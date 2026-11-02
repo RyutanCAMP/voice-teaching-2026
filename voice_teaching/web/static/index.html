@@ -11,6 +11,7 @@
   <div class="brand">
     <h1>ボイスティーチング</h1>
     <p id="mode-banner" class="mode-banner" data-mode="simulation">シミュレーションモード</p>
+    <p id="interp-badge" class="interp-badge" hidden>解釈：—</p>
   </div>
   <ol class="steps" id="steps" aria-label="手順">
     <li id="step-1" class="step"><span class="num">1</span><span class="label">JOBを読み込む</span></li>
@@ -42,13 +43,16 @@
   <section id="figure-panel" class="stage" aria-label="位置の図">
     <div class="stage-head">
       <span id="file-name" class="file-name"></span>
+      <button type="button" id="view-reset" class="link small" hidden>視点を戻す</button>
       <div class="view-tabs" role="tablist" aria-label="図の向き">
+        <button type="button" class="view-tab" data-view="3d" role="tab" title="ドラッグで回す・ホイールで拡大縮小">3D</button>
         <button type="button" class="view-tab" data-view="yz" role="tab" title="X方向から見る">Y・Z</button>
         <button type="button" class="view-tab" data-view="xz" role="tab" title="Y方向から見る">X・Z</button>
         <button type="button" class="view-tab" data-view="xy" role="tab" title="上から見る">X・Y</button>
       </div>
     </div>
     <p id="figure-message" class="warn" hidden></p>
+    <div id="fig-3d" class="fig fig-main fig-3d"></div>
     <div id="fig-main" class="fig fig-main"></div>
     <div class="play-row">
       <button type="button" id="play-button" class="play" disabled aria-label="経路を再生">▶</button>
@@ -61,6 +65,7 @@
       </div>
     </div>
     <p id="play-note" class="fine">点を命令の順に直線で結んだ目安です。ロボット本体の動きではありません。</p>
+    <p id="view3d-note" class="fine">3D はジョブの位置の値（X・Y・Z）をそのまま点で描いたものです。ロボット本体・関節は描いていません。実機の動作や干渉を保証するシミュレーターではありません。</p>
     <p id="figure-note" class="fine">この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。参考表示であり、実際のロボットの動きではありません。</p>
   </section>
 
@@ -84,10 +89,11 @@
               <p class="fine">ブラウザー標準は、音声が外部で処理されることがあります。</p>
             </fieldset>
             <div class="mic-row">
-              <button type="button" id="mic-button" class="mic-big" disabled aria-label="マイクで話す">🎤</button>
+              <button type="button" id="mic-button" class="mic-big" disabled aria-label="マイクをONにする" aria-pressed="false">🎤</button>
+              <p id="mic-label" class="mic-label">マイク OFF</p>
               <div class="rec-buttons">
                 <button type="button" id="voice-stop" disabled>話し終わった</button>
-                <button type="button" id="voice-cancel" class="link" disabled>やめる</button>
+                <button type="button" id="voice-cancel" class="link" disabled>マイクをOFF</button>
               </div>
             </div>
             <p id="voice-status" class="voice-status"></p>
@@ -190,8 +196,11 @@
     <div class="confirm-grid">
       <div id="confirm-figure" class="fig confirm-figure"></div>
       <div>
+        <ul id="confirm-warnings" class="confirm-warnings" aria-label="この変更の注意"></ul>
         <div id="confirm-diff" class="diff"></div>
         <p class="fine">灰色＝変更前、オレンジ＝変更後。点を命令の順に直線で結んだ目安で、ロボット本体の動きではありません。変更後の経路は、図と実機で人が確かめてください。</p>
+        <p class="fine confirm-figure-note">この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。参考表示であり、実際のロボットの動きではありません。</p>
+        <p class="fine">シミュレーション用の確認です。実機用の出力・転送・ロボットの起動はしません。</p>
       </div>
     </div>
     <div class="confirm-actions">

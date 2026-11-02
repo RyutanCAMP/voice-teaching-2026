@@ -9,6 +9,7 @@
 // - 画面は「説明が要らない」ことを目指す：右側には今のステップのカードだけ、目立たせる操作は1つだけ。
 "use strict";
 import { SpeechInput } from "/static/speech.js";
+import { View3D } from "/static/view3d.js";
 
 const state = {
   sessionId: null,  // サーバーのメモリにある画面の状態の番号
@@ -21,6 +22,8 @@ const state = {
   voiceState: "idle",   // 録音の状態（starting / listening / stopping / idle）
   voiceToken: null,     // 録音を始めたときのジョブ（session）と位置。違えば認識文を使わない
   voiceFinal: null,     // 最後に入力欄へ入れた認識文（直さずに送れば source=voice として記録）
+  live: false,          // マイク ON（Web会議のように、一度 ON にすると続けて話せる）
+  liveTimer: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -116,7 +119,7 @@ async function loadFile(f) {
   state.sessionId = res.session_id;
   state.view = res.view;
   state.st = res.state;
-  state.figView = bestView(res.view.positions);
+  state.figView = res.view.positions.some((p) => p.xyz) ? "3d" : bestView(res.view.positions);
   state.modeOpen = false;
   state.pickAgain = false;
   $("heard-text").textContent = "（まだありません）";
@@ -176,6 +179,12 @@ function renderState() {
   const st = state.st;
   if (!st) return;
   $("mock-notice").textContent = st.mock_notice;
+  // 解釈のしかた（モックか本物の Claude か）を、いつも見える上の帯で区別する
+  const claude = st.interpreter && st.interpreter.kind === "claude";
+  $("interp-badge").textContent = claude ? "解釈：Claude" : "解釈：モック";
+  $("interp-badge").classList.toggle("claude", claude);
+  $("interp-badge").title = st.mock_notice;
+  $("interp-badge").hidden = false;
   $("voice-position").replaceChildren(el("strong", {}, st.selected || ""), el("span", {}, "変える"));
   $("out-dir").textContent = st.out_dir;
   renderChips();
@@ -259,6 +268,7 @@ function renderSteps() {
   }
   $("next-action").textContent = text;
   if (primary) $(primary).classList.add("primary");
+  resumeLive();  // マイクが ON なら、入力欄が空のステップ3で、また聞き始める
 }
 
 $("text-input").addEventListener("input", renderSteps);
@@ -425,8 +435,16 @@ function openConfirm() {
   $("confirm-blocked").textContent = st.blocked_reason
     ? "この変更は承認できません。閉じて「元に戻す」を押し、別の位置を選んでください" + reason : "";
   $("confirm-blocked").hidden = !st.blocked_reason;
+  // U1：承認ボタンを押す画面に、候補の注意をすべて出す（右のカードは確認表示に隠れるため）
+  $("confirm-warnings").replaceChildren(...st.candidate.warnings.map((w) => el("li", {}, w)));
+  $("confirm-warnings").hidden = st.candidate.warnings.length === 0;
   $("confirm-diff").replaceChildren(diffView(st.candidate));
-  drawFigure($("confirm-figure"), ...VIEWS[state.figView], true);
+  if (state.view.positions.some((p) => p.xyz)) {
+    confirm3d.reset();
+    confirm3d.setData(data3d());
+  } else {
+    drawFigure($("confirm-figure"), "X", "Z", true);  // ロボット座標でないときは「描けません」と出す
+  }
   $("confirm-error").hidden = true;
   $("approve-button").disabled = !st.can_approve || recording();
   $("approver-name").disabled = !st.can_approve;
@@ -582,12 +600,34 @@ function setView(name) {
 for (const b of document.querySelectorAll(".view-tab")) b.addEventListener("click", () => setView(b.dataset.view));
 for (const f of document.querySelectorAll(".figs-small figure")) f.addEventListener("click", () => setView(f.dataset.view));
 
+// ---- 3D（ジョブの X・Y・Z をそのまま点で描く。ロボット本体は描かない） ----
+const view3d = new View3D($("fig-3d"), { onPick: (name) => select(name) });
+const confirm3d = new View3D($("confirm-figure"), { width: 640, height: 440 });  // 確認表示の中では選び直さない
+
+function data3d() {
+  const v = state.view;
+  const c = state.st && state.st.candidate && state.st.candidate.after_positions ? state.st.candidate : null;
+  return {
+    points: v.positions.filter((p) => p.xyz),
+    segments: v.segments,
+    selected: state.st ? state.st.selected : null,
+    after: c ? { points: c.after_positions.filter((p) => p.xyz), segments: c.after_segments, moved: c.moved } : null,
+  };
+}
+
+$("view-reset").addEventListener("click", () => view3d.reset());
+
 function renderFigures() {
   stopPlayback();
   for (const b of document.querySelectorAll(".view-tab")) {
     b.setAttribute("aria-selected", String(b.dataset.view === state.figView));
   }
-  drawFigure($("fig-main"), ...VIEWS[state.figView], true);
+  const is3d = state.figView === "3d" && state.view.positions.some((p) => p.xyz);
+  $("fig-3d").hidden = !is3d;
+  $("fig-main").hidden = is3d;
+  $("view-reset").hidden = !is3d;
+  if (is3d) view3d.setData(data3d());
+  else drawFigure($("fig-main"), ...VIEWS[state.figView === "3d" ? bestView(state.view.positions) : state.figView], true);
   drawFigure($("fig-xy"), "X", "Y", false);
   drawFigure($("fig-xz"), "X", "Z", false);
   drawFigure($("fig-yz"), "Y", "Z", false);
@@ -696,13 +736,15 @@ function stopPlayback() {
   state.playToken++;
   $("play-status").textContent = "";
   $("play-button").classList.remove("playing");
+  view3d.stop();
 }
 
 function startPlayback() {
   if (!state.view || recording()) return;
   stopPlayback();
+  if (!$("fig-3d").hidden) return startPlayback3d();
   const token = state.playToken;
-  const fig = drawFigure($("fig-main"), ...VIEWS[state.figView], true);
+  const fig = drawFigure($("fig-main"), ...VIEWS[state.figView === "3d" ? bestView(state.view.positions) : state.figView], true);
   if (!fig) return;
   $("play-button").classList.add("playing");
   const c = state.st && state.st.candidate;
@@ -747,15 +789,30 @@ function startPlayback() {
   requestAnimationFrame(step);
 }
 
+// 3D の再生：命令の順（変更前 → 変更後）に、線の上を印が動く（ロボットの動きではない）
+function startPlayback3d() {
+  const d = data3d();
+  const runs = [{ name: d.after ? "変更前" : "命令の順", color: d.after ? "#6e6e73" : C_POINT, segments: d.segments, points: d.points }];
+  if (d.after) runs.push({ name: "変更後", color: C_AFTER, segments: d.after.segments, points: d.after.points });
+  $("play-button").classList.add("playing");
+  view3d.play(runs,
+    (run, s) => { $("play-status").textContent = `${run.name}：${s.line_no}行目 ${s.text}`; },
+    () => { $("play-status").textContent = "再生が終わりました"; $("play-button").classList.remove("playing"); });
+}
+
 $("play-button").addEventListener("click", startPlayback);
 
 // ---- 音声入力（speech.js）。認識した文は入力欄に入れるだけ。承認・出力・送信は呼ばない ----
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
+// Web会議のように、マイクを一度 ON（state.live）にすると、続けて話せる：
+// 話し終わると認識文が入力欄に入り、録音は一時停止する（確かめて直してから「次へ」を押す）。
+// 結果が出て入力欄が空に戻り、ステップ3（音声で指示）にいれば、また聞き始める。
+// 認識に失敗したら、マイクを OFF にして文字の入力へ案内する。承認・出力・送信はここから呼ばない。
 const voice = new SpeechInput(Recognition, {
   state: (value) => {
     state.voiceState = value;
-    $("voice-status").textContent = { starting: "準備しています…", listening: "聞いています",
+    $("voice-status").textContent = { starting: "準備しています…", listening: "",
       stopping: "まとめています…", idle: "" }[value] || "";
     updateLocks();
   },
@@ -773,16 +830,55 @@ const voice = new SpeechInput(Recognition, {
     $("text-input").value = text;  // 入力欄に入れるだけ。自動では送らない
     state.voiceFinal = text;
     renderSteps();
+    renderMic();
   },
   error: (message) => {
     state.voiceToken = null;
+    state.live = false;  // 失敗したら OFF にして、文字の入力へ案内する
     showVoiceError(message);  // 固定の文。入力欄は変えない
+    renderMic();
+    setTimeout(() => { if (!recording() && !$("text-input").disabled) $("text-input").focus(); }, 0);
   },
 });
 
 function showVoiceError(message) {
-  $("voice-error").textContent = message;
+  $("voice-error").replaceChildren(el("span", {}, message), el("span", { class: "reason" }, "下の欄に文字で入力することもできます"));
   $("voice-error").hidden = false;
+}
+
+// マイクの ON／OFF を一目で分かるように（OFF・聞いています・一時停止）
+function renderMic() {
+  const rec = recording();
+  const on = state.live || rec;
+  document.body.classList.toggle("live", on);
+  $("mic-button").setAttribute("aria-pressed", String(on));
+  $("mic-button").setAttribute("aria-label", on ? "マイクをOFFにする" : "マイクをONにする");
+  $("mic-label").textContent = rec ? "マイク ON・聞いています"
+    : state.live ? ($("text-input").value.trim() ? "マイク ON・一時停止（文を確かめて「次へ」）" : "マイク ON")
+    : "マイク OFF";
+}
+
+function startListening() {
+  const mode = voiceMode();
+  if (!state.sessionId || !mode || recording()) return;
+  // 新しい録音：前の認識文・エラーは使わない。直さずに残っている前の認識文は入力欄から消す
+  if (state.voiceFinal !== null && $("text-input").value === state.voiceFinal) $("text-input").value = "";
+  state.voiceFinal = null;
+  $("voice-error").hidden = true;
+  $("voice-partial").textContent = "";
+  closeConfirm();
+  state.voiceToken = { sessionId: state.sessionId, selected: state.st ? state.st.selected : null };
+  voice.start(mode);
+}
+
+// マイクが ON のままなら、指示の結果が出て入力欄が空のときに、また聞き始める
+function resumeLive() {
+  clearTimeout(state.liveTimer);
+  state.liveTimer = setTimeout(() => {
+    if (!state.live || recording() || !Recognition || !voiceMode() || currentStep() !== 3
+        || $("text-input").value.trim() || !$("confirm-overlay").hidden || $("instruction-panel").hidden) return;
+    startListening();
+  }, 500);
 }
 
 function updateLocks() {
@@ -796,7 +892,7 @@ function updateLocks() {
   $("voice-position").disabled = rec;
   $("mic-button").disabled = rec || !loaded || !voiceMode() || !Recognition;
   $("voice-stop").disabled = !rec;
-  $("voice-cancel").disabled = !rec;
+  $("voice-cancel").disabled = !rec && !state.live;
   document.body.classList.toggle("recording", rec);
   if (state.st && state.view) {
     renderChips();
@@ -805,6 +901,8 @@ function updateLocks() {
     $("play-button").disabled = state.view.segments.length === 0 || rec;
   }
   renderSteps();
+  renderMic();
+  if (!rec) resumeLive();
 }
 
 if (!Recognition) {
@@ -812,23 +910,25 @@ if (!Recognition) {
   $("voice-unsupported").hidden = false;
 }
 for (const id of ["voice-mode-browser", "voice-mode-local"]) $(id).addEventListener("change", updateLocks);
+$("text-input").addEventListener("input", renderMic);
 
 $("mic-button").addEventListener("click", () => {
-  const mode = voiceMode();
-  if (!state.sessionId || !mode || recording()) return;
-  // 新しい録音：前の認識文・エラーは使わない。直さずに残っている前の認識文は入力欄から消す
-  if (state.voiceFinal !== null && $("text-input").value === state.voiceFinal) $("text-input").value = "";
-  state.voiceFinal = null;
-  $("voice-error").hidden = true;
-  $("voice-partial").textContent = "";
-  closeConfirm();
-  state.voiceToken = { sessionId: state.sessionId, selected: state.st ? state.st.selected : null };
-  voice.start(mode);
+  if (!state.sessionId || !voiceMode() || recording()) return;
+  if (state.live) {  // 一時停止中に押すと OFF
+    state.live = false;
+    updateLocks();
+    return;
+  }
+  state.live = true;
+  startListening();
+  renderMic();
 });
-$("voice-stop").addEventListener("click", () => voice.stop());
+$("voice-stop").addEventListener("click", () => voice.stop());  // 話し終わった（マイクは ON のまま）
 $("voice-cancel").addEventListener("click", () => {
+  state.live = false;
   state.voiceToken = null;
   voice.cancel();  // 認識文は使わない。入力欄は変えない
-  $("voice-status").textContent = "やめました";
+  $("voice-status").textContent = "マイクを OFF にしました";
+  updateLocks();
 });
 updateLocks();
