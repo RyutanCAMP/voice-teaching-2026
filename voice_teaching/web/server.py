@@ -27,6 +27,8 @@ _STATIC = {
     "/index.html": ("index.html", "text/html; charset=utf-8"),
     "/static/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/static/style.css": ("style.css", "text/css; charset=utf-8"),
+    # 音声入力（引き継ぎ fd03d84 の speech.js を無変更で配信）
+    "/static/speech.js": ("speech.js", "text/javascript; charset=utf-8"),
 }
 _CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
         "connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
