@@ -214,7 +214,7 @@ function renderCandidate() {
   const parts = [];
   if (c.blocked_reason) {
     parts.push(el("div", { class: "result refused" },
-      el("strong", {}, "シミュレーションだけの候補です。実機用の検査では止まりました。"),
+      el("strong", {}, "参考の表示だけの候補です。実機用の検査で止まったため、承認も出力もできません。"),
       el("p", {}, "理由：" + c.blocked_reason)));
   }
   parts.push(el("div", { class: "result proposal" },

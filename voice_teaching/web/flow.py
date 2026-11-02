@@ -63,11 +63,9 @@ class _Entry:
 
 
 class WebFlow:
-    def __init__(self, out_dir: str | Path | None = None, max_sessions: int = MAX_SESSIONS,
-                 interpreter=None):
+    def __init__(self, max_sessions: int = MAX_SESSIONS, interpreter=None):
         # 解釈の係：本物の Claude（ANTHROPIC_API_KEY があるとき）か、偽のClaude（モック）
         self.interpreter = interpreter if interpreter is not None else claude_interpreter.from_env()
-        self.out_dir = Path(out_dir) if out_dir is not None else sim.DEFAULT_OUT_DIR
         self.max_sessions = max_sessions
         self._entries: OrderedDict[str, _Entry] = OrderedDict()
         self._lock = threading.Lock()
@@ -200,6 +198,9 @@ class WebFlow:
                 return self._fail(e, "承認した人の名前がないため、承認できません")
             if ch.kind != "shift":
                 return self._fail(e, "シミュレーションの出力は位置の移動だけです。この候補は承認できません")
+            if s.candidate_blocked_reason:
+                # 実機用の検査で止まった候補は、合成ジョブでも承認しない（CHECKER_019 R1）
+                return self._fail(e, f"実機用の検査で止まった変更候補は、承認できません（理由：{s.candidate_blocked_reason}）")
             position, axis = ch.target.split()
             try:
                 sp = sim.simulate_shift(s.original, position, axis, ch.requested)
@@ -223,7 +224,7 @@ class WebFlow:
             if not self._approved(e):
                 return self._fail(e, NOT_APPROVED)
             try:
-                path = sim.export_sim(e.sim_proposal, e.approval, self.out_dir)
+                path = sim.export_sim(e.sim_proposal, e.approval)
             except sim.SimError as ex:
                 return self._fail(e, f"出力しませんでした：{ex}")
             full = str(Path(path).resolve())
@@ -292,10 +293,11 @@ class WebFlow:
             "blocked_reason": s.candidate_blocked_reason if ch is not None else None,
             "approval": ({"approved_by": e.approval.approved_by, "approved_at": e.approval.approved_at}
                          if approved else None),
-            "can_approve": ch is not None and ch.kind == "shift" and not approved,
+            "can_approve": (ch is not None and ch.kind == "shift" and not approved
+                            and not s.candidate_blocked_reason),
             "can_export": approved,
             "exported": e.exported if approved else None,
-            "out_dir": str(self.out_dir.resolve()),
+            "out_dir": str(Path(sim.DEFAULT_OUT_DIR).resolve()),
             "mock_notice": self.interpreter.notice,
             "interpreter": {"kind": self.interpreter.kind, "model": self.interpreter.model,
                             "notice": self.interpreter.notice},

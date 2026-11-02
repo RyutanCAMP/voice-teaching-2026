@@ -53,7 +53,7 @@ python -m pip install -r requirements.txt
 python -m pytest -q                   # すべて通ることを確かめる
 python -m voice_teaching.web          # 表示された http://127.0.0.1:8765/ を Chrome で開く
 ```
-画面で `samples/dummy/DEMO_PLACE.JBI` を選び、位置 C00004 を選んで「この位置を上に10mm」と入力すると、確認表示 → 承認 → シミュレーション用の出力（`output/sim/`）まで進みます。止めるときは Ctrl+C。
+画面で `samples/dummy/DEMO_PLACE.JBI` を選び、位置 C00004 を選んで「この位置を上に10mm」と入力すると、確認表示 → 承認 → シミュレーション用の出力（`output/sim/` に `.JBI.txt` で書きます。実機には入れません）まで進みます。止めるときは Ctrl+C。
 
 ### Claude API の設定（秘密の情報はリポジトリに入れない）
 - APIキーが無いときは、偽の Claude（モック）で動きます（画面と作業ログに「モック」と出ます）。

@@ -172,11 +172,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._error(404, "ありません")
 
 
-def make_server(host: str = HOST, port: int = DEFAULT_PORT, out_dir=None, interpreter=None) -> ThreadingHTTPServer:
-    """out_dir はシミュレーション用の出力先（既定は output/sim/）。"""
+def make_server(host: str = HOST, port: int = DEFAULT_PORT, interpreter=None) -> ThreadingHTTPServer:
+    """シミュレーション用の出力先は sim.DEFAULT_OUT_DIR（output/sim/）に固定。呼び出し側からは選べない。"""
     if host != HOST:
         raise ValueError("127.0.0.1 以外では待ち受けません")
     srv = ThreadingHTTPServer((HOST, port), Handler)
     srv.daemon_threads = True
-    srv.flow = WebFlow(out_dir=out_dir, interpreter=interpreter)
+    srv.flow = WebFlow(interpreter=interpreter)
     return srv

@@ -29,7 +29,7 @@ ASSERTIVE = ["安全です", "当たります", "干渉します", "当たりま
 
 @pytest.fixture
 def wf(tmp_path):
-    return WebFlow(out_dir=tmp_path / "sim")
+    return WebFlow()
 
 
 def load(wf, data=ORIGINAL):
@@ -87,7 +87,7 @@ def test_full_flow_exports_two_line_diff(wf, tmp_path):
     assert e["ok"] is True, e
     out = Path(e["path"])
     assert out.parent == tmp_path / "sim"
-    assert out.name == "DEMO_PLACE_SIM.JBI"
+    assert out.name == "DEMO_PLACE_SIM.JBI.txt"
     new = out.read_bytes()
     a_lines, b_lines = lines(ORIGINAL), lines(new)
     assert len(a_lines) == len(b_lines)
@@ -124,7 +124,7 @@ def test_heard_text_and_facts_are_returned_separately(wf):
 def test_voice_and_text_give_same_result(tmp_path):
     results = []
     for source in ("voice", "text"):
-        w = WebFlow(out_dir=tmp_path / source)
+        w = WebFlow()
         sid = load(w)
         r = w.hear(sid, "C00004をZ方向に-5mm移動して", source=source)
         results.append((r["status"], r["state"]["candidate"]["after_line"]))
@@ -253,6 +253,10 @@ def test_blocked_candidate_shows_reason(wf):
     st = r["state"]
     assert st["blocked_reason"] and "共用" in st["blocked_reason"]
     assert "シミュレーション" in st["confirmation_text"]
+    # 止まった候補は承認・出力できない（CHECKER_019 R1）。承認を促す文は出さない
+    assert "承認も出力もできません" in st["confirmation_text"]
+    assert "これでいいですか" not in st["confirmation_text"]
+    assert st["can_approve"] is False
 
 
 def test_speed_is_disabled_by_default(wf):
@@ -279,7 +283,7 @@ def test_unknown_session_is_refused(wf):
 
 
 def test_old_sessions_are_dropped(tmp_path):
-    w = WebFlow(out_dir=tmp_path, max_sessions=2)
+    w = WebFlow(max_sessions=2)
     a, b, c = load(w), load(w), load(w)
     assert w.state(a)["ok"] is False
     assert w.state(b)["ok"] is True and w.state(c)["ok"] is True
@@ -292,7 +296,7 @@ def test_unreadable_job_is_refused(wf):
 
 def test_sessions_are_not_saved_to_disk(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    w = WebFlow(out_dir=tmp_path / "sim")
+    w = WebFlow()
     sid = load(w)
     w.select(sid, "C00004")
     w.hear(sid, "この位置をY方向に10mm移動して")
@@ -340,7 +344,7 @@ def test_mock_never_calls_approve_or_start():
 @pytest.fixture
 def running(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    srv = server.make_server(port=0, out_dir=tmp_path / "sim")
+    srv = server.make_server(port=0)
     t = threading.Thread(target=srv.serve_forever, daemon=True)
     t.start()
     yield srv
@@ -383,7 +387,7 @@ def test_http_full_flow(running, tmp_path):
     _, r = post(running, "/api/export", {"session_id": sid})
     assert r["ok"] is True
     assert Path(r["path"]).read_bytes() != ORIGINAL
-    assert sorted(p.name for p in (tmp_path / "sim").iterdir()) == ["DEMO_PLACE_SIM.JBI"]
+    assert sorted(p.name for p in (tmp_path / "sim").iterdir()) == ["DEMO_PLACE_SIM.JBI.txt"]
     # 作業フォルダ（tmp_path）には出力先のほか何も作らない
     assert sorted(p.name for p in tmp_path.iterdir()) == ["sim"]
 

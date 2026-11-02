@@ -26,8 +26,12 @@ from . import jbi
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SAMPLES_DIR = REPO_ROOT / "samples" / "dummy"
 # git に入らない場所（.gitignore の output/）
+# シミュレーション用の出力先（固定）。呼び出し側からは選べない（USB など任意の場所へ直接は書かない。CHECKER_019 R6）
 DEFAULT_OUT_DIR = REPO_ROOT / "output" / "sim"
 SIM_SUFFIX = "_SIM"
+SIM_EXTENSION = ".JBI.txt"
+# 出力の拡張子。.JBI のままにしないことで、取り違えて実機に入れることを減らす（R6）。
+# 拡張子・出力先・ジョブ名の _SIM は誤使用を減らすためのもので、完全に防ぐものではない。JBI の中身に警告のコメントは足さない
 
 SIM_NOTICE = (
     "シミュレーション用の候補です。実機用のジョブとしては出力しません。"
@@ -176,6 +180,9 @@ def approve(proposal: SimProposal, approved_by: str) -> Approval:
         raise SimError("シミュレーションの候補ではないため、承認できません")
     if not isinstance(approved_by, str) or not approved_by.strip():
         raise SimError("承認した人の名前がないため、承認できません")
+    if proposal.blocked_reason:
+        # 実機用の検査で止まった候補は、合成ジョブでも承認しない（CHECKER_019 R1）
+        raise SimError(f"実機用の検査で止まった変更候補は、シミュレーションでも承認できません（理由：{proposal.blocked_reason}）")
     return Approval(
         original_sha256=_sha(proposal.original_bytes),
         new_sha256=_sha(proposal.new_bytes),
@@ -184,9 +191,13 @@ def approve(proposal: SimProposal, approved_by: str) -> Approval:
 
 
 # ---- 3. シミュレーション用の出力 ----
-def export_sim(proposal: SimProposal, approval: Approval, out_dir: str | Path | None = None) -> Path:
+def export_sim(proposal: SimProposal, approval: Approval) -> Path:
+    """承認した変更候補を、シミュレーション専用のフォルダ（DEFAULT_OUT_DIR）に <ジョブ名>_SIM.JBI.txt で書く。"""
     if not isinstance(proposal, SimProposal) or proposal.mode != "sim":
         raise SimError("シミュレーションの候補ではないため、出力しません")
+    if proposal.blocked_reason:
+        # 承認の記録があっても、実機用の検査で止まった候補は出力しない（CHECKER_019 R1）
+        raise SimError(f"実機用の検査で止まった変更候補は、シミュレーションでも出力しません（理由：{proposal.blocked_reason}）")
     if not isinstance(approval, Approval):
         raise SimError("承認されていないため、出力しません")
     if (approval.original_sha256 != _sha(proposal.original_bytes)
@@ -222,11 +233,11 @@ def export_sim(proposal: SimProposal, approval: Approval, out_dir: str | Path | 
     if diff is None or diff != sorted({proposal.line_index, name_index}) or len(diff) != 2:
         raise SimError("承認した位置の行とジョブ名の行のほかにも違いがあるため、出力しません")
 
-    out = Path(out_dir) if out_dir is not None else DEFAULT_OUT_DIR
+    out = Path(DEFAULT_OUT_DIR)
     if out.resolve() == SAMPLES_DIR.resolve():
         raise SimError("合成ジョブの置き場所には出力しません")
     out.mkdir(parents=True, exist_ok=True)
-    path = out / f"{new_name}.JBI"
+    path = out / f"{new_name}{SIM_EXTENSION}"
     try:
         with open(path, "xb") as f:
             f.write(data)

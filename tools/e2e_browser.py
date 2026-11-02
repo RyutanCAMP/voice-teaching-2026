@@ -56,11 +56,15 @@ def run(out_dir: Path | None = None, log=print) -> list[str]:
     """通し確認をして、失敗の一覧を返す（空なら全部通った）。"""
     from playwright.sync_api import sync_playwright
 
+    from voice_teaching import sim
     from voice_teaching.claude_interpreter import MockInterpreter
     from voice_teaching.web import server
 
     out = Path(out_dir) if out_dir else Path(tempfile.mkdtemp())
-    srv = server.make_server(port=0, out_dir=out / "sim", interpreter=MockInterpreter())
+    # 出力先は sim.DEFAULT_OUT_DIR に固定（呼び出し側からは選べない）。この確認の間だけ一時フォルダに差し替え、最後に戻す
+    saved_out_dir = sim.DEFAULT_OUT_DIR
+    sim.DEFAULT_OUT_DIR = out / "sim"
+    srv = server.make_server(port=0, interpreter=MockInterpreter())
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{srv.server_address[1]}/"
     fails: list[str] = []
@@ -134,7 +138,8 @@ def run(out_dir: Path | None = None, log=print) -> list[str]:
             pg.click("#export-button")
             pg.wait_for_selector("#export-result:not([hidden])")
             result = pg.inner_text("#export-result")
-            files = list((out / "sim").glob("*.JBI"))
+            files = list((out / "sim").glob("*"))
+            check([f.name for f in files] == ["DEMO_PLACE_SIM.JBI.txt"], f"出力の名前は .JBI.txt：{[f.name for f in files]}")
             check("出力しました" in result and len(files) == 1, f"出力：{[f.name for f in files]}")
             if files:
                 a = (REPO / "samples/dummy/DEMO_PLACE.JBI").read_bytes().splitlines()
@@ -155,6 +160,7 @@ def run(out_dir: Path | None = None, log=print) -> list[str]:
             b.close()
     finally:
         srv.shutdown()
+        sim.DEFAULT_OUT_DIR = saved_out_dir
         srv.server_close()
     check(not errors, f"画面のエラー：{errors or 'なし'}")
     return fails

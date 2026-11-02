@@ -160,6 +160,11 @@ def test_proposal_is_frozen():
         p.new_bytes = b""
 
 
+
+def written(root):
+    """root の下に書かれたファイル（出力先は sim.DEFAULT_OUT_DIR = root/"sim"）"""
+    return [p for p in root.rglob("*") if p.is_file()]
+
 # ---- 2. 承認 ----
 def test_approve_records_hashes_and_person():
     p = sim.simulate_shift(job(), "C00004", "Y", 10)
@@ -182,8 +187,8 @@ def test_approve_needs_a_person(who):
 # ---- 3. シミュレーション用の出力 ----
 def test_export_writes_sim_job_with_two_line_diff(tmp_path):
     p = sim.simulate_shift(job(), "C00004", "Y", 10)
-    out = sim.export_sim(p, sim.approve(p, "テスト担当"), tmp_path)
-    assert out == tmp_path / "DEMO_PLACE_SIM.JBI"
+    out = sim.export_sim(p, sim.approve(p, "テスト担当"))
+    assert out == tmp_path / "sim" / "DEMO_PLACE_SIM.JBI.txt"
     written = out.read_bytes()
     j2 = jbi.parse_bytes(written)
     assert j2.name == "DEMO_PLACE_SIM"
@@ -194,10 +199,13 @@ def test_export_writes_sim_job_with_two_line_diff(tmp_path):
     assert DUMMY.read_bytes() == raw()  # 元のファイルはそのまま
 
 
-def test_export_blocked_for_real_but_simulated_change(tmp_path):
+def test_blocked_for_real_but_simulated_change_is_not_approved(tmp_path):
+    """実機用の検査で止まった候補は、合成ジョブでも承認しない（CHECKER_019 R1。以前は出力できていた）"""
     p = sim.simulate_shift(job(), "C00000", "Z", -5)
-    out = sim.export_sim(p, sim.approve(p, "テスト担当"), tmp_path)
-    assert diff_indexes(raw(), out.read_bytes()) == sorted([1, p.line_index])
+    assert p.blocked_reason and "共用" in p.blocked_reason
+    with pytest.raises(sim.SimError, match="実機用の検査で止まった"):
+        sim.approve(p, "テスト担当")
+    assert written(tmp_path) == []
 
 
 def test_export_rejects_bytes_replaced_after_approval(tmp_path):
@@ -206,16 +214,16 @@ def test_export_rejects_bytes_replaced_after_approval(tmp_path):
     other = sim.simulate_shift(job(), "C00004", "Y", 20)
     tampered = dataclasses.replace(p, new_bytes=other.new_bytes)
     with pytest.raises(sim.SimError):
-        sim.export_sim(tampered, a, tmp_path)
-    assert list(tmp_path.iterdir()) == []
+        sim.export_sim(tampered, a)
+    assert written(tmp_path) == []
 
 
 def test_export_rejects_approval_of_other_proposal(tmp_path):
     p1 = sim.simulate_shift(job(), "C00004", "Y", 10)
     p2 = sim.simulate_shift(job(), "C00004", "Y", 20)
     with pytest.raises(sim.SimError):
-        sim.export_sim(p2, sim.approve(p1, "テスト担当"), tmp_path)
-    assert list(tmp_path.iterdir()) == []
+        sim.export_sim(p2, sim.approve(p1, "テスト担当"))
+    assert written(tmp_path) == []
 
 
 def test_export_rejects_non_synthetic_job(tmp_path):
@@ -223,9 +231,9 @@ def test_export_rejects_non_synthetic_job(tmp_path):
     data = raw().replace(b"DEMO_PLACE", b"OTHER_JOB")
     p = sim.simulate_shift(jbi.parse_bytes(data), "C00004", "Y", 10)
     with pytest.raises(sim.SimError) as e:
-        sim.export_sim(p, sim.approve(p, "テスト担当"), tmp_path)
+        sim.export_sim(p, sim.approve(p, "テスト担当"))
     assert "シミュレーションモードでは、合成ジョブ以外は出力しません" in str(e.value)
-    assert list(tmp_path.iterdir()) == []
+    assert written(tmp_path) == []
 
 
 def test_export_rejects_crlf_copy_of_dummy(tmp_path):
@@ -233,15 +241,16 @@ def test_export_rejects_crlf_copy_of_dummy(tmp_path):
     data = raw().replace(b"\n", b"\r\n")
     p = sim.simulate_shift(jbi.parse_bytes(data), "C00004", "Y", 10)
     with pytest.raises(sim.SimError):
-        sim.export_sim(p, sim.approve(p, "テスト担当"), tmp_path)
+        sim.export_sim(p, sim.approve(p, "テスト担当"))
 
 
 def test_export_does_not_overwrite(tmp_path):
-    existing = tmp_path / "DEMO_PLACE_SIM.JBI"
+    (tmp_path / "sim").mkdir()
+    existing = tmp_path / "sim" / "DEMO_PLACE_SIM.JBI.txt"
     existing.write_bytes(b"keep me")
     p = sim.simulate_shift(job(), "C00004", "Y", 10)
     with pytest.raises(sim.SimError):
-        sim.export_sim(p, sim.approve(p, "テスト担当"), tmp_path)
+        sim.export_sim(p, sim.approve(p, "テスト担当"))
     assert existing.read_bytes() == b"keep me"
 
 
@@ -251,8 +260,8 @@ def test_export_rejects_extra_line_change(tmp_path):
     extra = p.new_bytes.replace(b"MOVL C00005 V=80.0", b"MOVL C00005 V=90.0")
     bad = dataclasses.replace(p, new_bytes=extra)
     with pytest.raises(sim.SimError):
-        sim.export_sim(bad, sim.approve(bad, "テスト担当"), tmp_path)
-    assert list(tmp_path.iterdir()) == []
+        sim.export_sim(bad, sim.approve(bad, "テスト担当"))
+    assert written(tmp_path) == []
 
 
 def test_export_removes_file_when_read_back_differs(tmp_path, monkeypatch):
@@ -260,9 +269,10 @@ def test_export_removes_file_when_read_back_differs(tmp_path, monkeypatch):
     a = sim.approve(p, "テスト担当")
     monkeypatch.setattr(sim, "_read_back", lambda path: b"broken")
     with pytest.raises(sim.SimError):
-        sim.export_sim(p, a, tmp_path)
-    assert list(tmp_path.iterdir()) == []
+        sim.export_sim(p, a)
+    assert written(tmp_path) == []
 
 
+@pytest.mark.real_out_dir
 def test_default_out_dir_is_ignored_by_git():
     assert sim.DEFAULT_OUT_DIR.parts[-2:] == ("output", "sim")

@@ -226,8 +226,11 @@ class Session:
             text = f"{ch.target}の速度を V={before} から V={after} に変えます。"
         blocked = self.candidate_blocked_reason
         if blocked:
-            text += f"【シミュレーションだけの候補】実機用の検査では止まりました：{blocked}。"
-        text += "これでいいですか？ 承認は画面のボタンで行います"
+            # 止まった候補は承認・出力できない（CHECKER_019 R1）。シミュレーションの図と差分で確かめるだけ
+            text += (f"【参考の表示だけ】実機用の検査で止まりました：{blocked}。"
+                     "この候補は承認も出力もできません（シミュレーションの図と差分で確かめるだけです）")
+        else:
+            text += "これでいいですか？ 承認は画面のボタンで行います"
         warnings = tuple(ch.warnings) + ((f"実機用の検査で止まった理由：{blocked}",) if blocked else ())
         return Comparison(
             kind=ch.kind, target=ch.target, line_number=ch.line_index + 1,

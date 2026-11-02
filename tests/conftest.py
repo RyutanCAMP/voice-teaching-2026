@@ -16,3 +16,15 @@ def speed_enabled(monkeypatch):
     """
     from voice_teaching import jbi
     monkeypatch.setattr(jbi, "SPEED_CHANGE_ENABLED", True)
+
+
+@pytest.fixture(autouse=True)
+def _sim_out_dir(request, monkeypatch, tmp_path):
+    """シミュレーション用の出力先（sim.DEFAULT_OUT_DIR。呼び出し側からは選べない）を、テストでは一時フォルダにする。
+
+    リポジトリの output/sim にテストのファイルを書かないため。@pytest.mark.real_out_dir のテストだけ本物の値を見る。
+    """
+    if request.node.get_closest_marker("real_out_dir"):
+        return
+    from voice_teaching import sim
+    monkeypatch.setattr(sim, "DEFAULT_OUT_DIR", tmp_path / "sim")

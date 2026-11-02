@@ -43,7 +43,7 @@ def test_place_point_is_used_by_one_movl_entered_and_left_by_movl():
 def test_full_simulation_flow_changes_only_the_place_point(tmp_path):
     """読込 → 位置選択 → 指示 → 変更候補 → 比較 → 承認 → シミュレーション用の出力"""
     data = DEMO.read_bytes()
-    wf = WebFlow(out_dir=tmp_path / "sim")
+    wf = WebFlow()
     r = wf.load(data)
     assert r["ok"] is True, r
     sid = r["session_id"]
@@ -58,7 +58,7 @@ def test_full_simulation_flow_changes_only_the_place_point(tmp_path):
     e = wf.export(sid)
     assert e["ok"] is True, e
     out = Path(e["path"])
-    assert out.name == "DEMO_C_PLACE_SIM.JBI"
+    assert out.name == "DEMO_C_PLACE_SIM.JBI.txt"
     new = out.read_bytes()
     diff = [(a, b) for a, b in zip(lines(data), lines(new)) if a != b]
     assert diff == [

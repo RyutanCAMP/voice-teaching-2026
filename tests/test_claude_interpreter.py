@@ -168,7 +168,7 @@ def test_refusal_has_its_own_fixed_message():
 
 # ---- 画面の流れ：失敗はモックへ切り替えず止める・キーを出さない ----
 def flow_with(c, tmp_path):
-    w = WebFlow(out_dir=tmp_path / "sim", interpreter=ci.ClaudeInterpreter(KEY, client=c))
+    w = WebFlow(interpreter=ci.ClaudeInterpreter(KEY, client=c))
     sid = w.load(ORIGINAL)["session_id"]
     w.select(sid, "C00004")
     return w, sid
@@ -204,7 +204,7 @@ def test_flow_failure_does_not_switch_to_mock_and_hides_key(tmp_path):
 
 def test_flow_without_position_does_not_send_to_claude(tmp_path):
     c = client(up10())
-    w = WebFlow(out_dir=tmp_path, interpreter=ci.ClaudeInterpreter(KEY, client=c))
+    w = WebFlow(interpreter=ci.ClaudeInterpreter(KEY, client=c))
     sid = w.load(ORIGINAL)["session_id"]
     assert w.hear(sid, "この位置を上に10mm移動して")["status"] == "ask"
     assert c.messages.calls == []
