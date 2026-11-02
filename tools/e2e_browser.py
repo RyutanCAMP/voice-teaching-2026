@@ -410,6 +410,18 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     check("許可" in pg.inner_text("#voice-error") and pg.inner_text("#mic-label") == "マイク OFF",
           "マイクが許可されていないときは、許可の場所を案内して OFF")
 
+    # 入力欄に文があるまま失敗（network）→ 一時停止。あとで入力欄を消しても、勝手に聞き始めない（内部 QA P2-1）
+    pg.fill("#text-input", "手で書いた")
+    pg.evaluate("window.__fails = ['network']")
+    pg.click("#mic-button")
+    until(pg, lambda: pg.evaluate("window.__fails.length") == 0 and not pg.is_enabled("#voice-stop"))
+    pg.fill("#text-input", "")
+    pg.wait_for_timeout(1200)
+    check(not pg.is_enabled("#voice-stop") and "一時停止" in pg.inner_text("#mic-label"),
+          "入力欄に文があるまま失敗したあと、入力欄を消しても勝手に聞き始めない")
+    pg.click("#mic-button")  # 一時停止中に押すと OFF
+    until(pg, lambda: pg.inner_text("#mic-label") == "マイク OFF")
+
     # 「端末内のみ」（詳細表示で選ぶ・試験的）で日本語の音声データが無いとき：入れるボタンを出し、押したときだけ入れる
     pg.click("#engineer-toggle")
     pg.click('label:has(#voice-mode-local)')
@@ -434,7 +446,7 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     shot(pg, "3c_recording.png")
     pg.click("#voice-stop")
     until(pg, lambda: pg.input_value("#text-input") == FAKE_TEXT)
-    check("押すと OFF" in pg.inner_text("#mic-label") and pg.is_enabled("#text-input")
+    check("一時停止" in pg.inner_text("#mic-label") and pg.is_enabled("#text-input")
           and "primary" in (pg.get_attribute("#text-send", "class") or "") and primaries(pg) == 1,
           "話し終わると認識文が入力欄に入り、マイクは ON のまま一時停止（確かめて「次へ」）")
     pg.wait_for_timeout(800)

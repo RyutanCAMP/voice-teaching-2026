@@ -90,6 +90,7 @@ async function loadFile(f) {
   state.live = false;  // ジョブが変わったらマイクは OFF に戻す
   state.voiceFinal = null;
   $("voice-hint").hidden = true;
+  $("voice-consent").hidden = true;
   $("text-input").value = "";
   const bytes = new Uint8Array(await f.arrayBuffer());
   let res;
@@ -244,7 +245,7 @@ function renderSteps() {
       text = "文を確かめて「次へ」";
       primary = "text-send";
     } else if (!$("voice-consent").hidden) {
-      text = "音声の使い方を確かめてください";
+      text = "音声入力を使いますか？";
       primary = "consent-yes";
     } else if (!$("voice-controls").hidden) {
       text = "🎤 を押して話してください";
@@ -845,7 +846,7 @@ const failKind = (message) => (FAILS.find(([, head]) => (message || "").startsWi
 function failText(kind, message) {
   if (kind === "network") {
     return BROWSER === "other"
-      ? "このブラウザーでは、声を文字にできません。Google Chrome で開いてください"
+      ? "このブラウザーでは、声を文字にできませんでした。Google Chrome で開いてください（下のボタンでアドレスをコピー）"
       : "声を文字にする通信がつながりません。インターネットの接続を確かめて、もう一度 🎤";
   }
   if (kind === "not-allowed") {
@@ -853,7 +854,7 @@ function failText(kind, message) {
       ? "このブラウザーではマイクを使えません。Google Chrome で開いてください"
       : "マイクが許可されていません。アドレス欄の左のマークから、マイクを「許可」にして、もう一度 🎤";
   }
-  if (kind === "audio-capture") return "マイクが見つかりません。接続と、ほかのアプリ（Teams・Zoom など）が使っていないかを確かめてください";
+  if (kind === "audio-capture") return "マイクが見つかりません。接続を確かめるか、Teams・Zoom を閉じて、もう一度 🎤";
   if (kind === "language") return "端末内のみでは日本語を使えません。詳細表示で「ブラウザー標準」にするか、文字で入力してください";
   return message;
 }
@@ -897,17 +898,18 @@ const voice = new SpeechInput(Recognition, {
     state.voiceToken = null;
     const kind = failKind(message);
     // 声が無いまま止まった：マイク ON のまま、また聞く（長く使わなければ resumeLive が OFF にする）
+    const empty = !$("text-input").value.trim();
     if (state.live && (kind === "no-speech" || kind === "aborted") && state.quiet < QUIET_MAX) {
       state.quiet += 1;
-      state.resumeArmed = true;
+      state.resumeArmed = empty;  // 入力欄に文があれば一時停止のまま（「次へ」のあとに聞く）
       resumeLive();
       return;
     }
     // 通信の失敗：Chrome・Edge なら1回だけ聞き直す
     if (state.live && kind === "network" && BROWSER !== "other" && state.netRetry < 1) {
       state.netRetry += 1;
-      state.resumeArmed = true;
-      $("voice-status").textContent = "つながりにくいので、もう一度聞いています…";
+      state.resumeArmed = empty;
+      if (empty) $("voice-status").textContent = "つながりにくいので、もう一度聞いています…";
       resumeLive();
       return;
     }
@@ -918,7 +920,6 @@ const voice = new SpeechInput(Recognition, {
     $("browser-note").hidden = BROWSER !== "other";
     renderMic();
     offerLocalInstall();
-    setTimeout(() => { if (!recording() && !$("text-input").disabled) $("text-input").focus(); }, 0);
   },
 });
 
@@ -946,8 +947,8 @@ $("local-install").addEventListener("click", async () => {
 // 声から入った文に、軸があって向き（＋・−）が無ければ、送る前に知らせる（向きの無い軸は＋として読まれるため）
 function lacksSign(text) {
   const t = text.normalize("NFKC").toUpperCase()
-    .replace(/(エックス|ワイ|ゼット|ズィー)(?=\s?(の|プラス|マイナス|PLUS|MINUS|[+\-]|方向|軸))/g, (m) => ({ "エックス": "X", "ワイ": "Y" }[m] || "Z"));
-  return /(^|[^A-Z])[XYZ]([^A-Z]|$)/.test(t) && /\d/.test(t) && !/[+\-−]|プラス|マイナス|PLUS|MINUS/.test(t);
+    .replace(/(?<![ァ-ヺー])(エックス|ワイ|ゼット|ズィー)(?=\s?(の|プラス|マイナス|PLUS|MINUS|[+\-]|方向|軸))/g, (m) => ({ "エックス": "X", "ワイ": "Y" }[m] || "Z"));
+  return /(^|[^A-Z])[XYZ]([^A-Z]|$)/.test(t) && /\d/.test(t) && !/[+\-−]|プラス|マイナス|PLUS|MINUS|上げ|下げ|上に|下に|上へ|下へ|上方向|下方向/.test(t);
 }
 
 function renderSignHint() {
@@ -968,7 +969,7 @@ function renderMic() {
   $("mic-button").setAttribute("aria-pressed", String(on));
   $("mic-button").setAttribute("aria-label", on ? "マイクをOFFにする" : "マイクをONにする");
   $("mic-label").textContent = rec ? "マイク ON・聞いています"
-    : state.live ? "マイク ON（押すと OFF）"
+    : state.live ? "マイク ON・一時停止（「次へ」で再開）"
     : "マイク OFF";
 }
 
@@ -999,8 +1000,12 @@ function resumeLive() {
       renderMic();
       return;
     }
+    if ($("text-input").value.trim()) {  // 入力欄に文がある：聞き直す約束を取り消す（消しても勝手に聞き始めない）
+      state.resumeArmed = false;
+      return;
+    }
     if (!state.live || !state.resumeArmed || recording() || !Recognition || !voiceMode() || currentStep() !== 3
-        || $("text-input").value.trim() || !$("confirm-overlay").hidden || $("instruction-panel").hidden) return;
+        || !$("confirm-overlay").hidden || $("instruction-panel").hidden) return;
     startListening();
   }, 500);
 }
@@ -1013,6 +1018,7 @@ function updateLocks() {
   $("text-send").disabled = rec || !loaded;
   $("voice-mode-browser").disabled = rec;
   $("voice-mode-local").disabled = rec;
+  $("voice-mode-reset").disabled = rec;
   $("voice-position").disabled = rec;
   $("mic-button").disabled = rec || !loaded || !Recognition;
   $("voice-stop").disabled = !rec;
@@ -1041,6 +1047,7 @@ try {
 for (const id of ["voice-mode-browser", "voice-mode-local"]) {
   $(id).addEventListener("change", () => {
     try { localStorage.setItem(MODE_KEY, voiceMode()); } catch (_) { /* 覚えられなくても使える */ }
+    state.live = false;
     $("voice-error").hidden = true;
     updateLocks();
     offerLocalInstall();
@@ -1049,7 +1056,7 @@ for (const id of ["voice-mode-browser", "voice-mode-local"]) {
 $("text-input").addEventListener("input", () => { renderMic(); renderSignHint(); });
 $("browser-note").hidden = BROWSER !== "other" || !Recognition;
 $("browser-info").textContent = "このブラウザー：" + (BRANDS.join("・") || "不明") + "（" + navigator.userAgent + "）";
-$("consent-text").textContent = "声を文字にするため、" + PROVIDER + "文字にします。このアプリは音声を保存しません。";
+$("consent-text").textContent = "声を文字にするため、" + PROVIDER + "文字にします。このアプリは音声を保存しません。あとで詳細表示から変えられます。";
 
 function micOn() {
   state.live = true;
@@ -1080,6 +1087,14 @@ $("consent-yes").addEventListener("click", () => {
   try { localStorage.setItem(MODE_KEY, "browser"); } catch (_) { /* 覚えられなくても使える */ }
   $("voice-consent").hidden = true;
   micOn();
+});
+$("voice-mode-reset").addEventListener("click", () => {
+  if (recording()) return;
+  state.live = false;
+  for (const id of ["voice-mode-browser", "voice-mode-local"]) $(id).checked = false;
+  try { localStorage.removeItem(MODE_KEY); } catch (_) { /* 覚えていなければ何もしない */ }
+  $("voice-status").textContent = "方式を選び直します。次に 🎤 を押したときに聞きます";
+  updateLocks();
 });
 $("consent-no").addEventListener("click", () => {
   $("voice-consent").hidden = true;

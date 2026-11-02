@@ -270,7 +270,8 @@ button.approve:not([disabled]) { background: var(--accent); color: #fff; font-we
 /* ---- マイクの ON／OFF ---- */
 .mic-label { margin: 0; font-size: 14px; font-weight: 600; color: var(--sub); text-align: center; }
 body.live .mic-label { color: var(--red); }
-body.live:not(.recording) .mic-big { background: #fff; box-shadow: 0 0 0 4px var(--red) inset; }
+body.live:not(.recording) .mic-big { background: #fff; box-shadow: 0 0 0 3px rgba(255, 59, 48, 0.35) inset; }
+body.live:not(.recording) .mic-label { color: var(--sub); }
 body.recording .mic-label::before, body.live .mic-label::before {
   content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--red); margin-right: 8px; vertical-align: 1px;
 }
@@ -305,3 +306,5 @@ body.recording .mic-big[disabled] { opacity: 1; }
 .browser-note { font-size: 13px; color: var(--sub); text-align: center; margin: 6px 0; }
 #engineer-view .voice-mode { margin: 6px 0 10px; }
 .voice-hint { background: #fff8e6; border-radius: 10px; padding: 8px 12px; font-size: 13px; margin: 6px 0; }
+/* 詳細表示を開いている間は、右のカードを固定しない（下にスクロールしたとき詳細表示に重ならないように） */
+.work:has(#engineer-view:not([hidden])) .side { position: static; }

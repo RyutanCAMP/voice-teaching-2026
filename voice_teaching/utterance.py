@@ -78,6 +78,7 @@ class UtteranceFacts:
     sides: tuple[str, ...] = ()            # 右・左（軸は枠で決める）
     speed_signs: tuple[int, ...] = ()      # 速度を上げる +1 ／下げる -1
     refers_to_selection: bool = False      # 「この位置」「ここ」など
+    stray_signs: int = 0                   # 量にも軸にも付かなかった符号（＋・−・プラス・マイナス）の数
     stop_reasons: tuple[str, ...] = ()
 
     @property
@@ -143,11 +144,13 @@ _START = re.compile(r"起動|スタート|運転開始|動作開始|実行して
 _THIS = re.compile(r"この位置|この点|この命令|ここ|その位置|その点|そこ")
 
 _SIGN = {"+": 1, "プラス": 1, "-": -1, "マイナス": -1}
+_SIGN_TOKEN = re.compile(r"マイナス|プラス|[+\-]")
 
 
 # 音声認識が返す、軸と符号の別の書き方（実マイクで「ワイプラス 3mm」「Y の Plus 3ミリ」と返った）。
-# 言った言葉の書き方を揃えるだけで、符号や軸を推測で足さない。カタカナの軸名は、すぐ後に符号・方向・軸・「の」があるときだけ
-_SPOKEN_AXIS = re.compile(r"(エックス|ワイ|ゼット|ズィー)(?=\s?(?:の|プラス|マイナス|PLUS|MINUS|[+\-]|方向|軸))")
+# 言った言葉の書き方を揃えるだけで、符号や軸を推測で足さない。カタカナの軸名は、すぐ後に符号・方向・軸・「の」があり、
+# すぐ前がカタカナでないときだけ（「ガゼット」「ハワイ」を軸にしない）
+_SPOKEN_AXIS = re.compile(r"(?<![ァ-ヺー])(エックス|ワイ|ゼット|ズィー)(?=\s?(?:の|プラス|マイナス|PLUS|MINUS|[+\-]|方向|軸))")
 _SPOKEN_SIGN = re.compile(r"(?<![A-Z])(PLUS|MINUS)(?![A-Z])")
 
 
@@ -207,11 +210,13 @@ def read_utterance(raw: str) -> UtteranceFacts:
     # 方向
     axes: list[str] = []
     axis_signs: list[int] = []
+    placed_axis_signs = 0  # 軸に付いた符号の数（「X-方向」の -）
     for m in _AXIS_RE.finditer(rest_no_speed):
         if m.group(1) not in axes:
             axes.append(m.group(1))
         if m.group(2):
             axis_signs.append(_SIGN[m.group(2)])
+            placed_axis_signs += 1
     for m in _AXIS_SIGNED_NUM.finditer(rest_no_speed):
         if m.group(1) not in axes:
             axes.append(m.group(1))
@@ -256,6 +261,7 @@ def read_utterance(raw: str) -> UtteranceFacts:
         axes=tuple(axes), axis_signs=tuple(axis_signs), sides=sides,
         speed_signs=tuple(speed_signs),
         refers_to_selection=bool(_THIS.search(rest)),
+        stray_signs=len(_SIGN_TOKEN.findall(rest)) - sum(a.sign is not None for a in amounts) - placed_axis_signs,
         stop_reasons=tuple(stops),
     )
 
@@ -276,6 +282,7 @@ def merge_answer(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceF
         sides=answer.sides or previous.sides,
         speed_signs=answer.speed_signs or previous.speed_signs,
         refers_to_selection=previous.refers_to_selection or answer.refers_to_selection,
+        stray_signs=answer.stray_signs if (has_amount_info or answer.axes) else previous.stray_signs,
         stop_reasons=tuple(dict.fromkeys(previous.stop_reasons + answer.stop_reasons)),
     )
 
@@ -313,6 +320,8 @@ def pre_check(facts: UtteranceFacts) -> Verdict:
         return _ask(f"位置が {len(facts.positions)}つ（{'・'.join(facts.positions)}）あります。"
                     "1回の指示で変えるのは1つの位置だけです。1つずつ指示してください")
     op = facts.op
+    if op in ("move", "speed") and facts.stray_signs > 0:
+        return _ask("プラス・マイナスがどこに付くか分かりません。「Xのマイナス5ミリ」のように、軸のすぐ後に言ってください")
     if op == "move":
         if len(facts.amounts) > 1 or len(facts.axes) > 1:
             moves = _split_moves(facts.raw)

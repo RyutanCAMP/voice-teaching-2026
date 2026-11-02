@@ -136,7 +136,7 @@ def test_non_chrome_browser_gets_open_in_chrome_guide():
     v, h = voice(), html()
     assert 'BRANDS.includes("Google Chrome")' in v
     assert 'id="browser-note"' in h and "Google Chrome で開いてください" in h and 'id="copy-url"' in h
-    assert "このブラウザーでは、声を文字にできません。Google Chrome で開いてください" in v
+    assert "このブラウザーでは、声を文字にできませんでした。Google Chrome で開いてください" in v
 
 
 def test_voice_section_still_never_sends_or_approves():
@@ -171,3 +171,26 @@ def test_spoken_axis_and_sign_spellings(text, axis, value):
 def test_katakana_alone_is_not_taken_as_axis(text):
     f = read_utterance(text)
     assert f.axes == () and pre_check(f) is not OK
+
+
+# ---- 内部 Safety レビュー（17edb3f）の P2 ----
+@pytest.mark.parametrize("text", ["ガゼットの-5ミリ", "クローゼット方向に5ミリ", "ハワイ方向に5ミリ", "カワイの-5ミリ"])
+def test_katakana_inside_a_word_is_not_an_axis(text):
+    # P2-1：カタカナの言葉の途中を軸にしない（「ガゼット」→ Z にしない）
+    f = read_utterance(text)
+    assert f.axes == () and pre_check(f) is not OK
+    assert "(?<![ァ-ヺー])(エックス|ワイ|ゼット|ズィー)" in voice()  # 画面の知らせも同じ決まり
+
+
+@pytest.mark.parametrize("text", ["マイナスX方向に5ミリ", "-X方向に5ミリ", "−X方向に5ミリ", "X方向に5ミリマイナス"])
+def test_sign_that_belongs_nowhere_is_asked_back(text):
+    # P2-2：どこに付くか分からない符号を無視して＋にしない（聞き返す）
+    f = read_utterance(text)
+    assert f.stray_signs > 0
+    v = pre_check(f)
+    assert v.status == "ask" and "プラス・マイナスがどこに付くか" in v.message
+
+
+@pytest.mark.parametrize("text", ["Xマイナス5ミリ", "X-方向に5mm", "Z方向に-4mm", "上に2ミリ", "C00005をX-5mm"])
+def test_placed_signs_are_not_stray(text):
+    assert read_utterance(text).stray_signs == 0
