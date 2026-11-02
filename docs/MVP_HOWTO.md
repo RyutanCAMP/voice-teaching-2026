@@ -134,3 +134,10 @@ python tools/e2e_browser.py         # ブラウザーでの通し確認（Playwr
 - 本物の Claude で「X方向・Y方向」を扱うか：道具の `direction` に X・Y を足すかどうかを本人が決める
   （`voice_teaching/claude_interpreter.py` の `_tools` と `_convert`、テストは `tests/test_claude_interpreter.py`）。
 - `.env` の読込は起動時（`python -m voice_teaching.web`）だけです。`make_server()` を直接使うときは呼び出し側で環境変数を設定します。
+
+
+## C変数だけのデモ JOB（2026-11-02 追加）
+- 実機では P変数の使用枠が上限に達しているため、デモは C変数方式で行う。アプリは P変数への新規割り当てや既存 P変数の変更をしない（書き換えるのは C の位置の1行と //NAME の行だけ）。
+- 合成のデモ JOB：`samples/dummy/DEMO_C_PLACE.JBI`（中身は samples/dummy/PATTERNS.md の最後の節）。C00005（置く点）を選んで「この位置を上に10mm」と指示する。
+- 実機用 JOB の出力は、安全レビューが終わってから唐川さんが判断する（今はシミュレーション用の出力だけ）。
+- 注意：feat/mvp の jbi.py は安全ガード修正前の写しのまま。最新の安全ガードを取り込む作業は `wip/mvp-with-guards` で途中（テストの期待結果の更新が残っている）。
