@@ -335,7 +335,11 @@ function showReply(status, message, choices) {
       const row = el("div", { class: "choices" });
       for (const c of choices) {
         const b = el("button", { type: "button", class: "choice" }, c.label);
-        b.addEventListener("click", () => { if (!recording()) sendInstruction(c.text, "text"); });
+        b.addEventListener("click", () => {
+          if (recording()) return;
+          for (const x of row.querySelectorAll("button")) x.disabled = true;  // 2回押しても1回だけ送る
+          sendInstruction(c.text, "text");
+        });
         row.append(b);
       }
       box.append(row);
@@ -363,6 +367,8 @@ $("text-form").addEventListener("submit", async (ev) => {
 
 async function sendInstruction(text, source) {
   if (!state.sessionId) return;
+  $("reply-message").hidden = true;  // 前の聞き返し（と選択肢）は消す。古い選択肢を後から押せないように
+  $("reply-message").replaceChildren();
   const res = await postJson("/api/hear", { session_id: state.sessionId, text: text, source: source });
   $("heard-text").textContent = res.heard !== undefined ? res.heard : text;
   renderFacts(res.facts);

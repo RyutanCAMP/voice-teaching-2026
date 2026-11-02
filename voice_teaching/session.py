@@ -93,8 +93,13 @@ class Session:
     def hear(self, text: str, source: str = "text") -> Reply:
         """新しい発話。source（voice / text）は記録だけに使い、結果は変えない。"""
         facts = ut.read_utterance(text)
-        if self._awaiting_answer is not None and not facts.kinds:
-            facts = ut.merge_answer(self._awaiting_answer, facts)
+        prev = self._awaiting_answer
+        if prev is not None and not facts.kinds:
+            facts = ut.merge_answer(prev, facts)
+        elif (prev is not None and prev.op == "move" and prev.amount is None and not prev.unclear_amounts
+              and prev.axes and facts.op == "move" and facts.vertical and facts.axes == ("Z",) and not facts.positions):
+            # 量を聞き返した後の「3mm下げて」：前に言った軸（Y座標 など）を捨てて Z にしない。両方を合わせて聞き返す
+            facts = ut.combine_axes(prev, facts)
         self.facts = facts
         self._locked = False
         self._log("発話", f"{'音声' if source == 'voice' else '文字'}：{text}")
@@ -102,7 +107,12 @@ class Session:
         if v.status != "ok":
             self._locked = True  # 聞き返し・止めた発話では、Claude が量を作って提案しても使わない
         self._awaiting_answer = facts if v.status == "ask" else None
-        return self._reply(v.status, v.message, facts=facts, choices=v.choices)
+        choices = v.choices
+        if self.selected is not None:
+            # 選択肢の文には、聞き返したときの位置を必ず入れる（あとで別の位置を選んでも、その位置に当てない）
+            choices = tuple((label, text if ut.normalize_position(text[:6]) else f"{self.selected}を{text}")
+                            for label, text in choices)
+        return self._reply(v.status, v.message, facts=facts, choices=choices)
 
     # ---- 操作 ----
     def select(self, position: str) -> Reply:

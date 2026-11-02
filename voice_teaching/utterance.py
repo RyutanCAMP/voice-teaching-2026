@@ -132,7 +132,7 @@ _AXIS_RE = re.compile(r"(?<![A-Z])([XYZ])\s?(マイナス|プラス|[+\-])?\s?(�
 # 「Xマイナス5ミリ」「Y +3 mm」「X の -5ミリ」：軸のすぐ後（「の」をはさんでもよい）に符号と数字。符号は量の側（_SIGN_BEFORE）で読むので、ここでは軸だけ
 _AXIS_SIGNED_NUM = re.compile(r"(?<![A-Z])([XYZ])\s?(?:の\s?)?(?=(?:マイナス|プラス|[+\-])\s?\d)")
 # 単独の X・Y・Z（「Yを」「Yの」も、軸を言ったものとして読む。CHECKER_021 D1）
-_AXIS_WORD = re.compile(r"(?<![A-Z])([XYZ])(?![A-Z])")
+_AXIS_WORD = re.compile(r"(?<![A-Z])([XYZ]{1,3})(?![A-Z])")
 # 座標の値の上げ下げ（「Y座標を3mm下げて」「Yの値を3mm減らして」）：その軸の値の増減として読む（2026-11-03 本人の判断）
 _COORD_VALUE = re.compile(r"(?<![A-Z])([XYZ])\s?(?:の\s?)?(?:座標|値)")
 _VALUE_UP = re.compile(r"上げ|増や|大きく")
@@ -163,12 +163,12 @@ _SIGN_TOKEN = re.compile(r"マイナス|プラス|[+\-]")
 # 音声認識が返す、軸と符号の別の書き方（実マイクで「ワイプラス 3mm」「Y の Plus 3ミリ」と返った）。
 # 言った言葉の書き方を揃えるだけで、符号や軸を推測で足さない。カタカナの軸名は、すぐ後に符号・方向・軸・「の」があり、
 # すぐ前がカタカナでないときだけ（「ガゼット」「ハワイ」を軸にしない）
-_SPOKEN_AXIS = re.compile(r"(?<![ァ-ヺー])(エックス|ワイ|ゼット|ズィー)(?=\s?(?:の|を|に|へ|座標|プラス|マイナス|PLUS|MINUS|[+\-]|方向|軸))")
+_SPOKEN_AXIS = re.compile(r"(?<![ァ-ヺー])(エックス|ワイ|ゼット|ズィー)(?![ァ-ヴー])|(?<![ァ-ヺー])(エックス|ワイ|ゼット|ズィー)(?=プラス|マイナス)")
 _SPOKEN_SIGN = re.compile(r"(?<![A-Z])(PLUS|MINUS)(?![A-Z])")
 
 
 def _spoken(text: str) -> str:
-    text = _SPOKEN_AXIS.sub(lambda m: {"エックス": "X", "ワイ": "Y", "ゼット": "Z", "ズィー": "Z"}[m.group(1)], text)
+    text = _SPOKEN_AXIS.sub(lambda m: {"エックス": "X", "ワイ": "Y", "ゼット": "Z", "ズィー": "Z"}[m.group(1) or m.group(2)], text)
     return _SPOKEN_SIGN.sub(lambda m: {"PLUS": "プラス", "MINUS": "マイナス"}[m.group(1)], text)
 
 
@@ -260,8 +260,9 @@ def read_utterance(raw: str) -> UtteranceFacts:
     # 単独の X・Y・Z も軸として足す（「Yを3mm下げて」は Y と 下げ（Z）の2つ → 聞き返す）
     if not is_speed:
         for m in _AXIS_WORD.finditer(rest_no_speed):
-            if m.group(1) not in axes:
-                axes.append(m.group(1))
+            for a in m.group(1):  # 「XY」は X と Y
+                if a not in axes:
+                    axes.append(a)
     sides = tuple(dict.fromkeys(_SIDE.findall(rest)))
 
     kinds: set[str] = set()
@@ -298,6 +299,14 @@ def read_utterance(raw: str) -> UtteranceFacts:
         vertical=vertical,
         stop_reasons=tuple(stops),
     )
+
+
+def combine_axes(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceFacts:
+    """量を聞き返した後に、上げ・下げだけの答え（「3mm下げて」）が来たとき：前の軸と合わせる（推測で Z だけにしない）。"""
+    return replace(answer, raw=f"{previous.raw} ／ {answer.raw}", text=f"{previous.text} ／ {answer.text}",
+                   axes=tuple(dict.fromkeys(previous.axes + answer.axes)),
+                   positions=answer.positions or previous.positions,
+                   refers_to_selection=previous.refers_to_selection or answer.refers_to_selection)
 
 
 def merge_answer(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceFacts:

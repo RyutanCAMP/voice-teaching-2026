@@ -172,3 +172,51 @@ def test_direction_names_are_only_the_confirmed_ones():
     c = st["candidate"]
     assert c["heard"] == "上に2mm" and c["before_xyz"] == ["400.000", "150.000", "200.000"]
     assert c["after_xyz"] == ["400.000", "150.000", "202.000"]
+
+
+# ---- 内部 Safety レビュー（955f47c）の P1・P2 ----
+@pytest.mark.parametrize("text", ["ワイ 3mm下げて", "ワイ、3mm下げて", "ワイ3ミリ下げて", "ワイは3mm下げて",
+                                  "ワイざひょうを3mm下げて", "エックス 5mm上げて"])
+def test_spoken_axis_without_particle_is_not_dropped(text):
+    # P1：カタカナの軸名の後に「の・を」などが無くても、軸を捨てて Z にしない（2つの読み方 → 2択）
+    r = hear(text)
+    assert r["status"] == "ask" and cand(r) is None and len(r["choices"]) == 2
+
+
+@pytest.mark.parametrize("text", ["XY座標を3mm下げて", "XYを3mm下げて"])
+def test_axis_letter_runs_are_all_axes(text):
+    # P2-1：「XY」は X と Y（軸が2つ以上 → 聞き返す）
+    r = hear(text)
+    assert r["status"] == "ask" and cand(r) is None
+
+
+def test_amount_follow_up_keeps_the_earlier_axis():
+    # P2-2：「Y座標を」→「何mm？」→「3mm下げて」：前の Y を捨てて Z にしない（2択で聞き返す）
+    w, sid = flow()
+    assert w.hear(sid, "Y座標を", source="voice")["status"] == "ask"
+    r = w.hear(sid, "3mm下げて", source="voice")
+    assert r["status"] == "ask" and cand(r) is None
+    assert [c["label"] for c in r["choices"]] == ["Y座標を −3mm", "下方向へ 3mm"]
+
+
+def test_choice_after_d1_question_is_not_asked_again():
+    # 2択の［下方向へ 3mm］（「下に3mm」）を押したら、そのとおり Z−3（もう一度聞き返さない）
+    w, sid = flow()
+    w.hear(sid, "Yを3mm下げて", source="voice")
+    assert cand(w.hear(sid, "下に3mm", source="text")) == ("Z", "-3.000")
+
+
+@pytest.mark.parametrize("text", ["ワイヤーを3mm動かして", "ハワイ方向に5ミリ", "ワイド3mm"])
+def test_katakana_words_are_not_axes(text):
+    assert ut.read_utterance(text).axes == ()
+
+
+def test_choice_keeps_the_position_it_was_asked_about():
+    # 内部 QA P2：聞き返しの後に別の位置を選んでも、古い選択肢はその位置に当たらない（選択肢の文に位置を入れる）
+    w, sid = flow()
+    r = w.hear(sid, "Yを3mm下げて", source="voice")
+    assert all(c["text"].startswith("C00005を") for c in r["choices"])
+    w.hear(sid, "C00004を選択して", source="text")
+    r2 = w.hear(sid, r["choices"][0]["text"], source="text")
+    got = r2["state"]["candidate"]
+    assert got is not None and got["target"] == "C00005 Y" and got["delta"] == "-3.000"

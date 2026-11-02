@@ -168,7 +168,7 @@ def test_spoken_axis_and_sign_spellings(text, axis, value):
     assert f.axes == (axis,) and f.requested_value() == value and pre_check(f) is OK
 
 
-@pytest.mark.parametrize("text", ["ワイヤーを3mm動かして", "ワイ3mm"])
+@pytest.mark.parametrize("text", ["ワイヤーを3mm動かして", "ワイド3mm"])
 def test_katakana_alone_is_not_taken_as_axis(text):
     f = read_utterance(text)
     assert f.axes == () and pre_check(f) is not OK

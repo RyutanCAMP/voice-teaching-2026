@@ -310,8 +310,8 @@ class WebFlow:
 
 def _xyz(job: jbi.Job, name: str) -> list[str] | None:
     pos = job.positions.get(name)
-    if pos is None or len(pos.values) < 3:
-        return None
+    if pos is None or len(pos.values) < 3 or not pos.is_robot_coordinates():
+        return None  # ロボット座標（直交）でなければ X・Y・Z として出さない
     return [f"{v:.3f}" for v in pos.xyz]
 
 

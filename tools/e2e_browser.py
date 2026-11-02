@@ -234,7 +234,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             pg4.click("#open-confirm")
             pg4.wait_for_selector("#confirm-overlay:not([hidden])")
             cx = pg4.inner_text("#confirm-xyz")
-            check("指示：「Y座標を3mm下げて」" in cx and "147.000" in cx and "未確認" in cx,
+            check("指示：「C00005をY座標を3mm下げて」" in cx and "147.000" in cx and "未確認" in cx,
                   "確認表示に、指示の文・変更量・変更後の XYZ と、X・Y の向きの名前は未確認であることを出す")
             if shots is not None:
                 pg4.screenshot(path=str(shots / "6b_confirm_xyz.png"))
