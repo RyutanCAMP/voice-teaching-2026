@@ -201,9 +201,13 @@ def test_shift_of_unused_position_is_rejected():
 
 
 def test_shift_used_only_by_plain_movl_is_allowed():
-    """C00000 は2つのMOVL（PL・CRなし）だけが使うので変更できる"""
-    job = jbi.parse(load()).shift_position("C00000", "Z", 10.0)
-    assert job.positions["C00000"].xyz == (450.0, -200.0, 360.0)
+    """C00000 は2つのMOVL（PL・CRなし）が共用しているので変更しない
+    （PR #1 レビュー指摘：原本の test_shared_position_is_rejected に合わせて、許可から拒否に変えた）"""
+    text = load()
+    job = jbi.parse(text)
+    with pytest.raises(jbi.JbiError, match="共用"):
+        job.shift_position("C00000", "Z", 10.0)
+    assert job.render() == text
 
 
 @pytest.mark.parametrize("suffix", ["APL=3", "ACC=50", "'memo"])

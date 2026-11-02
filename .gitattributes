@@ -1,0 +1,3 @@
+# samples/dummy の JBI は改行・文字コードを変換せずにそのまま扱う（テストがバイト列で比較するため）
+samples/dummy/*.JBI -text
+samples/dummy/*.jbi -text
