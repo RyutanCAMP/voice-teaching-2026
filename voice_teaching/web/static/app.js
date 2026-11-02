@@ -24,6 +24,7 @@ const state = {
   voiceFinal: null,     // 最後に入力欄へ入れた認識文（直さずに送れば source=voice として記録）
   live: false,          // マイク ON（Web会議のように、一度 ON にすると続けて話せる）
   liveTimer: null,
+  liveAt: 0,            // マイクを ON にした・最後に話した時刻（長く放っておいたら OFF）
 };
 
 const $ = (id) => document.getElementById(id);
@@ -54,6 +55,7 @@ const HEADS = {
   stop: "この指示は使えませんでした。言い方を変えて、もう一度どうぞ",
   ask: "もう少し教えてください",
   blocked: "この位置は、ここでは変更できません。「元に戻す」を押して、別の位置を選んでください",
+  limit: "1回に動かせる量を超えています。小さい量で、もう一度どうぞ",
   approve: "承認できませんでした",
   export: "出力していません",
 };
@@ -237,7 +239,7 @@ function renderSteps() {
     text = "JOBファイルをドロップしてください";
     primary = "drop-zone";
   } else if (step === 2) {
-    text = "動かす位置を選んでください";
+    text = "図の点か、下の番号を押してください";
   } else if (step === 3) {
     if (recording()) {
       text = "どうぞ、話してください";
@@ -302,6 +304,7 @@ async function select(name) {
 
 function renderChips() {
   const selected = state.st ? state.st.selected : null;
+  $("chips-note").hidden = state.view.positions.every((p) => p.shift_check.ok);
   $("position-chips").replaceChildren(...state.view.positions.map((p) => {
     const b = el("button", {
       type: "button",
@@ -331,8 +334,10 @@ function showReply(status, message) {
   box.className = "reply " + status;
   if (status === "ok") box.replaceChildren(el("p", {}, message));
   else if (status === "ask") box.replaceChildren(friendly("ask", message));
+  else if (/まで(です)?|上限/.test(message || "")) box.replaceChildren(friendly("limit", message));
   else box.replaceChildren(friendly("stop", message));
   box.hidden = false;
+  $("voice-status").textContent = "";
 }
 
 // ---- 3. 指示（音声または文字）。どちらも同じ /api/hear へ ----
@@ -436,8 +441,11 @@ function openConfirm() {
     ? "この変更は承認できません。閉じて「元に戻す」を押し、別の位置を選んでください" + reason : "";
   $("confirm-blocked").hidden = !st.blocked_reason;
   // U1：承認ボタンを押す画面に、候補の注意をすべて出す（右のカードは確認表示に隠れるため）
-  $("confirm-warnings").replaceChildren(...st.candidate.warnings.map((w) => el("li", {}, w)));
-  $("confirm-warnings").hidden = st.candidate.warnings.length === 0;
+  const notes = [...st.candidate.warnings];  // 候補の注意は全部（一部だけにしない）
+  if (state.view.figure_message) notes.push(state.view.figure_message);  // 図に描けない点がある
+  $("confirm-warnings").replaceChildren(...notes.map((w) => el("li", {}, w)));
+  $("confirm-warnings").hidden = notes.length === 0;
+  $("confirm-affected").replaceChildren(...st.candidate.affected.map((a) => el("li", {}, a)));
   $("confirm-diff").replaceChildren(diffView(st.candidate));
   if (state.view.positions.some((p) => p.xyz)) {
     confirm3d.reset();
@@ -612,6 +620,8 @@ function data3d() {
     segments: v.segments,
     selected: state.st ? state.st.selected : null,
     after: c ? { points: c.after_positions.filter((p) => p.xyz), segments: c.after_segments, moved: c.moved } : null,
+    delta_label: c ? `${c.target.split(" ")[1]} ${c.delta}mm` : "",
+    blocked: Object.fromEntries(v.positions.filter((p) => !p.shift_check.ok).map((p) => [p.name, p.shift_check.reason])),
   };
 }
 
@@ -772,7 +782,8 @@ function startPlayback() {
     if (t0 === null) {
       t0 = now;
       s.line.setAttribute("stroke-width", "5");
-      $("play-status").textContent = `${run.name}：${s.seg.line_no}行目 ${s.seg.text}`;
+      $("play-status").textContent = `${run.name}を再生中 ${si + 1}/${run.list.length}`;
+      $("play-status").title = `${s.seg.line_no}行目 ${s.seg.text}`;
       marker.setAttribute("fill", run.color);
     }
     const len = Math.hypot(s.to[0] - s.from[0], s.to[1] - s.from[1]);
@@ -796,7 +807,10 @@ function startPlayback3d() {
   if (d.after) runs.push({ name: "変更後", color: C_AFTER, segments: d.after.segments, points: d.after.points });
   $("play-button").classList.add("playing");
   view3d.play(runs,
-    (run, s) => { $("play-status").textContent = `${run.name}：${s.line_no}行目 ${s.text}`; },
+    (run, s) => {
+      $("play-status").textContent = `${run.name}を再生中 ${run.segments.indexOf(s) + 1}/${run.segments.length}`;
+      $("play-status").title = `${s.line_no}行目 ${s.text}`;  // 命令の行は、マウスを重ねたときだけ
+    },
     () => { $("play-status").textContent = "再生が終わりました"; $("play-button").classList.remove("playing"); });
 }
 
@@ -829,6 +843,7 @@ const voice = new SpeechInput(Recognition, {
     }
     $("text-input").value = text;  // 入力欄に入れるだけ。自動では送らない
     state.voiceFinal = text;
+    state.liveAt = Date.now();
     renderSteps();
     renderMic();
   },
@@ -837,8 +852,29 @@ const voice = new SpeechInput(Recognition, {
     state.live = false;  // 失敗したら OFF にして、文字の入力へ案内する
     showVoiceError(message);  // 固定の文。入力欄は変えない
     renderMic();
+    offerLocalInstall();
     setTimeout(() => { if (!recording() && !$("text-input").disabled) $("text-input").focus(); }, 0);
   },
+});
+
+// 「端末内のみ」で日本語の音声データ（Chrome の言語パック）が無いときだけ、入れるボタンを出す（押したときだけ入れる）
+async function offerLocalInstall() {
+  $("local-install").hidden = true;
+  if (voiceMode() !== "local" || !Recognition || typeof Recognition.available !== "function") return;
+  try {
+    const a = await Recognition.available({ langs: ["ja-JP"], processLocally: true });
+    // 返る値は available・unavailable・取り込み中・取り込める の4つ。取り込める（まだ入っていない）ときだけ出す
+    $("local-install").hidden = ["available", "unavailable"].includes(a) || /ing$/.test(a);
+  } catch (_) { /* 調べられないときは出さない */ }
+}
+
+$("local-install").addEventListener("click", async () => {
+  $("local-install").hidden = true;
+  $("voice-status").textContent = "日本語の音声データを入れています…";
+  let ok = false;
+  try { ok = await Recognition.install({ langs: ["ja-JP"], processLocally: true }); } catch (_) { ok = false; }
+  $("voice-status").textContent = ok ? "入れました。もう一度 🎤 を押してください" : "入れられませんでした。「ブラウザー標準」か、文字で入力してください";
+  if (ok) $("voice-error").hidden = true;
 });
 
 function showVoiceError(message) {
@@ -854,7 +890,7 @@ function renderMic() {
   $("mic-button").setAttribute("aria-pressed", String(on));
   $("mic-button").setAttribute("aria-label", on ? "マイクをOFFにする" : "マイクをONにする");
   $("mic-label").textContent = rec ? "マイク ON・聞いています"
-    : state.live ? ($("text-input").value.trim() ? "マイク ON・一時停止（文を確かめて「次へ」）" : "マイク ON")
+    : state.live ? "マイク ON（押すと OFF）"
     : "マイク OFF";
 }
 
@@ -872,9 +908,17 @@ function startListening() {
 }
 
 // マイクが ON のままなら、指示の結果が出て入力欄が空のときに、また聞き始める
+const LIVE_MAX_MS = 3 * 60 * 1000;  // マイク ON のまま、指示が無くても聞き続ける長さ
+
 function resumeLive() {
   clearTimeout(state.liveTimer);
   state.liveTimer = setTimeout(() => {
+    if (state.live && Date.now() - state.liveAt > LIVE_MAX_MS) {  // しばらく使っていなければ OFF にする
+      state.live = false;
+      $("voice-status").textContent = "しばらく使わなかったので、マイクを OFF にしました";
+      renderMic();
+      return;
+    }
     if (!state.live || recording() || !Recognition || !voiceMode() || currentStep() !== 3
         || $("text-input").value.trim() || !$("confirm-overlay").hidden || $("instruction-panel").hidden) return;
     startListening();
@@ -920,6 +964,7 @@ $("mic-button").addEventListener("click", () => {
     return;
   }
   state.live = true;
+  state.liveAt = Date.now();
   startListening();
   renderMic();
 });

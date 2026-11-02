@@ -65,7 +65,7 @@
       </div>
     </div>
     <p id="play-note" class="fine">点を命令の順に直線で結んだ目安です。ロボット本体の動きではありません。</p>
-    <p id="view3d-note" class="fine">3D はジョブの位置の値（X・Y・Z）をそのまま点で描いたものです。ロボット本体・関節は描いていません。実機の動作や干渉を保証するシミュレーターではありません。</p>
+    <p id="view3d-note" class="fine">3D はジョブの X・Y・Z をそのまま点で描いたもので、ロボット本体・関節は描いていません。動作や干渉を保証するシミュレーターではありません。</p>
     <p id="figure-note" class="fine">この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。参考表示であり、実際のロボットの動きではありません。</p>
   </section>
 
@@ -75,6 +75,7 @@
 
     <section id="select-panel" class="card" aria-label="位置を選ぶ">
       <div id="position-chips" class="chips"></div>
+      <p id="chips-note" class="fine" hidden>薄い番号の位置は、ここでは変更できません（理由は番号に重ねると出ます）。</p>
     </section>
 
     <section id="instruction-panel" class="card" aria-label="音声で指示">
@@ -99,6 +100,7 @@
             <p id="voice-status" class="voice-status"></p>
             <p id="voice-partial" class="partial" aria-live="polite"></p>
             <p id="voice-error" class="error" hidden></p>
+            <button type="button" id="local-install" class="link small" hidden title="Chrome の端末内の音声認識に、日本語のデータを入れます（Chrome が取り込みます）">日本語の音声データを入れる</button>
             <button type="button" id="voice-mode-change" class="link small" hidden>マイクの方式を変える</button>
           </div>
           <p id="voice-unsupported" class="warn" hidden>このブラウザでは音声入力を使えません。文字で入力してください</p>
@@ -191,15 +193,18 @@
 <div id="confirm-overlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-title" hidden>
   <div class="confirm-box">
     <h2 id="confirm-title" class="sr-only">確認</h2>
-    <p id="confirm-text" class="confirm-text"></p>
     <p id="confirm-blocked" class="confirm-blocked" hidden></p>
+    <p id="confirm-text" class="confirm-text"></p>
     <div class="confirm-grid">
       <div id="confirm-figure" class="fig confirm-figure"></div>
       <div>
         <ul id="confirm-warnings" class="confirm-warnings" aria-label="この変更の注意"></ul>
         <div id="confirm-diff" class="diff"></div>
+        <p class="fine">変わる命令の行：</p>
+        <ul id="confirm-affected" class="confirm-affected"></ul>
         <p class="fine">灰色＝変更前、オレンジ＝変更後。点を命令の順に直線で結んだ目安で、ロボット本体の動きではありません。変更後の経路は、図と実機で人が確かめてください。</p>
         <p class="fine confirm-figure-note">この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。参考表示であり、実際のロボットの動きではありません。</p>
+        <p class="fine">3D はジョブの X・Y・Z をそのまま点で描いたもので、ロボット本体・関節は描いていません。動作や干渉を保証するシミュレーターではありません。</p>
         <p class="fine">シミュレーション用の確認です。実機用の出力・転送・ロボットの起動はしません。</p>
       </div>
     </div>

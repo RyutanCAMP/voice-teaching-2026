@@ -37,6 +37,8 @@ class FakeRecognition {
     this.onend && this.onend();
   }, 30); }
   abort() {}
+  static async available() { return window.__localAvail || "available"; }
+  static async install() { window.__localAvail = "available"; return true; }
 }
 window.SpeechRecognition = FakeRecognition;
 window.webkitSpeechRecognition = FakeRecognition;
@@ -280,7 +282,7 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     # 重なって見える点（C00000 と C00007）は、押すと選び分けの一覧が出る
     pt(pg, "C00000").click()
     pg.wait_for_selector("#fig-3d .chooser")
-    names = pg.eval_on_selector_all("#fig-3d .chooser button", "els => els.map(e => e.dataset.name)")
+    names = pg.eval_on_selector_all("#fig-3d .chooser button[data-name]", "els => els.map(e => e.dataset.name)")
     check(sorted(names) == ["C00000", "C00007"], f"重なった点は選び分けの一覧を出す：{names}")
     shot(pg, "2c_chooser.png")
     pg.click('#fig-3d .chooser button[data-name="C00000"]')
@@ -318,6 +320,19 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
           f"認識に失敗すると OFF にして文字入力へ案内：{' / '.join(err.splitlines())[:60]}")
     shot(pg, "3a_voice_error.png")
 
+    # 「端末内のみ」で日本語の音声データが無いとき：入れるボタンを出し、押したときだけ入れる
+    pg.click("#voice-mode-change")
+    pg.click('label:has(#voice-mode-local)')
+    pg.evaluate("window.__localAvail = 'downloadable'; window.__failNext = 'language-not-supported'")
+    pg.click("#mic-button")
+    until(pg, lambda: pg.is_visible("#local-install"))
+    check("言語パック" in pg.inner_text("#voice-error"), "端末内のみで日本語が無いときは、音声データを入れるボタンを出す")
+    pg.click("#local-install")
+    until(pg, lambda: "入れました" in pg.inner_text("#voice-status"))
+    check(pg.is_hidden("#local-install"), "押すと音声データを入れて、もう一度マイクを押すよう案内する")
+    pg.click("#voice-mode-change")
+    pg.click('label:has(#voice-mode-browser)')
+
     # マイクを一度 ON にすると、続けて話せる（Web会議のように）
     pg.click("#mic-button")
     until(pg, lambda: pg.is_enabled("#voice-stop"))
@@ -328,7 +343,7 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     shot(pg, "3c_recording.png")
     pg.click("#voice-stop")
     until(pg, lambda: pg.input_value("#text-input") == FAKE_TEXT)
-    check("一時停止" in pg.inner_text("#mic-label") and pg.is_enabled("#text-input")
+    check("押すと OFF" in pg.inner_text("#mic-label") and pg.is_enabled("#text-input")
           and "primary" in (pg.get_attribute("#text-send", "class") or "") and primaries(pg) == 1,
           "話し終わると認識文が入力欄に入り、マイクは ON のまま一時停止（確かめて「次へ」）")
     pg.wait_for_timeout(800)
@@ -356,6 +371,8 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     check("C00005" in cand and "200.000 → 210.000" in cand, f"右のカードに変更の要点：{' '.join(cand.split())[:40]}…")
     check(pg.locator("#fig-3d line.seg.after").count() > 0 and pg.locator("#fig-3d circle.after-pt").count() == 1,
           "3D に変更後の経路（オレンジ）と変更後の点を出す")
+    check(pg.text_content("#fig-3d .inset-amt") == "Z +10.000mm",
+          f"小さな変更も見えるよう、拡大の窓に向きと量を出す：{pg.text_content('#fig-3d .inset-amt')}")
     check(cards(pg) == ["candidate-panel"] and primaries(pg) == 1
           and "primary" in (pg.get_attribute("#open-confirm", "class") or ""),
           "ステップ4は「確認して承認へ」だけが目立つ")

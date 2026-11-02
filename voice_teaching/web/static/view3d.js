@@ -17,7 +17,7 @@ function svgEl(tag, attrs) {
 }
 
 function niceStep(span) {
-  const raw = span / 6;
+  const raw = span / 8;
   const p = Math.pow(10, Math.floor(Math.log10(raw)));
   for (const m of [1, 2, 5, 10]) if (raw <= m * p) return m * p;
   return 10 * p;
@@ -120,7 +120,7 @@ export class View3D {
       el.append(svgEl("circle", { cx: x, cy: y, r: 6, fill: isMoved ? "#a1a6ad" : (sel ? "#0a84ff" : "#1d1d1f") }));
       const label = svgEl("text", { x: x + 12, y: y - 8, fill: sel ? "#0a84ff" : "#6e6e73",
         "font-weight": sel ? "600" : "400" });
-      label.textContent = g.names.map((n) => n + (n === moved ? "（変更前）" : "")).join(" / ");
+      label.textContent = g.names.join(" / ");
       el.append(label);
       const t = svgEl("title", {});
       t.textContent = g.names.map((n) => {
@@ -143,6 +143,7 @@ export class View3D {
         const lab = svgEl("text", { x: b[0] + 14, y: b[1] + 18, fill: "#c4470a", "font-weight": "600" });
         lab.textContent = `${moved}（変更後）`;
         svg.append(lab);
+        this._inset(svg, p0.xyz, q.xyz, d.delta_label || "");
       }
     }
     if (this.marker) {
@@ -152,6 +153,30 @@ export class View3D {
     this.host.querySelector("svg")?.remove();
     this.host.prepend(svg);
     this.svg = svg;
+  }
+
+  // 拡大の窓：変更前（灰）と変更後（オレンジ）を大きくして並べる。小さな変更も見えるように
+  _inset(svg, a, b, label) {
+    const S = 132, x0 = this.W - S - 12, y0 = 12;
+    const pa = this.project(a), pb = this.project(b);
+    const dx = pb[0] - pa[0], dy = pb[1] - pa[1];
+    const len = Math.hypot(dx, dy);
+    const g = svgEl("g", { class: "inset" });
+    g.append(svgEl("rect", { x: x0, y: y0, width: S, height: S, rx: 14, fill: "#fff", stroke: "#e5e5ea" }));
+    const cx = x0 + S / 2, cy = y0 + S / 2 + 6;
+    let ux = 0, uy = -1;
+    if (len > 0.01) { ux = dx / len; uy = dy / len; }
+    const L = 34;  // 窓の中では、向きはそのまま・長さは決まった大きさで見せる
+    const ax = cx - ux * L, ay = cy - uy * L, bx = cx + ux * L, by = cy + uy * L;
+    g.append(svgEl("line", { x1: ax, y1: ay, x2: bx, y2: by, stroke: "#ff6a1a", "stroke-width": 3, "stroke-linecap": "round" }));
+    g.append(svgEl("circle", { cx: ax, cy: ay, r: 7, fill: "#a1a6ad" }));
+    g.append(svgEl("circle", { cx: bx, cy: by, r: 8, fill: "#ff6a1a" }));
+    const head = svgEl("text", { x: x0 + 12, y: y0 + 20, class: "inset-head" });
+    head.textContent = "変更の向き（拡大）";
+    const amt = svgEl("text", { x: x0 + S - 12, y: y0 + 20, "text-anchor": "end", fill: "#c4470a", "font-weight": "700", class: "inset-amt" });
+    amt.textContent = label;
+    g.append(head, amt);
+    svg.append(g);
   }
 
   // 床の格子と、X・Y・Z の軸（向きを知るため）
@@ -165,8 +190,8 @@ export class View3D {
       const p = this.project(a), q = this.project(b);
       g.append(svgEl("line", Object.assign({ x1: p[0], y1: p[1], x2: q[0], y2: q[1] }, attrs)));
     };
-    for (let x = Math.ceil(x0 / step) * step; x <= x1; x += step) line([x, y0, z0], [x, y1, z0], { stroke: "#ececf0", "stroke-width": 1 });
-    for (let y = Math.ceil(y0 / step) * step; y <= y1; y += step) line([x0, y, z0], [x1, y, z0], { stroke: "#ececf0", "stroke-width": 1 });
+    for (let x = Math.ceil(x0 / step) * step; x <= x1; x += step) line([x, y0, z0], [x, y1, z0], { stroke: "#dcdce2", "stroke-width": 1 });
+    for (let y = Math.ceil(y0 / step) * step; y <= y1; y += step) line([x0, y, z0], [x1, y, z0], { stroke: "#dcdce2", "stroke-width": 1 });
     // 軸（床の角から、格子1目盛りの長さ）
     const o = [x0, y0, z0];
     const axes = [["X", [step, 0, 0], "#e5484d"], ["Y", [0, step, 0], "#30a46c"], ["Z", [0, 0, step], "#0a84ff"]];
@@ -201,12 +226,18 @@ export class View3D {
     box.style.top = `${ev.clientY - r.top + 10}px`;
     const head = document.createElement("p");
     head.textContent = "重なっている位置";
+    const x = document.createElement("button");
+    x.type = "button"; x.className = "close"; x.textContent = "×"; x.setAttribute("aria-label", "閉じる");
+    x.addEventListener("click", (e) => { e.stopPropagation(); this.closeChooser(); });
+    head.append(x);
     box.append(head);
+    const blocked = (this.data && this.data.blocked) || {};
     for (const n of names) {
       const b = document.createElement("button");
       b.type = "button";
-      b.textContent = n;
+      b.textContent = n + (blocked[n] ? "（変更できません）" : "");
       b.dataset.name = n;
+      if (blocked[n]) { b.classList.add("blocked"); b.title = "この位置は変更できません：" + blocked[n]; }
       b.addEventListener("click", (e) => { e.stopPropagation(); this.closeChooser(); this.onPick(n); });
       box.append(b);
     }
@@ -232,8 +263,8 @@ export class View3D {
       const dx = ev.clientX - start.x, dy = ev.clientY - start.y;
       if (!this.dragged && Math.hypot(dx, dy) < 4) return;
       if (!this.dragged) { this.dragged = true; this.closeChooser(); h.setPointerCapture?.(ev.pointerId); }
-      this.yaw = start.yaw + dx * 0.01;
-      this.pitch = Math.max(-1.45, Math.min(1.45, start.pitch + dy * 0.01));
+      this.yaw = start.yaw + dx * 0.006;
+      this.pitch = Math.max(0.05, Math.min(1.3, start.pitch + dy * 0.006));  // 床が裏返らない範囲
       this.render();
     });
     const end = () => { start = null; setTimeout(() => { this.dragged = false; }, 0); };
@@ -242,10 +273,11 @@ export class View3D {
     h.addEventListener("wheel", (ev) => {
       if (!this.data) return;
       ev.preventDefault();
-      this.zoom = Math.max(0.3, Math.min(8, this.zoom * Math.exp(-ev.deltaY * 0.0015)));
+      this.zoom = Math.max(0.6, Math.min(5, this.zoom * Math.exp(-ev.deltaY * 0.0012)));
       this.render();
     }, { passive: false });
     h.addEventListener("click", (ev) => { if (!ev.target.closest(".chooser")) this.closeChooser(); });
+    document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") this.closeChooser(); });
   }
 
   // ---- 経路の再生：runs = [{name, color, segments, points}]。onStep(run, seg) で今の命令の行を知らせる ----

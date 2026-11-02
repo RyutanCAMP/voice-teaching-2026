@@ -280,3 +280,19 @@ body.recording .mic-label::before, body.live .mic-label::before {
 /* ---- 確認表示の注意（U1） ---- */
 .confirm-warnings { margin: 0 0 12px; padding: 12px 14px 12px 30px; background: #fff8e6; border-radius: 12px; font-size: 14px; line-height: 1.6; }
 .confirm-figure { position: relative; cursor: grab; touch-action: none; }
+
+/* ---- UXレビューの直し ---- */
+.chooser p { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.chooser button.close { padding: 2px 8px; font-size: 14px; background: none; color: var(--sub); }
+.chooser button.blocked { color: #a1a1a6; }
+.inset .inset-head { fill: #a1a1a6; font-size: 11px; }
+.inset .inset-amt { font-size: 13px; font-family: "SF Mono", Consolas, monospace; }
+body.live .rec-buttons { display: flex; }
+body:not(.recording) #voice-stop { display: none; }
+.mic-big[disabled]:not(.primary) { opacity: 0.4; }
+body.recording .mic-big[disabled] { opacity: 1; }
+.voice-mode label span { border: 1.5px solid transparent; }
+.voice-mode:not(:has(input:checked)) label span { border-color: var(--accent); }
+#text-input::placeholder { color: #c7c7cc; }
+.foot { position: sticky; bottom: 0; background: var(--bg); padding: 8px 32px 10px; }
+.confirm-affected { margin: 2px 0 8px; padding-left: 20px; font-family: "SF Mono", Consolas, monospace; font-size: 12px; color: var(--sub); }

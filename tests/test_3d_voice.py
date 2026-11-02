@@ -112,3 +112,20 @@ def test_server_serves_view3d_js():
     from voice_teaching.web import server
     assert "/static/view3d.js" in server.STATIC_FILES if hasattr(server, "STATIC_FILES") else \
         "/static/view3d.js" in (ROOT / "voice_teaching" / "web" / "server.py").read_text(encoding="utf-8")
+
+
+# ---- 内部 Safety レビュー #1〜#3（確認表示に、描けない点の注記・3D の限界・変わる命令の行も出す） ----
+def test_confirm_shows_unplottable_note_3d_limit_and_affected_lines():
+    j = text("app.js")
+    body = j[j.index("function openConfirm()"):j.index("function closeConfirm()")]
+    assert "state.view.figure_message" in body
+    assert '$("confirm-affected")' in body and "st.candidate.affected" in body
+    o = overlay()
+    assert "ロボット本体・関節は描いていません" in o and "保証" in o
+    view = api.job_view((ROOT / "samples" / "dummy" / "PAT_POSTYPE_MIXED.JBI").read_bytes())
+    assert view["figure_message"]  # 描けない点があるジョブでは、注記の文がある
+
+
+def test_live_mic_turns_off_after_a_while():
+    v = text("app.js")
+    assert "LIVE_MAX_MS" in v and "state.live = false" in v
