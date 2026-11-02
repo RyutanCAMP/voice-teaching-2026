@@ -91,7 +91,7 @@ def test_request_shape():
     calls = it.decide(facts("この位置を上に10mm移動して"), "C00004", NAMES)
     kw = c.messages.calls[0]
     assert kw["model"] == "claude-opus-5-5"
-    assert kw["max_tokens"] == 2048
+    assert kw["max_tokens"] == ci.MAX_TOKENS
     assert kw["output_config"] == {"effort": "low"}
     assert kw["tool_choice"] == {"type": "auto", "disable_parallel_tool_use": True}  # forced（any / tool）でない
     assert "thinking" not in kw
