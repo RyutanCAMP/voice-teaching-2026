@@ -83,12 +83,6 @@
         <button type="button" id="voice-position" class="position-pill" title="位置を選び直す"></button>
         <div id="voice-input-slot">
           <div id="voice-controls">
-            <fieldset class="voice-mode" id="voice-mode-set">
-              <legend>はじめにマイクの方式を選びます</legend>
-              <label><input type="radio" name="voice-mode" id="voice-mode-browser" value="browser"><span>ブラウザー標準</span></label>
-              <label><input type="radio" name="voice-mode" id="voice-mode-local" value="local"><span>端末内のみ</span></label>
-              <p class="fine">ブラウザー標準は、音声が外部で処理されることがあります。</p>
-            </fieldset>
             <div class="mic-row">
               <button type="button" id="mic-button" class="mic-big" disabled aria-label="マイクをONにする" aria-pressed="false">🎤</button>
               <p id="mic-label" class="mic-label">マイク OFF</p>
@@ -97,12 +91,19 @@
                 <button type="button" id="voice-cancel" class="link" disabled>マイクをOFF</button>
               </div>
             </div>
+            <div id="voice-consent" class="consent" hidden>
+              <p id="consent-text"></p>
+              <div class="consent-buttons">
+                <button type="button" id="consent-yes">使う</button>
+                <button type="button" id="consent-no" class="link">文字で入力する</button>
+              </div>
+            </div>
             <p id="voice-status" class="voice-status"></p>
             <p id="voice-partial" class="partial" aria-live="polite"></p>
+            <p id="voice-hint" class="voice-hint" hidden>向き（プラス・マイナス）が聞き取れていません。このまま送ると＋として扱います。マイナスなら文を直してください</p>
             <p id="voice-error" class="error" hidden></p>
-            <button type="button" id="local-install" class="link small" hidden title="Chrome の端末内の音声認識に、日本語のデータを入れます（Chrome が取り込みます）">日本語の音声データを入れる</button>
-            <button type="button" id="voice-mode-change" class="link small" hidden>マイクの方式を変える</button>
           </div>
+          <p id="browser-note" class="browser-note" hidden><span>音声入力は Google Chrome で開いてください</span> <button type="button" id="copy-url" class="link small">アドレスをコピー</button></p>
           <p id="voice-unsupported" class="warn" hidden>このブラウザでは音声入力を使えません。文字で入力してください</p>
         </div>
         <form id="text-form" class="text-form">
@@ -144,6 +145,14 @@
           <li>元のジョブは変えません。承認ボタンで承認した変更候補だけを、新しいジョブ名でシミュレーション用に出力します（合成ジョブだけ）。</li>
         </ul>
         <h3>音声と通信</h3>
+        <fieldset class="voice-mode" id="voice-mode-set">
+          <legend>マイクの方式（ふだんは選ばなくて大丈夫です。初めて 🎤 を押したときに聞きます）</legend>
+          <label><input type="radio" name="voice-mode" id="voice-mode-browser" value="browser"><span>ブラウザー標準</span></label>
+          <label><input type="radio" name="voice-mode" id="voice-mode-local" value="local"><span>端末内のみ（試験的）</span></label>
+          <p class="fine">端末内のみ：この PC の Chrome 156 では、話し終わるとタブが落ちることを確かめました（2026-11-03）。</p>
+        </fieldset>
+        <button type="button" id="local-install" class="link small" hidden title="Chrome の端末内の音声認識に、日本語のデータを入れます（Chrome が取り込みます）">日本語の音声データを入れる</button>
+        <p id="browser-info" class="fine"></p>
         <ul class="small">
           <li id="voice-notice">「ブラウザー標準」では、音声がブラウザー提供元のサーバーで処理されることがあります。このアプリは音声を保存・送信しません。</li>
           <li>「端末内のみ」は、対応するブラウザーと日本語の言語パックが要ります。使えないときは止まり、外部の処理へは切り替えません。</li>

@@ -21,11 +21,16 @@ sys.path.insert(0, str(REPO))
 FAKE_TEXT = "この位置を上に10mm"
 FAKE_RECOGNITION = """
 window.__fakeText = %r;
+// Google Chrome として振る舞う（window.__asOther を先に立てたページは、アプリの中のブラウザーなど Chrome 以外）
+if (!window.__asOther) Object.defineProperty(navigator, "userAgentData",
+  { value: { brands: [{ brand: "Google Chrome", version: "156" }] }, configurable: true });
 class FakeRecognition {
   constructor() { window.__rec = this; this.processLocally = false; }
   start() { setTimeout(() => {
-    if (window.__failNext) {  // 認識の失敗（例：Chrome の network）をまねる
-      const code = window.__failNext; window.__failNext = null;
+    // 認識の失敗（例：Chrome の network）をまねる。window.__fails は、続けて起こす失敗の並び
+    const code = (window.__fails && window.__fails.length) ? window.__fails.shift() : window.__failNext;
+    window.__failNext = null;
+    if (code) {
       this.onerror && this.onerror({ error: code });
       return;
     }
@@ -96,13 +101,22 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             pg.wait_for_selector("#job-area:not([hidden])")
             pg.locator("#position-chips button", has_text="C00004").first.click()
             until(pg, lambda: pg.inner_text("#voice-position strong") == "C00004")
-            check(not pg.is_enabled("#mic-button"), "処理方法を選ぶまでマイクのボタンは使えない")
-            pg.check("#voice-mode-browser")
-            check(pg.is_enabled("#mic-button"), "処理方法を選ぶとマイクのボタンが使える")
+            check(pg.is_enabled("#mic-button") and not pg.is_checked("#voice-mode-browser"),
+                  "方式を選ばなくても、マイクのボタンを押せる（方式は未選択のまま）")
+            pg.click("#mic-button")
+            check(pg.is_visible("#voice-consent") and "Google のサーバー" in pg.inner_text("#consent-text")
+                  and pg.inner_text("#mic-label") == "マイク OFF",
+                  "初めて 🎤 を押すと、声をどこで文字にするかを伝えて同意を聞く（まだ聞かない）")
+            pg.click("#consent-no")
+            check(pg.is_hidden("#voice-consent") and not pg.is_checked("#voice-mode-browser")
+                  and pg.inner_text("#mic-label") == "マイク OFF", "「文字で入力する」を選ぶと、音声は使わない")
 
             # 取消：入力欄は変わらない
             pg.fill("#text-input", "手で書いた文")
             pg.click("#mic-button")
+            pg.click("#consent-yes")
+            check(pg.is_checked("#voice-mode-browser") and pg.evaluate("localStorage.getItem('vt-voice-mode')") == "browser",
+                  "「使う」で同意すると、ブラウザー標準を使い、このブラウザーに覚える")
             until(pg, lambda: pg.is_enabled("#voice-cancel"))
             until(pg, lambda: pg.inner_text("#voice-partial") == "この位置を")
             check(all(not pg.is_enabled(s) for s in ["#file-input", "#text-send", "#text-input"]),
@@ -112,6 +126,22 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             until(pg, lambda: not pg.is_enabled("#voice-cancel"))
             check(pg.input_value("#text-input") == "手で書いた文", "取消で入力欄が変わらない")
             check(pg.inner_text("#voice-partial") == "", "取消で未確定の文が消える")
+
+            # 認識で「マイナス」が落ちた文（実マイクで「Xマイナス方向に5ミリ」→「X 方向に 5mm」）：送る前に知らせる
+            pg.fill("#text-input", "")
+            pg.evaluate("window.__fakeText = 'X 方向に 5mm'")
+            pg.click("#mic-button")
+            until(pg, lambda: pg.is_enabled("#voice-stop"))
+            pg.click("#voice-stop")
+            until(pg, lambda: pg.input_value("#text-input") == "X 方向に 5mm")
+            check(pg.is_visible("#voice-hint") and "＋として扱います" in pg.inner_text("#voice-hint"),
+                  "声から入った文に軸の向きが無ければ、送る前に「＋として扱います」と知らせる")
+            pg.fill("#text-input", "X マイナス方向に 5mm")
+            check(pg.is_hidden("#voice-hint"), "文を直して向きを入れると、知らせは消える")
+            pg.fill("#text-input", "")
+            pg.click("#voice-cancel")
+            until(pg, lambda: pg.inner_text("#mic-label") == "マイク OFF")
+            pg.evaluate("window.__fakeText = %r" % FAKE_TEXT)
 
             # 録音 → 終了 → 入力欄に入るだけ（自動では送らない）
             pg.fill("#text-input", "")
@@ -157,6 +187,27 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
 
             # 4ステップの画面（DEMO_C_PLACE をドラッグ＆ドロップ）
             check_four_steps(b, url, check, shots)
+
+            # Chrome 以外（ChatGPT のアプリの中のブラウザーなど）：Chrome で開くよう案内し、通信の失敗は聞き直さない
+            pg3 = b.new_page()
+            pg3.add_init_script("window.__asOther = true")
+            pg3.add_init_script(FAKE_RECOGNITION)
+            pg3.goto(url)
+            pg3.set_input_files("#file-input", str(REPO / "samples/dummy/DEMO_PLACE.JBI"))
+            pg3.wait_for_selector("#job-area:not([hidden])")
+            pg3.locator("#position-chips button", has_text="C00004").first.click()
+            until(pg3, lambda: pg3.inner_text("#voice-position strong") == "C00004")
+            check(pg3.is_visible("#browser-note") and "Google Chrome" in pg3.inner_text("#browser-note")
+                  and pg3.is_visible("#copy-url"), "Chrome 以外では「Google Chrome で開いてください」とアドレスのコピーを出す")
+            pg3.evaluate("window.__fails = ['network']")
+            pg3.click("#mic-button")
+            check("提供元のサーバー" in pg3.inner_text("#consent-text"), "Chrome 以外の同意の文は、送り先を決めつけない")
+            pg3.click("#consent-yes")
+            until(pg3, lambda: pg3.is_visible("#voice-error"))
+            check("Google Chrome で開いてください" in pg3.inner_text("#voice-error")
+                  and pg3.inner_text("#mic-label") == "マイク OFF",
+                  "Chrome 以外で通信に失敗したら、聞き直さずに Chrome で開くよう案内する")
+            pg3.close()
 
             # SpeechRecognition が無いブラウザー
             pg2 = b.new_page()
@@ -309,12 +360,9 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
           "3D の点を押すと位置が選ばれ、ステップ3になる（再生中に 80ms 押しても選べる）")
     check(pg.locator('#fig-3d g.pt3.sel[data-names~="C00005"]').count() == 1, "選んだ点が 3D で強調される")
     check(cards(pg) == ["instruction-panel"], f"右側は音声のカードだけ：{cards(pg)}")
-    check(pg.is_visible("#voice-mode-set") and primaries(pg) == 0, "マイクの方式を選ぶまでは、方式の欄を出す")
-    pg.click('label:has(#voice-mode-browser)')
-    check(pg.is_hidden("#voice-mode-set") and pg.is_visible("#voice-mode-change"),
-          "方式を選ぶと方式の欄は閉じる（「マイクの方式を変える」で開ける）")
-    check("primary" in (pg.get_attribute("#mic-button", "class") or "") and primaries(pg) == 1,
-          "方式を選ぶと、マイクのボタンだけが目立つ")
+    check(pg.is_hidden("#voice-mode-set") and pg.is_hidden("#browser-note")
+          and "primary" in (pg.get_attribute("#mic-button", "class") or "") and primaries(pg) == 1,
+          "方式を選ぶ欄は出さず（詳細表示の中）、マイクのボタンだけが目立つ")
     check(pg.inner_text("#mic-label") == "マイク OFF" and pg.get_attribute("#mic-button", "aria-pressed") == "false",
           "マイクは最初 OFF と出る")
     side = chars(pg, ".side")
@@ -325,27 +373,55 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
           "聞き取った文字・ログ・音声の方式の説明は詳細表示の中")
     shot(pg, "3_selected.png")
 
-    # 認識の失敗（Chrome の network など）：マイクを OFF にして、文字の入力へ案内する
-    pg.evaluate("window.__failNext = 'network'")
+    # 初めて 🎤：同意を聞いてから聞き始める。通信の失敗が1回だけなら、マイク ON のまま聞き直す
+    pg.evaluate("window.__fails = ['network']")
+    pg.click("#mic-button")
+    check(pg.is_visible("#voice-consent") and primaries(pg) == 1
+          and "primary" in (pg.get_attribute("#consent-yes", "class") or ""),
+          "初めて 🎤 を押すと同意を聞く（「使う」だけが目立つ）")
+    shot(pg, "3_consent.png")
+    pg.click("#consent-yes")
+    until(pg, lambda: pg.inner_text("#voice-partial") == "この位置を")
+    check(pg.is_hidden("#voice-error") and "聞いています" in pg.inner_text("#mic-label"),
+          "通信の失敗が1回なら、マイク ON のまま聞き直す")
+    pg.click("#voice-cancel")
+
+    # 続けて失敗（Chrome の network）：マイクを OFF にして、次にすることと文字の入力へ案内する
+    pg.evaluate("window.__fails = ['network', 'network']")
     pg.click("#mic-button")
     until(pg, lambda: pg.is_visible("#voice-error"))
     err = pg.inner_text("#voice-error")
-    check(pg.inner_text("#mic-label") == "マイク OFF" and "文字で入力" in err and pg.is_enabled("#text-input"),
-          f"認識に失敗すると OFF にして文字入力へ案内：{' / '.join(err.splitlines())[:60]}")
+    check(pg.inner_text("#mic-label") == "マイク OFF" and "接続" in err and "文字で入力" in err and pg.is_enabled("#text-input"),
+          f"通信の失敗が続くと OFF にして、次にすることと文字入力を案内：{' / '.join(err.splitlines())[:60]}")
     shot(pg, "3a_voice_error.png")
 
-    # 「端末内のみ」で日本語の音声データが無いとき：入れるボタンを出し、押したときだけ入れる
-    pg.click("#voice-mode-change")
+    # 声が無いまま止まる（no-speech）：Web会議のように、マイク ON のまま聞き直す
+    pg.evaluate("window.__fails = ['no-speech', 'no-speech']")
+    pg.click("#mic-button")
+    until(pg, lambda: pg.inner_text("#voice-partial") == "この位置を")
+    check(pg.is_hidden("#voice-error") and "聞いています" in pg.inner_text("#mic-label")
+          and pg.evaluate("window.__fails.length") == 0, "声が無いまま止まっても、マイク ON のまま聞き直す（2回）")
+    pg.click("#voice-cancel")
+
+    # マイクが許可されていない：どこで許可するかを出す
+    pg.evaluate("window.__fails = ['not-allowed']")
+    pg.click("#mic-button")
+    until(pg, lambda: pg.is_visible("#voice-error"))
+    check("許可" in pg.inner_text("#voice-error") and pg.inner_text("#mic-label") == "マイク OFF",
+          "マイクが許可されていないときは、許可の場所を案内して OFF")
+
+    # 「端末内のみ」（詳細表示で選ぶ・試験的）で日本語の音声データが無いとき：入れるボタンを出し、押したときだけ入れる
+    pg.click("#engineer-toggle")
     pg.click('label:has(#voice-mode-local)')
-    pg.evaluate("window.__localAvail = 'downloadable'; window.__failNext = 'language-not-supported'")
+    pg.evaluate("window.__localAvail = 'downloadable'; window.__fails = ['language-not-supported']")
     pg.click("#mic-button")
     until(pg, lambda: pg.is_visible("#local-install"))
-    check("言語パック" in pg.inner_text("#voice-error"), "端末内のみで日本語が無いときは、音声データを入れるボタンを出す")
+    check("端末内のみでは日本語" in pg.inner_text("#voice-error"), "端末内のみで日本語が無いときは、音声データを入れるボタンを出す")
     pg.click("#local-install")
     until(pg, lambda: "入れました" in pg.inner_text("#voice-status"))
     check(pg.is_hidden("#local-install"), "押すと音声データを入れて、もう一度マイクを押すよう案内する")
-    pg.click("#voice-mode-change")
     pg.click('label:has(#voice-mode-browser)')
+    pg.click("#engineer-toggle")
 
     # マイクを一度 ON にすると、続けて話せる（Web会議のように）
     pg.click("#mic-button")
@@ -446,7 +522,6 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     # 実機用の検査で止まる位置（C00000）：参考の表示だけで、承認できない。次にすることを出す
     pg.click("#undo-button")
     until(pg, lambda: pg.get_attribute("#step-3", "aria-current") == "step")
-    pg.click('label:has(#voice-mode-browser)') if pg.is_visible("#voice-mode-set") else None
     if pg.is_enabled("#voice-cancel"):
         pg.click("#voice-cancel")  # 元に戻すとまた聞き始めるので、ここではマイクを OFF にする
     until(pg, lambda: pg.inner_text("#mic-label") == "マイク OFF")

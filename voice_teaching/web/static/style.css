@@ -296,3 +296,12 @@ body.recording .mic-big[disabled] { opacity: 1; }
 #text-input::placeholder { color: #c7c7cc; }
 .foot { position: sticky; bottom: 0; background: var(--bg); padding: 8px 32px 10px; }
 .confirm-affected { margin: 2px 0 8px; padding-left: 20px; font-family: "SF Mono", Consolas, monospace; font-size: 12px; color: var(--sub); }
+
+/* 初めて 🎤 を押したときの同意（どこで声を文字にするか） */
+.consent { background: #f5f5f7; border-radius: 14px; padding: 14px 16px; margin: 8px 0; font-size: 14px; }
+.consent p { margin: 0 0 10px; }
+.consent-buttons { display: flex; gap: 12px; align-items: center; }
+/* Chrome 以外（アプリの中のブラウザーなど）で開いたときの案内 */
+.browser-note { font-size: 13px; color: var(--sub); text-align: center; margin: 6px 0; }
+#engineer-view .voice-mode { margin: 6px 0 10px; }
+.voice-hint { background: #fff8e6; border-radius: 10px; padding: 8px 12px; font-size: 13px; margin: 6px 0; }

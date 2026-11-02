@@ -17,7 +17,6 @@ const state = {
   st: null,         // サーバーの画面の状態（state）
   figView: "yz",    // 大きく出す図の向き（xy / xz / yz）
   playToken: 0,     // 再生を止めるための番号（描き直すと増やす）
-  modeOpen: false,  // マイクの方式を選び直す欄を開いているか
   pickAgain: false, // 位置を選び直している（図で重なった点も、位置のボタンで選べるように）
   voiceState: "idle",   // 録音の状態（starting / listening / stopping / idle）
   voiceToken: null,     // 録音を始めたときのジョブ（session）と位置。違えば認識文を使わない
@@ -90,6 +89,7 @@ async function loadFile(f) {
   voice.cancel();
   state.live = false;  // ジョブが変わったらマイクは OFF に戻す
   state.voiceFinal = null;
+  $("voice-hint").hidden = true;
   $("text-input").value = "";
   const bytes = new Uint8Array(await f.arrayBuffer());
   let res;
@@ -123,7 +123,6 @@ async function loadFile(f) {
   state.view = res.view;
   state.st = res.state;
   state.figView = res.view.positions.some((p) => p.xyz) ? "3d" : bestView(res.view.positions);
-  state.modeOpen = false;
   state.pickAgain = false;
   $("heard-text").textContent = "（まだありません）";
   $("facts-view").textContent = "（まだありません）";
@@ -226,12 +225,8 @@ function renderSteps() {
   for (const [n, id] of Object.entries(cards)) {
     $(id).hidden = Number(n) !== step;
   }
-  // マイクの方式は、選ぶまでだけ出す（選んだ後は「マイクの方式を変える」で開く）
-  const chosen = !!voiceMode();
-  $("voice-mode-set").hidden = chosen && !state.modeOpen;
-  $("voice-mode-change").hidden = !chosen || state.modeOpen || recording();
   // 次に押すものを1つだけ目立たせる
-  for (const id of ["drop-zone", "mic-button", "voice-stop", "text-send", "open-confirm", "undo-button", "export-button"]) {
+  for (const id of ["drop-zone", "mic-button", "voice-stop", "consent-yes", "text-send", "open-confirm", "undo-button", "export-button"]) {
     $(id).classList.remove("primary");
   }
   const st = state.st;
@@ -248,8 +243,9 @@ function renderSteps() {
     } else if ($("text-input").value.trim()) {
       text = "文を確かめて「次へ」";
       primary = "text-send";
-    } else if (!$("voice-controls").hidden && !chosen) {
-      text = "マイクの方式を選んでください";
+    } else if (!$("voice-consent").hidden) {
+      text = "音声の使い方を確かめてください";
+      primary = "consent-yes";
     } else if (!$("voice-controls").hidden) {
       text = "🎤 を押して話してください";
       primary = "mic-button";
@@ -275,10 +271,6 @@ function renderSteps() {
 }
 
 $("text-input").addEventListener("input", renderSteps);
-for (const id of ["voice-mode-browser", "voice-mode-local"]) {
-  $(id).addEventListener("change", () => { state.modeOpen = false; renderSteps(); });
-}
-$("voice-mode-change").addEventListener("click", () => { state.modeOpen = true; renderSteps(); });
 $("voice-position").addEventListener("click", () => {
   if (recording()) return;
   state.pickAgain = true;
@@ -351,6 +343,7 @@ $("text-form").addEventListener("submit", async (ev) => {
   // 認識文を直さずに送ったときだけ source=voice（記録だけ。結果は変わらない）
   const source = state.voiceFinal !== null && text === state.voiceFinal ? "voice" : "text";
   state.voiceFinal = null;
+  $("voice-hint").hidden = true;
   $("text-input").value = "";
   await sendInstruction(text, source);
 });
@@ -829,10 +822,50 @@ $("play-button").addEventListener("click", startPlayback);
 // ---- 音声入力（speech.js）。認識した文は入力欄に入れるだけ。承認・出力・送信は呼ばない ----
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
+// ブラウザーの種類。音声を文字にする処理は、Google Chrome は Google の、Edge は Microsoft のサーバーで行う。
+// アプリの中のブラウザー（ChatGPT のアプリの中など）は、その処理を使えず「通信に失敗」になることがある（2026-11-03 に調べた）
+const BRANDS = ((navigator.userAgentData && navigator.userAgentData.brands) || []).map((b) => b.brand);
+const BROWSER = BRANDS.includes("Google Chrome") ? "chrome" : BRANDS.includes("Microsoft Edge") ? "edge" : "other";
+const PROVIDER = { chrome: "Chrome が音声を Google のサーバーへ送って", edge: "Edge が音声を Microsoft のサーバーへ送って",
+  other: "ブラウザーが音声を提供元のサーバーへ送って" }[BROWSER];
+const MODE_KEY = "vt-voice-mode";  // 同意した方式（このブラウザーにだけ覚える。音声そのものは保存しない）
+
+// speech.js の失敗の文（固定）から、失敗の種類を知る（speech.js は変えない）
+const FAILS = [
+  ["network", "音声認識の通信に失敗"],
+  ["no-speech", "声を聞き取れませんでした"],
+  ["aborted", "音声入力が中断されました"],
+  ["not-allowed", "マイクの利用が許可されていません"],
+  ["audio-capture", "マイクを利用できません"],
+  ["language", "日本語の音声認識を利用できません"],
+];
+const failKind = (message) => (FAILS.find(([, head]) => (message || "").startsWith(head)) || ["other"])[0];
+
+// 失敗したときに出す、次にすることの短い文
+function failText(kind, message) {
+  if (kind === "network") {
+    return BROWSER === "other"
+      ? "このブラウザーでは、声を文字にできません。Google Chrome で開いてください"
+      : "声を文字にする通信がつながりません。インターネットの接続を確かめて、もう一度 🎤";
+  }
+  if (kind === "not-allowed") {
+    return BROWSER === "other"
+      ? "このブラウザーではマイクを使えません。Google Chrome で開いてください"
+      : "マイクが許可されていません。アドレス欄の左のマークから、マイクを「許可」にして、もう一度 🎤";
+  }
+  if (kind === "audio-capture") return "マイクが見つかりません。接続と、ほかのアプリ（Teams・Zoom など）が使っていないかを確かめてください";
+  if (kind === "language") return "端末内のみでは日本語を使えません。詳細表示で「ブラウザー標準」にするか、文字で入力してください";
+  return message;
+}
+
 // Web会議のように、マイクを一度 ON（state.live）にすると、続けて話せる：
 // 話し終わると認識文が入力欄に入り、録音は一時停止する（確かめて直してから「次へ」を押す）。
 // 結果が出て入力欄が空に戻り、ステップ3（音声で指示）にいれば、また聞き始める。
-// 認識に失敗したら、マイクを OFF にして文字の入力へ案内する。承認・出力・送信はここから呼ばない。
+// 声が無いまま止まったときは、マイク ON のまま聞き直す。通信の失敗は1回だけ聞き直す。
+// それ以外の失敗は、マイクを OFF にして、次にすることと文字の入力へ案内する。承認・出力・送信はここから呼ばない。
+state.netRetry = 0;
+state.quiet = 0;       // 声が無いまま止まって、続けて聞き直した回数
+const QUIET_MAX = 20;  // これを超えたら OFF にする（すぐに止まる失敗が続いても、聞き直しを繰り返さない）
 const voice = new SpeechInput(Recognition, {
   state: (value) => {
     state.voiceState = value;
@@ -854,13 +887,35 @@ const voice = new SpeechInput(Recognition, {
     $("text-input").value = text;  // 入力欄に入れるだけ。自動では送らない
     state.voiceFinal = text;
     state.liveAt = Date.now();
+    state.netRetry = 0;
+    state.quiet = 0;
     renderSteps();
     renderMic();
+    renderSignHint();
   },
   error: (message) => {
     state.voiceToken = null;
-    state.live = false;  // 失敗したら OFF にして、文字の入力へ案内する
-    showVoiceError(message);  // 固定の文。入力欄は変えない
+    const kind = failKind(message);
+    // 声が無いまま止まった：マイク ON のまま、また聞く（長く使わなければ resumeLive が OFF にする）
+    if (state.live && (kind === "no-speech" || kind === "aborted") && state.quiet < QUIET_MAX) {
+      state.quiet += 1;
+      state.resumeArmed = true;
+      resumeLive();
+      return;
+    }
+    // 通信の失敗：Chrome・Edge なら1回だけ聞き直す
+    if (state.live && kind === "network" && BROWSER !== "other" && state.netRetry < 1) {
+      state.netRetry += 1;
+      state.resumeArmed = true;
+      $("voice-status").textContent = "つながりにくいので、もう一度聞いています…";
+      resumeLive();
+      return;
+    }
+    state.quiet = 0;
+    state.live = false;  // それ以外は OFF にして、次にすることと文字の入力へ案内する
+    state.netRetry = 0;
+    showVoiceError(failText(kind, message));  // 固定の文。入力欄は変えない
+    $("browser-note").hidden = BROWSER !== "other";
     renderMic();
     offerLocalInstall();
     setTimeout(() => { if (!recording() && !$("text-input").disabled) $("text-input").focus(); }, 0);
@@ -887,6 +942,19 @@ $("local-install").addEventListener("click", async () => {
   if (ok) $("voice-error").hidden = true;
 });
 
+// 認識で「マイナス」が落ちることがある（実マイクで「Xマイナス方向に5ミリ」→「X 方向に 5mm」）。
+// 声から入った文に、軸があって向き（＋・−）が無ければ、送る前に知らせる（向きの無い軸は＋として読まれるため）
+function lacksSign(text) {
+  const t = text.normalize("NFKC").toUpperCase()
+    .replace(/(エックス|ワイ|ゼット|ズィー)(?=\s?(の|プラス|マイナス|PLUS|MINUS|[+\-]|方向|軸))/g, (m) => ({ "エックス": "X", "ワイ": "Y" }[m] || "Z"));
+  return /(^|[^A-Z])[XYZ]([^A-Z]|$)/.test(t) && /\d/.test(t) && !/[+\-−]|プラス|マイナス|PLUS|MINUS/.test(t);
+}
+
+function renderSignHint() {
+  const t = $("text-input").value;
+  $("voice-hint").hidden = !(state.voiceFinal !== null && t && lacksSign(t));
+}
+
 function showVoiceError(message) {
   $("voice-error").replaceChildren(el("span", {}, message), el("span", { class: "reason" }, "下の欄に文字で入力することもできます"));
   $("voice-error").hidden = false;
@@ -911,6 +979,7 @@ function startListening() {
   if (state.voiceFinal !== null && $("text-input").value === state.voiceFinal) $("text-input").value = "";
   state.voiceFinal = null;
   $("voice-error").hidden = true;
+  $("voice-hint").hidden = true;
   $("voice-partial").textContent = "";
   closeConfirm();
   state.voiceToken = { sessionId: state.sessionId, selected: state.st ? state.st.selected : null };
@@ -945,7 +1014,7 @@ function updateLocks() {
   $("voice-mode-browser").disabled = rec;
   $("voice-mode-local").disabled = rec;
   $("voice-position").disabled = rec;
-  $("mic-button").disabled = rec || !loaded || !voiceMode() || !Recognition;
+  $("mic-button").disabled = rec || !loaded || !Recognition;
   $("voice-stop").disabled = !rec;
   $("voice-cancel").disabled = !rec && !state.live;
   document.body.classList.toggle("recording", rec);
@@ -964,20 +1033,67 @@ if (!Recognition) {
   $("voice-controls").hidden = true;
   $("voice-unsupported").hidden = false;
 }
-for (const id of ["voice-mode-browser", "voice-mode-local"]) $(id).addEventListener("change", updateLocks);
-$("text-input").addEventListener("input", renderMic);
+// 前に同意した方式があれば、それを使う（無ければ、初めて 🎤 を押したときに聞く）
+try {
+  const saved = localStorage.getItem(MODE_KEY);
+  if (saved === "browser" || saved === "local") $("voice-mode-" + saved).checked = true;
+} catch (_) { /* 覚えられないブラウザーでは、毎回聞く */ }
+for (const id of ["voice-mode-browser", "voice-mode-local"]) {
+  $(id).addEventListener("change", () => {
+    try { localStorage.setItem(MODE_KEY, voiceMode()); } catch (_) { /* 覚えられなくても使える */ }
+    $("voice-error").hidden = true;
+    updateLocks();
+    offerLocalInstall();
+  });
+}
+$("text-input").addEventListener("input", () => { renderMic(); renderSignHint(); });
+$("browser-note").hidden = BROWSER !== "other" || !Recognition;
+$("browser-info").textContent = "このブラウザー：" + (BRANDS.join("・") || "不明") + "（" + navigator.userAgent + "）";
+$("consent-text").textContent = "声を文字にするため、" + PROVIDER + "文字にします。このアプリは音声を保存しません。";
+
+function micOn() {
+  state.live = true;
+  state.liveAt = Date.now();
+  state.netRetry = 0;
+  state.quiet = 0;
+  startListening();
+  renderMic();
+}
 
 $("mic-button").addEventListener("click", () => {
-  if (!state.sessionId || !voiceMode() || recording()) return;
+  if (!state.sessionId || recording()) return;
   if (state.live) {  // 一時停止中に押すと OFF
     state.live = false;
     updateLocks();
     return;
   }
-  state.live = true;
-  state.liveAt = Date.now();
-  startListening();
-  renderMic();
+  if (!voiceMode()) {  // 初めて：音声をどこで文字にするかを伝えて、同意をもらう（勝手に送らない）
+    $("voice-consent").hidden = false;
+    renderSteps();
+    $("consent-yes").focus();
+    return;
+  }
+  micOn();
+});
+$("consent-yes").addEventListener("click", () => {
+  $("voice-mode-browser").checked = true;
+  try { localStorage.setItem(MODE_KEY, "browser"); } catch (_) { /* 覚えられなくても使える */ }
+  $("voice-consent").hidden = true;
+  micOn();
+});
+$("consent-no").addEventListener("click", () => {
+  $("voice-consent").hidden = true;
+  renderSteps();
+  $("text-input").focus();
+});
+$("copy-url").addEventListener("click", async () => {
+  const url = location.origin + "/";
+  try {
+    await navigator.clipboard.writeText(url);
+    $("voice-status").textContent = "コピーしました。Chrome のアドレス欄に貼り付けてください";
+  } catch (_) {
+    $("voice-status").textContent = "Chrome で " + url + " を開いてください";
+  }
 });
 $("voice-stop").addEventListener("click", () => voice.stop());  // 話し終わった（マイクは ON のまま）
 $("voice-cancel").addEventListener("click", () => {

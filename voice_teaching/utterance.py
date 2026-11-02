@@ -39,9 +39,13 @@ def contains_forbidden(text: str) -> bool:
 
 
 # ---- 正規化 ----
+_MINUS = str.maketrans({"−": "-", "‐": "-", "‑": "-", "–": "-"})
+
+
 def normalize(text: str) -> str:
     """全角英数字を半角に（NFKC）、英字を大文字にする。"""
-    return unicodedata.normalize("NFKC", text).upper()
+    # 音声認識が返すマイナス記号（−・‐ など）も「-」として読む
+    return unicodedata.normalize("NFKC", text).upper().translate(_MINUS)
 
 
 def normalize_position(text: str) -> str | None:
@@ -119,6 +123,8 @@ _OTHER_UNIT_AFTER = re.compile(r"^\s?(センチ|CM|M(?![A-Z])|メートル|パ�
 _KANJI_AMOUNT = re.compile(r"[〇零一二三四五六七八九十百千万]+\s?(ミリ|MM|センチ|CM|%|パーセント|割)")
 _VAGUE = re.compile(r"半分|少し|すこし|ちょっと|ちょい|わずか|僅か|倍|もう少し|適当")
 _AXIS_RE = re.compile(r"(?<![A-Z])([XYZ])\s?(マイナス|プラス|[+\-])?\s?(方向|軸|に|へ)")
+# 「Xマイナス5ミリ」「Y +3 mm」「X の -5ミリ」：軸のすぐ後（「の」をはさんでもよい）に符号と数字。符号は量の側（_SIGN_BEFORE）で読むので、ここでは軸だけ
+_AXIS_SIGNED_NUM = re.compile(r"(?<![A-Z])([XYZ])\s?(?:の\s?)?(?=(?:マイナス|プラス|[+\-])\s?\d)")
 _UP = re.compile(r"(?<!以)(上げ|上に|上へ|上方向)")
 _DOWN = re.compile(r"(?<!以)(下げ|下に|下へ|下方向)")
 _SIDE = re.compile(r"(右|左)")
@@ -139,8 +145,19 @@ _THIS = re.compile(r"この位置|この点|この命令|ここ|その位置|そ
 _SIGN = {"+": 1, "プラス": 1, "-": -1, "マイナス": -1}
 
 
+# 音声認識が返す、軸と符号の別の書き方（実マイクで「ワイプラス 3mm」「Y の Plus 3ミリ」と返った）。
+# 言った言葉の書き方を揃えるだけで、符号や軸を推測で足さない。カタカナの軸名は、すぐ後に符号・方向・軸・「の」があるときだけ
+_SPOKEN_AXIS = re.compile(r"(エックス|ワイ|ゼット|ズィー)(?=\s?(?:の|プラス|マイナス|PLUS|MINUS|[+\-]|方向|軸))")
+_SPOKEN_SIGN = re.compile(r"(?<![A-Z])(PLUS|MINUS)(?![A-Z])")
+
+
+def _spoken(text: str) -> str:
+    text = _SPOKEN_AXIS.sub(lambda m: {"エックス": "X", "ワイ": "Y", "ゼット": "Z", "ズィー": "Z"}[m.group(1)], text)
+    return _SPOKEN_SIGN.sub(lambda m: {"PLUS": "プラス", "MINUS": "マイナス"}[m.group(1)], text)
+
+
 def read_utterance(raw: str) -> UtteranceFacts:
-    text = normalize(raw)
+    text = _spoken(normalize(raw))
     # 位置番号（数字を量と読まないように、先に取り除く）
     positions: list[str] = []
     bad_positions: list[str] = []
@@ -195,6 +212,9 @@ def read_utterance(raw: str) -> UtteranceFacts:
             axes.append(m.group(1))
         if m.group(2):
             axis_signs.append(_SIGN[m.group(2)])
+    for m in _AXIS_SIGNED_NUM.finditer(rest_no_speed):
+        if m.group(1) not in axes:
+            axes.append(m.group(1))
     speed_signs: list[int] = []
     up, down = bool(_UP.search(rest)), bool(_DOWN.search(rest))
     if is_speed:
