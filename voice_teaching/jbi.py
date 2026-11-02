@@ -2,9 +2,9 @@
 
 方針:
 - 分からない行は一文字も変えずに残す（改行コード・文字コードもそのまま）。
-- 変えるのは、検査を通った位置の数値1つ、または速度の数値1つ、ジョブ名だけ。
+- 変えるのは、検査を通った位置の数値1つ、ジョブ名だけ（速度の変更は、確認が済むまで止めている）。
 - 変更は元のオブジェクトを書き換えず、変更案（ChangeProposal）の中に新しい Job を入れて返す（元のジョブは必ず残る）。
-- 分からない書き方は「無い」とみなさず、変更を断る（理由を文で返す）。
+- 分からない書き方は「無い」とみなさず、変更を断る（理由を文で返す）。読むこと（表示）は最後まで続ける。
 - 検査を通ったことは、物理的な安全の保証ではない。
 
 書き方の前提は docs/JBI_FORMAT_NOTES.md を参照（実機のサンプルで確認待ちの点がある）。
@@ -19,8 +19,12 @@ from pathlib import Path
 
 AXES = {"X": 0, "Y": 1, "Z": 2}
 
-# 1回の位置変更で動かしてよい量の上限（mm）。唐川さんの確認待ちの仮の値
+# 位置の変更量の仮の上限（mm。確認待ち）。1回の変更量と、元のジョブ（基準）からの累積の両方に使う
 DEFAULT_MAX_SHIFT_MM = 50.0
+
+# 速度の変更は、単位・指定形式・適用範囲の確認が済むまで止める（本人の判断）。検査の中身は将来のために残す
+SPEED_CHANGE_ENABLED = False
+SPEED_DISABLED_MESSAGE = "速度の変更は、単位・指定形式・適用範囲の確認が済むまで、このアプリでは止めています"
 
 PATH_WARNING = (
     "この位置を変えると、この位置へ入る移動と、この位置から出る移動の経路が変わります。"
@@ -32,7 +36,6 @@ SPEED_UNIT_WARNING = (
 )
 
 _NUM = r"[+-]?\d+(?:\.\d+)?"
-_NUM_RE = re.compile(_NUM)
 _POS_NAME_LINE = re.compile(r"^(C\d{5})=(.*)$")
 _MOVE = re.compile(r"^(MOVL|MOVJ|MOVC|MOVS)\s+(C\d{5})\b(.*)$")
 # 行の中の位置参照。BC00004 のような別の変数は数えない。大文字小文字は区別しない
@@ -45,18 +48,39 @@ _CR = re.compile(r"\bCR=")
 _PL_LOOSE = re.compile(r"\bPL\b", re.IGNORECASE)
 _CR_LOOSE = re.compile(r"\bCR\b", re.IGNORECASE)
 _SECOND_MOVE = re.compile(r"\+\s*\w*MOV", re.IGNORECASE)
-# 変更してよい行の形（許可リスト）。これ以外の語が付いた行は止める
-_EDITABLE_MOVL = re.compile(r"MOVL C\d{5} V=\d+(?:\.\d+)?")
+# 変更してよい行の形（許可リスト）。「MOVL 位置 V=数値」と、ちょうど「 PL=0」が付いた形だけを通す
+# （PL=0 は本人の指示で正本＝仕様v2.1 6・7章に従う）。これ以外の語が付いた行は止める
+_EDITABLE_MOVL = re.compile(r"MOVL C\d{5} V=\d+(?:\.\d+)?(?: PL=0)?")
+# 前後の命令の PL を見るときに通す形：空白で区切られた、ちょうど「PL=0」1つだけ
+_EXACT_PL0 = re.compile(r"(?<= )PL=0(?= |$)")
 # 位置の意味を変える命令。ジョブに1つでもあれば位置は変えない
 _BLOCKING = re.compile(r"(?<![A-Z0-9_])(SFTON|SFTOF|MSHIFT|MFRAME|IMOV|SMOV[LJCS])(?![A-Z0-9_])", re.IGNORECASE)
-# 移動命令（出る移動を探すため。止める側に広めに拾う）
+# 移動命令（入る・出る移動を探すため。止める側に広めに拾う）
 _ANY_MOVE = re.compile(r"(?<![A-Z0-9_])(MOV[LJCS]|SMOV[LJCS]|IMOV)(?![A-Z0-9_])", re.IGNORECASE)
+# 制御の流れを変える命令。解析する機能がまだ無いので、1つでもあれば位置は変えない
 _FLOW = re.compile(r"(?<![A-Z0-9_])(JUMP|CALL|RET)(?![A-Z0-9_])", re.IGNORECASE)
 
-_KNOWN_POS_DIRECTIVES = {"NPOS", "TOOL", "POSTYPE", "RECTAN", "PULSE", "RCONF", "USER"}
 _KNOWN_INST_DIRECTIVES = {"DATE", "ATTR", "COMM"}
+# INST部の命令の許可リスト（仮。今のコード・ダミー・仕様に出てくるものだけ。実機サンプルで本人と確定する）
+KNOWN_INST_COMMANDS = frozenset({
+    "NOP", "END", "MOVL", "MOVJ", "MOVC", "MOVS", "DOUT", "TIMER", "JUMP", "CALL", "RET",
+    # 止めるために知っている命令（ジョブにあれば位置の変更を止める。_BLOCKING）
+    "SFTON", "SFTOF", "MSHIFT", "MFRAME", "IMOV", "SMOVL", "SMOVJ", "SMOVC", "SMOVS",
+    # GETS は止める命令ではない。位置を参照する命令として「使う行」に数えられ、共用・MOVL でない で止まる
+    "GETS",
+})
+_LABEL_LINE = re.compile(r"\*[A-Za-z0-9_]+")
+_DIGIT_LIST = r"\d+(?:,\d+)*"
+# POS部の指示行と、その引数の形（None は引数なし）。形が違えば「分からない指示行」とする
+_POS_DIRECTIVE_ARGS = {
+    "NPOS": _DIGIT_LIST, "TOOL": r"\d+", "POSTYPE": r"[A-Z]+", "RECTAN": None, "PULSE": None,
+    "RCONF": _DIGIT_LIST, "USER": r"\d+",
+}
 # 1行の中に入っていると行の区切りがあいまいになる文字（タブ以外の制御文字など）
 _BAD_CHARS = re.compile(r"[\x00-\x08\x0a-\x1f\x7f\x85  ]")
+_ROBOT_VALUES = 6  # HC20 は6軸。ロボット座標の位置は値が6個のときだけ変える
+# 位置の値の整数部の桁の上限（このアプリで扱える桁。ロボットの動作範囲を決めるものではない）
+_MAX_INT_DIGITS = 6
 
 
 class JbiError(Exception):
@@ -87,7 +111,7 @@ class Position:
 class Instruction:
     index: int  # ジョブ全体の中の行番号（0から）
     text: str
-    command: str  # MOVL など。移動命令以外は先頭の語
+    command: str  # MOVL など。移動命令以外は先頭の語（ラベル行は「*L1」など）
     position: str | None = None
     speed: float | None = None  # 数値で書かれていないときは None
     speed_raw: str | None = None
@@ -110,10 +134,15 @@ class ChangeProposal:
     affected: tuple[str, ...]
     warnings: tuple[str, ...]
     new_job: "Job"
+    baseline_value: float | None = None  # 位置の変更のとき、元のジョブ（基準）の値
 
     @property
     def actual_delta(self) -> float:
         return self.after_value - self.before_value
+
+    @property
+    def cumulative_delta(self) -> float | None:
+        return None if self.baseline_value is None else self.after_value - self.baseline_value
 
 
 @dataclass
@@ -124,6 +153,8 @@ class Job:
     instructions: list[Instruction] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)  # 1件でもあれば変更はすべて断る
     encoding: str = "utf-8"
+    # 累積の検査の基準：最初に読み込んだ元のジョブの位置の値。変更後の Job に引き継ぐ
+    baseline: dict[str, tuple[float, ...]] = field(default_factory=dict)
 
     # ---- 書き出し・情報 ----
     def render(self) -> str:
@@ -159,16 +190,15 @@ class Job:
     def plan_shift(self, position: str, axis: str, delta_mm: float,
                    max_abs_delta_mm: float = DEFAULT_MAX_SHIFT_MM) -> ChangeProposal:
         self._check_no_problems()
-        if not _is_real_number(max_abs_delta_mm) or not math.isfinite(max_abs_delta_mm) or max_abs_delta_mm <= 0:
+        limit = _as_float(max_abs_delta_mm, "移動量の上限の指定")
+        if limit <= 0:
             raise JbiError("移動量の上限の指定が正しくないため、変更しません")
-        if not _is_real_number(delta_mm):
-            raise JbiError("移動量が数値ではないため、変更しません")
-        if not math.isfinite(delta_mm):
-            raise JbiError("移動量が有限の数値ではないため、変更しません")
-        if delta_mm == 0:
+        limit = min(limit, DEFAULT_MAX_SHIFT_MM)  # 引数は上限を下げる方向にだけ効く
+        delta = _as_float(delta_mm, "移動量")
+        if delta == 0:
             raise JbiError("移動量が0のため、変更しません")
-        if abs(delta_mm) > max_abs_delta_mm:
-            raise JbiError(f"移動量 {delta_mm:g}mm は上限 {max_abs_delta_mm:g}mm を超えるため、変更しません")
+        if abs(delta) > limit:
+            raise JbiError(f"移動量 {delta:g}mm は仮の上限 {limit:g}mm（確認待ち）を超えるため、変更しません")
         if position not in self.positions:
             raise JbiError(f"位置 {position} はこのジョブにありません")
         if axis not in AXES:
@@ -178,12 +208,20 @@ class Job:
             raise JbiError(f"位置 {position} の前に分からない指示行があり、ロボット座標かどうか分からないため、変更しません")
         if not pos.is_robot_coordinates():
             raise JbiError(f"位置 {position} はロボット座標の形式ではないため、変更しません")
+        if len(pos.values) != _ROBOT_VALUES:
+            raise JbiError(
+                f"位置 {position} の値が{len(pos.values)}個で、6個（6軸のロボット座標）ではないため、変更しません")
 
         for ins in self.instructions:
             if _BLOCKING.search(ins.text):
                 raise JbiError(
                     f"{ins.index + 1}行目「{ins.text}」は位置の意味を変える命令のため、"
                     "このジョブの位置は、このアプリでは変更しません")
+        for ins in self.instructions:
+            if _FLOW.search(ins.text) or _LABEL_LINE.match(ins.text):
+                raise JbiError(
+                    f"{ins.index + 1}行目「{ins.text}」があります。制御の流れ（JUMP・CALL など）を解析する機能が"
+                    "まだ無いため、この位置へ入る移動・出る移動を確かめられず、このジョブの位置は変更しません")
 
         users = self.users_of(position)
         if not users:
@@ -203,13 +241,25 @@ class Job:
             raise JbiError(
                 f"{target.index + 1}行目「{target.text}」は位置 {position} を直線移動（MOVL）の行き先として"
                 "使っていないため、変更しません")
-        # 仕様v2.1 6章：入る命令と出る命令のどちらか一方でも「MOVL 位置 V=数値」でなければ止める
+        # 入る区間の始まり（直前の移動命令）と出る命令（次の移動命令）は、どちらも
+        # 「MOVL 位置 V=数値」（ちょうど PL=0 は可）でなければ止める（仕様v2.1 6章。MOVJ を始まりに認めるかは本人判断待ち）
+        # 前後の移動命令が無い位置は、入る／出る区間がジョブの中で決まらないので止める
+        prev = self._prev_move(target.index)
+        if prev is None:
+            raise JbiError(
+                f"位置 {position} へ入る区間の始まり（直前の移動命令）がジョブの中に無く、入る移動が決まらないため、変更しません")
+        try:
+            _check_editable_move(prev)
+        except JbiError as e:
+            raise JbiError(f"位置 {position} へ入る移動の始まりの命令が、このアプリで変更できる形ではありません。{e}") from None
         nxt = self._next_move(target.index)
-        if nxt is not None:
-            try:
-                _check_editable_move(nxt)
-            except JbiError as e:
-                raise JbiError(f"位置 {position} から出る移動の命令が、このアプリで変更できる形ではありません。{e}") from None
+        if nxt is None:
+            raise JbiError(
+                f"位置 {position} から出る移動の命令（次の移動命令）がジョブの中に無く、出る移動が決まらないため、変更しません")
+        try:
+            _check_editable_move(nxt)
+        except JbiError as e:
+            raise JbiError(f"位置 {position} から出る移動の命令が、このアプリで変更できる形ではありません。{e}") from None
 
         line = self.lines[pos.line_index]
         body, ending = _split_ending(line)
@@ -222,13 +272,13 @@ class Job:
         if not re.fullmatch(_NUM, old_token):
             raise JbiError(f"{pos.line_index + 1}行目の位置の数値が読めないため、変更しません")
         before_value = float(old_token)
-        new_token = _format_like(old_token, before_value + delta_mm)
+        new_token = _format_like(old_token, before_value + delta)
         tokens[k] = new_token
         new_body = f"{m.group(1)}={','.join(tokens)}"
         new_job = self._with_line(pos.line_index, new_body + ending)
 
         new_pos = new_job.positions.get(position)
-        if new_pos is None or len(new_pos.values) != len(pos.values):
+        if new_job.problems or new_pos is None or len(new_pos.values) != len(pos.values):
             raise JbiError("変更後のジョブを読み直せなかったため、変更しません")
         after_value = new_pos.values[k]
         if after_value == before_value:
@@ -236,8 +286,18 @@ class Job:
         if any(a != b for j, (a, b) in enumerate(zip(pos.values, new_pos.values)) if j != k):
             raise JbiError("変更後のジョブで別の値が変わってしまうため、変更しません")
         actual = after_value - before_value
-        if abs(actual) > max_abs_delta_mm + 1e-9:
-            raise JbiError(f"丸めた後の実際の移動量が上限 {max_abs_delta_mm:g}mm を超えるため、変更しません")
+        if abs(actual) > limit + 1e-9:
+            raise JbiError(f"丸めた後の実際の移動量が仮の上限 {limit:g}mm（確認待ち）を超えるため、変更しません")
+        # 仕様v2.1 6章：元のジョブ（基準）からの累積で軸ごとに検査する
+        base_values = self.baseline.get(position)
+        if base_values is None or len(base_values) != len(pos.values):
+            raise JbiError(f"位置 {position} の基準（元のジョブの値）が分からないため、変更しません")
+        baseline_value = base_values[k]
+        cumulative = after_value - baseline_value
+        if abs(cumulative) > DEFAULT_MAX_SHIFT_MM + 1e-9:
+            raise JbiError(
+                f"位置 {position} の {axis} は、元のジョブ（基準）からの累積が {_format_like(old_token, cumulative)}mm に"
+                f"なり、累積の仮の上限 {DEFAULT_MAX_SHIFT_MM:g}mm（確認待ち）を超えるため、変更しません")
 
         warnings = [PATH_WARNING]
         if pos.tool is not None:
@@ -246,32 +306,30 @@ class Job:
             warnings.append("この位置のツール番号の指定が見つかりません")
         if pos.user is not None:
             warnings.append(f"この位置にはユーザ座標 {pos.user} の指定があります")
-        if abs(actual - delta_mm) > 1e-9:
+        if abs(actual - delta) > 1e-9:
             warnings.append(
-                f"指示の {delta_mm:g}mm は小数点以下の桁数に丸めて、実際には {_fmt_delta(old_token, actual)}mm 動かします")
-        flow = sorted({mm.group(1).upper() for i in self.instructions for mm in _FLOW.finditer(i.text)})
-        if flow:
+                f"指示の {delta:g}mm は小数点以下の桁数に丸めて、実際には {_format_like(old_token, actual)}mm 動かします")
+        if baseline_value != before_value:
             warnings.append(
-                f"このジョブには {'・'.join(flow)} があるため、前後の移動は行の並びから推定したものです")
+                f"元のジョブ（基準）からの {axis} の累積の変更量は {_format_like(old_token, cumulative)}mm です")
 
-        affected = [f"{target.index + 1}行目「{target.text}」（この位置へ入る移動）"]
-        if nxt is None:
-            affected.append("（この後の移動命令は見つかりません）")
-        else:
-            note = "この位置から出る移動"
-            if _PL_LOOSE.search(nxt.text):
-                note += "。PL付き"
-            if _CR_LOOSE.search(nxt.text):
-                note += "。CR付き"
-            affected.append(f"{nxt.index + 1}行目「{nxt.text}」（{note}）")
+        note = "この位置から出る移動" + ("。PL=0 付き" if _PL_LOOSE.search(nxt.text) else "")
+        affected = [
+            f"{prev.index + 1}行目「{prev.text}」（この位置へ入る区間の始まり）",
+            f"{target.index + 1}行目「{target.text}」（この位置へ入る移動）",
+            f"{nxt.index + 1}行目「{nxt.text}」（{note}）",
+        ]
 
         return ChangeProposal(
             kind="shift", target=f"{position} {axis}", line_index=pos.line_index,
-            before_line=body, after_line=new_body, requested=float(delta_mm),
+            before_line=body, after_line=new_body, requested=delta,
             before_value=before_value, after_value=after_value,
-            affected=tuple(affected), warnings=tuple(warnings), new_job=new_job)
+            affected=tuple(affected), warnings=tuple(warnings), new_job=new_job,
+            baseline_value=baseline_value)
 
     def plan_speed(self, index: int, new_speed: float) -> ChangeProposal:
+        if not SPEED_CHANGE_ENABLED:
+            raise JbiError(SPEED_DISABLED_MESSAGE)
         self._check_no_problems()
         ins = self.instruction_at(index)
         if ins.command != "MOVL":
@@ -279,30 +337,33 @@ class Job:
         if ins.speed is None:
             raise JbiError(f"{index + 1}行目の速度は数値で書かれていないため、変更できません")
         _check_editable_move(ins)
-        # 仕様v2.1 6章：前後の移動命令に PL・CR があれば止める（PL=0 も今は止める扱い）
+        # 仕様v2.1 6章：前後の移動命令に PL・CR があれば止める（ちょうど PL=0 は通す）
         for nb in (self._prev_move(index), self._next_move(index)):
             if nb is None:
                 continue
-            what = "PL" if _PL_LOOSE.search(nb.text) else "CR" if _CR_LOOSE.search(nb.text) else None
+            what = _pl_or_cr(nb.text)
             if what:
                 raise JbiError(
-                    f"{index + 1}行目の前後の移動命令 {nb.index + 1}行目「{nb.text}」に {what} が付いているため、"
-                    "通り道が変わるので、このアプリでは速度を変更しません")
-        if not _is_real_number(new_speed):
-            raise JbiError("速度が数値ではないため、変更しません")
-        if not math.isfinite(new_speed) or new_speed <= 0:
-            raise JbiError("速度は正の有限の数値でなければならないため、変更しません")
+                    f"{index + 1}行目の前後の移動命令 {nb.index + 1}行目「{nb.text}」に {what} が付いていて、"
+                    "通り道が変わるため、このアプリでは速度を変更しません")
+        speed = _as_float(new_speed, "速度")
+        if speed <= 0:
+            raise JbiError("速度は正の数値でなければならないため、変更しません")
 
         body, ending = _split_ending(self.lines[index])
         m = _SPEED_NUM.search(body)
         if m is None:
             raise JbiError(f"{index + 1}行目の速度が読めないため、変更しません")
         old_token = m.group(1)
-        new_token = _format_like(old_token, new_speed)
+        new_token = _format_like(old_token, speed)
+        # 速度の上限の値は本人の判断待ち。書式が壊れるもの（整数部の桁が元より多い）だけを止める
+        if _int_digits(new_token) > _int_digits(old_token):
+            raise JbiError(
+                f"新しい速度は、元の値 {old_token} より整数部の桁が多く、このアプリで扱える桁を超えるため、変更しません")
         new_body = body[: m.start(1)] + new_token + body[m.end(1):]
         new_job = self._with_line(index, new_body + ending)
         new_ins = next((i for i in new_job.instructions if i.index == index), None)
-        if new_ins is None or new_ins.speed is None:
+        if new_job.problems or new_ins is None or new_ins.speed is None:
             raise JbiError("変更後のジョブを読み直せなかったため、変更しません")
         before_value, after_value = float(old_token), new_ins.speed
         if after_value == before_value:
@@ -311,11 +372,11 @@ class Job:
             raise JbiError("丸めると速度が0になるため、変更しません")
 
         warnings = [SPEED_UNIT_WARNING]
-        if abs(after_value - new_speed) > 1e-9:
-            warnings.append(f"指示の {new_speed:g} は小数点以下の桁数に丸めて、実際には {new_token} にします")
+        if abs(after_value - speed) > 1e-9:
+            warnings.append(f"指示の {speed:g} は小数点以下の桁数に丸めて、実際には {new_token} にします")
         return ChangeProposal(
             kind="speed", target=f"{index + 1}行目", line_index=index,
-            before_line=body, after_line=new_body, requested=float(new_speed),
+            before_line=body, after_line=new_body, requested=speed,
             before_value=before_value, after_value=after_value,
             affected=(f"{index + 1}行目「{ins.text}」",), warnings=tuple(warnings), new_job=new_job)
 
@@ -348,9 +409,12 @@ class Job:
         return next((i for i in reversed(self.instructions) if i.index < index and _ANY_MOVE.search(i.text)), None)
 
     def _with_line(self, index: int, new_line: str) -> "Job":
+        """1行だけ差し替えた新しい Job。累積の基準は引き継ぐ。"""
         new_lines = list(self.lines)
         new_lines[index] = new_line
-        return parse("".join(new_lines), encoding=self.encoding)
+        new_job = parse("".join(new_lines), encoding=self.encoding)
+        new_job.baseline = dict(self.baseline)
+        return new_job
 
 
 # ---- 読み込み ----
@@ -377,6 +441,10 @@ def parse_bytes(data: bytes) -> Job:
 
 
 def parse(text: str, encoding: str = "utf-8") -> Job:
+    """ジョブを読む。分からない所は problems に記録し、読むこと自体は最後まで続ける（表示のため）。
+
+    読み直したジョブは、累積の検査の基準が新しくなる（ファイルをまたいだ引き継ぎは別の設計で扱う）。
+    """
     lines = _split_lines(text)
     job = Job(lines=lines, encoding=encoding)
     section = None
@@ -388,16 +456,26 @@ def parse(text: str, encoding: str = "utf-8") -> Job:
     unknown = False
     npos_count = None
     c_lines = 0
+    ended = False
 
     def problem(i: int, body: str, why: str) -> None:
-        job.problems.append(f"{i + 1}行目「{body}」: {why}")
+        job.problems.append(f"{i + 1}行目「{body}」は{why}")
 
     for i, line in enumerate(lines):
         body, _ = _split_ending(line)
         if _BAD_CHARS.search(body):
             problem(i, body.encode("unicode_escape").decode("ascii"), "行の中に読めない文字があります")
             continue
-        stripped = body.strip()
+        if body != body.strip(" \t"):
+            problem(i, body, "前後に空白があります")
+            body = body.strip(" \t")
+        if not body:
+            problem(i, body, "空の行です")
+            continue
+        # 全角空白・NBSP などの空白文字は、コメント（' の行・///COMM）以外では止める。読むのは続ける
+        if not (body.startswith("'") or body.startswith("///COMM ")) and any(
+                c.isspace() and c not in " \t" for c in body):
+            problem(i, body, "全角空白などの空白文字を含みます")
 
         # 見出し（//NAME・//POS・//INST だけを知っている）
         if body.startswith("//") and not body.startswith("///"):
@@ -424,29 +502,32 @@ def parse(text: str, encoding: str = "utf-8") -> Job:
 
         if section == "POS":
             if body.startswith("///"):
-                word, _, arg = body[3:].partition(" ")
-                arg = arg.strip()
-                if word not in _KNOWN_POS_DIRECTIVES:
+                word, sep, arg = body[3:].partition(" ")
+                if word not in _POS_DIRECTIVE_ARGS:
                     unknown = True  # 以降の位置は変更しない
-                elif word == "NPOS":
-                    first = arg.split(",")[0]
-                    if npos_count is not None or not re.fullmatch(r"\d+", first):
+                    continue
+                pat = _POS_DIRECTIVE_ARGS[word]
+                ok = (sep == "") if pat is None else (sep == " " and re.fullmatch(pat, arg) is not None)
+                if word == "NPOS":
+                    if not ok or npos_count is not None:
                         problem(i, body, "NPOS が読めません")
                     else:
-                        npos_count = int(first)
+                        npos_count = int(arg.split(",")[0])
+                elif not ok:
+                    unknown = True  # 想定外の引数が付いた指示行は「分からない指示行」
                 elif word == "TOOL":
-                    tool = arg or None
+                    tool = arg
                 elif word == "POSTYPE":
-                    postype = arg or None
+                    postype = arg
                     rectan = False
                 elif word == "RECTAN":
                     rectan = True
                 elif word == "PULSE":
                     rectan = False
                 elif word == "RCONF":
-                    rconf = arg or None
+                    rconf = arg
                 elif word == "USER":
-                    user = arg or None
+                    user = arg
                 continue
             m = _POS_NAME_LINE.fullmatch(body)
             if not m:
@@ -457,6 +538,9 @@ def parse(text: str, encoding: str = "utf-8") -> Job:
             raw = m.group(2).split(",")
             if not all(re.fullmatch(_NUM, v) for v in raw):
                 problem(i, body, "数値でない値があります")
+                continue
+            if any(_int_digits(v) > _MAX_INT_DIGITS for v in raw):
+                problem(i, body, "整数部が7桁以上の値があり、このアプリで扱える桁を超えます")
                 continue
             if len(raw) < 3:
                 problem(i, body, "値が3個未満です")
@@ -471,22 +555,37 @@ def parse(text: str, encoding: str = "utf-8") -> Job:
 
         # INST部
         if body.startswith("///"):
-            word = body[3:].split(" ", 1)[0]
+            word, sep, arg = body[3:].partition(" ")
             if word.startswith("GROUP"):
                 if body != "///GROUP1 RB1":
-                    problem(i, body, "ロボット1台（GROUP1 RB1）以外の軸グループがあります")
+                    problem(i, body, "ロボット1台（GROUP1 RB1）以外の軸グループです")
+            elif word == "LVARS":
+                if not (sep == " " and re.fullmatch(_DIGIT_LIST, arg)):
+                    problem(i, body, "数字をカンマで区切った形ではない LVARS です")
             elif word not in _KNOWN_INST_DIRECTIVES:
                 problem(i, body, "知らない指示行です")
             continue
-        if not stripped or stripped.startswith("'"):
-            continue  # 空行とコメント行は命令として扱わない
-        job.instructions.append(_parse_instruction(i, stripped))
+        if body.startswith("'"):
+            continue  # コメント行は命令として扱わない
+        words = body.split()
+        if not words:
+            continue  # 空白文字だけの行（problems には上で記録済み）
+        # 命令を「認識できる」かの判定（許可リスト）。知らない命令も読み続け、problems に記録する
+        if not (_LABEL_LINE.fullmatch(body) or words[0] in KNOWN_INST_COMMANDS):
+            problem(i, body, "このアプリの命令の許可リストに無い命令です")
+        # END より後ろの命令は実行されない。その命令だけが使う位置などを取り違えないよう、ジョブごと止める
+        if ended:
+            problem(i, body, "END より後ろにある命令です（実行されません）")
+        if body == "END":
+            ended = True
+        job.instructions.append(_parse_instruction(i, body))
 
     if "POS" in seen_headers:
         if npos_count is None:
             job.problems.append("POS部に NPOS の行がありません")
         elif npos_count != c_lines:
             job.problems.append(f"NPOS の位置の数（{npos_count}）と位置の行の数（{c_lines}）が合いません")
+    job.baseline = {name: p.values for name, p in job.positions.items()}
     return job
 
 
@@ -515,26 +614,48 @@ def _parse_instruction(index: int, text: str) -> Instruction:
 def _check_editable_move(ins: Instruction) -> None:
     """このアプリで変えてよい移動命令か確かめる（docs/JBI_FORMAT_NOTES.md）。
 
-    「MOVL 位置 V=数値」だけの行を通す（許可リスト）。PL・CR・同時移動は理由を分けて返す。PLは値にかかわらず止める
-    （PL=0 の扱いは確認待ち。決まるまでは厳しい方に合わせる）。
+    「MOVL 位置 V=数値」と、ちょうど「 PL=0」が付いた形だけを通す（許可リスト）。
+    PL（PL=0 以外や緩い書き方）・CR・同時移動・知らない語は、理由を分けて返す。
     """
     where = f"{ins.index + 1}行目「{ins.text}」"
     if ins.command != "MOVL":
         raise JbiError(f"{where}は直線移動（MOVL）の命令ではないため、このアプリでは変更しません")
+    if _EDITABLE_MOVL.fullmatch(ins.text):
+        return
     if _SECOND_MOVE.search(ins.text):
         raise JbiError(f"{where}は別の移動と組になっているため、このアプリでは変更しません")
-    if _PL_LOOSE.search(ins.text):
-        m = _PL.search(ins.text)
-        what = f"PL={m.group(1)}" if m else "PL（書き方を読み取れない形）"
-        raise JbiError(f"{where}は {what} が付いているため、このアプリでは変更しません")
     if _CR_LOOSE.search(ins.text):
         raise JbiError(f"{where}は CR（CR=）が付いているため、このアプリでは変更しません")
-    if not _EDITABLE_MOVL.fullmatch(ins.text):
-        raise JbiError(f"{where}は、このアプリで扱える形（MOVL 位置 V=数値）ではないため、変更しません")
+    if _PL_LOOSE.search(ins.text):
+        m = _PL.search(ins.text)
+        if m is None:
+            raise JbiError(f"{where}は PL（書き方を読み取れない形）が付いているため、このアプリでは変更しません")
+        if m.group(1) != "0":
+            raise JbiError(f"{where}は PL={m.group(1)} が付いているため、このアプリでは変更しません")
+    raise JbiError(f"{where}は、このアプリで扱える形（MOVL 位置 V=数値、または末尾に PL=0）ではないため、変更しません")
 
 
-def _is_real_number(x: object) -> bool:
-    return isinstance(x, (int, float)) and not isinstance(x, bool)
+def _pl_or_cr(text: str) -> str | None:
+    """前後の命令に付いた PL・CR を調べる。ちょうど「PL=0」1つだけなら通す。"""
+    if _CR_LOOSE.search(text):
+        return "CR"
+    n = len(_PL_LOOSE.findall(text))
+    if n == 0 or (n == 1 and _EXACT_PL0.search(text)):
+        return None
+    return "PL"
+
+
+def _as_float(x: object, what: str) -> float:
+    """移動量・速度・上限の引数を数値として受け取る。極端な値は例外で落とさず JbiError で断る。"""
+    if not isinstance(x, (int, float)) or isinstance(x, bool):
+        raise JbiError(f"{what}が数値ではないため、変更しません")
+    try:
+        f = float(x)
+    except (OverflowError, ValueError):
+        raise JbiError(f"{what}が大きすぎて扱えないため、変更しません") from None
+    if not math.isfinite(f):
+        raise JbiError(f"{what}が有限の数値ではないため、変更しません")
+    return f
 
 
 def _split_lines(text: str) -> list[str]:
@@ -550,18 +671,15 @@ def _split_ending(line: str) -> tuple[str, str]:
     return line, ""
 
 
-def _decimals(original: str) -> int:
-    original = original.strip()
-    return len(original.split(".", 1)[1]) if "." in original else 0
+def _int_digits(token: str) -> int:
+    return len(token.lstrip("+-").split(".", 1)[0])
 
 
 def _format_like(original: str, value: float) -> str:
     """元の数値と同じ小数点以下の桁数で書く。"""
-    text = f"{value:.{_decimals(original)}f}"
+    original = original.strip()
+    decimals = len(original.split(".", 1)[1]) if "." in original else 0
+    text = f"{value:.{decimals}f}"
     if text.startswith("-") and float(text) == 0:
         text = text[1:]  # -0.000 を 0.000 にする
     return text
-
-
-def _fmt_delta(original: str, delta: float) -> str:
-    return _format_like(original, delta)

@@ -1,8 +1,8 @@
 """PR #1 レビュー指摘（1〜6）の回帰テスト。
 
 チャット側シクロの「PR #1 安全ガード修正の展開指示」2-1 のテストをそのまま置いたもの。
-ただし test_pl0_is_allowed は、チャッピーの暫定判断（PL=0 は拒否を維持）に合わせて
-test_pl0_is_rejected に変えている（reviews/REVIEW_PR1_FIX_001.md に矛盾として記録）。
+PL=0 は、本人（唐川さん）の指示で正本（仕様v2.1 6・7章、CURRENT_DECISIONS 4章）に従い「通す」。
+いったん test_pl0_is_rejected にしていたものを、原本どおり test_pl0_is_allowed に戻した（修正ラウンド1）。
 """
 from pathlib import Path
 
@@ -19,6 +19,12 @@ def base() -> str:
 
 def idx_of(job, pos):
     return [i.index for i in job.instructions if i.position == pos][0]
+
+
+@pytest.fixture
+def speed_enabled(monkeypatch):
+    """速度の変更は既定で止めている（SPEED_CHANGE_ENABLED = False）。検査の中身を試すテストだけ True にする"""
+    monkeypatch.setattr(jbi, "SPEED_CHANGE_ENABLED", True)
 
 
 # ---- 1. POS部の形式を位置ごとに判定する ----
@@ -96,19 +102,21 @@ def test_pl_position_shift_is_rejected():
         job.plan_shift("C00004", "Y", 10.0)
 
 
+@pytest.mark.usefixtures("speed_enabled")
 def test_pl_speed_change_is_rejected():
     job = jbi.parse(base().replace("MOVL C00004 V=80.0", "MOVL C00004 V=80.0 PL=1"))
     with pytest.raises(jbi.JbiError, match="PL=1"):
         job.plan_speed(idx_of(job, "C00004"), 100.0)
 
 
-def test_pl0_is_rejected():
-    """原本は test_pl0_is_allowed（PL=0 を許す）。暫定判断で PL=0 も拒否を維持する"""
+@pytest.mark.usefixtures("speed_enabled")
+def test_pl0_is_allowed():
+    """原本どおり：ちょうど PL=0 と書かれたMOVLは、位置も速度も変えられる（修正ラウンド1 A-1）"""
     job = jbi.parse(base().replace("MOVL C00004 V=80.0", "MOVL C00004 V=80.0 PL=0"))
-    with pytest.raises(jbi.JbiError, match="PL=0"):
-        job.plan_shift("C00004", "Y", 1.0)
-    with pytest.raises(jbi.JbiError, match="PL=0"):
-        job.plan_speed(idx_of(job, "C00004"), 100.0)
+    assert job.plan_shift("C00004", "Y", 1.0).after_value == 191.0
+    p = job.plan_speed(idx_of(job, "C00004"), 90.0)
+    assert p.after_value == 90.0
+    assert p.after_line == "MOVL C00004 V=90.0 PL=0"
 
 
 def test_cr_is_rejected():
@@ -195,6 +203,7 @@ def test_shift_over_limit_is_rejected():
     assert job.plan_shift("C00004", "Y", -jbi.DEFAULT_MAX_SHIFT_MM).after_value == 140.0
 
 
+@pytest.mark.usefixtures("speed_enabled")
 def test_same_speed_is_rejected():
     job = jbi.parse(base())
     with pytest.raises(jbi.JbiError):
@@ -202,6 +211,7 @@ def test_same_speed_is_rejected():
 
 
 @pytest.mark.parametrize("bad", [0, -10.0, float("nan"), True])
+@pytest.mark.usefixtures("speed_enabled")
 def test_invalid_speed_is_rejected(bad):
     job = jbi.parse(base())
     with pytest.raises(jbi.JbiError):
@@ -213,12 +223,15 @@ def test_proposal_lists_paths_in_and_out_and_warnings():
     p = jbi.parse(base()).plan_shift("C00004", "Y", 10.0)
     assert p.before_line == "C00004=450.000,190.000,120.000,180.00,0.00,0.00"
     assert p.after_line == "C00004=450.000,200.000,120.000,180.00,0.00,0.00"
-    assert len(p.affected) == 2
-    assert "MOVL C00004" in p.affected[0] and "MOVL C00005" in p.affected[1]
+    # 修正ラウンド1 C-8：入る区間の始まり（直前の移動命令）も入れる
+    assert len(p.affected) == 3
+    assert "MOVL C00003" in p.affected[0]
+    assert "MOVL C00004" in p.affected[1] and "MOVL C00005" in p.affected[2]
     assert jbi.PATH_WARNING in p.warnings
     assert any("ツール番号 0" in w for w in p.warnings)
 
 
+@pytest.mark.usefixtures("speed_enabled")
 def test_proposal_does_not_modify_original():
     job = jbi.parse(base())
     before = job.render()
@@ -227,16 +240,21 @@ def test_proposal_does_not_modify_original():
     assert job.render() == before
 
 
-def test_jump_in_job_adds_flow_warning():
-    p = jbi.parse(base().replace("TIMER T=3.00", "JUMP *L1")).plan_shift("C00004", "Y", 1.0)
-    assert any("JUMP" in w for w in p.warnings)
+def test_jump_anywhere_in_job_stops_position_edits():
+    """修正ラウンド1 D-4：もとは test_jump_in_job_adds_flow_warning（注意文だけ）。
+    制御の流れを解析する機能がまだ無いので、ジョブのどこかに JUMP があれば位置の変更を止める"""
+    text = base().replace("NOP\n", "NOP\nJUMP *L1\n")
+    job = jbi.parse(text)
+    with pytest.raises(jbi.JbiError, match="制御の流れ") as e:
+        job.plan_shift("C00004", "Y", 1.0)
+    assert "「JUMP *L1」" in str(e.value)
+    assert job.render() == text
 
 
 # ---- 仕様v2.1 6章の追加分（止める条件：出る命令・前後の命令） ----
 @pytest.mark.parametrize("out_line", [
     "MOVJ C00005 VJ=50.00",
     "MOVC C00005 V=80.0",
-    "MOVL C00005 V=80.0 PL=0",
     "MOVL C00005 V=80.0 PL=2",
     "MOVL C00005 V=80.0 CR=5.0",
     "MOVL C00005 V=80.0 +MOVJ C00001 VJ=50.00",
@@ -251,21 +269,24 @@ def test_shift_rejected_when_outgoing_move_is_not_plain_movl(out_line):
     assert job.render() == text
 
 
-def test_shift_allowed_when_no_outgoing_move():
-    """変える位置の後に移動命令が無い（ジョブの最後）なら、出る命令では止めない"""
+def test_shift_rejected_when_no_outgoing_move():
+    """修正ラウンド2：もとは test_shift_allowed_when_no_outgoing_move（止めない）。
+    次の移動命令が無い（ジョブの最後）位置は、出る区間がジョブの中で決まらないので止める"""
     text = base().replace("MOVL C00005 V=80.0\nMOVL C00000 V=200.0\n", "MOVL C00005 V=80.0\n")
-    p = jbi.parse(text).plan_shift("C00005", "Y", 1.0)
-    assert p.after_value == 191.0
+    job = jbi.parse(text)
+    with pytest.raises(jbi.JbiError, match="出る"):
+        job.plan_shift("C00005", "Y", 1.0)
+    assert job.render() == text
 
 
 @pytest.mark.parametrize("old,new", [
     ("MOVL C00002 V=80.0", "MOVL C00002 V=80.0 PL=1"),
-    ("MOVL C00002 V=80.0", "MOVL C00002 V=80.0 PL=0"),
     ("MOVL C00004 V=80.0", "MOVL C00004 V=80.0 CR=5.0"),
     ("MOVL C00004 V=80.0", "MOVL C00004 V=80.0 pl=3"),
 ])
+@pytest.mark.usefixtures("speed_enabled")
 def test_speed_rejected_when_neighbor_move_has_pl_or_cr(old, new):
-    """速度を変える命令の直前・直後の移動命令に PL・CR があれば止める（PL=0 も今は止める）"""
+    """速度を変える命令の直前・直後の移動命令に PL・CR があれば止める（ちょうど PL=0 は通す。修正ラウンド1 A-1）"""
     text = base().replace(old, new)
     job = jbi.parse(text)
     with pytest.raises(jbi.JbiError, match=r"前後.*行目「"):
@@ -273,14 +294,389 @@ def test_speed_rejected_when_neighbor_move_has_pl_or_cr(old, new):
     assert job.render() == text
 
 
+@pytest.mark.usefixtures("speed_enabled")
 def test_speed_allowed_when_neighbor_is_movj_without_pl():
     """前後の命令は PL・CR だけを見る（前後が MOVJ でも PL・CR が無ければ止めない）"""
     job = jbi.parse(base().replace("MOVL C00002 V=80.0", "MOVJ C00002 VJ=50.00"))
     assert job.plan_speed(idx_of(job, "C00003"), 300.0).after_value == 300.0
 
 
+@pytest.mark.usefixtures("speed_enabled")
 def test_speed_allowed_when_no_previous_move():
     """前に移動命令が無い（最初の移動）なら、前後の命令では止めない"""
     job = jbi.parse(base())
     first = min(i.index for i in job.instructions if i.position == "C00000")
     assert job.plan_speed(first, 150.0).after_value == 150.0
+
+
+def test_outgoing_move_with_exact_pl0_is_allowed():
+    """出る命令がちょうど PL=0 のMOVLなら止めない（修正ラウンド1 A-1）"""
+    job = jbi.parse(base().replace("MOVL C00005 V=80.0", "MOVL C00005 V=80.0 PL=0"))
+    assert job.plan_shift("C00004", "Y", 1.0).after_value == 191.0
+
+
+@pytest.mark.usefixtures("speed_enabled")
+def test_speed_allowed_when_neighbor_has_exact_pl0():
+    """前後の移動命令がちょうど PL=0 なら速度の変更を止めない（修正ラウンド1 A-1）"""
+    job = jbi.parse(base().replace("MOVL C00002 V=80.0", "MOVL C00002 V=80.0 PL=0"))
+    assert job.plan_speed(idx_of(job, "C00003"), 300.0).after_value == 300.0
+
+
+# ---- 修正ラウンド1 ----
+# A-1. PL=0 はちょうどその書き方だけを通す。緩い書き方は止めたまま
+@pytest.mark.parametrize("suffix", ["PL = 0", "pl=0", "PL=0.0", "PL=00", "PL=0 CR=5.0", "PL=0 PL=0"])
+@pytest.mark.usefixtures("speed_enabled")
+def test_loose_pl0_forms_are_rejected(suffix):
+    text = base().replace("MOVL C00004 V=80.0", f"MOVL C00004 V=80.0 {suffix}")
+    job = jbi.parse(text)
+    with pytest.raises(jbi.JbiError):
+        job.plan_shift("C00004", "Y", 1.0)
+    with pytest.raises(jbi.JbiError):
+        job.plan_speed(idx_of(job, "C00004"), 90.0)
+    assert job.render() == text
+
+
+def test_previous_move_with_exact_pl0_is_allowed():
+    job = jbi.parse(base().replace("MOVL C00003 V=250.0", "MOVL C00003 V=250.0 PL=0"))
+    assert job.plan_shift("C00004", "Y", 1.0).after_value == 191.0
+
+
+# A-2. ///LVARS は数字をカンマで区切った形だけ通す
+def test_lvars_with_numbers_is_allowed():
+    job = jbi.parse(base().replace("///GROUP1 RB1\n", "///GROUP1 RB1\n///LVARS 0,0,0,0,0,0,0,0\n"))
+    assert job.problems == []
+    assert job.plan_shift("C00004", "Y", 1.0).after_value == 191.0
+
+
+@pytest.mark.parametrize("bad", ["///LVARS", "///LVARS a,0", "///LVARS 0,,0", "///LVARS 0, 0", "///LVARS -1"])
+def test_lvars_in_other_forms_is_rejected(bad):
+    job = jbi.parse(base().replace("///GROUP1 RB1\n", f"///GROUP1 RB1\n{bad}\n"))
+    with pytest.raises(jbi.JbiError, match="読めない"):
+        job.plan_shift("C00004", "Y", 1.0)
+
+
+# A-3. 全角文字・コメント・Shift_JIS（2バイト目が 0x5C の文字、半角カナ、全角空白、///COMM、CRLF）
+def _sjis_text(newline="\n"):
+    text = (base()
+            .replace("///ATTR SC,RW\n", "///ATTR SC,RW\n///COMM 置き場所の調整用\n")
+            .replace("NOP\n", "NOP\n'ソ表能のワーク　取出し\n'ｿﾌﾄ ﾊﾝﾄﾞ\n")
+            .replace("TIMER T=3.00\n", "TIMER T=3.00\n'表示　能力\n"))
+    return text.replace("\n", newline)
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_shift_jis_realistic_roundtrip(newline):
+    data = _sjis_text(newline).encode("cp932")
+    assert b"\x83\x5c" in data and b"\x95\x5c" in data and b"\x94\x5c" in data  # ソ・表・能
+    job = jbi.parse_bytes(data)
+    assert job.encoding == "cp932"
+    assert job.problems == []
+    assert job.render_bytes() == data
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+@pytest.mark.usefixtures("speed_enabled")
+def test_shift_jis_realistic_edit_changes_one_line(newline):
+    data = _sjis_text(newline).encode("cp932")
+    job = jbi.parse_bytes(data)
+    nl = newline.encode("ascii")
+    new = job.plan_shift("C00004", "Y", 10.0).new_job.render_bytes()
+    changed = [(a, b) for a, b in zip(data.split(nl), new.split(nl)) if a != b]
+    assert changed == [(b"C00004=450.000,190.000,120.000,180.00,0.00,0.00",
+                        b"C00004=450.000,200.000,120.000,180.00,0.00,0.00")]
+    assert len(data.split(nl)) == len(new.split(nl))
+    new = job.plan_speed(idx_of(job, "C00003"), 300.0).new_job.render_bytes()
+    changed = [(a, b) for a, b in zip(data.split(nl), new.split(nl)) if a != b]
+    assert changed == [(b"MOVL C00003 V=250.0", b"MOVL C00003 V=300.0")]
+
+
+# B-5. INST部の命令は許可リストで判定する。知らない命令・前後の空白・空行は止める
+@pytest.mark.usefixtures("speed_enabled")
+def test_unknown_instruction_blocks_all_edits():
+    """再現：MOVL C00005 を EIMOVL P005 にすると、出る移動を取り違えた変更案ができていた"""
+    job = jbi.parse(base().replace("MOVL C00005 V=80.0", "EIMOVL P005 V=80.0"))
+    with pytest.raises(jbi.JbiError, match="読めない"):
+        job.plan_shift("C00004", "Y", 1.0)
+    with pytest.raises(jbi.JbiError, match="読めない"):
+        job.plan_speed(idx_of(job, "C00003"), 300.0)
+
+
+@pytest.mark.parametrize("line", ["FOO 1", "SPEED 10", "nop", "*L1 MOVL C00001 V=80.0"])
+def test_instructions_outside_allowlist_are_problems(line):
+    job = jbi.parse(base().replace("NOP\n", f"NOP\n{line}\n"))
+    assert job.problems
+    with pytest.raises(jbi.JbiError, match="読めない"):
+        job.plan_shift("C00004", "Y", 1.0)
+
+
+@pytest.mark.parametrize("old,new", [
+    ("///GROUP1 RB1\n", "///GROUP1 RB1\n  ///LVARS 0,0\n"),
+    ("NOP\n", "NOP \n"),
+    ("NOP\n", " NOP\n"),
+    ("NOP\n", "NOP\n\n"),
+    ("///RECTAN\n", "///RECTAN \n"),
+    ("//INST\n", "//INST \n"),
+])
+def test_lines_with_surrounding_spaces_or_empty_are_problems(old, new):
+    job = jbi.parse(base().replace(old, new))
+    assert job.problems
+    with pytest.raises(jbi.JbiError, match="読めない"):
+        job.plan_shift("C00004", "Y", 1.0)
+
+
+def test_label_line_alone_is_known():
+    job = jbi.parse(base().replace("NOP\n", "NOP\n*L1\n"))
+    assert job.problems == []
+
+
+# B-6. 巨大な整数は OverflowError でなく JbiError にする
+@pytest.mark.usefixtures("speed_enabled")
+def test_huge_integer_delta_is_rejected():
+    job = jbi.parse(base())
+    with pytest.raises(jbi.JbiError):
+        job.plan_shift("C00004", "Y", 10 ** 400)
+    with pytest.raises(jbi.JbiError):
+        job.plan_shift("C00004", "Y", 1.0, max_abs_delta_mm=10 ** 400)
+    with pytest.raises(jbi.JbiError):
+        job.plan_speed(idx_of(job, "C00003"), 10 ** 400)
+
+
+# B-7. 速度の書式が壊れるもの（整数部の桁数が元より多くなる）は止める。速度の上限の値は本人判断待ち
+@pytest.mark.parametrize("bad", [1e300, 1000.0])
+@pytest.mark.usefixtures("speed_enabled")
+def test_speed_with_more_integer_digits_is_rejected(bad):
+    job = jbi.parse(base())
+    with pytest.raises(jbi.JbiError, match="桁"):
+        job.plan_speed(idx_of(job, "C00003"), bad)
+
+
+# C-8. 入る区間の始まり（直前の移動命令）の PL・CR も止める
+@pytest.mark.parametrize("suffix", ["PL=3", "CR=20.0", "PL=I001", "pl=0"])
+def test_shift_rejected_when_previous_move_has_pl_or_cr(suffix):
+    text = base().replace("MOVL C00003 V=250.0", f"MOVL C00003 V=250.0 {suffix}")
+    job = jbi.parse(text)
+    with pytest.raises(jbi.JbiError, match=r"入る.*行目「.*C00003.*」"):
+        job.plan_shift("C00004", "Y", 10.0)
+    assert job.render() == text
+
+
+# C-9. ロボット座標の位置は値が6個のときだけ変える。引数付きの RECTAN・PULSE などは分からない指示行
+@pytest.mark.parametrize("values", [
+    "450.000,190.000,120.000,180.00,0.00,0.00,0.00",
+    "450.000,190.000,120.000,180.00,0.00",
+    "450.000,190.000,120.000",
+])
+def test_robot_position_without_six_values_is_rejected(values):
+    job = jbi.parse(base().replace("C00004=450.000,190.000,120.000,180.00,0.00,0.00", f"C00004={values}"))
+    with pytest.raises(jbi.JbiError, match="6"):
+        job.plan_shift("C00004", "Y", 1.0)
+
+
+@pytest.mark.parametrize("old,new", [
+    ("///RECTAN\n", "///RECTAN 1\n"),
+    ("///TOOL 0\n", "///TOOL A\n"),
+    ("///RCONF 0,0,0,0,0,0,0,0\n", "///RCONF x\n"),
+])
+def test_directive_with_unexpected_argument_is_unknown(old, new):
+    job = jbi.parse(base().replace(old, new))
+    assert job.positions["C00004"].after_unknown_directive
+    with pytest.raises(jbi.JbiError):
+        job.plan_shift("C00004", "Y", 1.0)
+
+
+def test_pulse_with_argument_is_unknown():
+    job = jbi.parse(base().replace("C00005=", "///PULSE 1\nC00005="))
+    assert job.positions["C00005"].after_unknown_directive
+    assert not job.positions["C00004"].after_unknown_directive
+
+
+# C-10 と D-4. ジョブの中に JUMP・CALL・RET・ラベル行が1つでもあれば位置の変更を止める
+# （入る・出る区間の中だけでなく、区間の外にあっても止める）
+@pytest.mark.parametrize("old,new,line", [
+    ("TIMER T=3.00\n", "TIMER T=3.00\nJUMP *L1\n", "JUMP *L1"),
+    ("TIMER T=3.00\n", "TIMER T=3.00\nCALL JOB:SUB\n", "CALL JOB:SUB"),
+    ("TIMER T=3.00\n", "TIMER T=3.00\nRET\n", "RET"),
+    ("MOVL C00004 V=80.0\n", "*L1\nMOVL C00004 V=80.0\n", "*L1"),
+    ("MOVL C00004 V=80.0\n", "JUMP *L1\nMOVL C00004 V=80.0\n", "JUMP *L1"),
+    ("NOP\n", "NOP\nCALL JOB:SUB\n", "CALL JOB:SUB"),
+    ("NOP\n", "NOP\n*L1\n", "*L1"),
+    ("MOVL C00000 V=200.0\nEND\n", "MOVL C00000 V=200.0\nRET\nEND\n", "RET"),
+])
+def test_flow_change_anywhere_stops_position_edits(old, new, line):
+    job = jbi.parse(base().replace(old, new))
+    with pytest.raises(jbi.JbiError, match="制御の流れ") as e:
+        job.plan_shift("C00004", "Y", 1.0)
+    assert f"「{line}」" in str(e.value)
+
+
+# ---- 修正ラウンド1 追加（本人の判断 D1〜D5） ----
+# D-1. 速度の変更は既定で止める
+def test_speed_change_is_disabled_by_default():
+    assert jbi.SPEED_CHANGE_ENABLED is False
+    text = base()
+    job = jbi.parse(text)
+    i = idx_of(job, "C00003")
+    with pytest.raises(jbi.JbiError, match="速度の変更は、単位・指定形式・適用範囲の確認が済むまで"):
+        job.plan_speed(i, 300.0)
+    with pytest.raises(jbi.JbiError, match="止めています"):
+        job.set_speed(i, 300.0)
+    assert job.render() == text
+
+
+# D-2. 元のジョブ（基準）からの累積で、軸ごとに検査する
+def test_cumulative_shift_over_limit_is_rejected():
+    first = jbi.parse(base()).plan_shift("C00004", "Y", 30.0)
+    assert first.after_value == 220.0
+    with pytest.raises(jbi.JbiError, match="累積"):
+        first.new_job.plan_shift("C00004", "Y", 30.0)
+
+
+def test_cumulative_shift_back_within_limit_is_allowed():
+    first = jbi.parse(base()).plan_shift("C00004", "Y", 30.0)
+    second = first.new_job.plan_shift("C00004", "Y", -40.0)
+    assert second.after_value == 180.0
+    assert second.baseline_value == 190.0
+    assert abs(second.cumulative_delta - (-10.0)) < 1e-9
+
+
+def test_cumulative_is_per_axis():
+    job = jbi.parse(base()).plan_shift("C00004", "Y", 40.0).new_job
+    assert job.plan_shift("C00004", "Z", 40.0).after_value == 160.0
+
+
+def test_baseline_is_kept_through_rename():
+    job = jbi.parse(base()).plan_shift("C00004", "Y", 30.0).new_job.rename("DEMO_PLACE_V1")
+    with pytest.raises(jbi.JbiError, match="累積"):
+        job.plan_shift("C00004", "Y", 30.0)
+
+
+def test_reparsed_job_has_new_baseline():
+    """読み直したジョブは基準が新しくなる（ファイルをまたいだ引き継ぎは別の設計で扱う）"""
+    text = jbi.parse(base()).plan_shift("C00004", "Y", 30.0).new_job.render()
+    assert jbi.parse(text).plan_shift("C00004", "Y", 30.0).after_value == 250.0
+
+
+def test_larger_max_argument_does_not_bypass_cumulative_limit():
+    # 修正ラウンド2：1回の上限は引数で上げられなくなったので、2回に分けて累積を確かめる
+    job = jbi.parse(base()).plan_shift("C00004", "Y", 30.0, max_abs_delta_mm=100.0).new_job
+    with pytest.raises(jbi.JbiError, match="累積"):
+        job.plan_shift("C00004", "Y", 30.0, max_abs_delta_mm=100.0)
+
+
+# D-3. 極端な値は例外で落とさず JbiError で断る（上限の引数も含む）
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -float("inf"), 10 ** 400, True, "50"])
+def test_extreme_max_argument_is_rejected(bad):
+    with pytest.raises(jbi.JbiError):
+        jbi.parse(base()).plan_shift("C00004", "Y", 1.0, max_abs_delta_mm=bad)
+
+
+@pytest.mark.parametrize("bad", [-float("inf"), -(10 ** 400), 10 ** 400])
+def test_extreme_delta_is_rejected(bad):
+    with pytest.raises(jbi.JbiError):
+        jbi.parse(base()).plan_shift("C00004", "Y", bad)
+
+
+@pytest.mark.usefixtures("speed_enabled")
+@pytest.mark.parametrize("bad", [float("inf"), float("nan"), 10 ** 400, 1e308])
+def test_extreme_speed_is_rejected(bad):
+    job = jbi.parse(base())
+    with pytest.raises(jbi.JbiError):
+        job.plan_speed(idx_of(job, "C00003"), bad)
+
+
+# D-5. 知らない命令があっても最後まで読む（表示のため）。変更は problems で止める
+def test_unknown_command_is_read_but_blocks_edits():
+    text = base().replace("TIMER T=3.00\n", "TIMER T=3.00\nWAIT IN#(1)=ON\n")
+    job = jbi.parse(text)
+    assert any("WAIT" in p for p in job.problems)
+    assert len(job.positions) == 6
+    assert [i.text for i in job.instructions][-3:] == ["MOVL C00005 V=80.0", "MOVL C00000 V=200.0", "END"]
+    assert any(i.text == "WAIT IN#(1)=ON" for i in job.instructions)
+    with pytest.raises(jbi.JbiError, match="読めない"):
+        job.plan_shift("C00004", "Y", 1.0)
+
+
+# ---- 修正ラウンド2 ----
+# 1. 入る区間の始まり（直前の移動命令）も、出る側と同じ許可リストで判定する
+@pytest.mark.parametrize("prev_line", [
+    "MOVL C00003 V=250.0 UNTIL IN#(1)=ON",
+    "MOVJ C00003 VJ=50.00",
+    "MOVC C00003 V=250.0",
+    "MOVS C00003 V=250.0",
+    "MOVL P000 V=250.0",
+    "MOVL LP000 V=250.0",
+    "MOVL BP000 V=250.0",
+    "MOVL C00003 V=250.0 NWAIT",
+    "MOVL C00003 V=250.0 ENWAIT",
+    "MOVL C00003 V=250.0 SPDL=10",
+    "MOVL C00003 V=250.0 ACC=50",
+    "MOVL C00003 V=250.0 +MOVJ C00001 VJ=10.00",
+    "MOVL C00003 V=250.0 TOOL#(1)",
+    "MOVL C00003 V=250.0 XYZ",
+])
+def test_shift_rejected_when_entry_move_is_not_plain_movl(prev_line):
+    text = base().replace("MOVL C00003 V=250.0", prev_line)
+    job = jbi.parse(text)
+    with pytest.raises(jbi.JbiError, match=r"入る.*行目「"):
+        job.plan_shift("C00004", "Y", 1.0)
+    assert job.render() == text
+
+
+# 2. 直前・次の移動命令が無い位置は、入る／出る区間が決まらないので止める
+def test_shift_rejected_when_no_entry_move():
+    job = jbi.parse(base().replace("NOP\nMOVL C00000 V=200.0\n", "NOP\n"))
+    with pytest.raises(jbi.JbiError, match="入る"):
+        job.plan_shift("C00001", "Y", 1.0)
+
+
+# 3. END より後ろの命令は problems（実行されない命令だけが使う位置も、これで止まる）
+@pytest.mark.parametrize("after", ["NOP", "MOVL C00005 V=80.0"])
+def test_instruction_after_end_is_problem(after):
+    text = base().replace("MOVL C00005 V=80.0\n", "") if after.startswith("MOVL") else base()
+    job = jbi.parse(text + after + "\n")
+    assert any("END" in p for p in job.problems)
+    with pytest.raises(jbi.JbiError, match="読めない"):
+        job.plan_shift("C00004", "Y", 1.0)
+
+
+def test_comment_after_end_is_not_problem():
+    job = jbi.parse(base() + "'memo\n")
+    assert job.problems == []
+
+
+# 4. Unicode の空白（全角空白・NBSP）を含む命令行は problems。読むのは最後まで続ける
+@pytest.mark.parametrize("line", ["　", "\xa0", "　MOVL C00001 V=80.0", "NOP　", "DOUT\xa0OT#(1) ON"])
+def test_unicode_space_in_instruction_line_is_problem(line):
+    job = jbi.parse(base().replace("NOP\n", f"NOP\n{line}\n"))
+    assert job.problems
+    assert job.instructions[-1].text == "END"
+    with pytest.raises(jbi.JbiError, match="読めない"):
+        job.plan_shift("C00004", "Y", 1.0)
+
+
+# 5. max_abs_delta_mm は下げる方向だけ効く
+def test_max_argument_cannot_raise_single_limit():
+    with pytest.raises(jbi.JbiError, match="上限") as e:
+        jbi.parse(base()).plan_shift("C00004", "Y", jbi.DEFAULT_MAX_SHIFT_MM + 1.0, max_abs_delta_mm=100.0)
+    assert "累積" not in str(e.value)  # 累積の検査ではなく、1回の上限で断られること
+
+
+def test_max_argument_can_lower_limit():
+    job = jbi.parse(base())
+    with pytest.raises(jbi.JbiError, match="上限"):
+        job.plan_shift("C00004", "Y", 6.0, max_abs_delta_mm=5.0)
+    assert job.plan_shift("C00004", "Y", 5.0, max_abs_delta_mm=5.0).after_value == 195.0
+
+
+# 6. 位置の値の整数部が7桁以上なら problems（扱える桁の問題。ロボットの範囲を決めるものではない）
+@pytest.mark.parametrize("value", ["1234567.000", "-1234567.000", "1" * 400 + ".000"])
+def test_position_value_with_too_many_digits_is_problem(value):
+    job = jbi.parse(base().replace("C00005=450.000", f"C00005={value}"))
+    assert any("桁" in p for p in job.problems)
+    with pytest.raises(jbi.JbiError, match="読めない"):
+        job.plan_shift("C00004", "Y", 1.0)
+
+
+def test_position_value_with_six_digits_is_read():
+    job = jbi.parse(base().replace("C00005=450.000", "C00005=999999.000"))
+    assert job.problems == []

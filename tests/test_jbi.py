@@ -12,6 +12,12 @@ def load():
     return DUMMY.read_text(encoding="utf-8")
 
 
+@pytest.fixture
+def speed_enabled(monkeypatch):
+    """速度の変更は既定で止めている（SPEED_CHANGE_ENABLED = False）。検査の中身を試すテストだけ True にする"""
+    monkeypatch.setattr(jbi, "SPEED_CHANGE_ENABLED", True)
+
+
 def test_roundtrip_unchanged():
     """1. 無変更で読込→書出しが元と完全に一致"""
     text = load()
@@ -60,6 +66,7 @@ def test_shift_keeps_decimal_places():
     assert line.startswith("C00004=450.123,")
 
 
+@pytest.mark.usefixtures("speed_enabled")
 def test_speed_changes_only_that_instruction():
     """4. 指定したMOVLのV=だけが変わる"""
     text = load()
@@ -97,6 +104,7 @@ def test_pulse_job_is_not_robot_coordinates():
         job.shift_position("C00004", "Y", 1.0)
 
 
+@pytest.mark.usefixtures("speed_enabled")
 def test_pl_and_speed_variable_are_detected():
     text = load().replace("MOVL C00003 V=250.0", "MOVL C00003 V=250.0 PL=3").replace(
         "MOVL C00004 V=80.0", "MOVL C00004 V=I000")
@@ -126,8 +134,9 @@ def _index_of(job, position):
 
 
 @pytest.mark.parametrize("suffix", [
-    "PL=3", "PL=0", "PL=I001", "PL = 3", "pl=3", "PL=3.5", "CR=10.0",
+    "PL=3", "PL=I001", "PL = 0", "pl=0", "PL=0.0", "PL = 3", "pl=3", "PL=3.5", "CR=10.0",
 ])
+@pytest.mark.usefixtures("speed_enabled")
 def test_speed_on_move_with_pl_or_cr_is_rejected(suffix):
     """PL・CRが付いたMOVLは（値や書き方にかかわらず）速度を変えない。理由を返し、何も変えない"""
     text = load().replace("MOVL C00003 V=250.0", f"MOVL C00003 V=250.0 {suffix}")
@@ -200,7 +209,7 @@ def test_shift_of_unused_position_is_rejected():
     assert job.render() == text
 
 
-def test_shift_used_only_by_plain_movl_is_allowed():
+def test_shift_of_shared_position_is_rejected():
     """C00000 は2つのMOVL（PL・CRなし）が共用しているので変更しない
     （PR #1 レビュー指摘：原本の test_shared_position_is_rejected に合わせて、許可から拒否に変えた）"""
     text = load()
@@ -211,6 +220,7 @@ def test_shift_used_only_by_plain_movl_is_allowed():
 
 
 @pytest.mark.parametrize("suffix", ["APL=3", "ACC=50", "'memo"])
+@pytest.mark.usefixtures("speed_enabled")
 def test_move_with_unknown_words_is_rejected(suffix):
     """MOVL Cxxxxx V=数値 の形に無い語が付いた行は、意味が分からないので変えない"""
     text = load().replace("MOVL C00004 V=80.0", f"MOVL C00004 V=80.0 {suffix}")
