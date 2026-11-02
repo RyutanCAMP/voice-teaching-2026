@@ -429,38 +429,41 @@ function drawFigure(host, axA, axB) {
     drawSegs(v.segments, before, "#4a6fa5", 2, 1);
   }
 
-  // 同じ点に重なる位置は、名前を縦にずらして並べる
-  const groups = new Map();
-  for (const p of before) {
-    const key = `${sx(p.xyz[a]).toFixed(0)},${sy(p.xyz[b]).toFixed(0)}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(p);
-  }
-  for (const list of groups.values()) {
-    list.forEach((p, idx) => {
-      const x = sx(p.xyz[a]), y = sy(p.xyz[b]);
-      const moved = c && c.moved === p.name;
-      const sel = p.name === selected;
-      const g = svgEl("g", { class: "pt" });
-      if (sel) g.append(svgEl("circle", { cx: x, cy: y, r: 11, fill: "none", stroke: "#e0a000", "stroke-width": 3 }));
-      g.append(svgEl("circle", { cx: x, cy: y, r: 5, fill: moved ? "#9a9a9a" : (c ? "#555" : "#d0602a") }));
-      const label = svgEl("text", { x: x + 9, y: y - 8 + idx * 14, "font-weight": sel ? "bold" : "normal" });
-      label.textContent = p.name + (moved ? "（変更前）" : "");
-      g.append(label);
-      const t = svgEl("title", {});
-      t.textContent = `${p.name}  ${p.line}`;
-      g.append(t);
-      g.addEventListener("click", () => select(p.name));
-      svg.append(g);
-    });
+  // 名前のラベルは、近くのラベルと重ならないように下へずらして置く
+  const placed = [];
+  const placeLabel = (x, y, w) => {
+    let ly = y - 8;
+    while (placed.some((b) => Math.abs(b.x - (x + 9)) < Math.max(b.w, w) && Math.abs(b.y - ly) < 13)) ly += 14;
+    placed.push({ x: x + 9, y: ly, w: w });
+    return ly;
+  };
+  const sorted = before.slice().sort((p, q) => sy(p.xyz[b]) - sy(q.xyz[b]) || sx(p.xyz[a]) - sx(q.xyz[a]));
+  for (const p of sorted) {
+    const x = sx(p.xyz[a]), y = sy(p.xyz[b]);
+    const moved = c && c.moved === p.name;
+    const sel = p.name === selected;
+    const text = p.name + (moved ? "（変更前）" : "");
+    const g = svgEl("g", { class: "pt" });
+    if (sel) g.append(svgEl("circle", { cx: x, cy: y, r: 11, fill: "none", stroke: "#e0a000", "stroke-width": 3 }));
+    g.append(svgEl("circle", { cx: x, cy: y, r: 5, fill: moved ? "#9a9a9a" : (c ? "#555" : "#d0602a") }));
+    // 動かす位置の「変更前」は点の下に置く（「変更後」は点の上）
+    const label = svgEl("text", { x: x + 9, y: placeLabel(x, moved ? y + 24 : y, text.length * 8), "font-weight": sel ? "bold" : "normal" });
+    label.textContent = text;
+    g.append(label);
+    const t = svgEl("title", {});
+    t.textContent = `${p.name}  ${p.line}`;
+    g.append(t);
+    g.addEventListener("click", () => select(p.name));
+    svg.append(g);
   }
   if (c) {
     const q = after.find((p) => p.name === c.moved);
     if (q) {
       const x = sx(q.xyz[a]), y = sy(q.xyz[b]);
       svg.append(svgEl("circle", { cx: x, cy: y, r: 6, fill: "#d0602a" }));
-      const label = svgEl("text", { x: x + 9, y: y + 16, fill: "#b04010", "font-weight": "bold" });
-      label.textContent = `${q.name}（変更後）`;
+      const text = `${q.name}（変更後）`;
+      const label = svgEl("text", { x: x + 9, y: placeLabel(x, y, text.length * 8), fill: "#b04010", "font-weight": "bold" });
+      label.textContent = text;
       svg.append(label);
     }
   }
