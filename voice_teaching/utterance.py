@@ -199,6 +199,11 @@ _AXIS_DIRECTION_WORD = re.compile(r"(?<![A-Z])[XYZ]\s?(?:の\s?)?(?:(?:マイナ
 # 「Y座標」「Yの値」「Y座標値」：座標の値の言葉（_COORD_VALUE で読んだときだけ取り除く）
 _COORD_VALUE_WORD = re.compile(r"(?<![A-Z])[XYZ]\s?(?:の\s?)?(?:座標値|座標|値)")
 _CONNECTOR = re.compile(r"そして|それから")  # 2つの変更の区切り（_SPLIT_MOVES）
+# 読み取りで使った動きの言葉のすぐ後の言い終わり（「下げる」「下げます」「ずらす」「移動させて」）。
+# 動きの言葉の後のときだけ取り除く（ひとつだけの「る」「す」などは、知らない言葉として残す）。2026-11-03 シクロの判断
+_VERB_TAIL = re.compile(r"(?<=上げ|下げ|増や|減ら|動か|ずら|寄せ|移動)(?:させて|させ|ます|です|る|す)")
+# 位置番号のすぐ後の「位置」（「C00005の位置を下に3mm」）。「この位置」「その位置」は _THIS で読む
+_POSITION_WORD = re.compile(r"^\s?(?:の\s?)?位置")
 
 
 def _script(ch: str) -> str:
@@ -380,6 +385,14 @@ def read_utterance(raw: str) -> UtteranceFacts:
     for pat in used_patterns:
         for m in pat.finditer(rest):
             blank(m.start(), m.end())
+    for m in _VERB_TAIL.finditer(rest):
+        if used[m.start() - 1] == " ":  # 前の動きの言葉を読んだときだけ
+            blank(m.start(), m.end())
+    for m in _POS_RE.finditer(text):
+        if len(m.group(1)) == 5:
+            w = _POSITION_WORD.match(text[m.end():])
+            if w:
+                blank(m.end(), m.end() + w.end())
     unknown = _unknown_words("".join(used))
 
     return UtteranceFacts(

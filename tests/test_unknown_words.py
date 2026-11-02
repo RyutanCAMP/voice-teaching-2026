@@ -210,3 +210,57 @@ def test_filler_words_are_a_short_named_list():
     # 軸・向き・量になる言葉や、カタカナの聞き違いは入れない
     for w in ("バイオ", "ワイド", "座標", "方向", "ざひょう", "X", "Y", "Z"):
         assert w not in ut.FILLER_WORDS
+
+
+# ---- 外部レビュー CHECKER_023 の B1（この不具合）----
+@pytest.mark.parametrize("heard,word", [
+    ("バイオ 3ミリ 下げて", "バイオ"),
+    ("バイオ3mm下げて", "バイオ"),
+    ("ライ 3mm下げて", "ライ"),
+    ("愛 3ミリ下げて", "愛"),       # 漢字1文字も捨てない
+    ("わい 3mm下げて", "わい"),     # ひらがなの「わい」も捨てない（Y と読み替えもしない）
+])
+@pytest.mark.parametrize("source", ["voice", "text"])
+def test_checker023_b1_unknown_word_asks(heard, word, source):
+    r = hear(heard, source=source)
+    assert r["status"] == "ask" and cand(r) is None and r["choices"] == [], (heard, r.get("message"))
+    assert f"「{word}」" in r["message"]
+    assert word in r["facts"]["unknown_words"]  # 画面で知らない言葉を目立たせるため、応答に入れる
+
+
+def test_checker023_b1_two_step_unknown_word_asks():
+    r1, r2 = hear_all("バイオ下げて", "3mm")
+    assert r1["status"] == "ask" and "「バイオ」" in r1["message"] and r1["choices"] == []
+    assert r2["status"] == "ask" and cand(r2) is None
+
+
+@pytest.mark.parametrize("text", ["えーと3mm下げて", "この位置を3mm下げて"])
+def test_checker023_b1_no_over_asking(text):
+    r = hear(text)
+    assert r["status"] == "ok" and cand(r) == ("Z", "-3.000"), (text, r.get("message"))
+
+
+# ---- 動きの言葉の後の言い終わり・位置番号の後の「位置」（2026-11-03 シクロの判断）----
+@pytest.mark.parametrize("text", [
+    "下に3ミリ移動させて", "下に3ミリ移動させ", "下に3ミリずらす", "3mm下げる", "3ミリ下げます", "3mm下げです",
+    "C00005の位置を下に3mm", "C00005 の 位置を下に3mm",
+])
+def test_allowed_endings_and_position_word(text):
+    r = hear(text)
+    assert r["status"] == "ok" and cand(r) == ("Z", "-3.000"), (text, r.get("message"))
+
+
+@pytest.mark.parametrize("text,word", [
+    ("3mmだけ下げて", "だけ"),      # 量があいまいになる
+    ("下に3ミリだけ", "だけ"),
+    ("下に3mmほど", "ほど"),
+    ("下に3ミリな", "な"),
+    ("はい下に3mm", "はい"),        # 承認の言葉
+    ("る 3mm下げて", "る"),         # 動きの言葉の後でない言い終わりは使わない
+    ("下に3ミリです", "です"),
+    ("位置を下に3mm", "位置"),       # 位置番号・この・その の後でない「位置」
+])
+def test_kept_asks(text, word):
+    r = hear(text)
+    assert r["status"] == "ask" and cand(r) is None and r["choices"] == [], (text, r.get("message"))
+    assert f"「{word}」" in r["message"]
