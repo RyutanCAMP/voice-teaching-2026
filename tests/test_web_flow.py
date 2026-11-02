@@ -407,25 +407,70 @@ def test_ids_used_by_js_exist_in_html():
 
 def test_no_inline_script_or_handlers():
     html = static_text()["index.html"]
+    assert "<script>" not in html
     for m in re.finditer(r"<script([^>]*)>(.*?)</script>", html, re.S):
         assert "src=" in m.group(1) and m.group(2).strip() == ""
     assert not re.search(r"\son[a-z]+\s*=", html)
 
 
-def test_screen_has_text_input_and_empty_voice_slot():
+def test_screen_has_text_input_and_voice_controls():
     html = static_text()["index.html"]
     for i in ["text-input", "heard-text", "facts-view", "reply-message",
               "confirm-overlay", "confirm-text", "confirm-blocked", "approver-name",
-              "approve-button", "export-button", "work-log"]:
+              "approve-button", "export-button", "work-log",
+              "voice-input-slot", "voice-mode-browser", "voice-mode-local", "mic-button",
+              "voice-stop", "voice-cancel", "voice-partial", "voice-unsupported"]:
         assert f'id="{i}"' in html, i
-    # 音声入力は別作業で準備中：空の置き場所だけ。音声を文字にする処理は入れない
-    m = re.search(r'<div id="voice-input-slot"[^>]*>(.*?)</div>', html, re.S)
-    assert m and m.group(1).strip() == "音声入力は準備中"
-    files = static_text()
-    for name, text in files.items():
-        for w in ["SpeechRecognition", "getUserMedia", "Google"]:
-            assert w not in text, (name, w)
-    assert '"/api/hear"' in files["app.js"]
+    # 処理方法は既定で未選択（選ぶまで録音できない）
+    assert not re.search(r'name="voice-mode"[^>]*checked', html)
+    assert re.search(r'<button[^>]*id="mic-button"[^>]*disabled', html)
+    # 送信先の注意（マイクの近く）と、使えないブラウザーの文
+    assert "ブラウザー提供元のサーバーで処理" in html
+    assert "このブラウザでは音声入力を使えません。文字で入力してください" in html
+    # app.js はモジュールとして読み、speech.js を同じサーバーから読む
+    assert '<script type="module" src="/static/app.js"></script>' in html
+    assert 'from "/static/speech.js"' in static_text()["app.js"]
+
+
+def test_speech_js_is_the_handoff_file_unchanged():
+    import hashlib
+    data = (STATIC / "speech.js").read_bytes().replace(b"\r\n", b"\n")
+    assert hashlib.sha256(data).hexdigest() == "4ad08bae0c175247362bd5e000d4a38c167704f181074c3ea60a8dca962c36d1"
+
+
+def test_speech_js_calls_no_api():
+    js = static_text()["speech.js"]
+    assert "/api/" not in js and "fetch(" not in js and "XMLHttpRequest" not in js
+
+
+def voice_section(js):
+    return js[js.index("// ---- 音声入力（speech.js）"):]
+
+
+def test_voice_only_fills_the_input_and_never_sends_or_approves():
+    js = static_text()["app.js"]
+    v = voice_section(js)
+    # 音声の部分からは、サーバーへの要求も承認・出力も呼ばない
+    for w in ["/api/", "postJson", "fetch(", "onApproveClick", "sendInstruction", ".click()", "requestSubmit"]:
+        assert w not in v, w
+    # final は入力欄に代入するだけ
+    final = v[v.index("final: (text) =>"):v.index("error: (message) =>")]
+    assert '$("text-input").value = text;' in final
+    # 承認と出力は、ボタンのクリックの処理の中だけ
+    assert js.count('"/api/approve"') == 1 and js.count('"/api/export"') == 1
+    assert '$("export-button").addEventListener("click"' in js
+
+
+def test_recording_locks_other_operations():
+    v = voice_section(static_text()["app.js"])
+    locks = v[v.index("function updateLocks()"):v.index("if (!Recognition)")]
+    for i in ["file-input", "text-input", "text-send", "mic-button"]:
+        assert f'$("{i}").disabled = rec' in locks, i
+    assert '$("voice-stop").disabled = !rec' in locks
+    assert '$("voice-cancel").disabled = !rec' in locks
+    js = static_text()["app.js"]
+    assert '$("export-button").disabled = !st.can_export || recording()' in js
+    assert '$("approve-button").disabled = !st.can_approve || recording()' in js
 
 
 def test_approve_button_is_inside_overlay_and_export_label():
@@ -456,3 +501,9 @@ def test_mock_and_flow_texts_are_not_assertive(wf):
     text = json.dumps(r, ensure_ascii=False) + mock_claude.MOCK_NOTICE
     for w in ASSERTIVE:
         assert w not in text
+
+
+def test_log_does_not_repeat_candidate_line(wf):
+    sid, r = candidate_ready(wf)
+    texts = [x["text"] for x in r["state"]["log"]]
+    assert texts.count(r["state"]["confirmation_text"]) == 1

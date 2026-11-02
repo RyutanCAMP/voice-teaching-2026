@@ -29,24 +29,6 @@
   <ul id="problems-list"></ul>
 </section>
 
-<section id="instruction-panel" class="panel" aria-label="指示">
-  <h2>3. 指示（文字）</h2>
-  <div id="instruction-slot">
-    <div id="voice-input-slot" class="small muted">音声入力は準備中</div>
-    <form id="text-form" class="row">
-      <label for="text-input">文字で指示：</label>
-      <input type="text" id="text-input" size="40" maxlength="500" placeholder="例：この位置をY方向に10mm移動して" disabled>
-      <button type="submit" id="text-send" disabled>指示を送る</button>
-    </form>
-    <p class="small muted">例：「C00004を選択して」「この位置をY方向に10mm移動して」「C00004をZ方向に-5mm移動して」「比較して」「元に戻して」。承認は指示の文字ではできません（確認表示の承認ボタンだけ）。</p>
-    <p class="small notice" id="mock-notice"></p>
-    <div class="heard-grid">
-      <div><h3>聞き取った文字（そのまま）</h3><div id="heard-text" class="box">（まだありません）</div></div>
-      <div><h3>解釈（プログラムが発話から取り出したこと）</h3><div id="facts-view" class="box">（まだありません）</div></div>
-    </div>
-    <div id="reply-message" class="reply" aria-live="polite" hidden></div>
-  </div>
-</section>
 
 <main id="job-area" hidden>
   <p id="job-summary"></p>
@@ -64,6 +46,44 @@
     <div class="figs">
       <figure><figcaption>上から見た図（X・Y）</figcaption><div id="fig-xy" class="fig"></div></figure>
       <figure><figcaption>横から見た図（X・Z）</figcaption><div id="fig-xz" class="fig"></div></figure>
+    </div>
+  </section>
+
+  <section id="instruction-panel" class="panel" aria-label="指示">
+    <h2>3. 指示（音声または文字）</h2>
+    <div id="instruction-slot">
+      <div id="voice-input-slot">
+        <div id="voice-controls">
+          <fieldset class="row" id="voice-mode-set">
+            <legend>音声の処理方法（選ぶまで録音できません）</legend>
+            <label><input type="radio" name="voice-mode" id="voice-mode-browser" value="browser"> ブラウザー標準</label>
+            <label><input type="radio" name="voice-mode" id="voice-mode-local" value="local"> 端末内のみ（対応するブラウザーと日本語の言語パックが要ります）</label>
+          </fieldset>
+          <p class="small notice" id="voice-notice">「ブラウザー標準」では、Chrome などの方式によって、音声がブラウザー提供元のサーバーで処理されることがあります。「端末内のみ」が使えないときは止まり、外部の処理へは切り替えません。このアプリは音声を保存・送信しません。</p>
+          <div class="row">
+            <button type="button" id="mic-button" disabled>マイクで話す</button>
+            <button type="button" id="voice-stop" disabled>終了</button>
+            <button type="button" id="voice-cancel" disabled>取消</button>
+            <span id="voice-status" class="small"></span>
+          </div>
+          <p class="small">未確定の文（表示だけ。使いません）：<span id="voice-partial" class="partial"></span></p>
+          <p id="voice-error" class="error" hidden></p>
+          <p class="small muted">終了すると、認識した文が下の文字入力の欄に入ります。自動では送りません。確かめて、直してから「指示を送る」を押してください。</p>
+        </div>
+        <p id="voice-unsupported" class="warn" hidden>このブラウザでは音声入力を使えません。文字で入力してください</p>
+      </div>
+      <form id="text-form" class="row">
+        <label for="text-input">文字で指示：</label>
+        <input type="text" id="text-input" size="40" maxlength="500" placeholder="例：この位置をY方向に10mm移動して" disabled>
+        <button type="submit" id="text-send" disabled>指示を送る</button>
+      </form>
+      <p class="small muted">例：「C00004を選択して」「この位置をY方向に10mm移動して」「C00004をZ方向に-5mm移動して」「比較して」「元に戻して」。承認は音声や指示の文字ではできません（確認表示の承認ボタンだけ）。</p>
+      <p class="small notice" id="mock-notice"></p>
+      <div class="heard-grid">
+        <div><h3>聞き取った文字（そのまま）</h3><div id="heard-text" class="box">（まだありません）</div></div>
+        <div><h3>解釈（プログラムが発話から取り出したこと）</h3><div id="facts-view" class="box">（まだありません）</div></div>
+      </div>
+      <div id="reply-message" class="reply" aria-live="polite" hidden></div>
     </div>
   </section>
 
@@ -132,6 +152,6 @@
   </div>
 </div><!-- /confirm-overlay -->
 
-<script src="/static/app.js"></script>
+<script type="module" src="/static/app.js"></script>
 </body>
 </html>

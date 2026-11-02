@@ -66,3 +66,6 @@ h3 { font-size: 14px; margin: 6px 0 4px; }
 button.approve { font-size: 20px; padding: 10px 24px; }
 #export-button { font-size: 16px; padding: 8px 16px; }
 @media (max-width: 1000px) { .layout { grid-template-columns: 1fr; } }
+fieldset { border: 1px solid #ccc; border-radius: 4px; }
+.partial { color: #777; font-style: italic; }
+body.recording #voice-input-slot { outline: 3px solid #d0602a; outline-offset: 4px; }

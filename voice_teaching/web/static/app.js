@@ -1,15 +1,20 @@
 // ボイスティーチング（シミュレーションモード）の画面。
 // - JBI の解析・変更候補・承認・出力はサーバー側（Python）で行う。ここでは JBI を解析しない。
-// - 指示は文字入力の欄から /api/hear へ送る（音声入力は別作業で準備中）。
+// - 指示は文字入力の欄から /api/hear へ送る。音声（speech.js）は認識した文を入力欄に入れるだけで、自動では送らない。
+// - 録音中は、取消と終了のほかの操作（読込・位置選択・指示を送る・承認・出力）を使えなくする。
 // - 承認は確認表示の承認ボタンからだけ /api/approve を呼ぶ。指示の経路からは呼ばない。
 // - 出力ボタンは承認した後だけ使える。失敗を成功と表示しない。
 // - 外部から何も読み込まない。サーバー（同じ 127.0.0.1）にだけ要求を送る。
 "use strict";
+import { SpeechInput } from "/static/speech.js";
 
 const state = {
   sessionId: null,  // サーバーのメモリにある画面の状態の番号
   view: null,       // 読み込んだときのジョブの内容（/api/load の view）
   st: null,         // サーバーの画面の状態（state）
+  voiceState: "idle",   // 録音の状態（starting / listening / stopping / idle）
+  voiceToken: null,     // 録音を始めたときのジョブ（session）と位置。違えば認識文を使わない
+  voiceFinal: null,     // 最後に入力欄へ入れた認識文（直さずに送れば source=voice として記録）
 };
 
 const $ = (id) => document.getElementById(id);
@@ -49,7 +54,10 @@ async function postJson(path, body) {
 // ---- 1. 読み込み ----
 $("file-input").addEventListener("change", async (ev) => {
   const f = ev.target.files[0];
-  if (!f) return;
+  if (!f || recording()) return;
+  voice.cancel();
+  state.voiceFinal = null;
+  $("text-input").value = "";
   $("file-name").textContent = f.name;
   const bytes = new Uint8Array(await f.arrayBuffer());
   let res;
@@ -83,11 +91,16 @@ $("file-input").addEventListener("change", async (ev) => {
   $("export-result").hidden = true;
   setInputEnabled(true);
   renderAll();
+  updateLocks();
 });
 
 function setInputEnabled(on) {
   $("text-input").disabled = !on;
   $("text-send").disabled = !on;
+}
+
+function recording() {
+  return state.voiceState !== "idle";
 }
 
 // ---- 画面全体 ----
@@ -120,7 +133,7 @@ function renderState() {
 
 // ---- 位置の選択 ----
 async function select(name) {
-  if (!state.sessionId) return;
+  if (!state.sessionId || recording()) return;
   const res = await postJson("/api/select", { session_id: state.sessionId, position: name });
   applyResult(res);
 }
@@ -145,12 +158,16 @@ function showReply(status, message) {
   box.hidden = false;
 }
 
-// ---- 3. 指示（文字）。音声入力は別作業で準備中 ----
+// ---- 3. 指示（音声または文字）。どちらも同じ /api/hear へ ----
 $("text-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
+  if (recording()) return;
   const text = $("text-input").value.trim();
   if (!text) return;
-  await sendInstruction(text, "text");
+  // 認識文を直さずに送ったときだけ source=voice（記録だけ。結果は変わらない）
+  const source = state.voiceFinal !== null && text === state.voiceFinal ? "voice" : "text";
+  state.voiceFinal = null;
+  await sendInstruction(text, source);
   $("text-input").value = "";
 });
 
@@ -187,9 +204,9 @@ function renderCandidate() {
   const st = state.st;
   const c = st.candidate;
   const host = $("candidate-view");
-  $("open-confirm").disabled = !c;
-  $("compare-button").disabled = !c;
-  $("undo-button").disabled = !c;
+  $("open-confirm").disabled = !c || recording();
+  $("compare-button").disabled = !c || recording();
+  $("undo-button").disabled = !c || recording();
   if (!c) {
     host.replaceChildren(el("p", { class: "muted" }, "変更候補はまだありません。"));
     return;
@@ -237,7 +254,7 @@ function openConfirm() {
   $("confirm-blocked").hidden = !st.blocked_reason;
   $("confirm-diff").replaceChildren(diffView(st.candidate));
   $("confirm-error").hidden = true;
-  $("approve-button").disabled = !st.can_approve;
+  $("approve-button").disabled = !st.can_approve || recording();
   $("confirm-overlay").hidden = false;
 }
 
@@ -250,6 +267,7 @@ $("confirm-close").addEventListener("click", closeConfirm);
 
 // ---- 5. 承認（このボタンからだけ） ----
 async function onApproveClick() {
+  if (recording()) return;
   const name = $("approver-name").value.trim();
   if (!name) {
     $("confirm-error").textContent = "承認する人の名前を入れてください";
@@ -276,8 +294,8 @@ function renderApproval() {
   $("approval-status").textContent = a
     ? `${a.approved_by} さんが承認ボタンで承認しました（${a.approved_at}）。出力ボタンが使えます。`
     : "まだ承認していません。承認は確認表示の承認ボタンだけで行います（指示の文字では承認しません）。";
-  $("export-button").disabled = !st.can_export;
-  $("approve-button").disabled = !st.can_approve;
+  $("export-button").disabled = !st.can_export || recording();
+  $("approve-button").disabled = !st.can_approve || recording();
   if (!a && !$("export-result").hidden && $("export-result").dataset.ok === "true") {
     $("export-result").hidden = true;
   }
@@ -285,6 +303,7 @@ function renderApproval() {
 
 // ---- シミュレーション用の出力 ----
 $("export-button").addEventListener("click", async () => {
+  if (recording()) return;
   const res = await postJson("/api/export", { session_id: state.sessionId });
   if (res.state) state.st = res.state;
   const box = $("export-result");
@@ -331,7 +350,7 @@ function renderTables() {
       ? el("div", {}, ...p.users.map((u) => el("div", {}, el("code", {}, `${u.line_no}行目 ${u.text}`))))
       : "どの命令も使っていません";
     const chk = p.shift_check.ok
-      ? el("span", { class: "ok" }, "検査を通る")
+      ? el("span", { class: "ok" }, "形式の検査は通る（枠の検査はまだ無い）")
       : el("span", { class: "ng" }, "断る：" + p.shift_check.reason);
     const tr = el("tr", { class: "clickable" + (p.name === selected ? " selected" : "") },
       el("td", {}, el("strong", {}, p.name)), el("td", {}, p.line_no),
@@ -345,7 +364,7 @@ function renderTables() {
     let chk = "";
     if (i.speed_check) {
       chk = i.speed_check.ok
-        ? el("span", { class: "ok" }, "検査を通る")
+        ? el("span", { class: "ok" }, "形式の検査は通る（枠の検査はまだ無い）")
         : el("span", { class: "ng" }, "断る：" + i.speed_check.reason);
     }
     const tr = el("tr", { class: (i.position ? "clickable " : "") + (related.has(i.line_no) ? "related" : "") },
@@ -450,3 +469,88 @@ function drawFigure(host, axA, axB) {
   svg.append(ax1, ax2);
   host.replaceChildren(svg);
 }
+
+// ---- 音声入力（speech.js）。認識した文は入力欄に入れるだけ。承認・出力・送信は呼ばない ----
+const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+const voice = new SpeechInput(Recognition, {
+  state: (value) => {
+    state.voiceState = value;
+    $("voice-status").textContent = { starting: "開始しています…", listening: "聞いています（終了で確定）",
+      stopping: "終了しています…", idle: "" }[value] || "";
+    updateLocks();
+  },
+  partial: (text) => {
+    $("voice-partial").textContent = text;  // 表示だけ。解析に使わない
+  },
+  final: (text) => {
+    const t = state.voiceToken;
+    state.voiceToken = null;
+    // 録音を始めたときとジョブ・位置が違えば使わない
+    if (!t || t.sessionId !== state.sessionId || t.selected !== (state.st ? state.st.selected : null)) {
+      showVoiceError("録音の間にジョブか位置が変わったため、認識文は使いません。");
+      return;
+    }
+    $("text-input").value = text;  // 入力欄に入れるだけ。自動では送らない
+    state.voiceFinal = text;
+    $("voice-status").textContent = "認識文を入力欄に入れました。確かめて、直してから「指示を送る」を押してください";
+  },
+  error: (message) => {
+    state.voiceToken = null;
+    showVoiceError(message);  // 固定の文。入力欄は変えない
+  },
+});
+
+function showVoiceError(message) {
+  $("voice-error").textContent = message;
+  $("voice-error").hidden = false;
+}
+
+function voiceMode() {
+  const checked = document.querySelector('input[name="voice-mode"]:checked');
+  return checked ? checked.value : null;
+}
+
+function updateLocks() {
+  const rec = recording();
+  const loaded = !!state.sessionId;
+  $("file-input").disabled = rec;
+  $("text-input").disabled = rec || !loaded;
+  $("text-send").disabled = rec || !loaded;
+  $("voice-mode-browser").disabled = rec;
+  $("voice-mode-local").disabled = rec;
+  $("mic-button").disabled = rec || !loaded || !voiceMode() || !Recognition;
+  $("voice-stop").disabled = !rec;
+  $("voice-cancel").disabled = !rec;
+  document.body.classList.toggle("recording", rec);
+  if (state.st && state.view) {
+    renderCandidate();
+    renderApproval();
+  }
+}
+
+if (!Recognition) {
+  $("voice-controls").hidden = true;
+  $("voice-unsupported").hidden = false;
+}
+for (const id of ["voice-mode-browser", "voice-mode-local"]) $(id).addEventListener("change", updateLocks);
+
+$("mic-button").addEventListener("click", () => {
+  const mode = voiceMode();
+  if (!state.sessionId || !mode || recording()) return;
+  // 新しい録音：前の認識文・エラーは使わない。直さずに残っている前の認識文は入力欄から消す
+  if (state.voiceFinal !== null && $("text-input").value === state.voiceFinal) $("text-input").value = "";
+  state.voiceFinal = null;
+  $("voice-error").hidden = true;
+  $("voice-partial").textContent = "";
+  closeConfirm();
+  state.voiceToken = { sessionId: state.sessionId, selected: state.st ? state.st.selected : null };
+  voice.start(mode);
+});
+$("voice-stop").addEventListener("click", () => voice.stop());
+$("voice-cancel").addEventListener("click", () => {
+  state.voiceToken = null;
+  voice.cancel();  // 認識文は使わない。入力欄は変えない
+  $("voice-status").textContent = "取り消しました。認識文は使っていません";
+});
+updateLocks();

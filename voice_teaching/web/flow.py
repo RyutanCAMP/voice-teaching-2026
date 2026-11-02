@@ -273,7 +273,7 @@ class WebFlow:
             "exported": e.exported if approved else None,
             "out_dir": str(self.out_dir.resolve()),
             "mock_notice": mock_claude.MOCK_NOTICE,
-            "log": [{"kind": k, "text": t} for k, t in s.log],
+            "log": _log_entries(s.log),
         }
 
 
@@ -308,6 +308,16 @@ def _facts(f: ut.UtteranceFacts | None) -> dict | None:
         "requested_value": f.requested_value(),
         "stop_reasons": list(f.stop_reasons),
     }
+
+
+def _log_entries(log: list) -> list[dict]:
+    """作業ログ。候補の直後に同じ文の「結果」が続くときは1つにする（同じ行が2回出ないように）。"""
+    out: list[dict] = []
+    for k, t in log:
+        if k == "結果" and out and out[-1]["kind"] == "候補" and out[-1]["text"] == t:
+            continue
+        out.append({"kind": k, "text": t})
+    return out
 
 
 def _args_text(args: dict) -> str:
