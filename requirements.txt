@@ -1,2 +1,5 @@
 # テスト
 pytest>=8
+
+# 本物の Claude への接続（任意。無ければ偽のClaude＝モックで動く）。MIT License
+anthropic

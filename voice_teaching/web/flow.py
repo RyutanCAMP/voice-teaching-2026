@@ -16,7 +16,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .. import jbi, mock_claude, sim
+from .. import claude_interpreter, jbi, mock_claude, sim
 from .. import utterance as ut
 from ..session import Comparison, Reply, Session
 from . import api
@@ -26,6 +26,7 @@ MAX_TEXT = 500
 SOURCES = ("voice", "text")
 NO_SESSION = "このジョブの画面の情報がありません（時間が経って捨てたか、サーバーを起動し直しました）。ジョブを読み込み直してください"
 NO_POSITION = "位置が決まっていないため、変更の提案をしていません。位置を選ぶか、位置番号（C と5桁の数字）で言ってください"
+NOT_DECIDED = "指示から変更の内容を決められませんでした。位置番号・方向・量（mm）を、もう一度指示してください"
 NOT_APPROVED = "承認されていないため、出力しません（承認は確認表示の承認ボタンで行います）"
 
 
@@ -62,7 +63,10 @@ class _Entry:
 
 
 class WebFlow:
-    def __init__(self, out_dir: str | Path | None = None, max_sessions: int = MAX_SESSIONS):
+    def __init__(self, out_dir: str | Path | None = None, max_sessions: int = MAX_SESSIONS,
+                 interpreter=None):
+        # 解釈の係：本物の Claude（ANTHROPIC_API_KEY があるとき）か、偽のClaude（モック）
+        self.interpreter = interpreter if interpreter is not None else claude_interpreter.from_env()
         self.out_dir = Path(out_dir) if out_dir is not None else sim.DEFAULT_OUT_DIR
         self.max_sessions = max_sessions
         self._entries: OrderedDict[str, _Entry] = OrderedDict()
@@ -78,7 +82,7 @@ class WebFlow:
             return {"ok": False, "error": "ジョブ名の行（//NAME）が読めないため、読み込みません"}
         entry = _Entry(session=None)  # type: ignore[arg-type]
         entry.session = Session(job, simulate=entry.simulate)
-        entry.session.log.append(("モック", mock_claude.MOCK_NOTICE))
+        entry.session.log.append((self._who(), self.interpreter.notice))
         sid = secrets.token_urlsafe(16)
         with self._lock:
             self._entries[sid] = entry
@@ -104,26 +108,43 @@ class WebFlow:
             r = s.hear(text, source=source)
             calls: list[dict] = []
             if r.status == "ok":
-                calls = mock_claude.decide(s.facts, s.selected)
-                r = self._dispatch(e, r, calls)
+                f = s.facts
+                if f is not None and f.op in ("move", "speed") and (f.position or s.selected) is None:
+                    # 位置が決まらなければ、解釈の係（Claude）には送らない
+                    s.log.append(("聞き返し", NO_POSITION))
+                    r = Reply("ask", NO_POSITION, facts=f)
+                else:
+                    try:
+                        calls = self.interpreter.decide(s.facts, s.selected, list(s.original.positions))
+                    except claude_interpreter.InterpreterError as ex:
+                        # モックへ自動で切り替えない。固定の文で止める
+                        s.log.append(("止めた理由", str(ex)))
+                        r = Reply("stop", str(ex), facts=f)
+                    else:
+                        r = self._dispatch(e, r, calls)
             return {"ok": True, "heard": text, "source": source, "facts": _facts(s.facts),
                     "tool_calls": calls, **self._reply(e, r)}
         return self._run(sid, run)
 
     def _dispatch(self, e: _Entry, heard: Reply, calls: list[dict]) -> Reply:
         s = e.session
+        who = self._who()
         if not calls:
             f = s.facts
-            if f is not None and f.op in ("move", "speed") and (f.position or s.selected) is None:
-                s.log.append(("聞き返し", NO_POSITION))
-                return Reply("ask", NO_POSITION, facts=f)
-            s.log.append(("モック", "偽のClaude（モック）：道具は呼びませんでした"))
+            s.log.append((who, "道具は呼びませんでした"))
+            if f is not None and f.op in ("move", "speed"):
+                s.log.append(("聞き返し", NOT_DECIDED))
+                return Reply("ask", NOT_DECIDED, facts=f)
             return heard
         r = heard
         for c in calls:
             tool, args = c["tool"], c["args"]
-            s.log.append(("モック", f"偽のClaude（モック）が道具 {tool} を呼びました：{_args_text(args)}"))
-            if tool == "select":
+            s.log.append((who, f"道具 {tool} を呼びました：{_args_text(args)}"))
+            if tool == "ask_user":
+                q = str(args.get("question") or NOT_DECIDED)
+                s.log.append(("聞き返し", q))
+                r = Reply("ask", q, facts=s.facts)
+            elif tool == "select":
                 r = s.select(args["position"])
             elif tool == "propose_change":
                 e.sim_error = None
@@ -142,6 +163,9 @@ class WebFlow:
             if r.status != "ok":
                 break
         return r
+
+    def _who(self) -> str:
+        return "Claude" if self.interpreter.kind == "claude" else "モック"
 
     # ---- 画面の操作 ----
     def select(self, sid: object, position: object) -> dict:
@@ -272,7 +296,9 @@ class WebFlow:
             "can_export": approved,
             "exported": e.exported if approved else None,
             "out_dir": str(self.out_dir.resolve()),
-            "mock_notice": mock_claude.MOCK_NOTICE,
+            "mock_notice": self.interpreter.notice,
+            "interpreter": {"kind": self.interpreter.kind, "model": self.interpreter.model,
+                            "notice": self.interpreter.notice},
             "log": _log_entries(s.log),
         }
 
