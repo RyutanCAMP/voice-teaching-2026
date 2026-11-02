@@ -19,8 +19,9 @@ from pathlib import Path
 
 AXES = {"X": 0, "Y": 1, "Z": 2}
 
-# 位置の変更量の上限（mm）。1回の変更量と、元のジョブ（基準）からの累積の両方に使う。
-# 仕様v2.1 のデモ案の「1回の上限 20mm」に合わせた（最終の値は本人が実機を見て決める。安全の保証ではない）
+# 位置の変更量の上限（mm）。仕様v2.1 では「1回の変更上限 20mm」（最終の値は本人が実機を見て決める。安全の保証ではない）。
+# 【暫定】元のジョブ（基準）からの累積にも同じ値を使っている。仕様では累積は専門家の枠（FRAME）で基準位置から判定する。
+# 枠ができるまでの止める側の暫定措置で、FRAME を実装するときに枠の判定と整合させる（docs/JBI_FORMAT_NOTES.md）
 DEFAULT_MAX_SHIFT_MM = 20.0
 
 # 速度の変更は、単位・指定形式・適用範囲の確認が済むまで止める（本人の判断）。検査の中身は将来のために残す
@@ -299,6 +300,7 @@ class Job:
         if abs(actual) > limit + 1e-9:
             raise JbiError(f"丸めた後の実際の移動量が仮の上限 {limit:g}mm（確認待ち）を超えるため、変更しません")
         # 仕様v2.1 6章：元のジョブ（基準）からの累積で軸ごとに検査する
+        # 【暫定】今は1回の上限と同じ値で止める。FRAME（専門家の枠）を実装するときに枠の判定と整合させる
         base_values = self.baseline.get(position)
         if base_values is None or len(base_values) != len(pos.values):
             raise JbiError(f"位置 {position} の基準（元のジョブの値）が分からないため、変更しません")
