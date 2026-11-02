@@ -1,9 +1,10 @@
-// ボイスティーチング（シミュレーションモード）の画面。
+// ボイスティーチング（シミュレーションモード）の画面。4ステップ：読込 → 位置を選ぶ → 音声で指示 → 確かめて承認。
 // - JBI の解析・変更候補・承認・出力はサーバー側（Python）で行う。ここでは JBI を解析しない。
 // - 指示は文字入力の欄から /api/hear へ送る。音声（speech.js）は認識した文を入力欄に入れるだけで、自動では送らない。
 // - 録音中は、取消と終了のほかの操作（読込・位置選択・指示を送る・承認・出力）を使えなくする。
 // - 承認は確認表示の承認ボタンからだけ /api/approve を呼ぶ。指示の経路からは呼ばない。
 // - 出力ボタンは承認した後だけ使える。失敗を成功と表示しない。
+// - 図と再生は、命令の順に位置の点を直線で結んだ「経路の目安」。ロボット本体の動きではない。
 // - 外部から何も読み込まない。サーバー（同じ 127.0.0.1）にだけ要求を送る。
 "use strict";
 import { SpeechInput } from "/static/speech.js";
@@ -12,6 +13,8 @@ const state = {
   sessionId: null,  // サーバーのメモリにある画面の状態の番号
   view: null,       // 読み込んだときのジョブの内容（/api/load の view）
   st: null,         // サーバーの画面の状態（state）
+  figView: "yz",    // 大きく出す図の向き（xy / xz / yz）
+  playToken: 0,     // 再生を止めるための番号（描き直すと増やす）
   voiceState: "idle",   // 録音の状態（starting / listening / stopping / idle）
   voiceToken: null,     // 録音を始めたときのジョブ（session）と位置。違えば認識文を使わない
   voiceFinal: null,     // 最後に入力欄へ入れた認識文（直さずに送れば source=voice として記録）
@@ -19,6 +22,7 @@ const state = {
 
 const $ = (id) => document.getElementById(id);
 const SVG_NS = "http://www.w3.org/2000/svg";
+const NO_SERVER = "サーバーに届きませんでした（python -m voice_teaching.web が動いているか確かめてください）";
 
 function el(tag, attrs, ...children) {
   const e = document.createElement(tag);
@@ -47,13 +51,16 @@ async function postJson(path, body) {
     });
     return await r.json();
   } catch (e) {
-    return { ok: false, error: "サーバーに届きませんでした（python -m voice_teaching.web が動いているか確かめてください）" };
+    return { ok: false, error: NO_SERVER };
   }
 }
 
-// ---- 1. 読み込み ----
-$("file-input").addEventListener("change", async (ev) => {
-  const f = ev.target.files[0];
+function recording() {
+  return state.voiceState !== "idle";
+}
+
+// ---- 1. 読み込み（ドラッグ＆ドロップ、またはファイルを選ぶ。どちらも loadFile を通る） ----
+async function loadFile(f) {
   if (!f || recording()) return;
   voice.cancel();
   state.voiceFinal = null;
@@ -69,39 +76,59 @@ $("file-input").addEventListener("change", async (ev) => {
     });
     res = await r.json();
   } catch (e) {
-    res = { ok: false, error: "サーバーに届きませんでした（python -m voice_teaching.web が動いているか確かめてください）" };
+    res = { ok: false, error: NO_SERVER };
   }
   state.sessionId = null; state.view = null; state.st = null;
   closeConfirm();
+  stopPlayback();
   if (!res.ok) {
     $("load-error").textContent = "読み込めません：" + (res.error || "理由が分かりません");
     $("load-error").hidden = false;
     $("job-area").hidden = true;
     $("problems-panel").hidden = true;
-    setInputEnabled(false);
+    document.body.classList.remove("loaded");
+    renderSteps();
+    updateLocks();
     return;
   }
   $("load-error").hidden = true;
   state.sessionId = res.session_id;
   state.view = res.view;
   state.st = res.state;
+  state.figView = bestView(res.view.positions);
   $("heard-text").textContent = "（まだありません）";
   $("facts-view").textContent = "（まだありません）";
   $("reply-message").hidden = true;
   $("export-result").hidden = true;
-  setInputEnabled(true);
+  document.body.classList.add("loaded");
   renderAll();
   updateLocks();
+}
+
+$("file-input").addEventListener("change", (ev) => loadFile(ev.target.files[0]));
+
+const drop = $("drop-zone");
+drop.addEventListener("dragover", (ev) => {
+  ev.preventDefault();
+  if (!recording()) drop.classList.add("dragover");
 });
-
-function setInputEnabled(on) {
-  $("text-input").disabled = !on;
-  $("text-send").disabled = !on;
-}
-
-function recording() {
-  return state.voiceState !== "idle";
-}
+drop.addEventListener("dragleave", () => drop.classList.remove("dragover"));
+drop.addEventListener("drop", (ev) => {
+  ev.preventDefault();
+  drop.classList.remove("dragover");
+  const f = ev.dataTransfer && ev.dataTransfer.files[0];
+  if (f) loadFile(f);
+});
+drop.addEventListener("click", (ev) => {
+  if (ev.target.closest("label, input") || recording()) return;  // ラベルは自分でファイル選択を開く
+  $("file-input").click();
+});
+drop.addEventListener("keydown", (ev) => {
+  if ((ev.key === "Enter" || ev.key === " ") && !recording()) { ev.preventDefault(); $("file-input").click(); }
+});
+// 枠の外に落としたファイルを、ブラウザーが開いてしまわないようにする
+window.addEventListener("dragover", (ev) => ev.preventDefault());
+window.addEventListener("drop", (ev) => ev.preventDefault());
 
 // ---- 画面全体 ----
 function renderAll() {
@@ -124,18 +151,114 @@ function renderState() {
   $("mock-notice").textContent = st.mock_notice;
   $("selected-name").textContent = st.selected || "なし";
   $("out-dir").textContent = st.out_dir;
+  renderChips();
   renderCandidate();
   renderApproval();
   renderLog();
   renderTables();
   renderFigures();
+  renderSteps();
 }
 
-// ---- 位置の選択 ----
+// ---- 今のステップと「次にすること」 ----
+function currentStep() {
+  const st = state.st;
+  if (!state.sessionId || !st) return 1;
+  if (st.candidate) return 4;
+  if (!st.selected) return 2;
+  return 3;
+}
+
+function voiceMode() {
+  const checked = document.querySelector('input[name="voice-mode"]:checked');
+  return checked ? checked.value : null;
+}
+
+function renderSteps() {
+  const step = currentStep();
+  for (let i = 1; i <= 4; i++) {
+    const li = $("step-" + i);
+    li.classList.toggle("done", i < step);
+    li.classList.toggle("current", i === step);
+    if (i === step) li.setAttribute("aria-current", "step"); else li.removeAttribute("aria-current");
+  }
+  const cards = { 2: "select-panel", 3: "instruction-panel", 4: "candidate-panel" };
+  for (const [n, id] of Object.entries(cards)) {
+    $(id).classList.toggle("current", Number(n) === step);
+  }
+  // 次に押すものを1つだけ目立たせる
+  for (const id of ["drop-zone", "mic-button", "voice-stop", "text-send", "open-confirm", "undo-button", "export-button"]) {
+    $(id).classList.remove("primary");
+  }
+  const st = state.st;
+  let text = "", primary = null;
+  if (step === 1) {
+    text = "JOBファイル（.JBI）をドラッグ＆ドロップしてください";
+    primary = "drop-zone";
+  } else if (step === 2) {
+    text = "図の点か位置のボタンを押して、動かす位置を選んでください";
+  } else if (step === 3) {
+    if (recording()) {
+      text = "話し終わったら「終了」を押してください";
+      primary = "voice-stop";
+    } else if ($("text-input").value.trim()) {
+      text = "入力欄の文を確かめて「指示を送る」を押してください";
+      primary = "text-send";
+    } else if (!$("voice-controls").hidden && !voiceMode()) {
+      text = "音声の処理方法を選んでから、マイクで話してください";
+    } else if (!$("voice-controls").hidden) {
+      text = `🎤 を押して「この位置を上に10ミリ」のように話してください（${st.selected}）`;
+      primary = "mic-button";
+    } else {
+      text = "入力欄に「この位置を上に10mm」のように書いて「指示を送る」を押してください";
+      primary = "text-send";
+    }
+  } else if (st.blocked_reason) {
+    text = "実機用の検査で止まった候補です（承認できません）。「元に戻す」を押して、別の指示をしてください";
+    primary = "undo-button";
+  } else if (!st.approval) {
+    text = "▶ 再生で変更前後の経路を確かめてから「確認して承認へ」を押してください";
+    primary = "open-confirm";
+  } else if (!st.exported) {
+    text = "承認しました。「シミュレーション用に出力」を押してください";
+    primary = "export-button";
+  } else {
+    text = "出力しました。別の位置を選ぶか、新しいJOBを読み込めます";
+  }
+  $("next-action").textContent = text;
+  if (primary) $(primary).classList.add("primary");
+}
+
+$("text-input").addEventListener("input", renderSteps);
+for (const id of ["voice-mode-browser", "voice-mode-local"]) $(id).addEventListener("change", renderSteps);
+
+// ---- エンジニア表示（同じ画面の中で開く・閉じる） ----
+$("engineer-toggle").addEventListener("click", () => {
+  const open = $("engineer-view").hidden;
+  $("engineer-view").hidden = !open;
+  $("engineer-toggle").setAttribute("aria-expanded", String(open));
+  $("engineer-toggle").textContent = open ? "エンジニア表示を閉じる" : "エンジニア表示";
+});
+
+// ---- 2. 位置の選択 ----
 async function select(name) {
   if (!state.sessionId || recording()) return;
   const res = await postJson("/api/select", { session_id: state.sessionId, position: name });
   applyResult(res);
+}
+
+function renderChips() {
+  const selected = state.st ? state.st.selected : null;
+  $("position-chips").replaceChildren(...state.view.positions.map((p) => {
+    const b = el("button", {
+      type: "button",
+      class: "chip" + (p.name === selected ? " selected" : "") + (p.shift_check.ok ? "" : " blocked"),
+      title: p.shift_check.ok ? p.line : "実機用の検査では断られます：" + p.shift_check.reason,
+    }, p.name);
+    b.disabled = recording();
+    b.addEventListener("click", () => select(p.name));
+    return b;
+  }));
 }
 
 function applyResult(res) {
@@ -167,8 +290,8 @@ $("text-form").addEventListener("submit", async (ev) => {
   // 認識文を直さずに送ったときだけ source=voice（記録だけ。結果は変わらない）
   const source = state.voiceFinal !== null && text === state.voiceFinal ? "voice" : "text";
   state.voiceFinal = null;
-  await sendInstruction(text, source);
   $("text-input").value = "";
+  await sendInstruction(text, source);
 });
 
 async function sendInstruction(text, source) {
@@ -177,7 +300,8 @@ async function sendInstruction(text, source) {
   $("heard-text").textContent = res.heard !== undefined ? res.heard : text;
   renderFacts(res.facts);
   applyResult(res);
-  if (res.candidate_made && state.st && state.st.candidate) openConfirm();
+  // 候補ができたら、まず図で変更前後の経路を再生して見せる（承認は確認表示のボタンだけ）
+  if (res.candidate_made && state.st && state.st.candidate) startPlayback();
 }
 
 function renderFacts(f) {
@@ -199,7 +323,7 @@ function renderFacts(f) {
     ...rows.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)])));
 }
 
-// ---- 4. 変更候補のプレビュー ----
+// ---- 4. 変更候補（要点は右のカード、詳しくはエンジニア表示） ----
 function renderCandidate() {
   const st = state.st;
   const c = st.candidate;
@@ -209,8 +333,10 @@ function renderCandidate() {
   $("undo-button").disabled = !c || recording();
   if (!c) {
     host.replaceChildren(el("p", { class: "muted" }, "変更候補はまだありません。"));
+    $("candidate-detail").textContent = "（まだありません）";
     return;
   }
+  const [pos, axis] = c.target.split(" ");
   const parts = [];
   if (c.blocked_reason) {
     parts.push(el("div", { class: "result refused" },
@@ -218,14 +344,15 @@ function renderCandidate() {
       el("p", {}, "理由：" + c.blocked_reason)));
   }
   parts.push(el("div", { class: "result proposal" },
-    el("strong", {}, `変更候補（${c.target}・ファイルの ${c.line_no}行目）。承認するまでジョブは変わりません。`),
-    diffView(c),
-    el("p", {}, `変更前の値：${c.before_value}　変更後の値：${c.after_value}　変化量：${c.delta}`),
-    el("p", {}, "変わる命令の行："),
-    el("ul", {}, ...c.affected.map((a) => el("li", {}, a))),
-    el("p", {}, "注意："),
-    el("ul", {}, ...c.warnings.map((w) => el("li", {}, w)))));
+    el("p", { class: "cand-big" }, `${pos} を ${axis}方向に ${c.delta}mm`),
+    el("p", { class: "cand-values" }, `${axis}：${c.before_value} → ${c.after_value}`),
+    el("ul", { class: "small" }, ...c.warnings.map((w) => el("li", {}, w)))));
   host.replaceChildren(...parts);
+  $("candidate-detail").replaceChildren(
+    el("p", {}, `変更候補（${c.target}・ファイルの ${c.line_no}行目）。承認するまでジョブは変わりません。`),
+    diffView(c),
+    el("p", {}, "変わる命令の行："),
+    el("ul", {}, ...c.affected.map((a) => el("li", {}, a))));
 }
 
 function diffView(c) {
@@ -242,6 +369,7 @@ $("compare-button").addEventListener("click", async () => {
 $("undo-button").addEventListener("click", async () => {
   const res = await postJson("/api/undo", { session_id: state.sessionId });
   closeConfirm();
+  stopPlayback();
   applyResult(res);
 });
 
@@ -249,10 +377,12 @@ $("undo-button").addEventListener("click", async () => {
 function openConfirm() {
   const st = state.st;
   if (!st || !st.candidate) return;
+  stopPlayback();
   $("confirm-text").textContent = st.confirmation_text || "";
   $("confirm-blocked").textContent = st.blocked_reason ? "実機用の検査では止まりました：" + st.blocked_reason : "";
   $("confirm-blocked").hidden = !st.blocked_reason;
   $("confirm-diff").replaceChildren(diffView(st.candidate));
+  drawFigure($("confirm-figure"), ...VIEWS[state.figView], true);
   $("confirm-error").hidden = true;
   $("approve-button").disabled = !st.can_approve || recording();
   $("confirm-overlay").hidden = false;
@@ -265,7 +395,7 @@ function closeConfirm() {
 $("open-confirm").addEventListener("click", openConfirm);
 $("confirm-close").addEventListener("click", closeConfirm);
 
-// ---- 5. 承認（このボタンからだけ） ----
+// ---- 承認（このボタンからだけ） ----
 async function onApproveClick() {
   if (recording()) return;
   const name = $("approver-name").value.trim();
@@ -321,7 +451,7 @@ $("export-button").addEventListener("click", async () => {
   renderState();
 });
 
-// ---- 作業ログ ----
+// ---- 作業ログ（エンジニア表示） ----
 function renderLog() {
   const ol = $("work-log");
   ol.replaceChildren(...state.st.log.map((x) =>
@@ -330,7 +460,7 @@ function renderLog() {
   ol.scrollTop = ol.scrollHeight;
 }
 
-// ---- 一覧 ----
+// ---- 一覧（エンジニア表示） ----
 function usersOf(name) {
   const p = state.view.positions.find((q) => q.name === name);
   return p ? p.users.map((u) => u.line_no) : [];
@@ -374,17 +504,47 @@ function renderTables() {
   }));
 }
 
-// ---- 図 ----
+// ---- 図（3つの向き。大きな図1つと小さな図3つ） ----
 const AXES = { X: 0, Y: 1, Z: 2 };
+const VIEWS = { xy: ["X", "Y"], xz: ["X", "Z"], yz: ["Y", "Z"] };
 
-function renderFigures() {
-  drawFigure($("fig-xy"), "X", "Y");
-  drawFigure($("fig-xz"), "X", "Z");
-  const c = state.st && state.st.candidate;
-  $("legend").hidden = !(c && c.after_positions);
+// 位置の広がりがいちばん大きい2つの軸の図を、最初に大きく出す
+function bestView(positions) {
+  const pts = positions.filter((p) => p.xyz);
+  if (!pts.length) return "yz";
+  const spread = [0, 1, 2].map((k) => {
+    const v = pts.map((p) => p.xyz[k]);
+    return Math.max(...v) - Math.min(...v);
+  });
+  const order = [0, 1, 2].sort((i, j) => spread[j] - spread[i]).slice(0, 2).sort();
+  return { "0,1": "xy", "0,2": "xz", "1,2": "yz" }[order.join(",")];
 }
 
-function drawFigure(host, axA, axB) {
+function setView(name) {
+  state.figView = name;
+  stopPlayback();
+  renderFigures();
+}
+
+for (const b of document.querySelectorAll(".view-tab")) b.addEventListener("click", () => setView(b.dataset.view));
+for (const f of document.querySelectorAll(".figs-small figure")) f.addEventListener("click", () => setView(f.dataset.view));
+
+function renderFigures() {
+  stopPlayback();
+  for (const b of document.querySelectorAll(".view-tab")) {
+    b.setAttribute("aria-selected", String(b.dataset.view === state.figView));
+  }
+  drawFigure($("fig-main"), ...VIEWS[state.figView], true);
+  drawFigure($("fig-xy"), "X", "Y", false);
+  drawFigure($("fig-xz"), "X", "Z", false);
+  drawFigure($("fig-yz"), "Y", "Z", false);
+  const c = state.st && state.st.candidate;
+  $("legend").hidden = !(c && c.after_positions);
+  $("play-button").disabled = !state.view || state.view.segments.length === 0 || recording();
+}
+
+// 図を描き、再生のために座標の変換を返す
+function drawFigure(host, axA, axB, big) {
   const v = state.view;
   const a = AXES[axA], b = AXES[axB];
   const selected = state.st ? state.st.selected : null;
@@ -393,12 +553,13 @@ function drawFigure(host, axA, axB) {
   const after = c ? c.after_positions.filter((p) => p.xyz) : [];
   if (before.length === 0) {
     host.replaceChildren(el("p", { class: "warn" }, "ロボット座標でないため描けません"));
-    return;
+    return null;
   }
   const all = before.concat(after);
   const xs = all.map((p) => p.xyz[a]), ys = all.map((p) => p.xyz[b]);
   const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys), 1);
-  const W = 460, H = 460, PAD = 60, k = (W - 2 * PAD) / span;
+  const W = big ? 720 : 300, H = big ? 480 : 220, PAD = big ? 70 : 24;
+  const k = Math.min((W - 2 * PAD) / span, (H - 2 * PAD) / span);
   const cx = (Math.max(...xs) + Math.min(...xs)) / 2, cy = (Math.max(...ys) + Math.min(...ys)) / 2;
   const sx = (val) => W / 2 + (val - cx) * k;
   const sy = (val) => H / 2 - (val - cy) * k; // 画面は下向きが正なので反転
@@ -406,7 +567,8 @@ function drawFigure(host, axA, axB) {
   const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: "img",
     "aria-label": `${axA}・${axB} の図` });
 
-  const drawSegs = (segs, posList, color, width, opacity) => {
+  const segLines = { before: [], after: [] };
+  const drawSegs = (segs, posList, color, width, opacity, key) => {
     const at = Object.fromEntries(posList.map((p) => [p.name, p]));
     for (const s of segs) {
       const p = at[s.from], q = at[s.to];
@@ -419,22 +581,24 @@ function drawFigure(host, axA, axB) {
       t.textContent = `${s.line_no}行目 ${s.text}${s.solid ? "" : "（目安）"}`;
       line.append(t);
       svg.append(line);
+      segLines[key].push({ seg: s, line: line, from: [sx(p.xyz[a]), sy(p.xyz[b])], to: [sx(q.xyz[a]), sy(q.xyz[b])] });
     }
   };
 
+  const w = big ? 2.5 : 2;
   if (c) {
-    drawSegs(v.segments, before, "#9a9a9a", 2, 0.9);          // 変更前（灰色）
-    drawSegs(c.after_segments, after, "#d0602a", 2, 0.95);    // 変更後（色付き）
+    drawSegs(v.segments, before, "#9a9a9a", w, 0.9, "before");          // 変更前（灰色）
+    drawSegs(c.after_segments, after, "#d0602a", w, 0.95, "after");      // 変更後（色付き）
   } else {
-    drawSegs(v.segments, before, "#4a6fa5", 2, 1);
+    drawSegs(v.segments, before, "#4a6fa5", w, 1, "before");
   }
 
   // 名前のラベルは、近くのラベルと重ならないように下へずらして置く
   const placed = [];
-  const placeLabel = (x, y, w) => {
+  const placeLabel = (x, y, wd) => {
     let ly = y - 8;
-    while (placed.some((b) => Math.abs(b.x - (x + 9)) < Math.max(b.w, w) && Math.abs(b.y - ly) < 13)) ly += 14;
-    placed.push({ x: x + 9, y: ly, w: w });
+    while (placed.some((q) => Math.abs(q.x - (x + 9)) < Math.max(q.w, wd) && Math.abs(q.y - ly) < 13)) ly += 14;
+    placed.push({ x: x + 9, y: ly, w: wd });
     return ly;
   };
   const sorted = before.slice().sort((p, q) => sy(p.xyz[b]) - sy(q.xyz[b]) || sx(p.xyz[a]) - sx(q.xyz[a]));
@@ -443,24 +607,24 @@ function drawFigure(host, axA, axB) {
     const moved = c && c.moved === p.name;
     const sel = p.name === selected;
     const text = p.name + (moved ? "（変更前）" : "");
-    const g = svgEl("g", { class: "pt" });
-    if (sel) g.append(svgEl("circle", { cx: x, cy: y, r: 11, fill: "none", stroke: "#e0a000", "stroke-width": 3 }));
-    g.append(svgEl("circle", { cx: x, cy: y, r: 5, fill: moved ? "#9a9a9a" : (c ? "#555" : "#d0602a") }));
-    // 動かす位置の「変更前」は点の下に置く（「変更後」は点の上）
+    const g = svgEl("g", { class: "pt", "data-name": p.name });
+    g.append(svgEl("circle", { cx: x, cy: y, r: big ? 16 : 8, fill: "transparent" }));  // 押しやすい大きさ
+    if (sel) g.append(svgEl("circle", { cx: x, cy: y, r: big ? 13 : 7, fill: "none", stroke: "#e0a000", "stroke-width": 3 }));
+    g.append(svgEl("circle", { cx: x, cy: y, r: big ? 6 : 4, fill: moved ? "#9a9a9a" : (c ? "#555" : "#d0602a") }));
     const label = svgEl("text", { x: x + 9, y: placeLabel(x, moved ? y + 24 : y, text.length * 8), "font-weight": sel ? "bold" : "normal" });
     label.textContent = text;
     g.append(label);
     const t = svgEl("title", {});
     t.textContent = `${p.name}  ${p.line}`;
     g.append(t);
-    g.addEventListener("click", () => select(p.name));
+    if (big) g.addEventListener("click", () => select(p.name));
     svg.append(g);
   }
   if (c) {
     const q = after.find((p) => p.name === c.moved);
     if (q) {
       const x = sx(q.xyz[a]), y = sy(q.xyz[b]);
-      svg.append(svgEl("circle", { cx: x, cy: y, r: 6, fill: "#d0602a" }));
+      svg.append(svgEl("circle", { cx: x, cy: y, r: big ? 7 : 4, fill: "#d0602a" }));
       const text = `${q.name}（変更後）`;
       const label = svgEl("text", { x: x + 9, y: placeLabel(x, y, text.length * 8), fill: "#b04010", "font-weight": "bold" });
       label.textContent = text;
@@ -471,7 +635,63 @@ function drawFigure(host, axA, axB) {
   const ax2 = svgEl("text", { x: 8, y: 16 }); ax2.textContent = `↑ ${axB}`;
   svg.append(ax1, ax2);
   host.replaceChildren(svg);
+  return { svg, segLines, big };
 }
+
+// ---- 経路の再生：JOB の命令の順（view.segments、変更後は after_segments）に、点を直線で動かす目安 ----
+function stopPlayback() {
+  state.playToken++;
+  $("play-status").textContent = "";
+}
+
+function startPlayback() {
+  if (!state.view || recording()) return;
+  stopPlayback();
+  const token = state.playToken;
+  const fig = drawFigure($("fig-main"), ...VIEWS[state.figView], true);
+  if (!fig) return;
+  const c = state.st && state.st.candidate;
+  const runs = [{ name: c ? "変更前" : "命令の順", list: fig.segLines.before, color: c ? "#666" : "#2d5aa0" }];
+  if (c) runs.push({ name: "変更後", list: fig.segLines.after, color: "#d0602a" });
+  const marker = svgEl("circle", { r: 9, fill: runs[0].color, stroke: "#fff", "stroke-width": 2 });
+  fig.svg.append(marker);
+  const SPEED = 260;  // 画面の上の速さ（px/秒）。実際のロボットの速度とは関係ない
+  let ri = 0, si = 0, t0 = null;
+  const step = (now) => {
+    if (token !== state.playToken) { marker.remove(); return; }
+    const run = runs[ri];
+    if (!run || si >= run.list.length) {
+      ri++; si = 0; t0 = null;
+      if (ri >= runs.length) {
+        $("play-status").textContent = "再生が終わりました（経路の目安）";
+        marker.remove();
+        return;
+      }
+      requestAnimationFrame(step);
+      return;
+    }
+    const s = run.list[si];
+    if (t0 === null) {
+      t0 = now;
+      s.line.setAttribute("stroke-width", "5");
+      $("play-status").textContent = `${run.name}：${s.seg.line_no}行目 ${s.seg.text}`;
+      marker.setAttribute("fill", run.color);
+    }
+    const len = Math.hypot(s.to[0] - s.from[0], s.to[1] - s.from[1]);
+    const dur = Math.max(350, (len / SPEED) * 1000);
+    const f = Math.min(1, (now - t0) / dur);
+    marker.setAttribute("cx", s.from[0] + (s.to[0] - s.from[0]) * f);
+    marker.setAttribute("cy", s.from[1] + (s.to[1] - s.from[1]) * f);
+    if (f >= 1) {
+      s.line.setAttribute("stroke-width", "2.5");
+      si++; t0 = null;
+    }
+    requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+$("play-button").addEventListener("click", startPlayback);
 
 // ---- 音声入力（speech.js）。認識した文は入力欄に入れるだけ。承認・出力・送信は呼ばない ----
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -479,7 +699,7 @@ const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 const voice = new SpeechInput(Recognition, {
   state: (value) => {
     state.voiceState = value;
-    $("voice-status").textContent = { starting: "開始しています…", listening: "聞いています（終了で確定）",
+    $("voice-status").textContent = { starting: "開始しています…", listening: "聞いています（話し終わったら「終了」）",
       stopping: "終了しています…", idle: "" }[value] || "";
     updateLocks();
   },
@@ -497,6 +717,7 @@ const voice = new SpeechInput(Recognition, {
     $("text-input").value = text;  // 入力欄に入れるだけ。自動では送らない
     state.voiceFinal = text;
     $("voice-status").textContent = "認識文を入力欄に入れました。確かめて、直してから「指示を送る」を押してください";
+    renderSteps();
   },
   error: (message) => {
     state.voiceToken = null;
@@ -507,11 +728,6 @@ const voice = new SpeechInput(Recognition, {
 function showVoiceError(message) {
   $("voice-error").textContent = message;
   $("voice-error").hidden = false;
-}
-
-function voiceMode() {
-  const checked = document.querySelector('input[name="voice-mode"]:checked');
-  return checked ? checked.value : null;
 }
 
 function updateLocks() {
@@ -527,9 +743,12 @@ function updateLocks() {
   $("voice-cancel").disabled = !rec;
   document.body.classList.toggle("recording", rec);
   if (state.st && state.view) {
+    renderChips();
     renderCandidate();
     renderApproval();
+    $("play-button").disabled = state.view.segments.length === 0 || rec;
   }
+  renderSteps();
 }
 
 if (!Recognition) {
