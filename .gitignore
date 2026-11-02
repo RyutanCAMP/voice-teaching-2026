@@ -1,0 +1,33 @@
+# --- 秘密の情報（絶対に公開しない） ---
+.env
+.env.*
+!.env.example
+*.key
+secrets/
+
+# --- 実機のジョブ・会社のデータ（公開しない） ---
+# 公開してよいのは samples/dummy/ の架空のジョブだけ
+*.JBI
+*.jbi
+!samples/dummy/*.JBI
+!samples/dummy/*.jbi
+private/
+backup/
+
+# --- アプリが作るファイル ---
+output/
+records/
+*.log
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# --- OS・エディタ ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
