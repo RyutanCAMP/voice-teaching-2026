@@ -8,156 +8,159 @@
 </head>
 <body>
 <header class="top">
-  <p id="mode-banner" class="mode-banner" data-mode="simulation">シミュレーションモード（合成ジョブで試すためのモードです。実機用のモードはまだありません）</p>
-  <div class="title-row">
+  <div class="brand">
     <h1>ボイスティーチング</h1>
-    <p class="readonly" id="readonly-note">元のジョブは変えません。承認ボタンで承認した変更候補だけを、新しいジョブ名でシミュレーション用に出力します（合成ジョブだけ）。実機用の出力・転送・ロボットの起動はしません。</p>
-    <button type="button" id="engineer-toggle" class="ghost" aria-expanded="false" aria-controls="engineer-view">エンジニア表示</button>
+    <p id="mode-banner" class="mode-banner" data-mode="simulation">シミュレーションモード</p>
   </div>
-  <ol class="steps" id="steps">
+  <ol class="steps" id="steps" aria-label="手順">
     <li id="step-1" class="step"><span class="num">1</span><span class="label">JOBを読み込む</span></li>
     <li id="step-2" class="step"><span class="num">2</span><span class="label">位置を選ぶ</span></li>
     <li id="step-3" class="step"><span class="num">3</span><span class="label">音声で指示</span></li>
     <li id="step-4" class="step"><span class="num">4</span><span class="label">確かめて承認</span></li>
   </ol>
-  <p id="next-action" class="next-action" aria-live="polite">JOBファイル（.JBI）をドラッグ＆ドロップしてください</p>
+  <button type="button" id="engineer-toggle" class="link" aria-expanded="false" aria-controls="engineer-view">詳細表示</button>
 </header>
 
 <section id="load-panel" class="load-panel">
   <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="JOBファイルを選ぶ">
-    <p class="drop-big">JOBファイル（.JBI）をここにドラッグ＆ドロップ</p>
-    <p class="drop-small">または <label for="file-input" class="file-label">クリックしてファイルを選ぶ</label></p>
+    <div class="drop-icon" aria-hidden="true">⤓</div>
+    <p class="drop-big">JOBファイルをここにドロップ</p>
+    <p class="drop-small"><label for="file-input" class="file-label">またはファイルを選ぶ</label></p>
     <input type="file" id="file-input" accept=".JBI,.jbi">
-    <p class="small muted">試すときは samples/dummy/DEMO_C_PLACE.JBI（置く動作の合成ジョブ）を使ってください。</p>
   </div>
-  <p class="small muted">読み込んだファイル：<span id="file-name">なし</span>。ファイルはこのPCの中のサーバー（127.0.0.1）にだけ送り、メモリの中だけで扱います（保存しません）。</p>
+  <p class="hint">試すときは samples/dummy/DEMO_C_PLACE.JBI</p>
   <p id="load-error" class="error" hidden></p>
 </section>
 
 <section id="problems-panel" class="problems" hidden>
-  <h2>このジョブには読めない所があります（実機用の検査では変更はすべて断られます）</h2>
+  <h2>このJOBには読めない行があります。図を見ることだけできます（変更はできません）</h2>
   <ul id="problems-list"></ul>
 </section>
 
 <main id="job-area" class="work" hidden>
-  <!-- 中央：ロボットの位置の図（経路の目安） -->
+  <!-- 中央：位置の図（経路の目安） -->
   <section id="figure-panel" class="stage" aria-label="位置の図">
     <div class="stage-head">
+      <span id="file-name" class="file-name"></span>
       <div class="view-tabs" role="tablist" aria-label="図の向き">
-        <button type="button" class="view-tab" data-view="yz" role="tab">Y・Z（X方向から見る）</button>
-        <button type="button" class="view-tab" data-view="xz" role="tab">X・Z（Y方向から見る）</button>
-        <button type="button" class="view-tab" data-view="xy" role="tab">X・Y（上から見る）</button>
+        <button type="button" class="view-tab" data-view="yz" role="tab" title="X方向から見る">Y・Z</button>
+        <button type="button" class="view-tab" data-view="xz" role="tab" title="Y方向から見る">X・Z</button>
+        <button type="button" class="view-tab" data-view="xy" role="tab" title="上から見る">X・Y</button>
       </div>
-      <p class="small">選んでいる位置：<strong id="selected-name" class="selected-name">なし</strong></p>
     </div>
-    <p class="figure-note" id="figure-note">この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。参考表示であり、実際のロボットの動きではありません。</p>
     <p id="figure-message" class="warn" hidden></p>
     <div id="fig-main" class="fig fig-main"></div>
-    <div id="legend" class="legend" hidden>
-      <span class="lg before">変更前（灰色）</span>
-      <span class="lg after">変更後（オレンジ）</span>
-    </div>
     <div class="play-row">
-      <button type="button" id="play-button" disabled>▶ 経路を再生（変更前 → 変更後）</button>
-      <span id="play-status" class="play-status" aria-live="polite"></span>
+      <button type="button" id="play-button" class="play" disabled aria-label="経路を再生">▶</button>
+      <div class="play-text">
+        <div id="legend" class="legend" hidden>
+          <span class="lg before">変更前</span>
+          <span class="lg after">変更後</span>
+        </div>
+        <span id="play-status" class="play-status" aria-live="polite"></span>
+      </div>
     </div>
-    <p id="play-note" class="play-note">再生は、JOBの命令の順に位置の点を直線で結んだ「経路の目安」のアニメーションです。ロボット本体の動きではありません（腕の姿勢・関節の動き・速度・PL による角の丸め・待ち時間は再現していません）。</p>
-    <div class="figs-small">
-      <figure data-view="xy"><figcaption>X・Y（上から）</figcaption><div id="fig-xy" class="fig fig-thumb"></div></figure>
-      <figure data-view="xz"><figcaption>X・Z</figcaption><div id="fig-xz" class="fig fig-thumb"></div></figure>
-      <figure data-view="yz"><figcaption>Y・Z</figcaption><div id="fig-yz" class="fig fig-thumb"></div></figure>
-    </div>
+    <p id="play-note" class="fine">点を命令の順に直線で結んだ目安です。ロボット本体の動きではありません。</p>
+    <p id="figure-note" class="fine">この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。参考表示であり、実際のロボットの動きではありません。</p>
   </section>
 
-  <!-- 右：今のステップの操作 -->
+  <!-- 右：今のステップの操作だけ -->
   <aside class="side">
+    <p id="next-action" class="next-action" aria-live="polite">JOBファイルをドロップしてください</p>
+
     <section id="select-panel" class="card" aria-label="位置を選ぶ">
-      <h2><span class="num">2</span>位置を選ぶ</h2>
-      <p class="small">図の点か、下のボタンを押します。</p>
       <div id="position-chips" class="chips"></div>
     </section>
 
-    <section id="instruction-panel" class="card" aria-label="指示">
-      <h2><span class="num">3</span>音声で指示</h2>
+    <section id="instruction-panel" class="card" aria-label="音声で指示">
       <div id="instruction-slot">
+        <button type="button" id="voice-position" class="position-pill" title="位置を選び直す"></button>
         <div id="voice-input-slot">
           <div id="voice-controls">
             <fieldset class="voice-mode" id="voice-mode-set">
-              <legend>音声の処理方法（選ぶまで録音できません）</legend>
-              <label><input type="radio" name="voice-mode" id="voice-mode-browser" value="browser"> ブラウザー標準</label>
-              <label><input type="radio" name="voice-mode" id="voice-mode-local" value="local"> 端末内のみ</label>
+              <legend>はじめにマイクの方式を選びます</legend>
+              <label><input type="radio" name="voice-mode" id="voice-mode-browser" value="browser"><span>ブラウザー標準</span></label>
+              <label><input type="radio" name="voice-mode" id="voice-mode-local" value="local"><span>端末内のみ</span></label>
+              <p class="fine">ブラウザー標準は、音声が外部で処理されることがあります。</p>
             </fieldset>
-            <p class="small notice" id="voice-notice">「ブラウザー標準」では、音声がブラウザー提供元のサーバーで処理されることがあります。このアプリは音声を保存・送信しません。</p>
             <div class="mic-row">
-              <button type="button" id="mic-button" class="mic-big" disabled aria-label="マイクで話す">🎤<span>マイクで話す</span></button>
-              <div class="mic-side">
-                <button type="button" id="voice-stop" disabled>終了</button>
-                <button type="button" id="voice-cancel" disabled>取消</button>
+              <button type="button" id="mic-button" class="mic-big" disabled aria-label="マイクで話す">🎤</button>
+              <div class="rec-buttons">
+                <button type="button" id="voice-stop" disabled>話し終わった</button>
+                <button type="button" id="voice-cancel" class="link" disabled>やめる</button>
               </div>
             </div>
-            <p id="voice-status" class="voice-status small"></p>
-            <p class="small">未確定の文（表示だけ。使いません）：<span id="voice-partial" class="partial"></span></p>
+            <p id="voice-status" class="voice-status"></p>
+            <p id="voice-partial" class="partial" aria-live="polite"></p>
             <p id="voice-error" class="error" hidden></p>
+            <button type="button" id="voice-mode-change" class="link small" hidden>マイクの方式を変える</button>
           </div>
           <p id="voice-unsupported" class="warn" hidden>このブラウザでは音声入力を使えません。文字で入力してください</p>
         </div>
         <form id="text-form" class="text-form">
-          <label for="text-input">認識した文（直してから送れます）</label>
-          <div class="row">
-            <input type="text" id="text-input" maxlength="500" placeholder="例：この位置を上に10mm" disabled>
-            <button type="submit" id="text-send" disabled>指示を送る</button>
-          </div>
+          <label for="text-input" class="sr-only">指示の文</label>
+          <input type="text" id="text-input" maxlength="500" placeholder="この位置を上に10mm" disabled>
+          <button type="submit" id="text-send" disabled>次へ</button>
         </form>
-        <p class="small muted">話した文は入力欄に入るだけで、自動では送りません。承認は声や文字ではできません（確認表示のボタンだけ）。</p>
-        <p class="small notice" id="mock-notice"></p>
-        <div class="heard"><span class="small muted">聞き取った文字：</span><span id="heard-text">（まだありません）</span></div>
+        <p class="fine">1回に動かせる量：<span id="max-shift-label"></span></p>
         <div id="reply-message" class="reply" aria-live="polite" hidden></div>
-        <details class="help">
-          <summary>話し方の例・詳しい説明</summary>
-          <ul class="small">
-            <li>「この位置を上に10mm」「この位置を下に5mm」</li>
-            <li>「C00005をZ方向に10mm移動して」「C00004を選択して」</li>
-            <li>「比較して」「元に戻して」</li>
-            <li>「少し動かして」のように量がはっきりしないときや、「右に」「左に」は聞き返します。</li>
-            <li>「端末内のみ」は、対応するブラウザーと日本語の言語パックが要ります。使えないときは止まり、外部の処理へは切り替えません。</li>
-            <li>終了すると、認識した文が入力欄に入ります。確かめて、直してから「指示を送る」を押してください。</li>
-          </ul>
-        </details>
       </div>
     </section>
 
     <section id="candidate-panel" class="card" aria-label="確かめて承認">
-      <h2><span class="num">4</span>確かめて承認</h2>
-      <div id="candidate-view"><p class="muted">変更候補はまだありません。</p></div>
-      <div class="row">
-        <button type="button" id="open-confirm" disabled>確認して承認へ</button>
-        <button type="button" id="undo-button" disabled>元に戻す</button>
-      </div>
-      <p class="small">1回に動かす量は <span id="max-shift-label"></span> までです。承認するまで、ジョブは変わりません。</p>
+      <div id="candidate-view"></div>
+      <button type="button" id="open-confirm" class="wide" disabled>確認して承認へ</button>
       <div id="approval-panel" aria-label="承認と出力">
-        <p id="approval-status" class="small">まだ承認していません。承認は確認表示の承認ボタンだけで行います（音声・文字では承認しません）。</p>
-        <button type="button" id="export-button" disabled>シミュレーション用に出力（合成ジョブだけ・実機に入れない）</button>
-        <p class="small muted">出力先：<code id="out-dir"></code>（拡張子 .JBI.txt）。実機での取り違えを完全に防ぐものではありません。実機には入れないでください。</p>
+        <p id="approval-status" class="approved" hidden></p>
+        <button type="button" id="export-button" class="wide" disabled>シミュレーション用に出力（合成ジョブだけ・実機に入れない）</button>
+        <p id="export-note" class="fine" hidden>出力先：<code id="out-dir"></code>（.JBI.txt）。実機での取り違えを完全に防ぐものではありません。実機には入れないでください。</p>
         <div id="export-result" aria-live="polite" hidden></div>
       </div>
+      <button type="button" id="undo-button" class="link" disabled>元に戻す</button>
     </section>
   </aside>
 
-  <!-- エンジニア表示（同じ画面の中の切り替え。最初は閉じている） -->
-  <section id="engineer-view" class="engineer" hidden aria-label="エンジニア表示">
-    <h2>エンジニア表示</h2>
+  <!-- 詳細表示（同じ画面の中の切り替え。最初は閉じている） -->
+  <section id="engineer-view" class="engineer" hidden aria-label="詳細表示">
+    <h2>詳細表示</h2>
     <p id="job-summary"></p>
     <ul id="job-notes" class="notes"></ul>
-    <p class="small">図の線は命令の順に結んでいます。実線は MOVL（PL・CRなし）の区間、点線はそれ以外で「目安」です。</p>
     <div class="eng-grid">
       <div>
+        <h3>使い方</h3>
+        <ul class="small">
+          <li>話し方の例：「この位置を上に10mm」「この位置を下に5mm」「C00005をZ方向に10mm移動して」「C00004を選択して」「比較して」「元に戻して」</li>
+          <li>「少し動かして」のように量がはっきりしないときや、「右に」「左に」は聞き返します。</li>
+          <li>話した文は入力欄に入るだけで、自動では送りません。直してから「次へ」を押せます。</li>
+          <li>承認は確認表示の承認ボタンだけで行います。声や文字では承認しません。承認するまで、ジョブは変わりません。</li>
+          <li>元のジョブは変えません。承認ボタンで承認した変更候補だけを、新しいジョブ名でシミュレーション用に出力します（合成ジョブだけ）。</li>
+        </ul>
+        <h3>音声と通信</h3>
+        <ul class="small">
+          <li id="voice-notice">「ブラウザー標準」では、音声がブラウザー提供元のサーバーで処理されることがあります。このアプリは音声を保存・送信しません。</li>
+          <li>「端末内のみ」は、対応するブラウザーと日本語の言語パックが要ります。使えないときは止まり、外部の処理へは切り替えません。</li>
+          <li>JOBファイルは、このPCの中のサーバー（127.0.0.1）にだけ送り、メモリの中だけで扱います（保存しません）。</li>
+          <li id="mock-notice"></li>
+        </ul>
+        <h3>図と再生</h3>
+        <ul class="small">
+          <li>図の線は命令の順に結んでいます。実線は MOVL（PL・CRなし）の区間、点線はそれ以外で「目安」です。</li>
+          <li>再生は、位置の点を直線で結んだ線の上を印が動くだけです。腕の姿勢・関節の動き・速度・PL による角の丸め・待ち時間は再現していません。</li>
+        </ul>
+        <div class="figs-small">
+          <figure data-view="xy"><figcaption>X・Y（上から見る）</figcaption><div id="fig-xy" class="fig fig-thumb"></div></figure>
+          <figure data-view="xz"><figcaption>X・Z（Y方向から見る）</figcaption><div id="fig-xz" class="fig fig-thumb"></div></figure>
+          <figure data-view="yz"><figcaption>Y・Z（X方向から見る）</figcaption><div id="fig-yz" class="fig fig-thumb"></div></figure>
+        </div>
+      </div>
+      <div>
+        <h3>聞き取った文字</h3>
+        <div id="heard-text" class="box">（まだありません）</div>
         <h3>解釈（プログラムが発話から取り出したこと）</h3>
         <div id="facts-view" class="box">（まだありません）</div>
         <h3>変更候補の詳細</h3>
         <div id="candidate-detail" class="box">（まだありません）</div>
         <div class="row"><button type="button" id="compare-button" disabled>比べる</button></div>
-      </div>
-      <div>
         <h3>作業ログ</h3>
         <ol id="work-log"></ol>
       </div>
@@ -175,27 +178,29 @@
   </section><!-- /engineer-view -->
 </main>
 
+<footer class="foot">
+  <p id="readonly-note">元のジョブは変えません。実機用の出力・転送・ロボットの起動はしません。</p>
+</footer>
+
 <div id="confirm-overlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-title" hidden>
   <div class="confirm-box">
-    <h2 id="confirm-title">確認</h2>
+    <h2 id="confirm-title" class="sr-only">確認</h2>
     <p id="confirm-text" class="confirm-text"></p>
     <p id="confirm-blocked" class="confirm-blocked" hidden></p>
     <div class="confirm-grid">
       <div id="confirm-figure" class="fig confirm-figure"></div>
       <div>
         <div id="confirm-diff" class="diff"></div>
-        <p class="small">図は、JOBの命令の順に位置の点を直線で結んだ経路の目安です（灰色＝変更前、オレンジ＝変更後）。ロボット本体の動きではありません。変更後の経路は、図と実機で人が確かめてください。この確認表示の文はプログラムが変更候補から作っています。</p>
+        <p class="fine">灰色＝変更前、オレンジ＝変更後。点を命令の順に直線で結んだ目安で、ロボット本体の動きではありません。変更後の経路は、図と実機で人が確かめてください。</p>
       </div>
     </div>
-    <div class="row">
-      <label for="approver-name">承認する人の名前：</label>
-      <input type="text" id="approver-name" maxlength="50" autocomplete="name">
+    <div class="confirm-actions">
+      <label for="approver-name" class="sr-only">承認する人の名前</label>
+      <input type="text" id="approver-name" maxlength="50" autocomplete="name" placeholder="承認する人の名前">
+      <button type="button" id="approve-button" class="approve" disabled>承認する</button>
+      <button type="button" id="confirm-close" class="link">閉じる</button>
     </div>
     <p id="confirm-error" class="error" hidden></p>
-    <div class="row">
-      <button type="button" id="approve-button" class="approve" disabled>承認する（ボタンだけ）</button>
-      <button type="button" id="confirm-close">閉じる（承認しない）</button>
-    </div>
   </div>
 </div><!-- /confirm-overlay -->
 

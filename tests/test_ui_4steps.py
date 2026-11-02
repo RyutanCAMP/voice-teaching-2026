@@ -3,10 +3,18 @@
 方針（唐川さん 2026-11-02）：誰が見ても5秒で使い方が分かる。操作は4ステップ
   1. JOB をドラッグ＆ドロップ  2. ロボットの位置を選ぶ  3. 音声で変更を指示  4. 変更前後の動作を確かめて承認
 - 最初の画面は JOB の読込が中心。次に押すボタンを目立たせる。マイクボタンは大きく。ロボットの図を画面の中心に
-- 技術的なログ・表は「エンジニア表示」（同じ画面の中の切り替え）にまとめる
+- 技術的なログ・表は「詳細表示」（同じ画面の中の切り替え）にまとめる
 - 図は X-Y・X-Z に加えて Y-Z。JOB の命令の順に、変更前後の経路を再生する（直線で結んだ目安。ロボット本体の動きではない）
 - 最終の承認は全画面の確認表示のまま。安全に関わる注意は省略しない
-ブラウザーでの動き（クリック・再生・切り替え）は tools/e2e_browser.py で確かめる。
+
+追加の方針（唐川さん 2026-11-02 夜・Apple の製品のように）：「説明を増やす」のではなく「説明が要らない画面」にする
+- 余白を広く、文字とボタンを減らす。画面ごとに目立たせる操作は1つだけ
+- 細かい説明・音声の方式の説明・通信の仕組み・ログは詳細表示へ
+- 音声の画面は「位置・マイク・入力欄・次へ」が中心
+- エラーは専門用語でなく、次に何をすればよいかを短く
+- 危険な変更の警告、シミュレーション限定の明示、最終承認は残す
+合格基準：初めて使う人が説明なしで操作できること。
+ブラウザーでの動き（見える文字の量・目立つボタンが1つだけ・クリック・再生）は tools/e2e_browser.py で確かめる。
 """
 import re
 from pathlib import Path
@@ -24,6 +32,23 @@ def html():
 
 def js():
     return files()["app.js"]
+
+
+def engineer_part(h):
+    m = re.search(r'<section id="engineer-view".*?<!-- /engineer-view -->', h, re.S)
+    assert m, "engineer-view が無い"
+    return m.group(0)
+
+
+def folded_part(h):
+    """詳細表示と <details> の中（最初は見えない所）"""
+    return engineer_part(h) + "".join(re.findall(r"<details.*?</details>", h, re.S))
+
+
+def outside_detail(h):
+    """詳細表示と <details> を除いた所（いつも見える所）"""
+    rest = h.replace(engineer_part(h), "")
+    return re.sub(r"<details.*?</details>", "", rest, flags=re.S)
 
 
 # ---- 4つのステップと「次にすること」 ----
@@ -46,11 +71,17 @@ def test_next_action_area_exists_and_js_marks_current_step():
     assert "primary" in j  # 次に押すボタンを目立たせる印
 
 
+def test_only_the_current_step_card_is_shown():
+    """右側には、今のステップのカードだけを出す（前後のカードは隠す）"""
+    j = js()
+    assert re.search(r'\$\(id\)\.hidden\s*=\s*Number\(n\)\s*!==\s*step', j)
+
+
 # ---- 1. 読込はドラッグ＆ドロップが中心 ----
 def test_drop_zone_is_the_first_screen_and_uses_the_same_loader():
     h, j = html(), js()
     assert re.search(r'id="drop-zone"[^>]*>', h)
-    assert "ドラッグ" in h and "ドロップ" in h
+    assert "ドロップ" in h
     assert 'id="file-input"' in h  # クリックで選ぶこともできる
     assert 'addEventListener("drop"' in j
     # ドロップでもファイル選択でも、同じ読み込みの関数を通る（/api/load は1か所だけ）
@@ -58,7 +89,7 @@ def test_drop_zone_is_the_first_screen_and_uses_the_same_loader():
     assert "loadFile(" in j
 
 
-# ---- 3. マイクは大きく、処理方法を選ぶまで押せない（既存の決まりのまま） ----
+# ---- 3. 音声の画面：位置・マイク・入力欄・次へ ----
 def test_mic_button_is_big_and_starts_disabled():
     h, css = html(), files()["style.css"]
     assert re.search(r'<button[^>]*id="mic-button"[^>]*class="[^"]*mic-big', h) or \
@@ -67,6 +98,38 @@ def test_mic_button_is_big_and_starts_disabled():
     m = re.search(r"\.mic-big\s*\{([^}]*)\}", css)
     assert m and re.search(r"(width|min-width|font-size)\s*:\s*\d{2,}", m.group(1))
     assert not re.search(r'name="voice-mode"[^>]*checked', h)
+
+
+def test_voice_card_is_position_mic_input_next():
+    h = html()
+    card = re.search(r'<section id="instruction-panel".*?</section>', h, re.S).group(0)
+    for i in ["voice-position", "mic-button", "text-input", "text-send"]:
+        assert f'id="{i}"' in card, i
+    assert re.search(r'<button[^>]*id="text-send"[^>]*>次へ</button>', card)
+    # 聞き取った文字・解釈・ログはカードに置かない（詳細表示へ）
+    eng = engineer_part(h)
+    for i in ["heard-text", "facts-view", "work-log"]:
+        assert f'id="{i}"' in eng, i
+
+
+# ---- 説明・音声の方式・通信の仕組み・ログは詳細表示へ ----
+def test_details_are_moved_out_of_the_main_screen():
+    h = html()
+    folded, shown = folded_part(h), outside_detail(h)
+    for w in ["ブラウザー提供元のサーバーで処理",  # 音声の方式の説明
+              "127.0.0.1",                       # 通信の仕組み
+              "話し方の例"]:
+        assert w in folded, w
+        assert w not in shown, w
+
+
+# ---- エラーは次に何をすればよいかを短く ----
+def test_errors_say_what_to_do_next():
+    j = js()
+    assert "function friendly(" in j
+    assert "python" not in j.split("function friendly(")[0].lower()  # 画面に出す文に起動のコマンドを書かない
+    for w in ["もう一度", "別の位置"]:
+        assert w in j, w
 
 
 # ---- 図：3つの向きと、経路の再生（ロボット本体の動きではないことを明記） ----
@@ -90,13 +153,11 @@ def test_path_playback_exists_and_states_its_limits():
     assert "after_segments" in j and "segments" in j
 
 
-# ---- エンジニア表示（同じ画面の中の切り替え） ----
+# ---- 詳細表示（同じ画面の中の切り替え） ----
 def test_engineer_view_is_a_toggle_in_the_same_page():
     h, j = html(), js()
     assert re.search(r'<button[^>]*id="engineer-toggle"', h)
-    eng = re.search(r'<section id="engineer-view".*?<!-- /engineer-view -->', h, re.S)
-    assert eng, "engineer-view が無い"
-    body = eng.group(0)
+    body = engineer_part(h)
     for i in ["work-log", "positions-table", "instructions-table", "facts-view"]:
         assert f'id="{i}"' in body, i
     assert 'aria-expanded' in j
@@ -112,13 +173,13 @@ def test_final_approval_stays_in_full_screen_overlay():
 
 
 def test_safety_notices_are_visible_not_folded():
-    """安全に関わる注意は <details>（折りたたみ）の中に入れない"""
+    """安全に関わる注意は、詳細表示にも <details>（折りたたみ）にも入れない"""
     h = html()
-    folded = "".join(re.findall(r"<details.*?</details>", h, re.S))
+    shown = outside_detail(h)
     for must in ["シミュレーションモード", "実機用の出力・転送・ロボットの起動はしません",
                  "この図で離れて見えても、当たらないとは限りません", "ロボット本体の動きではありません",
-                 "ブラウザー提供元のサーバーで処理"]:
-        assert must in h, must
-        assert must not in folded, must
-    for i in ["confirm-blocked", "problems-panel", "mode-banner"]:
-        assert f'id="{i}"' in h
+                 "実機での取り違えを完全に防ぐものではありません",
+                 "シミュレーション用に出力（合成ジョブだけ・実機に入れない）"]:
+        assert must in shown, must
+    for i in ["confirm-blocked", "problems-panel", "mode-banner", "candidate-view", "reply-message"]:
+        assert f'id="{i}"' in shown, i

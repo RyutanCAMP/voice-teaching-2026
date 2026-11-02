@@ -88,7 +88,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             pg.set_input_files("#file-input", str(REPO / "samples/dummy/DEMO_PLACE.JBI"))
             pg.wait_for_selector("#job-area:not([hidden])")
             pg.locator("#position-chips button", has_text="C00004").first.click()
-            until(pg, lambda: pg.inner_text("#selected-name") == "C00004")
+            until(pg, lambda: pg.inner_text("#voice-position strong") == "C00004")
             check(not pg.is_enabled("#mic-button"), "処理方法を選ぶまでマイクのボタンは使えない")
             pg.check("#voice-mode-browser")
             check(pg.is_enabled("#mic-button"), "処理方法を選ぶとマイクのボタンが使える")
@@ -130,13 +130,9 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             until(pg, lambda: pg.is_enabled("#export-button"))
             check(True, "承認すると出力ボタンが使える")
 
-            # 承認の後の録音中は、承認・出力が押せない
-            pg.click("#mic-button")
-            until(pg, lambda: pg.is_enabled("#voice-cancel"))
-            check(not pg.is_enabled("#export-button") and not pg.is_enabled("#approve-button"),
-                  "録音中は承認・出力のボタンが使えない")
-            pg.click("#voice-cancel")
-            until(pg, lambda: pg.is_enabled("#export-button"))
+            # 承認・出力の段階（ステップ4）では、マイクのカードを出さない（録音と承認・出力が重ならない）
+            check(pg.is_hidden("#mic-button") and pg.is_hidden("#instruction-panel"),
+                  "ステップ4ではマイクを出さない（録音しながら承認・出力できない）")
 
             pg.click("#export-button")
             pg.wait_for_selector("#export-result:not([hidden])")
@@ -183,13 +179,29 @@ DROP_FILE = """
 
 
 def check_four_steps(browser, url, check, shots: Path | None) -> None:
-    """4ステップの画面：ドラッグ＆ドロップ → 位置を選ぶ → 指示 → 変更前後の再生 → 確認表示（承認はしない）。"""
+    """4ステップの画面：ドラッグ＆ドロップ → 位置を選ぶ → 指示 → 変更前後の再生 → 確認表示（承認はしない）。
+
+    「説明が要らない画面」の確かめ：見える文字の量、目立つボタンが1つだけ、今のステップのカードだけを出す、
+    音声のカードは「位置・マイク・入力欄・次へ」、エラーは次に何をすればよいかを出す、止まった候補は承認できない。
+    """
     import base64
 
     def shot(page, name):
         if shots is not None:
             shots.mkdir(parents=True, exist_ok=True)
-            page.screenshot(path=str(shots / name), full_page=not name.startswith("6_"))  # 確認表示は画面の範囲だけ
+            page.screenshot(path=str(shots / name), full_page=not name.startswith(("6_", "7_")))  # 確認表示は画面の範囲だけ
+
+    def primaries(page):
+        return page.locator("button.primary:not([disabled]):visible, .drop-zone.primary:visible").count()
+
+    def buttons(page):
+        return page.locator("button:visible").count()
+
+    def chars(page, sel="body"):
+        return len("".join(page.inner_text(sel).split()))
+
+    def cards(page):
+        return [c for c in ["select-panel", "instruction-panel", "candidate-panel"] if page.is_visible("#" + c)]
 
     # ドロップのデータを作るのに evaluate を使うので、この確認のページだけ CSP を外す（画面のファイルは変えない）
     ctx = browser.new_context(viewport={"width": 1500, "height": 1000}, bypass_csp=True)
@@ -199,6 +211,11 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     check(pg.get_attribute("#step-1", "aria-current") == "step" and pg.is_visible("#drop-zone")
           and "primary" in (pg.get_attribute("#drop-zone", "class") or ""),
           "最初の画面：ステップ1が今のステップで、ドロップの枠が目立つ")
+    n = chars(pg)
+    check(n <= 160, f"最初の画面の文字は少ない（{n}文字。160文字まで）")
+    check(primaries(pg) == 1 and buttons(pg) <= 2, f"最初の画面：目立つものは1つ（ボタン {buttons(pg)}個）")
+    check(pg.is_visible("#mode-banner") and pg.is_visible("#readonly-note"),
+          "最初の画面にも、シミュレーションモードと「実機用の出力・転送・ロボットの起動はしません」を出す")
     shot(pg, "1_start.png")
 
     data = (REPO / "samples/dummy/DEMO_C_PLACE.JBI").read_bytes()
@@ -208,26 +225,56 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     check(pg.get_attribute("#step-2", "aria-current") == "step", "ドロップで読み込むと、ステップ2（位置を選ぶ）になる")
     check(pg.get_attribute('.view-tab[data-view="yz"]', "aria-selected") == "true",
           "X が一定の DEMO_C_PLACE では、最初に Y・Z の図を大きく出す")
+    check(cards(pg) == ["select-panel"], f"右側は今のステップのカードだけ：{cards(pg)}")
+    check(pg.is_visible("#figure-note") and pg.is_visible("#play-note"), "図の注意と再生の限界は、いつも見える")
     shot(pg, "2_loaded.png")
 
     pg.locator('#fig-main g.pt[data-name="C00005"] circle').last.click()  # 点そのもの（丸）を押す
-    until(pg, lambda: pg.inner_text("#selected-name") == "C00005")
+    until(pg, lambda: pg.inner_text("#voice-position strong") == "C00005")
     check(pg.get_attribute("#step-3", "aria-current") == "step", "図の点を押すと位置が選ばれ、ステップ3になる")
-    pg.check("#voice-mode-browser")
-    check("primary" in (pg.get_attribute("#mic-button", "class") or ""), "処理方法を選ぶと、マイクのボタンが目立つ")
+    check(cards(pg) == ["instruction-panel"], f"右側は音声のカードだけ：{cards(pg)}")
+    check(pg.is_visible("#voice-mode-set") and primaries(pg) == 0, "マイクの方式を選ぶまでは、方式の欄を出す")
+    pg.click('label:has(#voice-mode-browser)')
+    check(pg.is_hidden("#voice-mode-set") and pg.is_visible("#voice-mode-change"),
+          "方式を選ぶと方式の欄は閉じる（「マイクの方式を変える」で開ける）")
+    check("primary" in (pg.get_attribute("#mic-button", "class") or "") and primaries(pg) == 1,
+          "方式を選ぶと、マイクのボタンだけが目立つ")
+    side = chars(pg, ".side")
+    check(all(pg.is_visible(s) for s in ["#voice-position", "#mic-button", "#text-input", "#text-send"])
+          and pg.inner_text("#text-send") == "次へ" and side <= 70,
+          f"音声のカードは「位置・マイク・入力欄・次へ」（右側の文字 {side}文字。70文字まで）")
+    check(pg.is_hidden("#heard-text") and pg.is_hidden("#work-log") and pg.is_hidden("#voice-notice"),
+          "聞き取った文字・ログ・音声の方式の説明は詳細表示の中")
     shot(pg, "3_selected.png")
+
+    # 量がはっきりしない指示：専門用語でなく、次に何をすればよいかを出す
+    pg.fill("#text-input", "少し動かして")
+    pg.click("#text-send")
+    until(pg, lambda: pg.is_visible("#reply-message"))
+    reply = pg.inner_text("#reply-message")
+    check(pg.get_attribute("#step-3", "aria-current") == "step" and pg.is_visible("#reply-message .friendly strong"),
+          f"はっきりしない指示には、次にすることを出す：{' / '.join(reply.splitlines())[:60]}")
+    shot(pg, "3b_ask.png")
 
     pg.click("#mic-button")
     until(pg, lambda: pg.is_enabled("#voice-stop"))
+    check(pg.is_visible("#voice-stop") and primaries(pg) == 1 and "primary" in (pg.get_attribute("#voice-stop", "class") or ""),
+          "録音中は「話し終わった」だけが目立つ")
+    shot(pg, "3c_recording.png")
     pg.click("#voice-stop")
     until(pg, lambda: pg.input_value("#text-input") == FAKE_TEXT)
-    check("primary" in (pg.get_attribute("#text-send", "class") or ""), "認識文が入ると「指示を送る」が目立つ")
+    check("primary" in (pg.get_attribute("#text-send", "class") or "") and primaries(pg) == 1,
+          "認識文が入ると「次へ」だけが目立つ")
     pg.click("#text-send")
     until(pg, lambda: pg.get_attribute("#step-4", "aria-current") == "step")
     until(pg, lambda: "変更前" in pg.inner_text("#play-status") or "変更後" in pg.inner_text("#play-status"))
     check(True, f"候補ができると、変更前後の経路の再生が始まる：{pg.inner_text('#play-status')}")
     cand = pg.inner_text("#candidate-view")
-    check("C00005" in cand and "200.000 → 210.000" in cand, f"右のカードに変更の要点：{cand[:40]}…")
+    check("C00005" in cand and "200.000 → 210.000" in cand, f"右のカードに変更の要点：{' '.join(cand.split())[:40]}…")
+    check(cards(pg) == ["candidate-panel"] and primaries(pg) == 1
+          and "primary" in (pg.get_attribute("#open-confirm", "class") or ""),
+          "ステップ4は「確認して承認へ」だけが目立つ")
+    check(pg.is_hidden("#export-button"), "承認する前は、出力のボタンを出さない")
     pg.wait_for_timeout(1500)
     shot(pg, "4_playing.png")
     until(pg, lambda: "終わりました" in pg.inner_text("#play-status"), timeout_ms=60000)
@@ -237,19 +284,52 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     check(pg.get_attribute('.view-tab[data-view="xz"]', "aria-selected") == "true", "図の向きを切り替えられる")
     pg.click('.view-tab[data-view="yz"]')
 
-    check(pg.is_hidden("#engineer-view"), "エンジニア表示は最初は閉じている")
+    check(pg.is_hidden("#engineer-view"), "詳細表示は最初は閉じている")
     pg.click("#engineer-toggle")
-    check(pg.is_visible("#engineer-view") and "C00005" in pg.inner_text("#work-log"),
-          "エンジニア表示を開くと、作業ログ・表が同じ画面に出る")
+    check(pg.is_visible("#engineer-view") and "C00005" in pg.inner_text("#work-log")
+          and pg.is_visible("#voice-notice"),
+          "詳細表示を開くと、作業ログ・表・音声と通信の説明が同じ画面に出る")
     shot(pg, "5_engineer.png")
     pg.click("#engineer-toggle")
+    pg.evaluate("window.scrollTo(0, 0)")
 
     pg.click("#open-confirm")
     pg.wait_for_selector("#confirm-overlay:not([hidden])")
     check(pg.is_visible("#confirm-figure svg") and pg.is_visible("#approve-button"),
           "全画面の確認表示に、図と承認ボタンがある（承認はボタンだけ）")
+    pg.click("#approve-button")
+    check(pg.is_visible("#confirm-error") and "名前" in pg.inner_text("#confirm-error"),
+          "名前が無いと、名前を入れるように出す（承認しない）")
     shot(pg, "6_confirm.png")
     pg.click("#confirm-close")
+
+    # 実機用の検査で止まる位置（C00000）：参考の表示だけで、承認できない。次にすることを出す
+    pg.click("#undo-button")
+    until(pg, lambda: pg.get_attribute("#step-3", "aria-current") == "step")
+    # 図で重なった点（C00000 と C00007）は、位置の「変える」→ 位置のボタンで選ぶ
+    pg.click("#voice-position")
+    check(cards(pg) == ["select-panel"] and pg.get_attribute("#step-2", "aria-current") == "step",
+          "位置の「変える」で、位置のボタンに戻れる（図で重なった点も選べる）")
+    pg.locator("#position-chips button", has_text="C00000").click()
+    until(pg, lambda: pg.inner_text("#voice-position strong") == "C00000")
+    pg.fill("#text-input", FAKE_TEXT)
+    pg.click("#text-send")
+    pg.wait_for_timeout(500)
+    if pg.get_attribute("#step-4", "aria-current") == "step":
+        text = pg.inner_text("#candidate-view")
+        check("別の位置" in text and pg.is_visible("#candidate-view .friendly.blocked .reason")
+              and "primary" in (pg.get_attribute("#undo-button", "class") or ""),
+              "止まった候補：次にすること（元に戻して別の位置）と理由を出し、「元に戻す」が目立つ")
+        pg.click("#open-confirm")
+        pg.wait_for_selector("#confirm-overlay:not([hidden])")
+        check(pg.is_visible("#confirm-blocked") and not pg.is_enabled("#approve-button"),
+              "止まった候補は、確認表示でも承認できない")
+        shot(pg, "7_blocked.png")
+        pg.click("#confirm-close")
+    else:
+        reply = pg.inner_text("#reply-message")
+        check(pg.is_visible("#reply-message .friendly strong"), f"止まった指示には、次にすることを出す：{reply[:60]}")
+        shot(pg, "7_blocked.png")
     ctx.close()
 
 

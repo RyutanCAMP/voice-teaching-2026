@@ -1,11 +1,12 @@
 // ボイスティーチング（シミュレーションモード）の画面。4ステップ：読込 → 位置を選ぶ → 音声で指示 → 確かめて承認。
-// - JBI の解析・変更候補・承認・出力はサーバー側（Python）で行う。ここでは JBI を解析しない。
+// - JBI の解析・変更候補・承認・出力はサーバー側で行う。ここでは JBI を解析しない。
 // - 指示は文字入力の欄から /api/hear へ送る。音声（speech.js）は認識した文を入力欄に入れるだけで、自動では送らない。
 // - 録音中は、取消と終了のほかの操作（読込・位置選択・指示を送る・承認・出力）を使えなくする。
 // - 承認は確認表示の承認ボタンからだけ /api/approve を呼ぶ。指示の経路からは呼ばない。
 // - 出力ボタンは承認した後だけ使える。失敗を成功と表示しない。
 // - 図と再生は、命令の順に位置の点を直線で結んだ「経路の目安」。ロボット本体の動きではない。
 // - 外部から何も読み込まない。サーバー（同じ 127.0.0.1）にだけ要求を送る。
+// - 画面は「説明が要らない」ことを目指す：右側には今のステップのカードだけ、目立たせる操作は1つだけ。
 "use strict";
 import { SpeechInput } from "/static/speech.js";
 
@@ -15,6 +16,8 @@ const state = {
   st: null,         // サーバーの画面の状態（state）
   figView: "yz",    // 大きく出す図の向き（xy / xz / yz）
   playToken: 0,     // 再生を止めるための番号（描き直すと増やす）
+  modeOpen: false,  // マイクの方式を選び直す欄を開いているか
+  pickAgain: false, // 位置を選び直している（図で重なった点も、位置のボタンで選べるように）
   voiceState: "idle",   // 録音の状態（starting / listening / stopping / idle）
   voiceToken: null,     // 録音を始めたときのジョブ（session）と位置。違えば認識文を使わない
   voiceFinal: null,     // 最後に入力欄へ入れた認識文（直さずに送れば source=voice として記録）
@@ -22,7 +25,7 @@ const state = {
 
 const $ = (id) => document.getElementById(id);
 const SVG_NS = "http://www.w3.org/2000/svg";
-const NO_SERVER = "サーバーに届きませんでした（python -m voice_teaching.web が動いているか確かめてください）";
+const NO_SERVER = "アプリにつながりません。アプリを起動し直して、もう一度どうぞ";
 
 function el(tag, attrs, ...children) {
   const e = document.createElement(tag);
@@ -40,6 +43,23 @@ function svgEl(tag, attrs) {
   const e = document.createElementNS(SVG_NS, tag);
   for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, String(v));
   return e;
+}
+
+// エラーは専門用語でなく「次に何をすればよいか」を大きく出し、プログラムの理由は小さく添える（理由は省略しない）
+const HEADS = {
+  load: "読み込めませんでした。.JBI のファイルを選んで、もう一度どうぞ",
+  stop: "この指示は使えませんでした。言い方を変えて、もう一度どうぞ",
+  ask: "もう少し教えてください",
+  blocked: "この位置は、ここでは変更できません。「元に戻す」を押して、別の位置を選んでください",
+  approve: "承認できませんでした",
+  export: "出力していません",
+};
+
+function friendly(kind, reason) {
+  const box = el("div", { class: "friendly " + kind });
+  box.append(el("strong", {}, HEADS[kind] || ""));
+  if (reason) box.append(el("p", { class: "reason" }, reason));
+  return box;
 }
 
 async function postJson(path, body) {
@@ -65,7 +85,6 @@ async function loadFile(f) {
   voice.cancel();
   state.voiceFinal = null;
   $("text-input").value = "";
-  $("file-name").textContent = f.name;
   const bytes = new Uint8Array(await f.arrayBuffer());
   let res;
   try {
@@ -82,20 +101,24 @@ async function loadFile(f) {
   closeConfirm();
   stopPlayback();
   if (!res.ok) {
-    $("load-error").textContent = "読み込めません：" + (res.error || "理由が分かりません");
+    $("load-error").replaceChildren(friendly("load", res.error || "理由が分かりません"));
     $("load-error").hidden = false;
     $("job-area").hidden = true;
     $("problems-panel").hidden = true;
+    $("file-name").textContent = "";
     document.body.classList.remove("loaded");
     renderSteps();
     updateLocks();
     return;
   }
   $("load-error").hidden = true;
+  $("file-name").textContent = f.name;
   state.sessionId = res.session_id;
   state.view = res.view;
   state.st = res.state;
   state.figView = bestView(res.view.positions);
+  state.modeOpen = false;
+  state.pickAgain = false;
   $("heard-text").textContent = "（まだありません）";
   $("facts-view").textContent = "（まだありません）";
   $("reply-message").hidden = true;
@@ -126,9 +149,13 @@ drop.addEventListener("click", (ev) => {
 drop.addEventListener("keydown", (ev) => {
   if ((ev.key === "Enter" || ev.key === " ") && !recording()) { ev.preventDefault(); $("file-input").click(); }
 });
-// 枠の外に落としたファイルを、ブラウザーが開いてしまわないようにする
+// 枠の外に落としたファイルも読み込む（ブラウザーがファイルを開いてしまわないように）
 window.addEventListener("dragover", (ev) => ev.preventDefault());
-window.addEventListener("drop", (ev) => ev.preventDefault());
+window.addEventListener("drop", (ev) => {
+  ev.preventDefault();
+  const f = ev.dataTransfer && ev.dataTransfer.files[0];
+  if (f && !drop.contains(ev.target)) loadFile(f);
+});
 
 // ---- 画面全体 ----
 function renderAll() {
@@ -149,7 +176,7 @@ function renderState() {
   const st = state.st;
   if (!st) return;
   $("mock-notice").textContent = st.mock_notice;
-  $("selected-name").textContent = st.selected || "なし";
+  $("voice-position").replaceChildren(el("strong", {}, st.selected || ""), el("span", {}, "変える"));
   $("out-dir").textContent = st.out_dir;
   renderChips();
   renderCandidate();
@@ -165,7 +192,7 @@ function currentStep() {
   const st = state.st;
   if (!state.sessionId || !st) return 1;
   if (st.candidate) return 4;
-  if (!st.selected) return 2;
+  if (!st.selected || state.pickAgain) return 2;
   return 3;
 }
 
@@ -182,10 +209,15 @@ function renderSteps() {
     li.classList.toggle("current", i === step);
     if (i === step) li.setAttribute("aria-current", "step"); else li.removeAttribute("aria-current");
   }
+  // 右側には今のステップのカードだけを出す
   const cards = { 2: "select-panel", 3: "instruction-panel", 4: "candidate-panel" };
   for (const [n, id] of Object.entries(cards)) {
-    $(id).classList.toggle("current", Number(n) === step);
+    $(id).hidden = Number(n) !== step;
   }
+  // マイクの方式は、選ぶまでだけ出す（選んだ後は「マイクの方式を変える」で開く）
+  const chosen = !!voiceMode();
+  $("voice-mode-set").hidden = chosen && !state.modeOpen;
+  $("voice-mode-change").hidden = !chosen || state.modeOpen || recording();
   // 次に押すものを1つだけ目立たせる
   for (const id of ["drop-zone", "mic-button", "voice-stop", "text-send", "open-confirm", "undo-button", "export-button"]) {
     $(id).classList.remove("primary");
@@ -193,58 +225,69 @@ function renderSteps() {
   const st = state.st;
   let text = "", primary = null;
   if (step === 1) {
-    text = "JOBファイル（.JBI）をドラッグ＆ドロップしてください";
+    text = "JOBファイルをドロップしてください";
     primary = "drop-zone";
   } else if (step === 2) {
-    text = "図の点か位置のボタンを押して、動かす位置を選んでください";
+    text = "動かす位置を選んでください";
   } else if (step === 3) {
     if (recording()) {
-      text = "話し終わったら「終了」を押してください";
+      text = "どうぞ、話してください";
       primary = "voice-stop";
     } else if ($("text-input").value.trim()) {
-      text = "入力欄の文を確かめて「指示を送る」を押してください";
+      text = "文を確かめて「次へ」";
       primary = "text-send";
-    } else if (!$("voice-controls").hidden && !voiceMode()) {
-      text = "音声の処理方法を選んでから、マイクで話してください";
+    } else if (!$("voice-controls").hidden && !chosen) {
+      text = "マイクの方式を選んでください";
     } else if (!$("voice-controls").hidden) {
-      text = `🎤 を押して「この位置を上に10ミリ」のように話してください（${st.selected}）`;
+      text = "🎤 を押して話してください";
       primary = "mic-button";
     } else {
-      text = "入力欄に「この位置を上に10mm」のように書いて「指示を送る」を押してください";
+      text = "動かし方を書いて「次へ」";
       primary = "text-send";
     }
   } else if (st.blocked_reason) {
-    text = "実機用の検査で止まった候補です（承認できません）。「元に戻す」を押して、別の指示をしてください";
+    text = "この変更はできません";
     primary = "undo-button";
   } else if (!st.approval) {
-    text = "▶ 再生で変更前後の経路を確かめてから「確認して承認へ」を押してください";
+    text = "動きを確かめてください";
     primary = "open-confirm";
   } else if (!st.exported) {
-    text = "承認しました。「シミュレーション用に出力」を押してください";
+    text = "承認しました。出力してください";
     primary = "export-button";
   } else {
-    text = "出力しました。別の位置を選ぶか、新しいJOBを読み込めます";
+    text = "出力しました";
   }
   $("next-action").textContent = text;
   if (primary) $(primary).classList.add("primary");
 }
 
 $("text-input").addEventListener("input", renderSteps);
-for (const id of ["voice-mode-browser", "voice-mode-local"]) $(id).addEventListener("change", renderSteps);
+for (const id of ["voice-mode-browser", "voice-mode-local"]) {
+  $(id).addEventListener("change", () => { state.modeOpen = false; renderSteps(); });
+}
+$("voice-mode-change").addEventListener("click", () => { state.modeOpen = true; renderSteps(); });
+$("voice-position").addEventListener("click", () => {
+  if (recording()) return;
+  state.pickAgain = true;
+  renderSteps();
+});
 
-// ---- エンジニア表示（同じ画面の中で開く・閉じる） ----
+// ---- 詳細表示（同じ画面の中で開く・閉じる） ----
 $("engineer-toggle").addEventListener("click", () => {
   const open = $("engineer-view").hidden;
   $("engineer-view").hidden = !open;
   $("engineer-toggle").setAttribute("aria-expanded", String(open));
-  $("engineer-toggle").textContent = open ? "エンジニア表示を閉じる" : "エンジニア表示";
+  $("engineer-toggle").textContent = open ? "詳細表示を閉じる" : "詳細表示";
+  if (open) $("engineer-view").scrollIntoView({ behavior: "smooth", block: "start" });
 });
 
 // ---- 2. 位置の選択 ----
 async function select(name) {
   if (!state.sessionId || recording()) return;
   const res = await postJson("/api/select", { session_id: state.sessionId, position: name });
-  applyResult(res);
+  state.pickAgain = false;
+  $("reply-message").hidden = true;
+  applyResult(res, false);
 }
 
 function renderChips() {
@@ -253,7 +296,7 @@ function renderChips() {
     const b = el("button", {
       type: "button",
       class: "chip" + (p.name === selected ? " selected" : "") + (p.shift_check.ok ? "" : " blocked"),
-      title: p.shift_check.ok ? p.line : "実機用の検査では断られます：" + p.shift_check.reason,
+      title: p.shift_check.ok ? p.line : "この位置は変更できません：" + p.shift_check.reason,
     }, p.name);
     b.disabled = recording();
     b.addEventListener("click", () => select(p.name));
@@ -261,13 +304,13 @@ function renderChips() {
   }));
 }
 
-function applyResult(res) {
+function applyResult(res, showOk = true) {
   if (res.state) state.st = res.state;
   if (res.ok === false) {
     showReply("stop", res.error || "理由が分かりません");
   } else if (res.status && res.status !== "ok") {
     showReply(res.status, res.message);
-  } else if (res.message) {
+  } else if (res.message && showOk) {
     showReply("ok", res.message);
   }
   renderState();
@@ -275,9 +318,10 @@ function applyResult(res) {
 
 function showReply(status, message) {
   const box = $("reply-message");
-  const head = { ok: "結果：", ask: "聞き返し：", stop: "止めました（何も変えていません）：" }[status] || "";
   box.className = "reply " + status;
-  box.replaceChildren(el("strong", {}, head), message);
+  if (status === "ok") box.replaceChildren(el("p", {}, message));
+  else if (status === "ask") box.replaceChildren(friendly("ask", message));
+  else box.replaceChildren(friendly("stop", message));
   box.hidden = false;
 }
 
@@ -299,7 +343,7 @@ async function sendInstruction(text, source) {
   const res = await postJson("/api/hear", { session_id: state.sessionId, text: text, source: source });
   $("heard-text").textContent = res.heard !== undefined ? res.heard : text;
   renderFacts(res.facts);
-  applyResult(res);
+  applyResult(res, false);
   // 候補ができたら、まず図で変更前後の経路を再生して見せる（承認は確認表示のボタンだけ）
   if (res.candidate_made && state.st && state.st.candidate) startPlayback();
 }
@@ -323,7 +367,7 @@ function renderFacts(f) {
     ...rows.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)])));
 }
 
-// ---- 4. 変更候補（要点は右のカード、詳しくはエンジニア表示） ----
+// ---- 4. 変更候補（要点だけをカードに。詳しくは詳細表示） ----
 function renderCandidate() {
   const st = state.st;
   const c = st.candidate;
@@ -332,21 +376,17 @@ function renderCandidate() {
   $("compare-button").disabled = !c || recording();
   $("undo-button").disabled = !c || recording();
   if (!c) {
-    host.replaceChildren(el("p", { class: "muted" }, "変更候補はまだありません。"));
+    host.replaceChildren();
     $("candidate-detail").textContent = "（まだありません）";
     return;
   }
   const [pos, axis] = c.target.split(" ");
   const parts = [];
-  if (c.blocked_reason) {
-    parts.push(el("div", { class: "result refused" },
-      el("strong", {}, "参考の表示だけの候補です。実機用の検査で止まったため、承認も出力もできません。"),
-      el("p", {}, "理由：" + c.blocked_reason)));
-  }
-  parts.push(el("div", { class: "result proposal" },
-    el("p", { class: "cand-big" }, `${pos} を ${axis}方向に ${c.delta}mm`),
-    el("p", { class: "cand-values" }, `${axis}：${c.before_value} → ${c.after_value}`),
-    el("ul", { class: "small" }, ...c.warnings.map((w) => el("li", {}, w)))));
+  if (c.blocked_reason) parts.push(friendly("blocked", c.blocked_reason));
+  parts.push(el("p", { class: "cand-pos" }, pos));
+  parts.push(el("p", { class: "cand-big" }, `${axis}方向に ${c.delta}mm`));
+  parts.push(el("p", { class: "cand-values" }, `${c.before_value} → ${c.after_value}`));
+  if (c.warnings.length) parts.push(el("ul", { class: "cand-warn" }, ...c.warnings.map((w) => el("li", {}, w))));
   host.replaceChildren(...parts);
   $("candidate-detail").replaceChildren(
     el("p", {}, `変更候補（${c.target}・ファイルの ${c.line_no}行目）。承認するまでジョブは変わりません。`),
@@ -379,13 +419,19 @@ function openConfirm() {
   if (!st || !st.candidate) return;
   stopPlayback();
   $("confirm-text").textContent = st.confirmation_text || "";
-  $("confirm-blocked").textContent = st.blocked_reason ? "実機用の検査では止まりました：" + st.blocked_reason : "";
+  // 止まった理由は確認の文に入っている。入っていないときだけ、ここに添える（理由は省略しない）
+  const reason = st.blocked_reason && !(st.confirmation_text || "").includes(st.blocked_reason)
+    ? "（実機用の検査で止まりました：" + st.blocked_reason + "）" : "";
+  $("confirm-blocked").textContent = st.blocked_reason
+    ? "この変更は承認できません。閉じて「元に戻す」を押し、別の位置を選んでください" + reason : "";
   $("confirm-blocked").hidden = !st.blocked_reason;
   $("confirm-diff").replaceChildren(diffView(st.candidate));
   drawFigure($("confirm-figure"), ...VIEWS[state.figView], true);
   $("confirm-error").hidden = true;
   $("approve-button").disabled = !st.can_approve || recording();
+  $("approver-name").disabled = !st.can_approve;
   $("confirm-overlay").hidden = false;
+  if (st.can_approve) $("approver-name").focus(); else $("confirm-close").focus();
 }
 
 function closeConfirm() {
@@ -394,20 +440,24 @@ function closeConfirm() {
 
 $("open-confirm").addEventListener("click", openConfirm);
 $("confirm-close").addEventListener("click", closeConfirm);
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape" && !$("confirm-overlay").hidden) closeConfirm();
+});
 
 // ---- 承認（このボタンからだけ） ----
 async function onApproveClick() {
   if (recording()) return;
   const name = $("approver-name").value.trim();
   if (!name) {
-    $("confirm-error").textContent = "承認する人の名前を入れてください";
+    $("confirm-error").textContent = "名前を入れてから、承認してください";
     $("confirm-error").hidden = false;
+    $("approver-name").focus();
     return;
   }
   const res = await postJson("/api/approve", { session_id: state.sessionId, approver: name });
   if (res.state) state.st = res.state;
   if (res.ok !== true) {
-    $("confirm-error").textContent = "承認できませんでした：" + (res.error || "理由が分かりません");
+    $("confirm-error").replaceChildren(friendly("approve", res.error || "理由が分かりません"));
     $("confirm-error").hidden = false;
     renderState();
     return;
@@ -421,9 +471,11 @@ $("approve-button").addEventListener("click", onApproveClick);
 function renderApproval() {
   const st = state.st;
   const a = st.approval;
-  $("approval-status").textContent = a
-    ? `${a.approved_by} さんが承認ボタンで承認しました（${a.approved_at}）。出力ボタンが使えます。`
-    : "まだ承認していません。承認は確認表示の承認ボタンだけで行います（指示の文字では承認しません）。";
+  $("approval-status").textContent = a ? `✓ ${a.approved_by} さんが承認しました` : "";
+  $("approval-status").hidden = !a;
+  $("open-confirm").hidden = !!a;
+  $("export-button").hidden = !a;
+  $("export-note").hidden = !a;
   $("export-button").disabled = !st.can_export || recording();
   $("approve-button").disabled = !st.can_approve || recording();
   if (!a && !$("export-result").hidden && $("export-result").dataset.ok === "true") {
@@ -438,20 +490,20 @@ $("export-button").addEventListener("click", async () => {
   if (res.state) state.st = res.state;
   const box = $("export-result");
   if (res.ok === true) {
-    box.className = "result proposal";
+    box.className = "result done";
     box.dataset.ok = "true";
-    box.replaceChildren(el("strong", {}, "シミュレーション用のジョブを出力しました（実機には入れないでください）："),
-      el("div", {}, el("code", {}, res.path)));
+    box.replaceChildren(el("strong", {}, "✓ シミュレーション用に出力しました（実機には入れないでください）"),
+      el("p", { class: "reason" }, el("code", {}, res.path)));
   } else {
-    box.className = "result refused";
+    box.className = "result";
     box.dataset.ok = "false";
-    box.replaceChildren(el("strong", {}, "出力していません。"), el("p", {}, res.error || "理由が分かりません"));
+    box.replaceChildren(friendly("export", res.error || "理由が分かりません"));
   }
   box.hidden = false;
   renderState();
 });
 
-// ---- 作業ログ（エンジニア表示） ----
+// ---- 作業ログ（詳細表示） ----
 function renderLog() {
   const ol = $("work-log");
   ol.replaceChildren(...state.st.log.map((x) =>
@@ -460,7 +512,7 @@ function renderLog() {
   ol.scrollTop = ol.scrollHeight;
 }
 
-// ---- 一覧（エンジニア表示） ----
+// ---- 一覧（詳細表示） ----
 function usersOf(name) {
   const p = state.view.positions.find((q) => q.name === name);
   return p ? p.users.map((u) => u.line_no) : [];
@@ -504,9 +556,10 @@ function renderTables() {
   }));
 }
 
-// ---- 図（3つの向き。大きな図1つと小さな図3つ） ----
+// ---- 図（大きな図1つ。3つの向きを切り替える。小さな図は詳細表示） ----
 const AXES = { X: 0, Y: 1, Z: 2 };
 const VIEWS = { xy: ["X", "Y"], xz: ["X", "Z"], yz: ["Y", "Z"] };
+const C_LINE = "#c7cbd1", C_BEFORE = "#a1a6ad", C_AFTER = "#ff6a1a", C_POINT = "#1d1d1f", C_SEL = "#0a84ff";
 
 // 位置の広がりがいちばん大きい2つの軸の図を、最初に大きく出す
 function bestView(positions) {
@@ -568,37 +621,36 @@ function drawFigure(host, axA, axB, big) {
     "aria-label": `${axA}・${axB} の図` });
 
   const segLines = { before: [], after: [] };
-  const drawSegs = (segs, posList, color, width, opacity, key) => {
+  const drawSegs = (segs, posList, color, width, key) => {
     const at = Object.fromEntries(posList.map((p) => [p.name, p]));
     for (const s of segs) {
       const p = at[s.from], q = at[s.to];
       if (!p || !q) continue;
-      const related = selected && (s.to === selected || s.from === selected);
       const line = svgEl("line", { x1: sx(p.xyz[a]), y1: sy(p.xyz[b]), x2: sx(q.xyz[a]), y2: sy(q.xyz[b]),
-        stroke: color, "stroke-width": related ? width + 1.5 : width, "stroke-opacity": opacity });
-      if (!s.solid) line.setAttribute("stroke-dasharray", "6 4");
+        stroke: color, "stroke-width": width, "stroke-linecap": "round" });
+      if (!s.solid) line.setAttribute("stroke-dasharray", "6 5");
       const t = svgEl("title", {});
       t.textContent = `${s.line_no}行目 ${s.text}${s.solid ? "" : "（目安）"}`;
       line.append(t);
       svg.append(line);
-      segLines[key].push({ seg: s, line: line, from: [sx(p.xyz[a]), sy(p.xyz[b])], to: [sx(q.xyz[a]), sy(q.xyz[b])] });
+      segLines[key].push({ seg: s, line: line, width: width, from: [sx(p.xyz[a]), sy(p.xyz[b])], to: [sx(q.xyz[a]), sy(q.xyz[b])] });
     }
   };
 
   const w = big ? 2.5 : 2;
   if (c) {
-    drawSegs(v.segments, before, "#9a9a9a", w, 0.9, "before");          // 変更前（灰色）
-    drawSegs(c.after_segments, after, "#d0602a", w, 0.95, "after");      // 変更後（色付き）
+    drawSegs(v.segments, before, C_BEFORE, w, "before");        // 変更前（灰色）
+    drawSegs(c.after_segments, after, C_AFTER, w + 0.5, "after"); // 変更後（オレンジ）
   } else {
-    drawSegs(v.segments, before, "#4a6fa5", w, 1, "before");
+    drawSegs(v.segments, before, C_LINE, w, "before");
   }
 
   // 名前のラベルは、近くのラベルと重ならないように下へずらして置く
   const placed = [];
   const placeLabel = (x, y, wd) => {
-    let ly = y - 8;
-    while (placed.some((q) => Math.abs(q.x - (x + 9)) < Math.max(q.w, wd) && Math.abs(q.y - ly) < 13)) ly += 14;
-    placed.push({ x: x + 9, y: ly, w: wd });
+    let ly = y - 10;
+    while (placed.some((q) => Math.abs(q.x - (x + 12)) < Math.max(q.w, wd) && Math.abs(q.y - ly) < 14)) ly += 15;
+    placed.push({ x: x + 12, y: ly, w: wd });
     return ly;
   };
   const sorted = before.slice().sort((p, q) => sy(p.xyz[b]) - sy(q.xyz[b]) || sx(p.xyz[a]) - sx(q.xyz[a]));
@@ -607,11 +659,12 @@ function drawFigure(host, axA, axB, big) {
     const moved = c && c.moved === p.name;
     const sel = p.name === selected;
     const text = p.name + (moved ? "（変更前）" : "");
-    const g = svgEl("g", { class: "pt", "data-name": p.name });
-    g.append(svgEl("circle", { cx: x, cy: y, r: big ? 16 : 8, fill: "transparent" }));  // 押しやすい大きさ
-    if (sel) g.append(svgEl("circle", { cx: x, cy: y, r: big ? 13 : 7, fill: "none", stroke: "#e0a000", "stroke-width": 3 }));
-    g.append(svgEl("circle", { cx: x, cy: y, r: big ? 6 : 4, fill: moved ? "#9a9a9a" : (c ? "#555" : "#d0602a") }));
-    const label = svgEl("text", { x: x + 9, y: placeLabel(x, moved ? y + 24 : y, text.length * 8), "font-weight": sel ? "bold" : "normal" });
+    const g = svgEl("g", { class: "pt" + (sel ? " sel" : ""), "data-name": p.name });
+    g.append(svgEl("circle", { cx: x, cy: y, r: big ? 18 : 8, fill: "transparent" }));  // 押しやすい大きさ
+    if (sel) g.append(svgEl("circle", { cx: x, cy: y, r: big ? 14 : 7, fill: "rgba(10,132,255,0.15)", stroke: C_SEL, "stroke-width": 2 }));
+    g.append(svgEl("circle", { cx: x, cy: y, r: big ? 6 : 4, fill: moved ? C_BEFORE : (sel ? C_SEL : C_POINT) }));
+    const label = svgEl("text", { x: x + 12, y: placeLabel(x, moved ? y + 24 : y, text.length * 8),
+      fill: sel ? C_SEL : "#6e6e73", "font-weight": sel ? "600" : "400" });
     label.textContent = text;
     g.append(label);
     const t = svgEl("title", {});
@@ -624,15 +677,15 @@ function drawFigure(host, axA, axB, big) {
     const q = after.find((p) => p.name === c.moved);
     if (q) {
       const x = sx(q.xyz[a]), y = sy(q.xyz[b]);
-      svg.append(svgEl("circle", { cx: x, cy: y, r: big ? 7 : 4, fill: "#d0602a" }));
+      svg.append(svgEl("circle", { cx: x, cy: y, r: big ? 7 : 4, fill: C_AFTER }));
       const text = `${q.name}（変更後）`;
-      const label = svgEl("text", { x: x + 9, y: placeLabel(x, y, text.length * 8), fill: "#b04010", "font-weight": "bold" });
+      const label = svgEl("text", { x: x + 12, y: placeLabel(x, y, text.length * 8), fill: "#c4470a", "font-weight": "600" });
       label.textContent = text;
       svg.append(label);
     }
   }
-  const ax1 = svgEl("text", { x: W - 46, y: H - 10 }); ax1.textContent = `${axA} →`;
-  const ax2 = svgEl("text", { x: 8, y: 16 }); ax2.textContent = `↑ ${axB}`;
+  const ax1 = svgEl("text", { x: W - 40, y: H - 12, class: "axis" }); ax1.textContent = `${axA} →`;
+  const ax2 = svgEl("text", { x: 12, y: 20, class: "axis" }); ax2.textContent = `↑ ${axB}`;
   svg.append(ax1, ax2);
   host.replaceChildren(svg);
   return { svg, segLines, big };
@@ -642,6 +695,7 @@ function drawFigure(host, axA, axB, big) {
 function stopPlayback() {
   state.playToken++;
   $("play-status").textContent = "";
+  $("play-button").classList.remove("playing");
 }
 
 function startPlayback() {
@@ -650,10 +704,11 @@ function startPlayback() {
   const token = state.playToken;
   const fig = drawFigure($("fig-main"), ...VIEWS[state.figView], true);
   if (!fig) return;
+  $("play-button").classList.add("playing");
   const c = state.st && state.st.candidate;
-  const runs = [{ name: c ? "変更前" : "命令の順", list: fig.segLines.before, color: c ? "#666" : "#2d5aa0" }];
-  if (c) runs.push({ name: "変更後", list: fig.segLines.after, color: "#d0602a" });
-  const marker = svgEl("circle", { r: 9, fill: runs[0].color, stroke: "#fff", "stroke-width": 2 });
+  const runs = [{ name: c ? "変更前" : "命令の順", list: fig.segLines.before, color: c ? "#6e6e73" : C_POINT }];
+  if (c) runs.push({ name: "変更後", list: fig.segLines.after, color: C_AFTER });
+  const marker = svgEl("circle", { r: 9, fill: runs[0].color, stroke: "#fff", "stroke-width": 3 });
   fig.svg.append(marker);
   const SPEED = 260;  // 画面の上の速さ（px/秒）。実際のロボットの速度とは関係ない
   let ri = 0, si = 0, t0 = null;
@@ -663,7 +718,8 @@ function startPlayback() {
     if (!run || si >= run.list.length) {
       ri++; si = 0; t0 = null;
       if (ri >= runs.length) {
-        $("play-status").textContent = "再生が終わりました（経路の目安）";
+        $("play-status").textContent = "再生が終わりました";
+        $("play-button").classList.remove("playing");
         marker.remove();
         return;
       }
@@ -683,7 +739,7 @@ function startPlayback() {
     marker.setAttribute("cx", s.from[0] + (s.to[0] - s.from[0]) * f);
     marker.setAttribute("cy", s.from[1] + (s.to[1] - s.from[1]) * f);
     if (f >= 1) {
-      s.line.setAttribute("stroke-width", "2.5");
+      s.line.setAttribute("stroke-width", String(s.width));
       si++; t0 = null;
     }
     requestAnimationFrame(step);
@@ -699,8 +755,8 @@ const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 const voice = new SpeechInput(Recognition, {
   state: (value) => {
     state.voiceState = value;
-    $("voice-status").textContent = { starting: "開始しています…", listening: "聞いています（話し終わったら「終了」）",
-      stopping: "終了しています…", idle: "" }[value] || "";
+    $("voice-status").textContent = { starting: "準備しています…", listening: "聞いています",
+      stopping: "まとめています…", idle: "" }[value] || "";
     updateLocks();
   },
   partial: (text) => {
@@ -711,12 +767,11 @@ const voice = new SpeechInput(Recognition, {
     state.voiceToken = null;
     // 録音を始めたときとジョブ・位置が違えば使わない
     if (!t || t.sessionId !== state.sessionId || t.selected !== (state.st ? state.st.selected : null)) {
-      showVoiceError("録音の間にジョブか位置が変わったため、認識文は使いません。");
+      showVoiceError("話している間に位置が変わったので、使いませんでした。もう一度どうぞ");
       return;
     }
     $("text-input").value = text;  // 入力欄に入れるだけ。自動では送らない
     state.voiceFinal = text;
-    $("voice-status").textContent = "認識文を入力欄に入れました。確かめて、直してから「指示を送る」を押してください";
     renderSteps();
   },
   error: (message) => {
@@ -738,6 +793,7 @@ function updateLocks() {
   $("text-send").disabled = rec || !loaded;
   $("voice-mode-browser").disabled = rec;
   $("voice-mode-local").disabled = rec;
+  $("voice-position").disabled = rec;
   $("mic-button").disabled = rec || !loaded || !voiceMode() || !Recognition;
   $("voice-stop").disabled = !rec;
   $("voice-cancel").disabled = !rec;
@@ -773,6 +829,6 @@ $("voice-stop").addEventListener("click", () => voice.stop());
 $("voice-cancel").addEventListener("click", () => {
   state.voiceToken = null;
   voice.cancel();  // 認識文は使わない。入力欄は変えない
-  $("voice-status").textContent = "取り消しました。認識文は使っていません";
+  $("voice-status").textContent = "やめました";
 });
 updateLocks();
