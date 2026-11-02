@@ -21,7 +21,7 @@ def test_select_utterance():
 
 
 def test_move_this_position_x_10mm():
-    f = read_utterance("この位置をX方向に10mm移動して")
+    f = read_utterance("この位置をXプラス方向に10mm移動して")
     assert f.kinds == ("move",)
     assert f.position is None
     assert f.refers_to_selection
@@ -57,7 +57,7 @@ def test_right_left_is_not_turned_into_an_axis():
 
 # ---- 正規化 ----
 def test_fullwidth_is_normalized():
-    f = read_utterance("Ｃ００００５をＸ方向に１０ｍｍ移動して")
+    f = read_utterance("Ｃ００００５をＸプラス方向に１０ｍｍ移動して")
     assert f.position == "C00005"
     assert f.axis == "X"
     assert f.amount.value == 10.0
@@ -65,26 +65,26 @@ def test_fullwidth_is_normalized():
 
 
 def test_fullwidth_milli_and_lowercase():
-    f = read_utterance("c00005をx方向に１０ミリ動かして")
+    f = read_utterance("c00005をxプラス方向に１０ミリ動かして")
     assert f.position == "C00005"
     assert f.axis == "X"
     assert f.requested_value() == 10.0
 
 
 def test_decimal_amount():
-    f = read_utterance("C00005をZ方向に0.5mm移動して")
+    f = read_utterance("C00005をZプラス方向に0.5mm移動して")
     assert f.requested_value() == 0.5
 
 
 # ---- 5. 量が分からない指示は聞き返す ----
 @pytest.mark.parametrize("text", [
-    "C00005をX方向に移動して",          # 量が無い
-    "C00005をX方向に十ミリ移動して",     # 漢数字
+    "C00005をXプラス方向に移動して",          # 量が無い
+    "C00005をXプラス方向に十ミリ移動して",     # 漢数字
     "C00005をX方向に半分だけ移動して",   # 半分
     "C00005をX方向に少し移動して",       # 少し
-    "C00005をX方向に10移動して",         # 単位が無い数字
-    "C00005をX方向に1センチ移動して",    # mm以外の長さの単位
-    "C00005をX方向に1,000mm移動して",    # 区切りのある数字（1 や 0 と読まない）
+    "C00005をXプラス方向に10移動して",         # 単位が無い数字
+    "C00005をXプラス方向に1センチ移動して",    # mm以外の長さの単位
+    "C00005をXプラス方向に1,000mm移動して",    # 区切りのある数字（1 や 0 と読まない）
 ])
 def test_unclear_amount_asks(text):
     f = read_utterance(text)
@@ -94,12 +94,12 @@ def test_unclear_amount_asks(text):
 
 
 def test_no_amount_question_text():
-    v = pre_check(read_utterance("C00005をX方向に移動して"))
+    v = pre_check(read_utterance("C00005をXプラス方向に移動して"))
     assert "何mm" in v.message
 
 
 def test_kanji_amount_is_not_read_as_number():
-    f = read_utterance("C00005をX方向に十ミリ移動して")
+    f = read_utterance("C00005をXプラス方向に十ミリ移動して")
     assert f.amounts == ()
     assert f.unclear_amounts
 
@@ -127,7 +127,7 @@ def test_no_direction_asks():
 
 
 def test_two_axes_ask():
-    assert pre_check(read_utterance("C00005をX方向とY方向に10mm移動して")).status == "ask"
+    assert pre_check(read_utterance("C00005をX方向とYプラス方向に10mm移動して")).status == "ask"
 
 
 def test_front_back_stops():
@@ -159,15 +159,15 @@ def test_speed_absolute_value_is_not_an_amount():
 
 # ---- 11. 2つ以上を変える依頼は聞き返す ----
 def test_two_positions_ask():
-    assert pre_check(read_utterance("C00004とC00005をX方向に10mm移動して")).status == "ask"
+    assert pre_check(read_utterance("C00004とC00005をXプラス方向に10mm移動して")).status == "ask"
 
 
 def test_two_operations_ask():
-    assert pre_check(read_utterance("X方向に10mm移動して元に戻して")).status == "ask"
+    assert pre_check(read_utterance("Xプラス方向に10mm移動して元に戻して")).status == "ask"
 
 
 def test_bad_position_number_asks():
-    f = read_utterance("C0005をX方向に10mm移動して")
+    f = read_utterance("C0005をXプラス方向に10mm移動して")
     assert f.position is None
     assert pre_check(f).status == "ask"
 
@@ -191,53 +191,53 @@ def test_robot_start_stops():
 
 # ---- 16. 提案と発話の照らし合わせ ----
 def test_matching_proposal_ok():
-    f = read_utterance("C00005をX方向に10mm移動して")
+    f = read_utterance("C00005をXプラス方向に10mm移動して")
     assert check_proposal(f, shift()).status == "ok"
 
 
 def test_amount_mismatch_asks():
-    f = read_utterance("C00005をX方向に10mm移動して")
+    f = read_utterance("C00005をXプラス方向に10mm移動して")
     v = check_proposal(f, shift(delta_mm=15))
     assert v.status == "ask"
     assert "10" in v.message and "15" in v.message
 
 
 def test_sign_mismatch_asks():
-    f = read_utterance("C00005をX方向に10mm移動して")
+    f = read_utterance("C00005をXプラス方向に10mm移動して")
     assert check_proposal(f, shift(delta_mm=-10)).status == "ask"
 
 
 def test_axis_mismatch_asks():
-    f = read_utterance("C00005をX方向に10mm移動して")
+    f = read_utterance("C00005をXプラス方向に10mm移動して")
     assert check_proposal(f, shift(axis="Y")).status == "ask"
 
 
 def test_position_mismatch_asks():
-    f = read_utterance("C00005をX方向に10mm移動して")
+    f = read_utterance("C00005をXプラス方向に10mm移動して")
     assert check_proposal(f, shift(position="C00004")).status == "ask"
 
 
 def test_this_position_uses_selection():
-    f = read_utterance("この位置をX方向に10mm移動して")
+    f = read_utterance("この位置をXプラス方向に10mm移動して")
     assert check_proposal(f, shift(), selected="C00005").status == "ok"
     assert check_proposal(f, shift(position="C00004"), selected="C00005").status == "ask"
     assert check_proposal(f, shift(), selected=None).status == "ask"
 
 
 def test_two_proposals_ask():
-    f = read_utterance("C00005をX方向に10mm移動して")
+    f = read_utterance("C00005をXプラス方向に10mm移動して")
     assert check_proposal(f, [shift(), shift(position="C00004")]).status == "ask"
     assert check_proposal(f, []).status == "ask"
 
 
 def test_unclear_amount_rejects_any_proposal():
     """5. 漢数字・「半分」では、Claudeが数字を出しても使わない"""
-    for text in ("C00005をX方向に十ミリ移動して", "C00005をX方向に半分移動して"):
+    for text in ("C00005をXプラス方向に十ミリ移動して", "C00005をX方向に半分移動して"):
         assert check_proposal(read_utterance(text), shift(delta_mm=5)).status == "ask"
 
 
 def test_side_proposal_stops():
-    f = read_utterance("C00005をX方向に10mm移動して")
+    f = read_utterance("C00005をXプラス方向に10mm移動して")
     p = ProposedChange(kind="shift", position="C00005", side="右", delta_mm=10)
     assert check_proposal(f, p).status == "stop"
 

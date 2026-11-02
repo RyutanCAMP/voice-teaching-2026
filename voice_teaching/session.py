@@ -53,6 +53,7 @@ class Reply:
     comparison: Comparison | None = None
     blocked_reason: str | None = None   # 実機用の検査（jbi）に断られた理由
     candidate_made: bool = False        # この操作で変更候補を作ったか
+    choices: tuple[tuple[str, str], ...] = ()  # 聞き返しの短い選択肢（見せる文, 指示の文）
 
 
 class Session:
@@ -67,6 +68,7 @@ class Session:
         self._simulate = simulate
         self.selected: str | None = None
         self.candidate: jbi.ChangeProposal | None = None
+        self.candidate_utterance: str | None = None  # 候補を作った指示の文（認識した文字・打った文字）
         self.candidate_blocked_reason: str | None = None
         self._candidate_position: str | None = None
         self.facts: ut.UtteranceFacts | None = None
@@ -100,7 +102,7 @@ class Session:
         if v.status != "ok":
             self._locked = True  # 聞き返し・止めた発話では、Claude が量を作って提案しても使わない
         self._awaiting_answer = facts if v.status == "ask" else None
-        return self._reply(v.status, v.message, facts=facts)
+        return self._reply(v.status, v.message, facts=facts, choices=v.choices)
 
     # ---- 操作 ----
     def select(self, position: str) -> Reply:
@@ -196,6 +198,7 @@ class Session:
 
     def _accept(self, p: ut.ProposedChange, change: jbi.ChangeProposal, blocked: str | None) -> Reply:
         self.candidate = change
+        self.candidate_utterance = self.facts.raw if self.facts is not None else None
         self.candidate_blocked_reason = blocked
         self._candidate_position = p.position
         self.selected = p.position
@@ -210,6 +213,7 @@ class Session:
 
     def _discard(self) -> None:
         self.candidate = None
+        self.candidate_utterance = None
         self.candidate_blocked_reason = None
         self._candidate_position = None
 

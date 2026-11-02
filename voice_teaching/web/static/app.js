@@ -317,18 +317,30 @@ function applyResult(res, showOk = true) {
   if (res.ok === false) {
     showReply("stop", res.error || "理由が分かりません");
   } else if (res.status && res.status !== "ok") {
-    showReply(res.status, res.message);
+    showReply(res.status, res.message, res.choices);
   } else if (res.message && showOk) {
     showReply("ok", res.message);
   }
   renderState();
 }
 
-function showReply(status, message) {
+function showReply(status, message, choices) {
   const box = $("reply-message");
   box.className = "reply " + status;
   if (status === "ok") box.replaceChildren(el("p", {}, message));
-  else if (status === "ask") box.replaceChildren(friendly("ask", message));
+  else if (status === "ask") {
+    box.replaceChildren(friendly("ask", message));
+    // 短い選択肢：押すと、その文を指示として送る（同じ検査を通る。承認・出力はしない）
+    if (choices && choices.length) {
+      const row = el("div", { class: "choices" });
+      for (const c of choices) {
+        const b = el("button", { type: "button", class: "choice" }, c.label);
+        b.addEventListener("click", () => { if (!recording()) sendInstruction(c.text, "text"); });
+        row.append(b);
+      }
+      box.append(row);
+    }
+  }
   else if (/上限[^。]*を超え/.test(message || "")) box.replaceChildren(friendly("limit", message));  // 移動量の上限を超えたときだけ
   else box.replaceChildren(friendly("stop", message));
   box.hidden = false;
@@ -395,8 +407,9 @@ function renderCandidate() {
   const parts = [];
   if (c.blocked_reason) parts.push(friendly("blocked", c.blocked_reason));
   parts.push(el("p", { class: "cand-pos" }, pos));
-  parts.push(el("p", { class: "cand-big" }, `${axis}方向に ${c.delta}mm`));
-  parts.push(el("p", { class: "cand-values" }, `${c.before_value} → ${c.after_value}`));
+  parts.push(el("p", { class: "cand-big" }, `${axis}方向に ${c.delta}mm${dirName(axis, c.delta)}`));
+  if (c.heard) parts.push(el("p", { class: "cand-heard" }, `指示：「${c.heard}」`));
+  parts.push(c.before_xyz ? xyzView(c) : el("p", { class: "cand-values" }, `${c.before_value} → ${c.after_value}`));
   if (c.warnings.length) parts.push(el("ul", { class: "cand-warn" }, ...c.warnings.map((w) => el("li", {}, w))));
   host.replaceChildren(...parts);
   $("candidate-detail").replaceChildren(
@@ -404,6 +417,32 @@ function renderCandidate() {
     diffView(c),
     el("p", {}, "変わる命令の行："),
     el("ul", {}, ...c.affected.map((a) => el("li", {}, a))));
+}
+
+// 確認済みの方向の名前（サーバーの direction_names。今は Z の 上・下 だけ）。未確認の軸には名前を付けない
+function dirName(axis, delta) {
+  const names = (state.st && state.st.direction_names) || {};
+  const n = names[axis] && names[axis][String(delta).trim().startsWith("-") ? "-" : "+"];
+  return n ? `（${n}へ）` : "";
+}
+
+// 変更前後の X・Y・Z（サーバーが読んだ値）。変わる軸を強調し、確認済みの向きの名前だけを添える
+function xyzView(c) {
+  const axis = c.target.split(" ")[1];
+  const names = (state.st && state.st.direction_names) || {};
+  const head = (a) => {
+    const n = names[a];
+    return el("th", { class: a === axis ? "chg" : "" }, a, n ? el("span", { class: "dir" }, `＋${n["+"]}／−${n["-"]}`) : null);
+  };
+  const row = (label, xyz) => el("tr", {}, el("th", {}, label),
+    ...["X", "Y", "Z"].map((a, i) => el("td", { class: a === axis ? "chg" : "" }, xyz[i])));
+  const known = ["X", "Y", "Z"].filter((a) => names[a]);
+  const unknown = ["X", "Y", "Z"].filter((a) => !names[a]);
+  return el("div", { class: "xyz" },
+    el("table", {}, el("tr", {}, el("th", {}, ""), ...["X", "Y", "Z"].map(head)),
+      row("変更前", c.before_xyz), row("変更後", c.after_xyz)),
+    el("p", { class: "fine" }, (known.length ? `向きの名前は確認済みの ${known.join("・")} だけ。` : "")
+      + (unknown.length ? `${unknown.join("・")} の向きの名前（右・前など）は未確認のため出していません` : "")));
 }
 
 function diffView(c) {
@@ -443,6 +482,11 @@ function openConfirm() {
   $("confirm-warnings").hidden = notes.length === 0;
   $("confirm-affected").replaceChildren(...st.candidate.affected.map((a) => el("li", {}, a)));
   $("confirm-diff").replaceChildren(diffView(st.candidate));
+  const cc = st.candidate, [, ax] = cc.target.split(" ");
+  $("confirm-xyz").replaceChildren(
+    el("p", { class: "cand-big" }, `${cc.target.split(" ")[0]}：${ax}方向に ${cc.delta}mm${dirName(ax, cc.delta)}`),
+    cc.heard ? el("p", { class: "cand-heard" }, `指示：「${cc.heard}」`) : "",
+    cc.before_xyz ? xyzView(cc) : "");
   if (state.view.positions.some((p) => p.xyz)) {
     confirm3d.reset();
     confirm3d.setData(data3d());
@@ -948,7 +992,7 @@ $("local-install").addEventListener("click", async () => {
 function lacksSign(text) {
   const t = text.normalize("NFKC").toUpperCase()
     .replace(/(?<![ァ-ヺー])(エックス|ワイ|ゼット|ズィー)(?=\s?(の|プラス|マイナス|PLUS|MINUS|[+\-]|方向|軸))/g, (m) => ({ "エックス": "X", "ワイ": "Y" }[m] || "Z"));
-  return /(^|[^A-Z])[XYZ]([^A-Z]|$)/.test(t) && /\d/.test(t) && !/[+\-−]|プラス|マイナス|PLUS|MINUS|上げ|下げ|上に|下に|上へ|下へ|上方向|下方向/.test(t);
+  return /(^|[^A-Z])[XYZ]([^A-Z]|$)/.test(t) && /\d/.test(t) && !/[+\-−]|プラス|マイナス|PLUS|MINUS|上げ|下げ|上に|下に|上へ|下へ|上方向|下方向|増や|減ら|大きく|小さく/.test(t);
 }
 
 function renderSignHint() {

@@ -116,7 +116,7 @@ def test_down_is_minus_z_and_side_asks():
     assert it.decide(facts("この位置を下に5mm移動して"), "C00004", NAMES)[0]["args"]["delta_mm"] == -5.0
     r = resp(tool_use("propose_position", {"position": "C00004", "direction": "右", "amount_mm": 5}))
     it = ci.ClaudeInterpreter(KEY, client=client(r))
-    calls = it.decide(facts("この位置をZ方向に5mm移動して"), "C00004", NAMES)
+    calls = it.decide(facts("この位置をZプラス方向に5mm移動して"), "C00004", NAMES)
     assert calls == [{"tool": "ask_user", "args": {"question": u.SIDE_MESSAGE}}]
 
 

@@ -100,7 +100,7 @@
             </div>
             <p id="voice-status" class="voice-status"></p>
             <p id="voice-partial" class="partial" aria-live="polite"></p>
-            <p id="voice-hint" class="voice-hint" hidden>＋か−が入っていません。このままだと＋として扱います。マイナスなら直してください</p>
+            <p id="voice-hint" class="voice-hint" hidden>＋か−が入っていません。このままだと聞き返します。「Xのマイナス」のように直せます</p>
             <p id="voice-error" class="error" hidden></p>
           </div>
           <p id="browser-note" class="browser-note" hidden><span>アプリの中で開いた画面では、音声を使えないことがあります。Google Chrome で開いてください</span> <button type="button" id="copy-url" class="link small">アドレスをコピー</button></p>
@@ -138,7 +138,7 @@
       <div>
         <h3>使い方</h3>
         <ul class="small">
-          <li>話し方の例：「この位置を上に10mm」「この位置を下に5mm」「C00005をZ方向に10mm移動して」「C00004を選択して」「比較して」「元に戻して」</li>
+          <li>話し方の例：「この位置を上に10mm」「この位置を下に5mm」「C00005をZプラス方向に10mm移動して」「C00004を選択して」「比較して」「元に戻して」</li>
           <li>「少し動かして」のように量がはっきりしないときや、「右に」「左に」は聞き返します。</li>
           <li>話した文は入力欄に入るだけで、自動では送りません。直してから「次へ」を押せます。</li>
           <li>承認は確認表示の承認ボタンだけで行います。声や文字では承認しません。承認するまで、ジョブは変わりません。</li>
@@ -208,6 +208,7 @@
       <div id="confirm-figure" class="fig confirm-figure"></div>
       <div>
         <ul id="confirm-warnings" class="confirm-warnings" aria-label="この変更の注意"></ul>
+        <div id="confirm-xyz" class="confirm-xyz"></div>
         <div id="confirm-diff" class="diff"></div>
         <details class="fine"><summary>変わる命令の行</summary><ul id="confirm-affected" class="confirm-affected"></ul></details>
         <p class="fine">灰色＝変更前、オレンジ＝変更後。点を命令の順に直線で結んだ目安で、ロボット本体の動きではありません。ロボット本体・関節は描いていません。動作や干渉を保証するシミュレーターではありません。経路は人が確かめてください。</p>

@@ -84,7 +84,7 @@ def test_sim_export_refuses_blocked_candidate_even_with_matching_approval(name, 
 def test_flow_refuses_to_approve_or_export_blocked_candidate(name, position, tmp_path):
     wf = WebFlow()
     sid = wf.load((DUMMY / name).read_bytes())["session_id"]
-    r = wf.hear(sid, f"{position}をZ方向に5mm移動して")
+    r = wf.hear(sid, f"{position}をZプラス方向に5mm移動して")
     st = r["state"]
     assert st["candidate"] is not None and st["blocked_reason"], r
     assert st["can_approve"] is False
@@ -122,7 +122,7 @@ def _post(srv, path, body):
 @pytest.mark.parametrize("name,position", BLOCKED)
 def test_http_api_refuses_blocked_candidate(running, name, position, tmp_path):
     sid = _post(running, "/api/load", (DUMMY / name).read_bytes())["session_id"]
-    h = _post(running, "/api/hear", {"session_id": sid, "text": f"{position}をZ方向に5mm移動して", "source": "text"})
+    h = _post(running, "/api/hear", {"session_id": sid, "text": f"{position}をZプラス方向に5mm移動して", "source": "text"})
     assert h["state"]["blocked_reason"]
     a = _post(running, "/api/approve", {"session_id": sid, "approver": "テスト太郎"})
     assert a["ok"] is False

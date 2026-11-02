@@ -70,7 +70,7 @@ def test_sign_is_read_once_not_twice():
 def test_lost_sign_is_not_guessed():
     # 認識で「マイナス」が落ちた「x5ミリ」：軸と向きを推測しない（聞き返す）
     f = read_utterance("x5ミリ")
-    assert f.axes == () and pre_check(f) is not OK
+    assert f.requested_value() is None and pre_check(f).status == "ask"
 
 
 def test_misheard_large_amount_is_stopped_by_the_existing_limit():
@@ -149,10 +149,11 @@ def test_voice_text_without_sign_is_flagged_before_sending():
     # 実マイクで「Xマイナス方向に5ミリ」が「X 方向に 5mm」になった（マイナスが落ちた）。向きの無い軸は＋として読むので、
     # 声から入った文に軸があって向きが無ければ、送る前に知らせる（サーバーの読み方は変えない：音声と文字で結果は同じ）
     h, v = html(), voice()
-    assert 'id="voice-hint"' in card(h) and "＋として扱います" in h
+    assert 'id="voice-hint"' in card(h) and "＋か−が入っていません" in h
     assert "function lacksSign(" in v and "state.voiceFinal !== null" in v[v.index("function renderSignHint"):]
     f = read_utterance("X 方向に 5mm")
-    assert f.requested_value() == 5  # 今の決まり（向きの無い軸は＋）。変えるかは唐川さんの判断
+    # 2026-11-03 本人の方針（CHECKER_021 D2）：符号が分からなければ、音声・文字とも聞き返す（＋を補わない）
+    assert f.requested_value() is None and pre_check(f).status == "ask"
 
 
 @pytest.mark.parametrize("text,axis,value", [
@@ -167,10 +168,15 @@ def test_spoken_axis_and_sign_spellings(text, axis, value):
     assert f.axes == (axis,) and f.requested_value() == value and pre_check(f) is OK
 
 
-@pytest.mark.parametrize("text", ["ワイヤーを3mm動かして", "ワイ3mm", "ワイの3mm"])
+@pytest.mark.parametrize("text", ["ワイヤーを3mm動かして", "ワイ3mm"])
 def test_katakana_alone_is_not_taken_as_axis(text):
     f = read_utterance(text)
     assert f.axes == () and pre_check(f) is not OK
+
+
+def test_katakana_axis_without_sign_asks_sign():
+    f = read_utterance("ワイの3mm")
+    assert f.axes == ("Y",) and f.requested_value() is None and pre_check(f).status == "ask"
 
 
 # ---- 内部 Safety レビュー（17edb3f）の P2 ----

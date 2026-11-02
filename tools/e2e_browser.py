@@ -134,8 +134,8 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             until(pg, lambda: pg.is_enabled("#voice-stop"))
             pg.click("#voice-stop")
             until(pg, lambda: pg.input_value("#text-input") == "X 方向に 5mm")
-            check(pg.is_visible("#voice-hint") and "＋として扱います" in pg.inner_text("#voice-hint"),
-                  "声から入った文に軸の向きが無ければ、送る前に「＋として扱います」と知らせる")
+            check(pg.is_visible("#voice-hint") and "＋か−が入っていません" in pg.inner_text("#voice-hint"),
+                  "声から入った文に軸の向きが無ければ、送る前に「＋か−が入っていません」と知らせる")
             pg.fill("#text-input", "X マイナス方向に 5mm")
             check(pg.is_hidden("#voice-hint"), "文を直して向きを入れると、知らせは消える")
             pg.fill("#text-input", "")
@@ -208,6 +208,37 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
                   and pg3.inner_text("#mic-label") == "マイク OFF",
                   "Chrome 以外で通信に失敗したら、聞き直さずに Chrome で開くよう案内する")
             pg3.close()
+
+            # 聞き返しの短い選択肢（CHECKER_021 10章・CHECKER_022）：「Yを3mm下げて」は2択。押すと候補を作るだけ（承認しない）
+            pg4 = b.new_page(viewport={"width": 1400, "height": 1000})
+            pg4.add_init_script(FAKE_RECOGNITION)
+            pg4.goto(url)
+            pg4.set_input_files("#file-input", str(REPO / "samples/dummy/DEMO_C_PLACE.JBI"))
+            pg4.wait_for_selector("#job-area:not([hidden])")
+            pg4.locator("#position-chips button", has_text="C00005").first.click()
+            until(pg4, lambda: pg4.inner_text("#voice-position strong") == "C00005")
+            pg4.fill("#text-input", "Yを3mm下げて")
+            pg4.click("#text-send")
+            until(pg4, lambda: pg4.locator("#reply-message button.choice").count() == 2)
+            labels = pg4.locator("#reply-message button.choice").all_inner_texts()
+            check(labels == ["Y座標を −3mm", "下方向へ 3mm"] and pg4.get_attribute("#step-3", "aria-current") == "step",
+                  f"「Yを3mm下げて」は候補を作らず、短い2択で聞き返す：{labels}")
+            if shots is not None:
+                pg4.screenshot(path=str(shots / "3e_choices.png"))
+            pg4.locator("#reply-message button.choice", has_text="Y座標を").click()
+            until(pg4, lambda: pg4.get_attribute("#step-4", "aria-current") == "step")
+            cv = pg4.inner_text("#candidate-view")
+            check("Y方向に -3.000mm" in cv and "150.000" in cv and "147.000" in cv and pg4.is_hidden("#export-button")
+                  and pg4.is_enabled("#open-confirm"),
+                  "選択肢を押すと Y −3mm の候補（変更前後の XYZ 付き）になるだけで、承認・出力はされない（確認へ進む）")
+            pg4.click("#open-confirm")
+            pg4.wait_for_selector("#confirm-overlay:not([hidden])")
+            cx = pg4.inner_text("#confirm-xyz")
+            check("指示：「Y座標を3mm下げて」" in cx and "147.000" in cx and "未確認" in cx,
+                  "確認表示に、指示の文・変更量・変更後の XYZ と、X・Y の向きの名前は未確認であることを出す")
+            if shots is not None:
+                pg4.screenshot(path=str(shots / "6b_confirm_xyz.png"))
+            pg4.close()
 
             # SpeechRecognition が無いブラウザー
             pg2 = b.new_page()
@@ -475,7 +506,7 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     check(True, f"候補ができると、3D で変更前後の経路の再生が始まる：{pg.inner_text('#play-status')}")
     check(not pg.is_enabled("#voice-stop") and pg.is_hidden("#mic-button"), "ステップ4では聞かない（マイクのカードを出さない）")
     cand = pg.inner_text("#candidate-view")
-    check("C00005" in cand and "200.000 → 210.000" in cand, f"右のカードに変更の要点：{' '.join(cand.split())[:40]}…")
+    check("C00005" in cand and "200.000" in cand and "210.000" in cand and "指示：「" in cand and "上へ" in cand, f"右のカードに変更の要点・指示の文・変更前後の XYZ・確認済みの向きの名前：{' '.join(cand.split())[:40]}…")
     check(pg.locator("#fig-3d line.seg.after").count() > 0 and pg.locator("#fig-3d circle.after-pt").count() == 1,
           "3D に変更後の経路（オレンジ）と変更後の点を出す")
     check(pg.text_content("#fig-3d .inset-amt") == "Z +10.000mm",

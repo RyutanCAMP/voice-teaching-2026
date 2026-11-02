@@ -308,3 +308,16 @@ body.recording .mic-big[disabled] { opacity: 1; }
 .voice-hint { background: #fff8e6; border-radius: 10px; padding: 8px 12px; font-size: 13px; margin: 6px 0; }
 /* 詳細表示を開いている間は、右のカードを固定しない（下にスクロールしたとき詳細表示に重ならないように） */
 .work:has(#engineer-view:not([hidden])) .side { position: static; }
+
+/* 聞き返しの短い選択肢 */
+.choices { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.choice { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 8px 14px; font-size: 14px; cursor: pointer; }
+.choice:hover { border-color: var(--blue); }
+/* 認識した文字・変更前後の X・Y・Z */
+.cand-heard { font-size: 13px; color: var(--sub); margin: 4px 0; }
+.xyz table { border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 13px; margin: 6px 0 2px; }
+.xyz th, .xyz td { padding: 3px 8px; text-align: right; }
+.xyz th { color: var(--sub); font-weight: 500; }
+.xyz .chg { color: var(--text); font-weight: 700; background: #fff3e8; }
+.xyz .dir { display: block; font-size: 11px; color: var(--sub); font-weight: 400; }
+.xyz .fine { margin: 2px 0 0; }

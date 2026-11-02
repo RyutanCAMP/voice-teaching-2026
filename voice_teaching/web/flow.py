@@ -270,7 +270,8 @@ class WebFlow:
 
     def _reply(self, e: _Entry, r: Reply) -> dict:
         return {"status": r.status, "message": r.message, "blocked_reason": r.blocked_reason,
-                "candidate_made": r.candidate_made}
+                "candidate_made": r.candidate_made,
+                "choices": [{"label": label, "text": text} for label, text in r.choices]}
 
     def _state(self, sid: str, e: _Entry) -> dict:
         s = e.session
@@ -280,7 +281,7 @@ class WebFlow:
             if e.comparison is None or e.comparison[0] is not ch:
                 cand = None
             else:
-                cand = _comparison_dict(e.comparison[1], ch)
+                cand = _comparison_dict(e.comparison[1], ch, s)
         approved = self._approved(e)
         return {
             "session_id": sid,
@@ -288,6 +289,8 @@ class WebFlow:
             "job_name": s.original.name,
             "selected": s.selected,
             "facts": _facts(s.facts),
+            # 確認済みの方向の名前だけ（未確認の 右・前 などは入れない）
+            "direction_names": ut.DIRECTION_NAMES, "direction_names_source": ut.DIRECTION_NAMES_SOURCE,
             "candidate": cand,
             "confirmation_text": s.confirmation_text(),
             "blocked_reason": s.candidate_blocked_reason if ch is not None else None,
@@ -305,18 +308,27 @@ class WebFlow:
         }
 
 
-def _comparison_dict(c: Comparison, ch: jbi.ChangeProposal) -> dict:
+def _xyz(job: jbi.Job, name: str) -> list[str] | None:
+    pos = job.positions.get(name)
+    if pos is None or len(pos.values) < 3:
+        return None
+    return [f"{v:.3f}" for v in pos.xyz]
+
+
+def _comparison_dict(c: Comparison, ch: jbi.ChangeProposal, s) -> dict:
     d = {
         "kind": c.kind, "target": c.target, "line_no": c.line_number,
         "before_line": c.before_line, "after_line": c.after_line,
         "before_value": c.before_value, "after_value": c.after_value, "delta": c.delta,
         "affected": list(c.affected), "warnings": list(c.warnings),
         "blocked_reason": c.blocked_reason,
+        "heard": s.candidate_utterance,  # 認識した文字（または打った文字）
     }
     if ch.kind == "shift":
         fig = api.figure_data(ch.new_job)
-        d.update(after_positions=fig["positions"], after_segments=fig["segments"],
-                 moved=c.target.split()[0])
+        name = c.target.split()[0]
+        d.update(after_positions=fig["positions"], after_segments=fig["segments"], moved=name,
+                 before_xyz=_xyz(s.original, name), after_xyz=_xyz(ch.new_job, name))  # 変更前後の X・Y・Z（プログラムが読んだ値）
     return d
 
 

@@ -45,7 +45,7 @@ def lines(data: bytes) -> list[bytes]:
 def candidate_ready(wf):
     sid = load(wf)
     assert wf.select(sid, "C00004")["status"] == "ok"
-    r = wf.hear(sid, "この位置をY方向に10mm移動して", source="voice")
+    r = wf.hear(sid, "この位置をYプラス方向に10mm移動して", source="voice")
     assert r["status"] == "ok", r
     return sid, r
 
@@ -113,8 +113,8 @@ def test_mock_claude_is_shown_in_log(wf):
 
 def test_heard_text_and_facts_are_returned_separately(wf):
     sid = load(wf)
-    r = wf.hear(sid, "C00004をY方向に10mm移動して", source="text")
-    assert r["heard"] == "C00004をY方向に10mm移動して"
+    r = wf.hear(sid, "C00004をYプラス方向に10mm移動して", source="text")
+    assert r["heard"] == "C00004をYプラス方向に10mm移動して"
     f = r["facts"]
     assert f["positions"] == ["C00004"] and f["axes"] == ["Y"]
     assert f["requested_value"] == 10.0
@@ -133,7 +133,7 @@ def test_voice_and_text_give_same_result(tmp_path):
 
 def test_without_selection_this_position_is_not_proposed(wf):
     sid = load(wf)
-    r = wf.hear(sid, "この位置をY方向に10mm移動して", source="text")
+    r = wf.hear(sid, "この位置をYプラス方向に10mm移動して", source="text")
     assert r["status"] == "ask"
     assert r["tool_calls"] == []
     assert r["state"]["candidate"] is None
@@ -197,7 +197,7 @@ def approved(wf):
 
 def test_new_instruction_after_approve_cancels_approval(wf, tmp_path):
     sid = approved(wf)
-    r = wf.hear(sid, "C00005をX方向に5mm移動して", source="text")
+    r = wf.hear(sid, "C00005をXプラス方向に5mm移動して", source="text")
     assert r["state"]["approval"] is None
     assert r["state"]["can_export"] is False
     assert any("承認を取り消" in x["text"] for x in r["state"]["log"])
@@ -230,7 +230,7 @@ def test_non_synthetic_bytes_are_refused_at_export(wf, tmp_path):
     assert data != ORIGINAL
     sid = load(wf, data)
     wf.select(sid, "C00004")
-    assert wf.hear(sid, "この位置をY方向に10mm移動して")["status"] == "ok"
+    assert wf.hear(sid, "この位置をYプラス方向に10mm移動して")["status"] == "ok"
     assert wf.approve(sid, "テスト太郎")["ok"] is True
     e = wf.export(sid)
     assert e["ok"] is False
@@ -248,7 +248,7 @@ def test_second_export_does_not_overwrite(wf):
 # ---- 6. シミュレーションだけの候補（実機用の検査で止まる） ----
 def test_blocked_candidate_shows_reason(wf):
     sid = load(wf)
-    r = wf.hear(sid, "C00000をX方向に10mm移動して")
+    r = wf.hear(sid, "C00000をXプラス方向に10mm移動して")
     assert r["status"] == "ok"
     st = r["state"]
     assert st["blocked_reason"] and "共用" in st["blocked_reason"]
@@ -277,7 +277,7 @@ def test_speed_is_not_changed_without_limit(wf):
 
 
 def test_unknown_session_is_refused(wf):
-    assert wf.hear("nope", "C00004をY方向に10mm移動して")["ok"] is False
+    assert wf.hear("nope", "C00004をYプラス方向に10mm移動して")["ok"] is False
     assert wf.approve("nope", "テスト太郎")["ok"] is False
     assert wf.export("nope")["ok"] is False
 
@@ -299,7 +299,7 @@ def test_sessions_are_not_saved_to_disk(tmp_path, monkeypatch):
     w = WebFlow()
     sid = load(w)
     w.select(sid, "C00004")
-    w.hear(sid, "この位置をY方向に10mm移動して")
+    w.hear(sid, "この位置をYプラス方向に10mm移動して")
     w.approve(sid, "テスト太郎")
     assert list(tmp_path.iterdir()) == []
 
@@ -319,7 +319,7 @@ def test_mock_uses_only_facts():
 
 @pytest.mark.parametrize("text", [
     "C00005を少し動かして", "C00005を動かして", "右に10ミリ", "C00005をX方向に動かして",
-    "Y方向に10mm移動して",  # 位置が分からない（選択も無い）
+    "Yプラス方向に10mm移動して",  # 位置が分からない（選択も無い）
 ])
 def test_mock_proposes_nothing_without_facts(text):
     calls = mock_claude.decide(facts(text), selected=None)
@@ -372,7 +372,7 @@ def test_http_full_flow(running, tmp_path):
     sid = r["session_id"]
     assert r["view"]["name"] == "DEMO_PLACE"
     assert post(running, "/api/select", {"session_id": sid, "position": "C00004"})[1]["status"] == "ok"
-    _, r = post(running, "/api/hear", {"session_id": sid, "text": "この位置をY方向に10mm移動して", "source": "voice"})
+    _, r = post(running, "/api/hear", {"session_id": sid, "text": "この位置をYプラス方向に10mm移動して", "source": "voice"})
     assert r["status"] == "ok" and r["state"]["can_approve"] is True
     _, r = post(running, "/api/compare", {"session_id": sid})
     assert r["status"] == "ok"
@@ -399,7 +399,7 @@ def test_http_undo_and_bad_requests(running):
     assert r["status"] == "ok"
     st, r = post(running, "/api/hear", {"session_id": sid, "text": 5})
     assert r["ok"] is False
-    st, r = post(running, "/api/hear", {"session_id": sid, "text": "C00004をY方向に10mm移動して", "source": "robot"})
+    st, r = post(running, "/api/hear", {"session_id": sid, "text": "C00004をYプラス方向に10mm移動して", "source": "robot"})
     assert r["ok"] is False
     st, r = post(running, "/api/export", {})
     assert r["ok"] is False

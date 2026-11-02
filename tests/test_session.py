@@ -63,7 +63,7 @@ def test_select_move_compare_undo(s):
     assert r.status == "ok" and s.selected == "C00005"
     assert s.candidate is None
 
-    r = s.hear("この位置をX方向に10mm移動して", source="voice")
+    r = s.hear("この位置をXプラス方向に10mm移動して", source="voice")
     assert r.status == "ok"
     r = claude.call("propose_change", SHIFT_10)
     replies.append(r)
@@ -155,7 +155,7 @@ def test_speed_on_shared_position_stops():
 
 # ---- 5. 量が分からない指示 ----
 def test_no_amount_asks_then_answer_continues(s):
-    r = s.hear("C00005をX方向に移動して")
+    r = s.hear("C00005をXプラス方向に移動して")
     assert r.status == "ask" and "何mm" in r.message
     # 聞き返し中に Claude が量を作って出しても使わない
     assert s.propose(SHIFT_10).status == "stop"
@@ -168,14 +168,14 @@ def test_no_amount_asks_then_answer_continues(s):
 
 
 def test_kanji_amount_never_becomes_candidate(s):
-    assert s.hear("C00005をX方向に十ミリ移動して").status == "ask"
+    assert s.hear("C00005をXプラス方向に十ミリ移動して").status == "ask"
     assert s.propose(SHIFT_10).status == "stop"
     assert s.candidate is None
     assert s.original_bytes == ORIGINAL
 
 
 def test_fullwidth_utterance_works(s):
-    assert s.hear("Ｃ００００５をＸ方向に１０ｍｍ移動して").status == "ok"
+    assert s.hear("Ｃ００００５をＸプラス方向に１０ｍｍ移動して").status == "ok"
     assert s.propose(SHIFT_10).status == "ok"
 
 
@@ -184,7 +184,7 @@ def test_unknown_position(s):
     r = s.select("C00099")
     assert r.status == "stop" and "C00099" in r.message
     assert s.selected is None
-    s.hear("C00099をX方向に10mm移動して")
+    s.hear("C00099をXプラス方向に10mm移動して")
     r = s.propose({**SHIFT_10, "position": "C00099"})
     assert r.status == "stop" and "C00099" in r.message
     assert s.candidate is None
@@ -202,7 +202,7 @@ def test_right_left_stops(s):
 
 # ---- 16. 量の食い違い → 聞き返し。15. 断られた発話では出し直せない ----
 def test_amount_mismatch_then_retry_is_refused(s):
-    s.hear("C00005をX方向に10mm移動して")
+    s.hear("C00005をXプラス方向に10mm移動して")
     r = s.propose({**SHIFT_10, "delta_mm": 15})
     assert r.status == "ask"
     assert s.candidate is None
@@ -210,12 +210,12 @@ def test_amount_mismatch_then_retry_is_refused(s):
     assert r.status == "stop"
     assert s.candidate is None
     # 新しい発話なら受け付ける
-    s.hear("C00005をX方向に10mm移動して")
+    s.hear("C00005をXプラス方向に10mm移動して")
     assert s.propose(SHIFT_10).status == "ok"
 
 
 def test_rejected_by_job_check_then_retry_is_refused(s):
-    s.hear("C00005をX方向に60mm移動して")
+    s.hear("C00005をXプラス方向に60mm移動して")
     r = s.propose({**SHIFT_10, "delta_mm": 60})
     assert r.status == "stop" and "上限" in r.message
     # 実機用の検査で止まった理由と、候補を作れたかを分けて返す
@@ -226,7 +226,7 @@ def test_rejected_by_job_check_then_retry_is_refused(s):
 
 
 def test_ok_reply_has_no_blocked_reason(s):
-    s.hear("C00005をX方向に10mm移動して")
+    s.hear("C00005をXプラス方向に10mm移動して")
     r = s.propose(SHIFT_10)
     assert r.candidate_made is True and r.blocked_reason is None
     assert s.candidate_blocked_reason is None
@@ -242,7 +242,7 @@ def preview_only(job, proposal, reason):
 def test_simulate_makes_preview_candidate_with_blocked_reason():
     preview_only.calls = []
     s = Session.from_file(DUMMY, simulate=preview_only)
-    s.hear("C00000をX方向に10mm移動して")  # C00000 は2つの命令が共用 → 実機用の検査で止まる
+    s.hear("C00000をXプラス方向に10mm移動して")  # C00000 は2つの命令が共用 → 実機用の検査で止まる
     r = s.propose({**SHIFT_10, "position": "C00000"})
     assert r.status == "ok" and r.candidate_made is True
     assert r.blocked_reason and "共用" in r.blocked_reason
@@ -258,7 +258,7 @@ def test_simulate_makes_preview_candidate_with_blocked_reason():
 def test_simulate_is_not_used_for_utterance_mismatch():
     preview_only.calls = []
     s = Session.from_file(DUMMY, simulate=preview_only)
-    s.hear("C00005をX方向に10mm移動して")
+    s.hear("C00005をXプラス方向に10mm移動して")
     assert s.propose({**SHIFT_10, "delta_mm": 15}).status == "ask"
     s.hear("置く位置を右に10ミリ")
     assert s.propose({"kind": "shift", "position": "C00004", "side": "右", "delta_mm": 10}).status == "stop"
@@ -267,7 +267,7 @@ def test_simulate_is_not_used_for_utterance_mismatch():
 
 
 def test_position_mismatch_asks(s):
-    s.hear("C00005をX方向に10mm移動して")
+    s.hear("C00005をXプラス方向に10mm移動して")
     assert s.propose({**SHIFT_10, "position": "C00004"}).status == "ask"
     assert s.candidate is None
 
@@ -277,7 +277,7 @@ def test_propose_before_any_utterance_stops(s):
 
 
 def test_tool_args_with_job_text_stop(s):
-    s.hear("C00005をX方向に10mm移動して")
+    s.hear("C00005をXプラス方向に10mm移動して")
     r = s.propose({**SHIFT_10, "after_line": "C00005=460.000,190.000,250.000,180.00,0.00,0.00"})
     assert r.status == "stop"
     assert s.candidate is None
@@ -285,7 +285,7 @@ def test_tool_args_with_job_text_stop(s):
 
 # ---- 11. 2つ以上を変える提案は聞き返し。承認前はジョブが変わらない ----
 def test_two_changes_ask(s):
-    s.hear("C00005をX方向に10mm移動して")
+    s.hear("C00005をXプラス方向に10mm移動して")
     r = s.propose([SHIFT_10, {**SHIFT_10, "position": "C00004"}])
     assert r.status == "ask"
     assert s.candidate is None
@@ -293,24 +293,24 @@ def test_two_changes_ask(s):
 
 
 def test_candidate_does_not_change_original(s):
-    s.hear("C00005をX方向に10mm移動して")
+    s.hear("C00005をXプラス方向に10mm移動して")
     s.propose(SHIFT_10)
     assert s.candidate.new_job.render_bytes() != ORIGINAL
     assert s.original.render_bytes() == ORIGINAL
 
 
 def test_new_proposal_while_candidate_exists_stops(s):
-    s.hear("C00005をX方向に10mm移動して")
+    s.hear("C00005をXプラス方向に10mm移動して")
     s.propose(SHIFT_10)
     first = s.candidate
-    s.hear("C00005をX方向に5mm移動して")
+    s.hear("C00005をXプラス方向に5mm移動して")
     r = s.propose({**SHIFT_10, "delta_mm": 5})
     assert r.status == "stop"
     assert s.candidate is first
 
 
 def test_selecting_other_position_discards_candidate(s):
-    s.hear("C00005をX方向に10mm移動して")
+    s.hear("C00005をXプラス方向に10mm移動して")
     s.propose(SHIFT_10)
     r = s.select("C00004")
     assert r.status == "ok"
@@ -327,7 +327,7 @@ def test_compare_and_undo_without_candidate(s):
 
 # ---- 承認・書き出し・転送・起動は作らない ----
 def test_voice_approval_does_nothing(s):
-    s.hear("C00005をX方向に10mm移動して")
+    s.hear("C00005をXプラス方向に10mm移動して")
     s.propose(SHIFT_10)
     r = s.hear("はい、承認して")
     assert r.status == "stop" and "ボタン" in r.message
@@ -345,7 +345,7 @@ def test_voice_and_text_give_same_result():
     results = []
     for source in ("voice", "text"):
         s = Session.from_file(DUMMY)
-        r1 = s.hear("この位置をX方向に10mm移動して", source=source)
+        r1 = s.hear("この位置をXプラス方向に10mm移動して", source=source)
         s.select("C00005")
         r2 = s.propose(SHIFT_10)
         results.append((r1.status, r1.facts.position, r1.facts.requested_value(),
@@ -359,14 +359,14 @@ def test_no_forbidden_words_in_any_message():
     replies = []
     for text, tool, args in [
         ("C00005を選択して", "select", {"position": "C00005"}),
-        ("この位置をX方向に10mm移動して", "propose_change", {**SHIFT_10, "delta_mm": 15}),
-        ("この位置をX方向に10mm移動して", "propose_change", SHIFT_10),
+        ("この位置をXプラス方向に10mm移動して", "propose_change", {**SHIFT_10, "delta_mm": 15}),
+        ("この位置をXプラス方向に10mm移動して", "propose_change", SHIFT_10),
         ("変更前と比較して", "compare", None),
         ("元に戻して", "undo", None),
-        ("C00005をX方向に60mm移動して", "propose_change", {**SHIFT_10, "delta_mm": 60}),
-        ("C00000をX方向に10mm移動して", "propose_change", {**SHIFT_10, "position": "C00000"}),
+        ("C00005をXプラス方向に60mm移動して", "propose_change", {**SHIFT_10, "delta_mm": 60}),
+        ("C00000をXプラス方向に10mm移動して", "propose_change", {**SHIFT_10, "position": "C00000"}),
         ("置く位置を右に10ミリ", None, None),
-        ("C00005をX方向に十ミリ移動して", None, None),
+        ("C00005をXプラス方向に十ミリ移動して", None, None),
         ("はい", None, None),
         ("ロボットを起動して", None, None),
         ("C00004の速度を20%上げて", "propose_change", {"kind": "speed", "position": "C00004", "percent": 20}),

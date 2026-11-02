@@ -12,7 +12,7 @@ from __future__ import annotations
 import math
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Mapping, Sequence
 
 # 画面にも文章にも出さない、安全や距離を断定する言葉（CLAUDE.md・受入テスト18）
@@ -79,6 +79,7 @@ class UtteranceFacts:
     speed_signs: tuple[int, ...] = ()      # 速度を上げる +1 ／下げる -1
     refers_to_selection: bool = False      # 「この位置」「ここ」など
     stray_signs: int = 0                   # 量にも軸にも付かなかった符号（＋・−・プラス・マイナス）の数
+    vertical: bool = False                 # 「上げ・下げ・上に・下に」を Z（上下）として読んだ
     stop_reasons: tuple[str, ...] = ()
 
     @property
@@ -110,10 +111,14 @@ class UtteranceFacts:
         if len(signs) > 1:
             return None  # 向きの指定が2つ（あいまい）
         if not signs:
-            if self.op == "speed":
-                return None  # 上げるか下げるか分からない
-            signs = [1]  # 「X方向に10mm」は + として読む（確認表示に符号を出す）
+            return None  # 符号が分からない（「Y方向に3mm」）。＋を補わない（CHECKER_021 D2・2026-11-03 本人の方針）
         return signs[0] * a.value
+
+    def sign_count(self) -> int:
+        """量と方向の言葉についた向き（＋・−）の数。"""
+        a = self.amount
+        own = [a.sign] if a is not None and a.sign is not None else []
+        return len(own) + len(self.speed_signs if self.op == "speed" else self.axis_signs)
 
 
 _POS_RE = re.compile(r"(?<![A-Z0-9])C\s?(\d+)(?![\d.])")
@@ -126,6 +131,14 @@ _VAGUE = re.compile(r"半分|少し|すこし|ちょっと|ちょい|わずか|�
 _AXIS_RE = re.compile(r"(?<![A-Z])([XYZ])\s?(マイナス|プラス|[+\-])?\s?(方向|軸|に|へ)")
 # 「Xマイナス5ミリ」「Y +3 mm」「X の -5ミリ」：軸のすぐ後（「の」をはさんでもよい）に符号と数字。符号は量の側（_SIGN_BEFORE）で読むので、ここでは軸だけ
 _AXIS_SIGNED_NUM = re.compile(r"(?<![A-Z])([XYZ])\s?(?:の\s?)?(?=(?:マイナス|プラス|[+\-])\s?\d)")
+# 単独の X・Y・Z（「Yを」「Yの」も、軸を言ったものとして読む。CHECKER_021 D1）
+_AXIS_WORD = re.compile(r"(?<![A-Z])([XYZ])(?![A-Z])")
+# 座標の値の上げ下げ（「Y座標を3mm下げて」「Yの値を3mm減らして」）：その軸の値の増減として読む（2026-11-03 本人の判断）
+_COORD_VALUE = re.compile(r"(?<![A-Z])([XYZ])\s?(?:の\s?)?(?:座標|値)")
+_VALUE_UP = re.compile(r"上げ|増や|大きく")
+_VALUE_DOWN = re.compile(r"下げ|減ら|小さく")
+_TOWARD_UP = re.compile(r"(?<!以)(上に|上へ|上方向)")      # 座標の値の話のときも、これは「上へ」（Z）
+_TOWARD_DOWN = re.compile(r"(?<!以)(下に|下へ|下方向)")
 _UP = re.compile(r"(?<!以)(上げ|上に|上へ|上方向)")
 _DOWN = re.compile(r"(?<!以)(下げ|下に|下へ|下方向)")
 _SIDE = re.compile(r"(右|左)")
@@ -150,7 +163,7 @@ _SIGN_TOKEN = re.compile(r"マイナス|プラス|[+\-]")
 # 音声認識が返す、軸と符号の別の書き方（実マイクで「ワイプラス 3mm」「Y の Plus 3ミリ」と返った）。
 # 言った言葉の書き方を揃えるだけで、符号や軸を推測で足さない。カタカナの軸名は、すぐ後に符号・方向・軸・「の」があり、
 # すぐ前がカタカナでないときだけ（「ガゼット」「ハワイ」を軸にしない）
-_SPOKEN_AXIS = re.compile(r"(?<![ァ-ヺー])(エックス|ワイ|ゼット|ズィー)(?=\s?(?:の|プラス|マイナス|PLUS|MINUS|[+\-]|方向|軸))")
+_SPOKEN_AXIS = re.compile(r"(?<![ァ-ヺー])(エックス|ワイ|ゼット|ズィー)(?=\s?(?:の|を|に|へ|座標|プラス|マイナス|PLUS|MINUS|[+\-]|方向|軸))")
 _SPOKEN_SIGN = re.compile(r"(?<![A-Z])(PLUS|MINUS)(?![A-Z])")
 
 
@@ -222,13 +235,33 @@ def read_utterance(raw: str) -> UtteranceFacts:
             axes.append(m.group(1))
     speed_signs: list[int] = []
     up, down = bool(_UP.search(rest)), bool(_DOWN.search(rest))
+    coord = [] if is_speed else list(dict.fromkeys(m.group(1) for m in _COORD_VALUE.finditer(rest_no_speed)))
+    vertical = False  # 「上げ・下げ・上に・下に」を Z（上下）として読んだ
     if is_speed:
         speed_signs += [1] * up + [-1] * down
         speed_signs += [1] * bool(_FASTER.search(rest)) + [-1] * bool(_SLOWER.search(rest))
+    elif coord:
+        # 座標の値の増減：その軸に、増やす＋・減らす−。「上に・下に」は別に Z（上下）として読む（軸が2つなら聞き返す）
+        for a in coord:
+            if a not in axes:
+                axes.append(a)
+        axis_signs += [1] * bool(_VALUE_UP.search(rest_no_speed)) + [-1] * bool(_VALUE_DOWN.search(rest_no_speed))
+        t_up, t_down = bool(_TOWARD_UP.search(rest)), bool(_TOWARD_DOWN.search(rest))
+        if t_up or t_down:
+            vertical = True
+            if "Z" not in axes:
+                axes.append("Z")
+            axis_signs += [1] * t_up + [-1] * t_down
     elif up or down:
+        vertical = True
         if "Z" not in axes:
             axes.append("Z")
         axis_signs += [1] * up + [-1] * down
+    # 単独の X・Y・Z も軸として足す（「Yを3mm下げて」は Y と 下げ（Z）の2つ → 聞き返す）
+    if not is_speed:
+        for m in _AXIS_WORD.finditer(rest_no_speed):
+            if m.group(1) not in axes:
+                axes.append(m.group(1))
     sides = tuple(dict.fromkeys(_SIDE.findall(rest)))
 
     kinds: set[str] = set()
@@ -262,6 +295,7 @@ def read_utterance(raw: str) -> UtteranceFacts:
         speed_signs=tuple(speed_signs),
         refers_to_selection=bool(_THIS.search(rest)),
         stray_signs=len(_SIGN_TOKEN.findall(rest)) - sum(a.sign is not None for a in amounts) - placed_axis_signs,
+        vertical=vertical,
         stop_reasons=tuple(stops),
     )
 
@@ -269,6 +303,12 @@ def read_utterance(raw: str) -> UtteranceFacts:
 def merge_answer(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceFacts:
     """聞き返しへの答え（操作の言葉が無い1文）を、前の発話で分かっていたことに足す。"""
     has_amount_info = bool(answer.amounts or answer.unclear_amounts)
+    loose = _SIGN_TOKEN.findall(answer.text)
+    if (not has_amount_info and not answer.axes and len(loose) == 1 and answer.stray_signs == 1
+            and previous.axes and not previous.axis_signs and previous.amount is not None
+            and previous.amount.sign is None):
+        # 「プラスですか、マイナスですか？」への答え「マイナス」：前の発話の軸の向きにする
+        answer = replace(answer, axes=previous.axes, axis_signs=(_SIGN[loose[0]],), stray_signs=0)
     return UtteranceFacts(
         raw=f"{previous.raw} ／ {answer.raw}",
         text=f"{previous.text} ／ {answer.text}",
@@ -292,13 +332,34 @@ def merge_answer(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceF
 class Verdict:
     status: str   # "ok" / "ask"（聞き返す） / "stop"（止める）
     message: str = ""
+    choices: tuple[tuple[str, str], ...] = ()  # 聞き返しの短い選択肢（見せる文, 指示の文）。押すと、その文を指示として送る
+
+
+# 「上・下 ＝ Z±」を設定済みとみなすか（CHECKER_021 10章の未決A。本人に確認中）。
+# 今は FRAME v1.1 6章（枠が無いときは今どおり Z±）に従って True。False にすると、上・下を Z として読まず
+# 「上下の設定を確認してください」と聞き返し、聞き返しの選択肢にも［下方向へ …］を出さない
+UPDOWN_IS_Z = True
+UPDOWN_UNSET_MESSAGE = "上・下が X・Y・Z のどれに当たるかが設定されていません。上下の設定を確認してください"
+
+# 確認済みの方向の名前（軸 → 向き → 名前）。
+# 右・左（実機の確認まで未定）、前・後（止める）は未確認なので入れない（推測で足さない）
+DIRECTION_NAMES = {"Z": {"+": "上", "-": "下"}} if UPDOWN_IS_Z else {}
+DIRECTION_NAMES_SOURCE = "FRAME v1.1 6章（枠が無いときは 上・下 ＝ Z±）" if UPDOWN_IS_Z else "確認済みの方向の名前はありません"
 
 
 OK = Verdict("ok")
 
 
-def _ask(msg: str) -> Verdict:
-    return Verdict("ask", msg)
+def _ask(msg: str, choices: tuple[tuple[str, str], ...] = ()) -> Verdict:
+    return Verdict("ask", msg, choices)
+
+
+def _num(x: float) -> str:
+    return f"{x:g}"
+
+
+def _where(facts: UtteranceFacts) -> str:
+    return f"{facts.position}を" if facts.position else ""
 
 
 def _stop(msg: str) -> Verdict:
@@ -331,6 +392,24 @@ def pre_check(facts: UtteranceFacts) -> Verdict:
                             "1回に動かすのは1つの方向だけです。1つずつ指示してください")
         if facts.sides:
             return _ask(SIDE_MESSAGE)
+        if facts.vertical and len(facts.axes) > 1:
+            other = "・".join(a for a in facts.axes if a != "Z")
+            choices: tuple[tuple[str, str], ...] = ()
+            a = facts.amount
+            if (len(facts.axes) == 2 and len(facts.axis_signs) == 1 and a is not None and a.sign is None
+                    and a.unit == "mm" and not facts.unclear_amounts):
+                sign, v, w = facts.axis_signs[0], _num(a.value), _where(facts)
+                up = sign > 0
+                choices = ((f"{other}座標を {'+' if up else '−'}{v}mm", f"{w}{other}座標を{v}mm{'上げて' if up else '下げて'}"),)
+                if UPDOWN_IS_Z:
+                    choices += ((f"{'上' if up else '下'}方向へ {v}mm", f"{w}{'上' if up else '下'}に{v}mm"),)
+            if not UPDOWN_IS_Z:
+                return _ask(f"{other} の値を変えるなら「{other}座標を…上げて／下げて」と言ってください。" + UPDOWN_UNSET_MESSAGE, choices)
+            return _ask(f"{other} と、上げ・下げ（上下＝Z）の2つの読み方があります。"
+                        f"{other} の値なら「{other}座標を…上げて／下げて」、上下なら「上に…／下に…」のように言ってください",
+                        choices)
+        if facts.vertical and not UPDOWN_IS_Z:
+            return _ask(UPDOWN_UNSET_MESSAGE)
         v = _amount_check(facts, "mm", "何mm動かしますか？")
         if v is not OK:
             return v
@@ -338,6 +417,13 @@ def pre_check(facts: UtteranceFacts) -> Verdict:
             return _ask("どの方向（X・Y・Z、または上げる・下げる）に動かしますか？")
         if len(facts.axes) > 1:
             return _ask("方向が2つ以上あります。1回の指示で動かすのは1つの方向だけです")
+        if facts.sign_count() == 0:
+            a, ax, w = facts.amount, facts.axis, _where(facts)
+            choices = ()
+            if a is not None and a.unit == "mm":
+                v = _num(a.value)
+                choices = ((f"{ax}のプラス {v}mm", f"{w}{ax}プラスに{v}mm"), (f"{ax}のマイナス {v}mm", f"{w}{ax}マイナスに{v}mm"))
+            return _ask(f"{ax}方向のプラスですか、マイナスですか？（「{ax}のマイナス」のように向きも言ってください）", choices)
         if facts.requested_value() is None:
             return _ask("向きの指定が2つあります。どちらの向きか、もう一度指示してください")
     elif op == "speed":
