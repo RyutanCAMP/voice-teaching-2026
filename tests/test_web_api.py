@@ -54,6 +54,15 @@ def test_view_lists_positions_with_file_line_format_and_users():
     assert "共用" in c0["shift_check"]["reason"]
 
 
+def test_view_speed_check_is_disabled_by_default():
+    """既定では速度の変更を止めている。一覧の速度の検査も、その理由を出す"""
+    assert jbi.SPEED_CHANGE_ENABLED is False
+    ins = {i["line_no"]: i for i in api.job_view(demo())["instructions"]}
+    assert ins[26]["speed_check"]["ok"] is False
+    assert ins[26]["speed_check"]["reason"] == jbi.SPEED_DISABLED_MESSAGE
+
+
+@pytest.mark.usefixtures("speed_enabled")
 def test_view_lists_instructions_with_speed_check():
     view = api.job_view(demo())
     ins = {i["line_no"]: i for i in view["instructions"]}
@@ -132,7 +141,10 @@ def test_preview_shift_returns_proposal_and_after_coordinates():
     assert p["before_value"] == 120.0 and p["after_value"] == 130.0
     assert p["actual_delta"] == pytest.approx(10.0)
     assert p["line_no"] == 13
-    assert len(p["affected"]) == 2
+    # 入る区間の始まり（25行目）・入る移動（26行目）・出る移動（30行目）の3つ
+    assert len(p["affected"]) == 3
+    assert "25行目" in p["affected"][0] and "入る区間の始まり" in p["affected"][0]
+    assert "26行目" in p["affected"][1] and "30行目" in p["affected"][2]
     assert jbi.PATH_WARNING in p["warnings"]
     after = {q["name"]: q["xyz"] for q in res["after_positions"]}
     assert after["C00004"] == [450.0, 190.0, 130.0]
@@ -180,14 +192,26 @@ def test_preview_shift_refused_when_job_has_problems():
     assert "読めない所" in res["reason"]
 
 
+@pytest.mark.parametrize("line_no,speed", [(26, 100), (26, 90), (19, 100), (999, 100), (26, 0), (26, "100")])
+def test_preview_speed_is_disabled_by_default(line_no, speed):
+    assert jbi.SPEED_CHANGE_ENABLED is False
+    res = api.preview_speed(demo(), line_no, speed)
+    assert res["ok"] is False
+    assert "proposal" not in res
+    if isinstance(line_no, int) and isinstance(speed, (int, float)) and line_no != 999:
+        assert res["reason"] == jbi.SPEED_DISABLED_MESSAGE
+
+
+@pytest.mark.usefixtures("speed_enabled")
 def test_preview_speed_returns_proposal():
-    res = api.preview_speed(demo(), 26, 100)
+    # 90：元の 80.0 より整数部の桁が増えない値（桁が増える 100 は別の理由で止まる）
+    res = api.preview_speed(demo(), 26, 90)
     assert res["ok"] is True
     p = res["proposal"]
     assert p["kind"] == "speed"
     assert p["before_line"] == "MOVL C00004 V=80.0"
-    assert p["after_line"] == "MOVL C00004 V=100.0"
-    assert p["after_value"] == 100.0
+    assert p["after_line"] == "MOVL C00004 V=90.0"
+    assert p["after_value"] == 90.0
     assert jbi.SPEED_UNIT_WARNING in p["warnings"]
     assert res["highlight_lines"] == [26]
 
@@ -200,6 +224,7 @@ def test_preview_speed_returns_proposal():
     (999, 100, "命令"),
     ("26", 100, "行"),
 ])
+@pytest.mark.usefixtures("speed_enabled")
 def test_preview_speed_refused_returns_reason(line_no, speed, word):
     res = api.preview_speed(demo(), line_no, speed)
     assert res["ok"] is False
@@ -279,7 +304,14 @@ def test_preview_json_separates_warnings_and_blocked_reason():
     assert ng["warnings"] == []
     sp = api.preview_speed(demo(), 19, 100)
     assert sp["blocked_reason"] and sp["warnings"] == []
-    assert api.preview_speed(demo(), 26, 100)["blocked_reason"] is None
+    # 既定では速度の変更を止めているので、正しい行でも止まった理由が出る
+    assert api.preview_speed(demo(), 26, 100)["blocked_reason"] == jbi.SPEED_DISABLED_MESSAGE
+
+
+@pytest.mark.usefixtures("speed_enabled")
+def test_preview_speed_json_has_no_blocked_reason_when_check_passes():
+    assert api.preview_speed(demo(), 26, 90)["blocked_reason"] is None
+    assert "桁" in api.preview_speed(demo(), 26, 100)["blocked_reason"]
 
 
 def test_voice_panel_placeholder_exists():
@@ -339,7 +371,10 @@ def test_server_serves_page_and_parses_without_writing_files(running_server, tmp
                           "line_no": 26, "speed": 100})
     r, body = request(running_server, "POST", "/api/preview/speed", body=payload,
                       headers={"Content-Type": "application/json"})
-    assert json.loads(body)["proposal"]["after_value"] == 100.0
+    # 既定では速度の変更を止めている（変更案は返さない）
+    res = json.loads(body)
+    assert res["ok"] is False and "proposal" not in res
+    assert res["reason"] == jbi.SPEED_DISABLED_MESSAGE
 
     assert os.listdir(tmp_path) == []  # 受け取ったジョブをディスクに置かない
 

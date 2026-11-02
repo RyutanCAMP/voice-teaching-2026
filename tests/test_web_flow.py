@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from voice_teaching import mock_claude, sim
+from voice_teaching import jbi, mock_claude, sim
 from voice_teaching import utterance as u
 from voice_teaching.web import flow as flow_mod
 from voice_teaching.web import server
@@ -255,6 +255,16 @@ def test_blocked_candidate_shows_reason(wf):
     assert "シミュレーション" in st["confirmation_text"]
 
 
+def test_speed_is_disabled_by_default(wf):
+    assert jbi.SPEED_CHANGE_ENABLED is False
+    sid = load(wf)
+    r = wf.hear(sid, "C00004の速度を10%上げて")
+    assert r["status"] == "stop"
+    assert r["state"]["candidate"] is None
+    assert r["state"]["can_approve"] is False and r["state"]["can_export"] is False
+
+
+@pytest.mark.usefixtures("speed_enabled")
 def test_speed_is_not_changed_without_limit(wf):
     sid = load(wf)
     r = wf.hear(sid, "C00004の速度を10%上げて")

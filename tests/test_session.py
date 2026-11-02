@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from voice_teaching import jbi
 from voice_teaching import utterance as u
 from voice_teaching.session import Session
 
@@ -100,6 +101,19 @@ def test_select_move_compare_undo(s):
     assert not any(u.contains_forbidden(m) for m in collect(replies))
 
 
+def test_speed_proposal_is_disabled_by_default():
+    """既定では速度の変更を止めている。枠の値があっても候補は作らない"""
+    assert jbi.SPEED_CHANGE_ENABLED is False
+    s = Session.from_file(DUMMY, max_speed_change_percent=30)
+    assert s.hear("C00004の速度を20%上げて").status == "ok"
+    r = s.propose({"kind": "speed", "position": "C00004", "percent": 20})
+    assert r.status == "stop"
+    assert s.candidate is None
+    assert jbi.SPEED_DISABLED_MESSAGE in r.message
+    assert s.original_bytes == ORIGINAL
+
+
+@pytest.mark.usefixtures("speed_enabled")
 def test_speed_proposal_with_frame_value():
     s = Session.from_file(DUMMY, max_speed_change_percent=30)
     assert s.hear("C00004の速度を20%上げて").status == "ok"
@@ -112,6 +126,7 @@ def test_speed_proposal_with_frame_value():
     assert s.original_bytes == ORIGINAL
 
 
+@pytest.mark.usefixtures("speed_enabled")
 def test_speed_over_frame_value_stops():
     s = Session.from_file(DUMMY, max_speed_change_percent=30)
     s.hear("C00004の速度を40%上げて")
@@ -121,6 +136,7 @@ def test_speed_over_frame_value_stops():
     assert s.candidate is None
 
 
+@pytest.mark.usefixtures("speed_enabled")
 def test_speed_without_frame_value_stops(s):
     s.hear("C00004の速度を20%上げて")
     r = s.propose({"kind": "speed", "position": "C00004", "percent": 20})
@@ -128,6 +144,7 @@ def test_speed_without_frame_value_stops(s):
     assert s.candidate is None
 
 
+@pytest.mark.usefixtures("speed_enabled")
 def test_speed_on_shared_position_stops():
     """C00000 は2つの MOVL が使うので、どの命令の速度か1つに決まらない"""
     s = Session.from_file(DUMMY, max_speed_change_percent=30)

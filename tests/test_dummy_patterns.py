@@ -2,7 +2,11 @@
 
 一覧と期待結果は samples/dummy/PATTERNS.md。ファイルは tools/make_dummy_patterns.py で作る。
 期待結果は仕様v2.1 6・7章と CURRENT_DECISIONS に合わせる。今の jbi.py が正本と違うところは
-xfail(strict=True) にしてある（直ると XPASS で失敗するので、そのとき xfail を外す）。
+xfail(strict=True) にする（直ると XPASS で失敗するので、そのとき xfail を外す）。
+安全ガードの取り込み（fix/safety-guards）で PL=0・未知の命令・LVARS の xfail は外した。
+
+速度の変更は既定で止めている（jbi.SPEED_CHANGE_ENABLED = False）。speed の期待結果は検査の中身として
+speed_enabled で確かめ、既定で止まることは test_speed_is_disabled_by_default で確かめる。
 """
 import importlib.util
 from pathlib import Path
@@ -14,9 +18,6 @@ from voice_teaching import jbi
 ROOT = Path(__file__).resolve().parent.parent
 DUMMY = ROOT / "samples" / "dummy"
 
-PL0_FIX = "PL=0 は正本（仕様v2.1 6・7章、CURRENT_DECISIONS 4章）どおり通す予定。jbi.py の修正待ち"
-UNKNOWN_FIX = "INST部の知らない命令は problems に入れて止める予定。jbi.py の修正待ち"
-LVARS_FIX = "正しい形の ///LVARS（数字をカンマで区切った行）は problems にしない予定。jbi.py の修正待ち"
 
 
 def _make_module():
@@ -115,8 +116,8 @@ PROBLEMS = [
     ("PAT_BAD_POS_SHORT.JBI", True, None),
     ("PAT_BAD_POS_DUP.JBI", True, None),
     ("PAT_LVARS_BAD.JBI", True, None),
-    ("PAT_UNKNOWN_INST.JBI", True, UNKNOWN_FIX),
-    ("PAT_LVARS.JBI", False, LVARS_FIX),
+    ("PAT_UNKNOWN_INST.JBI", True, None),
+    ("PAT_LVARS.JBI", False, None),
 ]
 
 
@@ -128,20 +129,21 @@ def test_problems(name, has_problems):
 
 # ---- 期待結果（plan_shift / plan_speed が通るか止まるか） ----
 # (ファイル, 操作, 対象, 期待, 理由に含まれる語, xfail の理由)
-#   shift の対象は位置名（Z を +5mm）。speed の対象は命令の行（速度を 100.0 にする）
+#   shift の対象は位置名（Z を +5mm）。speed の対象は命令の行（速度を 90.0 にする）
 CASES = [
     ("PAT_MOVL_OK.JBI", "shift", "C00004", "ok", None, None),
     ("PAT_MOVL_OK.JBI", "shift", "C00001", "ok", None, None),
     ("PAT_MOVL_OK.JBI", "speed", "MOVL C00003 V=250.0", "ok", None, None),
 
-    ("PAT_PL0.JBI", "shift", "C00004", "ok", None, PL0_FIX),
-    ("PAT_PL0.JBI", "shift", "C00003", "ok", None, PL0_FIX),
-    ("PAT_PL0.JBI", "speed", "MOVL C00004 V=80.0 PL=0", "ok", None, PL0_FIX),
-    ("PAT_PL0.JBI", "speed", "MOVL C00003 V=250.0", "ok", None, PL0_FIX),
+    ("PAT_PL0.JBI", "shift", "C00004", "ok", None, None),
+    ("PAT_PL0.JBI", "shift", "C00003", "ok", None, None),
+    ("PAT_PL0.JBI", "speed", "MOVL C00004 V=80.0 PL=0", "ok", None, None),
+    ("PAT_PL0.JBI", "speed", "MOVL C00003 V=250.0", "ok", None, None),
 
     ("PAT_PL_GT0.JBI", "shift", "C00002", "stop", "PL=3", None),
     ("PAT_PL_GT0.JBI", "shift", "C00001", "stop", "PL=3", None),
-    ("PAT_PL_GT0.JBI", "shift", "C00003", "ok", None, None),
+    # 入る区間の始まり（直前の移動命令 C00002 の PL=3）も検査する（仕様v2.1 6章・受入テスト10。安全ガードの取り込みで ok → stop）
+    ("PAT_PL_GT0.JBI", "shift", "C00003", "stop", "PL=3", None),
     ("PAT_PL_GT0.JBI", "shift", "C00004", "ok", None, None),
     ("PAT_PL_GT0.JBI", "speed", "MOVL C00002 V=80.0 PL=3", "stop", "PL", None),
     ("PAT_PL_GT0.JBI", "speed", "MOVL C00001 V=80.0", "stop", "PL", None),
@@ -157,13 +159,15 @@ CASES = [
 
     ("PAT_MOVJ.JBI", "shift", "C00000", "stop", "MOVL", None),
     ("PAT_MOVJ.JBI", "shift", "C00005", "stop", "出る移動", None),
-    ("PAT_MOVJ.JBI", "shift", "C00001", "ok", None, None),
+    # 入る区間の始まりが MOVJ（C00000）。MOVJ を始まりに認めるかは本人判断待ちのため止める（安全ガードの取り込みで ok → stop）
+    ("PAT_MOVJ.JBI", "shift", "C00001", "stop", "入る移動の始まり", None),
     ("PAT_MOVJ.JBI", "speed", "MOVJ C00000 VJ=25.00", "stop", "MOVL", None),
     ("PAT_MOVJ.JBI", "speed", "MOVL C00001 V=80.0", "ok", None, None),
 
     ("PAT_MOVC.JBI", "shift", "C00003", "stop", "MOVL", None),
     ("PAT_MOVC.JBI", "shift", "C00001", "stop", "出る移動", None),
-    ("PAT_MOVC.JBI", "shift", "C00005", "ok", None, None),
+    # 入る区間の始まりが MOVC（C00004）のため止める（安全ガードの取り込みで ok → stop）
+    ("PAT_MOVC.JBI", "shift", "C00005", "stop", "入る移動の始まり", None),
     ("PAT_MOVC.JBI", "speed", "MOVC C00003 V=250.0", "stop", "MOVL", None),
 
     ("PAT_POSTYPE_ROBOT.JBI", "shift", "C00004", "ok", None, None),
@@ -194,8 +198,8 @@ CASES = [
     ("PAT_SJIS_COMMENT_CRLF.JBI", "shift", "C00004", "ok", None, None),
     ("PAT_SJIS_COMMENT_CRLF.JBI", "speed", "MOVL C00003 V=250.0", "ok", None, None),
 
-    ("PAT_UNKNOWN_INST.JBI", "shift", "C00004", "stop", None, UNKNOWN_FIX),
-    ("PAT_UNKNOWN_INST.JBI", "speed", "MOVL C00003 V=250.0", "stop", None, UNKNOWN_FIX),
+    ("PAT_UNKNOWN_INST.JBI", "shift", "C00004", "stop", "許可リスト", None),
+    ("PAT_UNKNOWN_INST.JBI", "speed", "MOVL C00003 V=250.0", "stop", "許可リスト", None),
 
     ("PAT_BAD_POS_NONNUM.JBI", "shift", "C00004", "stop", "数値でない", None),
     ("PAT_BAD_POS_NONNUM.JBI", "speed", "MOVL C00003 V=250.0", "stop", "数値でない", None),
@@ -204,8 +208,8 @@ CASES = [
     ("PAT_BAD_POS_DUP.JBI", "shift", "C00004", "stop", "重複", None),
     ("PAT_BAD_POS_DUP.JBI", "speed", "MOVL C00003 V=250.0", "stop", "重複", None),
 
-    ("PAT_LVARS.JBI", "shift", "C00004", "ok", None, LVARS_FIX),
-    ("PAT_LVARS.JBI", "speed", "MOVL C00003 V=250.0", "ok", None, LVARS_FIX),
+    ("PAT_LVARS.JBI", "shift", "C00004", "ok", None, None),
+    ("PAT_LVARS.JBI", "speed", "MOVL C00003 V=250.0", "ok", None, None),
     ("PAT_LVARS_BAD.JBI", "shift", "C00004", "stop", "LVARS", None),
     ("PAT_LVARS_BAD.JBI", "speed", "MOVL C00003 V=250.0", "stop", "LVARS", None),
 ]
@@ -218,14 +222,17 @@ def _case_id(c):
 @pytest.mark.parametrize("name,op,target,expected,why", [
     pytest.param(*c[:5], id=_case_id(c), marks=_xf(c[5])) if c[5] else pytest.param(*c[:5], id=_case_id(c))
     for c in CASES])
-def test_expected_result(name, op, target, expected, why):
+def test_expected_result(name, op, target, expected, why, monkeypatch):
+    if op == "speed":
+        monkeypatch.setattr(jbi, "SPEED_CHANGE_ENABLED", True)  # 検査の中身を確かめる（既定では止まる）
     job = _load(name)
     before = job.render_bytes()
 
     def run():
         if op == "shift":
             return job.plan_shift(target, "Z", 5.0)
-        return job.plan_speed(_line_index(job, target), 100.0)
+        # 90.0：元の値（80.0・250.0）より整数部の桁が増えない値（桁が増える値は別の理由で止まる）
+        return job.plan_speed(_line_index(job, target), 90.0)
 
     if expected == "ok":
         proposal = run()
@@ -239,6 +246,17 @@ def test_expected_result(name, op, target, expected, why):
         if why:
             assert why in str(e.value)
     assert job.render_bytes() == before  # 元のジョブは変わらない
+
+
+@pytest.mark.parametrize("name,target", sorted({(c[0], c[2]) for c in CASES if c[1] == "speed"}))
+def test_speed_is_disabled_by_default(name, target):
+    """既定（SPEED_CHANGE_ENABLED = False）では、どの速度の変更も止まり、元のジョブは変わらない"""
+    assert jbi.SPEED_CHANGE_ENABLED is False
+    job = _load(name)
+    before = job.render_bytes()
+    with pytest.raises(jbi.JbiError, match="速度の変更は"):
+        job.plan_speed(_line_index(job, target), 100.0)
+    assert job.render_bytes() == before
 
 
 def test_tool_number_is_reported_in_warnings():
