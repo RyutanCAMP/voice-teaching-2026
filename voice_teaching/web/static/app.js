@@ -88,6 +88,7 @@ function recording() {
 async function loadFile(f) {
   if (!f || recording()) return;
   voice.cancel();
+  state.live = false;  // ジョブが変わったらマイクは OFF に戻す
   state.voiceFinal = null;
   $("text-input").value = "";
   const bytes = new Uint8Array(await f.arrayBuffer());
@@ -319,6 +320,7 @@ function renderChips() {
 
 function applyResult(res, showOk = true) {
   if (res.state) state.st = res.state;
+  state.resumeArmed = true;  // 結果が出た：マイクが ON なら、また聞き始めてよい
   if (res.ok === false) {
     showReply("stop", res.error || "理由が分かりません");
   } else if (res.status && res.status !== "ok") {
@@ -461,7 +463,9 @@ function openConfirm() {
 }
 
 function closeConfirm() {
+  const was = !$("confirm-overlay").hidden;
   $("confirm-overlay").hidden = true;
+  if (was && !$("open-confirm").hidden && !$("open-confirm").disabled) $("open-confirm").focus();
 }
 
 $("open-confirm").addEventListener("click", openConfirm);
@@ -609,7 +613,13 @@ for (const b of document.querySelectorAll(".view-tab")) b.addEventListener("clic
 for (const f of document.querySelectorAll(".figs-small figure")) f.addEventListener("click", () => setView(f.dataset.view));
 
 // ---- 3D（ジョブの X・Y・Z をそのまま点で描く。ロボット本体は描かない） ----
-const view3d = new View3D($("fig-3d"), { onPick: (name) => select(name) });
+const view3d = new View3D($("fig-3d"), { onPick: (name) => {
+  if (state.st && state.st.candidate) {
+    $("play-status").textContent = "変更を確かめている間は、位置を選び直せません（「元に戻す」で選び直せます）";
+    return;
+  }
+  select(name);
+} });
 const confirm3d = new View3D($("confirm-figure"), { width: 640, height: 440 });  // 確認表示の中では選び直さない
 
 function data3d() {
@@ -904,6 +914,7 @@ function startListening() {
   $("voice-partial").textContent = "";
   closeConfirm();
   state.voiceToken = { sessionId: state.sessionId, selected: state.st ? state.st.selected : null };
+  state.resumeArmed = false;
   voice.start(mode);
 }
 
@@ -919,7 +930,7 @@ function resumeLive() {
       renderMic();
       return;
     }
-    if (!state.live || recording() || !Recognition || !voiceMode() || currentStep() !== 3
+    if (!state.live || !state.resumeArmed || recording() || !Recognition || !voiceMode() || currentStep() !== 3
         || $("text-input").value.trim() || !$("confirm-overlay").hidden || $("instruction-panel").hidden) return;
     startListening();
   }, 500);

@@ -128,7 +128,6 @@ export class View3D {
         return `${n}  ${p.line}`;
       }).join("\n");
       el.append(t);
-      el.addEventListener("click", (ev) => this._pick(g.names, ev));
       svg.append(el);
     }
     // 変更後の点と、変更前からの矢印（小さな変更でも見えるように）
@@ -257,6 +256,8 @@ export class View3D {
       if (ev.target.closest(".chooser")) return;
       start = { x: ev.clientX, y: ev.clientY, yaw: this.yaw, pitch: this.pitch };
       this.dragged = false;
+      const pt = ev.target.closest && ev.target.closest(".pt3");
+      this.downNames = pt ? pt.dataset.names.split(" ") : null;  // 再生中に作り直されても選べるように
     });
     h.addEventListener("pointermove", (ev) => {
       if (!start || !(ev.buttons & 1)) return;
@@ -267,16 +268,26 @@ export class View3D {
       this.pitch = Math.max(0.05, Math.min(1.3, start.pitch + dy * 0.006));  // 床が裏返らない範囲
       this.render();
     });
-    const end = () => { start = null; setTimeout(() => { this.dragged = false; }, 0); };
-    h.addEventListener("pointerup", end);
+    const end = () => { start = null; this.downNames = null; setTimeout(() => { this.dragged = false; }, 0); };
+    h.addEventListener("pointerup", (ev) => {
+      if (start && !this.dragged && this.downNames) {
+        this.justPicked = true;
+        this._pick(this.downNames, ev);
+      }
+      end();
+    });
     h.addEventListener("pointercancel", end);
     h.addEventListener("wheel", (ev) => {
       if (!this.data) return;
       ev.preventDefault();
+      this.closeChooser();
       this.zoom = Math.max(0.6, Math.min(5, this.zoom * Math.exp(-ev.deltaY * 0.0012)));
       this.render();
     }, { passive: false });
-    h.addEventListener("click", (ev) => { if (!ev.target.closest(".chooser")) this.closeChooser(); });
+    h.addEventListener("click", (ev) => {
+      if (this.justPicked) { this.justPicked = false; return; }  // 点を押した直後の click では閉じない
+      if (!ev.target.closest(".chooser")) this.closeChooser();
+    });
     document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") this.closeChooser(); });
   }
 

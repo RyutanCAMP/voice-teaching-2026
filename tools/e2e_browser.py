@@ -218,6 +218,11 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     def pt(page, name):
         return page.locator(f'#fig-3d g.pt3[data-names~="{name}"] circle').last
 
+    def press(page, name, ms=80):
+        # 人の押し方：その場所でボタンを押し、少し待って離す（再生中に図が描き直されても、要素の安定を待たない）
+        x, y = pos_of(page, name)
+        page.mouse.move(x, y); page.mouse.down(); page.wait_for_timeout(ms); page.mouse.up()
+
     def pos_of(page, name):
         box = pt(page, name).bounding_box()
         return (round(box["x"] + box["width"] / 2), round(box["y"] + box["height"] / 2))
@@ -290,9 +295,14 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     check(True, "選び分けの一覧から C00000 を選べる")
     pg.click("#voice-position")  # 選び直す
 
-    pt(pg, "C00005").click()  # 点そのもの（丸）を押す
+    # 再生中でも、点を押して（人の押し方：80ms）選べる
+    pg.click("#play-button")
+    pg.wait_for_timeout(300)
+    playing = pg.locator("#fig-3d circle.marker").count() == 1
+    press(pg, "C00005")  # 点そのもの（丸）を押す
     until(pg, lambda: pg.inner_text("#voice-position strong") == "C00005")
-    check(pg.get_attribute("#step-3", "aria-current") == "step", "3D の点を押すと位置が選ばれ、ステップ3になる")
+    check(playing and pg.get_attribute("#step-3", "aria-current") == "step",
+          "3D の点を押すと位置が選ばれ、ステップ3になる（再生中に 80ms 押しても選べる）")
     check(pg.locator('#fig-3d g.pt3.sel[data-names~="C00005"]').count() == 1, "選んだ点が 3D で強調される")
     check(cards(pg) == ["instruction-panel"], f"右側は音声のカードだけ：{cards(pg)}")
     check(pg.is_visible("#voice-mode-set") and primaries(pg) == 0, "マイクの方式を選ぶまでは、方式の欄を出す")
@@ -339,6 +349,7 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     check(pg.get_attribute("#mic-button", "aria-pressed") == "true" and "聞いています" in pg.inner_text("#mic-label")
           and primaries(pg) == 1 and "primary" in (pg.get_attribute("#voice-stop", "class") or ""),
           "マイク ON：聞いていることが一目で分かり、「話し終わった」だけが目立つ")
+    check(pg.is_hidden("#voice-error"), "前の失敗の文は消える（もう一度 ON にできる）")
     check(pg.is_hidden("#voice-error"), "前の失敗の文は消える")
     shot(pg, "3c_recording.png")
     pg.click("#voice-stop")
@@ -350,6 +361,10 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     check(pg.input_value("#text-input") == FAKE_TEXT and pg.is_hidden("#reply-message")
           and pg.get_attribute("#step-3", "aria-current") == "step", "自動では送らない（入力欄の文を直せる）")
 
+    pg.fill("#text-input", "")
+    pg.wait_for_timeout(1000)
+    check(not pg.is_enabled("#voice-stop") and pg.is_enabled("#text-input"),
+          "一時停止中に入力欄を消しても、勝手に聞き始めない（文字で打ち直せる）")
     # 入力欄の文を直して送る → 聞き返し → マイクが ON のまま、また聞き始める
     pg.fill("#text-input", "少し動かして")
     pg.click("#text-send")
@@ -382,6 +397,10 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     shot(pg, "4_playing.png")
     until(pg, lambda: "終わりました" in pg.inner_text("#play-status"), timeout_ms=60000)
     check("ロボット本体の動きではありません" in pg.inner_text("#play-note"), "再生の限界（ロボット本体の動きではない）を出す")
+    press(pg, "C00002")
+    pg.wait_for_timeout(200)
+    check(pg.get_attribute("#step-4", "aria-current") == "step" and "選び直せません" in pg.inner_text("#play-status"),
+          "候補がある間は、図の点を押しても候補を取り消さない（理由を出す）")
 
     pg.click('.view-tab[data-view="yz"]')
     check(pg.get_attribute('.view-tab[data-view="yz"]', "aria-selected") == "true" and pg.is_visible("#fig-main svg")
