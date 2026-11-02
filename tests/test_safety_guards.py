@@ -200,7 +200,7 @@ def test_shift_over_limit_is_rejected():
     job = jbi.parse(base())
     with pytest.raises(jbi.JbiError, match="上限"):
         job.plan_shift("C00004", "Y", jbi.DEFAULT_MAX_SHIFT_MM + 0.001)
-    assert job.plan_shift("C00004", "Y", -jbi.DEFAULT_MAX_SHIFT_MM).after_value == 140.0
+    assert job.plan_shift("C00004", "Y", -jbi.DEFAULT_MAX_SHIFT_MM).after_value == 190.0 - jbi.DEFAULT_MAX_SHIFT_MM
 
 
 @pytest.mark.usefixtures("speed_enabled")
@@ -524,43 +524,53 @@ def test_speed_change_is_disabled_by_default():
 
 
 # D-2. 元のジョブ（基準）からの累積で、軸ごとに検査する
+# 量は上限（20mm）に対する割合で決める：1回はどちらも上限以内、2回の合計だけが上限を超える
+STEP = 12.0  # 上限の 0.6 倍。2回で 24mm（上限を超える）
+BACK = 16.0  # 上限の 0.8 倍
+
+
+def test_cumulative_steps_are_within_one_shot_limit_but_exceed_in_total():
+    assert STEP <= jbi.DEFAULT_MAX_SHIFT_MM and BACK <= jbi.DEFAULT_MAX_SHIFT_MM
+    assert STEP * 2 > jbi.DEFAULT_MAX_SHIFT_MM
+
+
 def test_cumulative_shift_over_limit_is_rejected():
-    first = jbi.parse(base()).plan_shift("C00004", "Y", 30.0)
-    assert first.after_value == 220.0
+    first = jbi.parse(base()).plan_shift("C00004", "Y", STEP)
+    assert first.after_value == 202.0
     with pytest.raises(jbi.JbiError, match="累積"):
-        first.new_job.plan_shift("C00004", "Y", 30.0)
+        first.new_job.plan_shift("C00004", "Y", STEP)
 
 
 def test_cumulative_shift_back_within_limit_is_allowed():
-    first = jbi.parse(base()).plan_shift("C00004", "Y", 30.0)
-    second = first.new_job.plan_shift("C00004", "Y", -40.0)
-    assert second.after_value == 180.0
+    first = jbi.parse(base()).plan_shift("C00004", "Y", STEP)
+    second = first.new_job.plan_shift("C00004", "Y", -BACK)
+    assert second.after_value == 186.0
     assert second.baseline_value == 190.0
-    assert abs(second.cumulative_delta - (-10.0)) < 1e-9
+    assert abs(second.cumulative_delta - (-4.0)) < 1e-9
 
 
 def test_cumulative_is_per_axis():
-    job = jbi.parse(base()).plan_shift("C00004", "Y", 40.0).new_job
-    assert job.plan_shift("C00004", "Z", 40.0).after_value == 160.0
+    job = jbi.parse(base()).plan_shift("C00004", "Y", BACK).new_job
+    assert job.plan_shift("C00004", "Z", BACK).after_value == 136.0
 
 
 def test_baseline_is_kept_through_rename():
-    job = jbi.parse(base()).plan_shift("C00004", "Y", 30.0).new_job.rename("DEMO_PLACE_V1")
+    job = jbi.parse(base()).plan_shift("C00004", "Y", STEP).new_job.rename("DEMO_PLACE_V1")
     with pytest.raises(jbi.JbiError, match="累積"):
-        job.plan_shift("C00004", "Y", 30.0)
+        job.plan_shift("C00004", "Y", STEP)
 
 
 def test_reparsed_job_has_new_baseline():
     """読み直したジョブは基準が新しくなる（ファイルをまたいだ引き継ぎは別の設計で扱う）"""
-    text = jbi.parse(base()).plan_shift("C00004", "Y", 30.0).new_job.render()
-    assert jbi.parse(text).plan_shift("C00004", "Y", 30.0).after_value == 250.0
+    text = jbi.parse(base()).plan_shift("C00004", "Y", STEP).new_job.render()
+    assert jbi.parse(text).plan_shift("C00004", "Y", STEP).after_value == 214.0
 
 
 def test_larger_max_argument_does_not_bypass_cumulative_limit():
     # 修正ラウンド2：1回の上限は引数で上げられなくなったので、2回に分けて累積を確かめる
-    job = jbi.parse(base()).plan_shift("C00004", "Y", 30.0, max_abs_delta_mm=100.0).new_job
+    job = jbi.parse(base()).plan_shift("C00004", "Y", STEP, max_abs_delta_mm=100.0).new_job
     with pytest.raises(jbi.JbiError, match="累積"):
-        job.plan_shift("C00004", "Y", 30.0, max_abs_delta_mm=100.0)
+        job.plan_shift("C00004", "Y", STEP, max_abs_delta_mm=100.0)
 
 
 # D-3. 極端な値は例外で落とさず JbiError で断る（上限の引数も含む）

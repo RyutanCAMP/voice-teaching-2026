@@ -19,8 +19,9 @@ from pathlib import Path
 
 AXES = {"X": 0, "Y": 1, "Z": 2}
 
-# 位置の変更量の仮の上限（mm。確認待ち）。1回の変更量と、元のジョブ（基準）からの累積の両方に使う
-DEFAULT_MAX_SHIFT_MM = 50.0
+# 位置の変更量の上限（mm）。1回の変更量と、元のジョブ（基準）からの累積の両方に使う。
+# 仕様v2.1 のデモ案の「1回の上限 20mm」に合わせた（最終の値は本人が実機を見て決める。安全の保証ではない）
+DEFAULT_MAX_SHIFT_MM = 20.0
 
 # 速度の変更は、単位・指定形式・適用範囲の確認が済むまで止める（本人の判断）。検査の中身は将来のために残す
 SPEED_CHANGE_ENABLED = False
@@ -35,14 +36,14 @@ SPEED_UNIT_WARNING = (
     "速度を変えると、この移動の動き方と時間が変わります。"
 )
 
-_NUM = r"[+-]?\d+(?:\.\d+)?"
-_POS_NAME_LINE = re.compile(r"^(C\d{5})=(.*)$")
-_MOVE = re.compile(r"^(MOVL|MOVJ|MOVC|MOVS)\s+(C\d{5})\b(.*)$")
+_NUM = r"[+-]?[0-9]+(?:\.[0-9]+)?"
+_POS_NAME_LINE = re.compile(r"^(C[0-9]{5})=(.*)$")
+_MOVE = re.compile(r"^(MOVL|MOVJ|MOVC|MOVS)\s+(C[0-9]{5})\b(.*)$")
 # 行の中の位置参照。BC00004 のような別の変数は数えない。大文字小文字は区別しない
-_REF = re.compile(r"(?<![A-Z0-9#])C\d{5}\b", re.IGNORECASE)
-_SPEED_NUM = re.compile(r"(?<![A-Z])V=(\d+(?:\.\d+)?)(?![\w.])")
+_REF = re.compile(r"(?<![A-Z0-9#])C[0-9]{5}\b", re.IGNORECASE)
+_SPEED_NUM = re.compile(r"(?<![A-Z])V=([0-9]+(?:\.[0-9]+)?)(?![\w.])")
 _SPEED_ANY = re.compile(r"(?<![A-Z])V=(\S+)")
-_PL = re.compile(r"\bPL=(\d+)(?![\w.])")
+_PL = re.compile(r"\bPL=([0-9]+)(?![\w.])")
 _CR = re.compile(r"\bCR=")
 # 変更を断るための広い検出（書き方の揺れも拾う）。読み取れない書き方を「無い」とみなさない
 _PL_LOOSE = re.compile(r"\bPL\b", re.IGNORECASE)
@@ -50,7 +51,7 @@ _CR_LOOSE = re.compile(r"\bCR\b", re.IGNORECASE)
 _SECOND_MOVE = re.compile(r"\+\s*\w*MOV", re.IGNORECASE)
 # 変更してよい行の形（許可リスト）。「MOVL 位置 V=数値」と、ちょうど「 PL=0」が付いた形だけを通す
 # （PL=0 は本人の指示で正本＝仕様v2.1 6・7章に従う）。これ以外の語が付いた行は止める
-_EDITABLE_MOVL = re.compile(r"MOVL C\d{5} V=\d+(?:\.\d+)?(?: PL=0)?")
+_EDITABLE_MOVL = re.compile(r"MOVL C[0-9]{5} V=[0-9]+(?:\.[0-9]+)?(?: PL=0)?")
 # 前後の命令の PL を見るときに通す形：空白で区切られた、ちょうど「PL=0」1つだけ
 _EXACT_PL0 = re.compile(r"(?<= )PL=0(?= |$)")
 # 位置の意味を変える命令。ジョブに1つでもあれば位置は変えない
@@ -69,12 +70,21 @@ KNOWN_INST_COMMANDS = frozenset({
     # GETS は止める命令ではない。位置を参照する命令として「使う行」に数えられ、共用・MOVL でない で止まる
     "GETS",
 })
+# 引数の形まで決まっている命令は、行全体がこの形のときだけ認める（先頭の語だけでは決めない。END X・NOP X などを止める）
+_EXACT_INST_FORMS = {
+    "NOP": re.compile(r"NOP"),
+    "END": re.compile(r"END"),
+    "TIMER": re.compile(r"TIMER T=[0-9]+(?:\.[0-9]+)?"),
+    "DOUT": re.compile(r"DOUT OT#\([0-9]+\) (?:ON|OFF)"),
+}
+# 命令・位置の行に入ってよい文字（ASCII の表示できる文字と空白）。全角の数字などは数字として扱わず止める
+_ASCII_LINE = re.compile(r"[ -~\t]*")
 _LABEL_LINE = re.compile(r"\*[A-Za-z0-9_]+")
-_DIGIT_LIST = r"\d+(?:,\d+)*"
+_DIGIT_LIST = r"[0-9]+(?:,[0-9]+)*"
 # POS部の指示行と、その引数の形（None は引数なし）。形が違えば「分からない指示行」とする
 _POS_DIRECTIVE_ARGS = {
-    "NPOS": _DIGIT_LIST, "TOOL": r"\d+", "POSTYPE": r"[A-Z]+", "RECTAN": None, "PULSE": None,
-    "RCONF": _DIGIT_LIST, "USER": r"\d+",
+    "NPOS": _DIGIT_LIST, "TOOL": r"[0-9]+", "POSTYPE": r"[A-Z]+", "RECTAN": None, "PULSE": None,
+    "RCONF": _DIGIT_LIST, "USER": r"[0-9]+",
 }
 # 1行の中に入っていると行の区切りがあいまいになる文字（タブ以外の制御文字など）
 _BAD_CHARS = re.compile(r"[\x00-\x08\x0a-\x1f\x7f\x85  ]")
@@ -534,6 +544,9 @@ def parse(text: str, encoding: str = "utf-8") -> Job:
                 problem(i, body, "読めない行です")
                 continue
             c_lines += 1
+            if not _ASCII_LINE.fullmatch(body):
+                problem(i, body, "ASCII 以外の文字（全角の数字など）を含みます")
+                continue
             name = m.group(1)
             raw = m.group(2).split(",")
             if not all(re.fullmatch(_NUM, v) for v in raw):
@@ -570,14 +583,18 @@ def parse(text: str, encoding: str = "utf-8") -> Job:
         words = body.split()
         if not words:
             continue  # 空白文字だけの行（problems には上で記録済み）
+        if not _ASCII_LINE.fullmatch(body):
+            problem(i, body, "ASCII 以外の文字（全角の数字など）を含みます")
         # 命令を「認識できる」かの判定（許可リスト）。知らない命令も読み続け、problems に記録する
         if not (_LABEL_LINE.fullmatch(body) or words[0] in KNOWN_INST_COMMANDS):
             problem(i, body, "このアプリの命令の許可リストに無い命令です")
+        elif words[0] in _EXACT_INST_FORMS and not _EXACT_INST_FORMS[words[0]].fullmatch(body):
+            problem(i, body, f"{words[0]} の書き方が、このアプリで扱える形ではありません")
         # END より後ろの命令は実行されない。その命令だけが使う位置などを取り違えないよう、ジョブごと止める
         if ended:
             problem(i, body, "END より後ろにある命令です（実行されません）")
-        if body == "END":
-            ended = True
+        if words[0] == "END":
+            ended = True  # 引数の付いた END（END X）も、ここで終わりとみなして後ろを止める
         job.instructions.append(_parse_instruction(i, body))
 
     if "POS" in seen_headers:
@@ -585,6 +602,9 @@ def parse(text: str, encoding: str = "utf-8") -> Job:
             job.problems.append("POS部に NPOS の行がありません")
         elif npos_count != c_lines:
             job.problems.append(f"NPOS の位置の数（{npos_count}）と位置の行の数（{c_lines}）が合いません")
+    if not ended:
+        # END の無いジョブは、途中で切れたファイルかもしれない。命令の終わりが確かめられないので止める
+        job.problems.append("END の命令がありません（ファイルが途中で切れているかもしれません）")
     job.baseline = {name: p.values for name, p in job.positions.items()}
     return job
 

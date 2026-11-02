@@ -34,8 +34,8 @@ SIM_NOTICE = (
     "変更後の経路は、人が確かめてください。"
 )
 
-_NUM = re.compile(r"[+-]?\d+(?:\.\d+)?")
-_POS_LINE = re.compile(r"^(C\d{5})=(.*)$")
+_NUM = re.compile(r"[+-]?[0-9]+(?:\.[0-9]+)?")
+_POS_LINE = re.compile(r"^(C[0-9]{5})=(.*)$")
 _LINES = re.compile(rb"[^\n]*\n|[^\n]+\Z")
 _NAME_OK = re.compile(r"[A-Za-z0-9_\-]+")
 
