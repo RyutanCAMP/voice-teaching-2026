@@ -1,7 +1,7 @@
 """画面の一連の流れ（シミュレーションモード）：読込 → 位置選択 → 指示 → 変更候補 → プレビュー → ボタン承認 → 出力。
 
 - 画面ごとの Session はメモリの中だけに持つ（ディスクに保存しない）。数を超えたら古いものから捨てる。
-- 指示（hear）は Session.hear → 偽のClaude（mock_claude.decide）→ Session の select / propose / compare / undo。
+- 指示（hear）は Session.hear → 解釈の係（本物の Claude か偽のClaude。claude_interpreter.from_env）→ Session の select / propose / compare / undo。
   指示の経路からは承認も出力も呼ばない（「承認」「OK」などの発話は Session が止める）。
 - 承認（approve）は画面の承認ボタンからだけ呼ぶ。sim.approve を使い、承認した人の名前が要る。
 - 出力（export）は sim.export_sim（合成ジョブだけ）。失敗は理由を返し、成功と表示させない。
