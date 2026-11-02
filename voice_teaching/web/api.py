@@ -18,6 +18,8 @@ FIGURE_NOTE = (
     "参考表示であり、実際のロボットの動きではありません。"
 )
 NOT_DRAWABLE = "ロボット座標でないため描けません"
+# いまはシミュレーションモードだけ。実機用モードは後で作る
+MODE = "simulation"
 
 # 図で実線にしてよい命令の形（これだけ。ほかは点線で「目安」）。jbi の許可リストと同じ形を、表示用に別に持つ
 _PLAIN_MOVL = re.compile(r"MOVL C\d{5} V=\d+(?:\.\d+)?")
@@ -132,6 +134,7 @@ def job_view(data: bytes) -> dict:
         notes.append(f"このジョブには {'・'.join(flow)} があるため、図の線は行の並びから推定したものです。")
     return {
         "ok": True,
+        "mode": MODE,
         "name": job.name,
         "encoding": job.encoding,
         "problems": list(job.problems),
@@ -161,7 +164,19 @@ def _proposal(p: jbi.ChangeProposal) -> dict:
 
 
 def _refused(reason: str) -> dict:
-    return {"ok": False, "reason": reason}
+    """検査に断られたとき。blocked_reason は「実機用の検査で止まる理由」の欄。
+
+    いまは jbi の plan_shift / plan_speed が断った理由をそのまま入れ、変更案は出さない。
+    後で voice_teaching/sim.py が、断られてもシミュレーションのプレビューを出す形にするときは、
+    proposal と blocked_reason を同時に入れる（warnings は注意、blocked_reason は止まる理由で、別々に持つ）。
+    reason は以前の形との互換のため同じ文を入れる。
+    """
+    return {"ok": False, "mode": MODE, "reason": reason, "blocked_reason": reason, "warnings": []}
+
+
+def _accepted(prop: jbi.ChangeProposal, **extra) -> dict:
+    return {"ok": True, "mode": MODE, "proposal": _proposal(prop),
+            "warnings": list(prop.warnings), "blocked_reason": None, **extra}
 
 
 def preview_shift(data: bytes, position: object, axis: object, delta_mm: object) -> dict:
@@ -182,14 +197,13 @@ def preview_shift(data: bytes, position: object, axis: object, delta_mm: object)
                 if i.index > max(u.index for u in job.users_of(position)) and _is_move(i)), None)
     if nxt is not None:
         highlight.append(nxt.index + 1)
-    return {
-        "ok": True,
-        "proposal": _proposal(prop),
-        "after_positions": _positions(new, with_checks=False),
-        "after_segments": _segments(new),
-        "highlight_lines": highlight,
-        "moved": position,
-    }
+    return _accepted(
+        prop,
+        after_positions=_positions(new, with_checks=False),
+        after_segments=_segments(new),
+        highlight_lines=highlight,
+        moved=position,
+    )
 
 
 def preview_speed(data: bytes, line_no: object, new_speed: object) -> dict:
@@ -206,4 +220,4 @@ def preview_speed(data: bytes, line_no: object, new_speed: object) -> dict:
         prop = job.plan_speed(line_no - 1, new_speed)
     except jbi.JbiError as e:
         return _refused(str(e))
-    return {"ok": True, "proposal": _proposal(prop), "highlight_lines": [line_no]}
+    return _accepted(prop, highlight_lines=[line_no])

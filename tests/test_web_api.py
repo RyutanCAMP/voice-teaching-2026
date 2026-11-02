@@ -243,14 +243,42 @@ def test_static_files_load_nothing_from_outside():
         assert "//cdn" not in text, name
 
 
-def test_no_export_save_or_transfer_buttons():
-    html = static_text()["index.html"]
+def test_approve_and_export_buttons_are_placeholders_only():
+    """承認・出力のボタンは置き場所だけ（disabled）。まだ動かさない。"""
     import re
-    buttons = re.findall(r"<button[^>]*>(.*?)</button>", html, re.S)
-    for b in buttons:
-        for w in ["書き出", "保存", "転送", "承認", "ダウンロード", "送信"]:
-            assert w not in b
-    assert "download" not in static_text()["app.js"].lower()
+    html = static_text()["index.html"]
+    js = static_text()["app.js"]
+    buttons = re.findall(r"<button([^>]*)>(.*?)</button>", html, re.S)
+    for attrs, text in buttons:
+        if any(w in text for w in ["書き出", "出力", "保存", "転送", "承認", "ダウンロード", "送信"]):
+            assert "disabled" in attrs, text
+    assert re.search(r'<button[^>]*id="approve-button"[^>]*disabled', html)
+    assert re.search(r'<button[^>]*id="export-button"[^>]*disabled', html)
+    # JS からは触らない（有効にしない・押しても何もしない）
+    assert "approve-button" not in js and "export-button" not in js
+    assert "download" not in js.lower()
+
+
+def test_simulation_mode_is_shown():
+    html = static_text()["index.html"]
+    assert 'id="mode-banner"' in html
+    assert "シミュレーションモード" in html
+    assert api.job_view(demo())["mode"] == "simulation"
+
+
+def test_preview_json_separates_warnings_and_blocked_reason():
+    ok = api.preview_shift(demo(), "C00004", "Z", 10)
+    assert ok["mode"] == "simulation"
+    assert ok["blocked_reason"] is None
+    assert ok["warnings"] == ok["proposal"]["warnings"]
+    ng = api.preview_shift(demo(), "C00000", "X", 5)
+    assert ng["mode"] == "simulation"
+    assert "共用" in ng["blocked_reason"]
+    assert ng["blocked_reason"] == ng["reason"]
+    assert ng["warnings"] == []
+    sp = api.preview_speed(demo(), 19, 100)
+    assert sp["blocked_reason"] and sp["warnings"] == []
+    assert api.preview_speed(demo(), 26, 100)["blocked_reason"] is None
 
 
 def test_voice_panel_placeholder_exists():

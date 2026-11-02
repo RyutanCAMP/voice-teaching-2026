@@ -8,6 +8,7 @@
 </head>
 <body>
 <header>
+  <p id="mode-banner" class="mode-banner" data-mode="simulation">シミュレーションモード（合成ジョブで試すためのモードです。実機用のモードはまだありません）</p>
   <h1>ジョブの図と変更案のプレビュー</h1>
   <p class="readonly" id="readonly-note">このページは読むだけです。ジョブは書き出しません。変更案は画面に見せるだけで、ジョブのファイルは変わりません。</p>
 </header>
@@ -69,6 +70,17 @@
     </form>
     <div id="preview-result" aria-live="polite"></div>
     <button type="button" id="preview-clear" hidden>プレビューを消す</button>
+  </section>
+
+  <!-- 承認と出力の置き場所。まだ動かさない（disabled のまま。JS からも触らない）。 -->
+  <section id="approval-panel" class="panel" aria-label="承認と出力">
+    <h2>承認と出力（まだ使えません）</h2>
+    <div id="approval-slot"></div>
+    <div class="row">
+      <button type="button" id="approve-button" disabled>承認する（まだ使えません）</button>
+      <button type="button" id="export-button" disabled>新しいジョブ名で出力（まだ使えません）</button>
+    </div>
+    <p class="small muted" id="approval-placeholder">承認はボタンだけで行います（音声だけでは承認しません）。承認していないジョブは出力しません。いまは承認も出力もできません。</p>
   </section>
 
   <section id="positions-panel" class="panel">

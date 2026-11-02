@@ -269,17 +269,22 @@ $("preview-clear").addEventListener("click", () => {
   renderFigures();
 });
 
+// 結果の形（api.py）：mode・proposal（あれば）・warnings（注意）・blocked_reason（実機用の検査で止まる理由。無ければ null）。
+// いまは断られたときは proposal が無い。後で sim.py が両方を返す形になっても表示できるようにしておく。
 function showResult(res) {
-  if (!res.ok) {
-    state.preview = null;
-    $("preview-result").replaceChildren(el("div", { class: "result refused" },
-      el("strong", {}, "検査に断られました。何も変えていません。"),
-      el("p", {}, "理由：" + (res.reason || res.error || "理由が分かりません"))));
-  } else {
-    state.preview = res;
+  const parts = [];
+  const blocked = res.blocked_reason || (!res.ok ? (res.reason || res.error || "理由が分かりません") : null);
+  if (blocked) {
+    parts.push(el("div", { class: "result refused" },
+      el("strong", {}, res.proposal
+        ? "実機用の検査では止まります（シミュレーションでの表示だけです）。"
+        : "検査に断られました。何も変えていません。"),
+      el("p", {}, "理由：" + blocked)));
+  }
+  if (res.proposal) {
     const p = res.proposal;
     const unit = p.kind === "shift" ? "mm" : "";
-    const box = el("div", { class: "result proposal" },
+    parts.push(el("div", { class: "result proposal" },
       el("strong", {}, `変更案（${p.target}・ファイルの ${p.line_no}行目）。見るだけで、ジョブは変わりません。`),
       el("div", { class: "diff" },
         el("div", { class: "minus" }, "変更前  " + p.before_line),
@@ -289,11 +294,14 @@ function showResult(res) {
       el("p", {}, "変わる命令の行："),
       el("ul", {}, ...p.affected.map((a) => el("li", {}, a))),
       el("p", {}, "注意："),
-      el("ul", {}, ...p.warnings.map((w) => el("li", {}, w))));
-    $("preview-result").replaceChildren(box);
+      el("ul", {}, ...(res.warnings || p.warnings).map((w) => el("li", {}, w)))));
+    state.preview = res;
     if (p.kind === "shift" && res.moved) state.selected = res.moved;
+  } else {
+    state.preview = null;
   }
-  $("preview-clear").hidden = !res.ok;
+  $("preview-result").replaceChildren(...parts);
+  $("preview-clear").hidden = !res.proposal;
   renderTables();
   renderFigures();
 }
