@@ -21,6 +21,12 @@ _SPEED_NUM = re.compile(r"(?<![A-Z])V=(\d+(?:\.\d+)?)(?![\w.])")
 _SPEED_ANY = re.compile(r"(?<![A-Z])V=(\S+)")
 _PL = re.compile(r"\bPL=(\d+)")
 _CR = re.compile(r"\bCR=")
+# 変更を断るための広い検出（書き方の揺れも拾う）。読み取れない書き方を「無い」とみなさない
+_PL_LOOSE = re.compile(r"\bPL\b", re.IGNORECASE)
+_CR_LOOSE = re.compile(r"\bCR\b", re.IGNORECASE)
+_SECOND_MOVE = re.compile(r"\+\s*\w*MOV", re.IGNORECASE)
+# 変更してよい行の形（許可リスト）。これ以外の語が付いた行は止める
+_EDITABLE_MOVL = re.compile(r"MOVL C\d{5} V=\d+(?:\.\d+)?")
 
 
 class JbiError(Exception):
@@ -94,6 +100,14 @@ class Job:
             raise JbiError(f"位置 {position} はこのジョブにありません")
         if axis not in AXES:
             raise JbiError(f"軸 {axis} は扱えません（X・Y・Zのみ）")
+        # 位置を変えると、それを使うすべての行の動きが変わる。位置の名前が出てくる行は
+        # 書き方にかかわらず全部「使う行」とみなし、1つでも止める対象なら変えない
+        mention = re.compile(rf"(?<![A-Za-z0-9]){position}(?!\d)", re.IGNORECASE)
+        mentioned = [i for i in self.instructions if mention.search(i.text)]
+        if not mentioned:
+            raise JbiError(f"位置 {position} はどの命令も使っていないため、このアプリでは変更しません")
+        for ins in mentioned:
+            _check_editable_move(ins)
         pos = self.positions[position]
         line = self.lines[pos.line_index]
         body, ending = _split_ending(line)
@@ -110,6 +124,7 @@ class Job:
         ins = self.instruction_at(index)
         if ins.command != "MOVL":
             raise JbiError(f"{index + 1}行目は直線移動（MOVL）ではないため、速度を変更できません")
+        _check_editable_move(ins)
         if ins.speed is None:
             raise JbiError(f"{index + 1}行目の速度は数値で書かれていないため、変更できません")
         body, ending = _split_ending(self.lines[index])
@@ -188,6 +203,25 @@ def _parse_instruction(index: int, text: str) -> Instruction:
         pl=int(pl.group(1)) if pl else None,
         has_cr=bool(_CR.search(rest)),
     )
+
+
+def _check_editable_move(ins: Instruction) -> None:
+    """このアプリで変えてよい移動命令か確かめる（docs/JBI_FORMAT_NOTES.md）。
+
+    「MOVL 位置 V=数値」だけの行を通す（許可リスト）。PL・CR・同時移動は理由を分けて返す。PLは値にかかわらず止める
+    （PL=0 の扱いは確認待ち。決まるまでは厳しい方に合わせる）。
+    """
+    where = f"{ins.index + 1}行目「{ins.text}」"
+    if ins.command != "MOVL":
+        raise JbiError(f"{where}は直線移動（MOVL）の命令ではないため、このアプリでは変更しません")
+    if _SECOND_MOVE.search(ins.text):
+        raise JbiError(f"{where}は別の移動と組になっているため、このアプリでは変更しません")
+    if _PL_LOOSE.search(ins.text):
+        raise JbiError(f"{where}は PL が付いているため、このアプリでは変更しません")
+    if _CR_LOOSE.search(ins.text):
+        raise JbiError(f"{where}は CR が付いているため、このアプリでは変更しません")
+    if not _EDITABLE_MOVL.fullmatch(ins.text):
+        raise JbiError(f"{where}は、このアプリで扱える形（MOVL 位置 V=数値）ではないため、変更しません")
 
 
 def _split_ending(line: str) -> tuple[str, str]:

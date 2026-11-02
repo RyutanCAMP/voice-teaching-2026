@@ -116,3 +116,103 @@ def test_normalized_hash_ignores_name_and_date():
     h3 = jbi.parse(text).shift_position("C00004", "Y", 1.0).normalized_hash()
     assert h1 == h2
     assert h1 != h3
+
+
+# ---- 安全の止め（PR #1 のレビュー指摘 P1 ×2 と、内部レビューの指摘への対応）。実装より先に書いた ----
+# 分からないものは全部止める：読み取れない書き方は「無い」とみなさず、変更を断る
+
+def _index_of(job, position):
+    return [i.index for i in job.instructions if i.position == position][0]
+
+
+@pytest.mark.parametrize("suffix", [
+    "PL=3", "PL=0", "PL=I001", "PL = 3", "pl=3", "PL=3.5", "CR=10.0",
+])
+def test_speed_on_move_with_pl_or_cr_is_rejected(suffix):
+    """PL・CRが付いたMOVLは（値や書き方にかかわらず）速度を変えない。理由を返し、何も変えない"""
+    text = load().replace("MOVL C00003 V=250.0", f"MOVL C00003 V=250.0 {suffix}")
+    job = jbi.parse(text)
+    with pytest.raises(jbi.JbiError, match="変更しません"):
+        job.set_speed(_index_of(job, "C00003"), 300.0)
+    assert job.render() == text
+
+
+@pytest.mark.parametrize("line", [
+    "MOVJ C00004 VJ=50.00",
+    "MOVC C00004 V=80.0",
+    "MOVS C00004 V=80.0",
+    "movj C00004 VJ=50.00",
+    "SMOVL C00004 V=80.0",
+    "IMOV C00004 V=80.0",
+    "*L1 MOVL C00004 V=80.0",
+    "MOVL C00004 V=80.0 PL=2",
+    "MOVL C00004 V=80.0 PL=I001",
+    "MOVL C00004 V=80.0 CR=10.0",
+])
+def test_shift_used_by_unsupported_line_is_rejected(line):
+    """位置を使う行が、PL・CRの無いMOVL以外なら、その位置は変えない"""
+    # 普通のMOVLを残したまま、止める対象の行を足す（「使っていない」で断られる道を通さない）
+    text = load().replace("MOVL C00004 V=80.0\n", f"MOVL C00004 V=80.0\n{line}\n")
+    job = jbi.parse(text)
+    with pytest.raises(jbi.JbiError, match=r"「.*C00004.*」は"):
+        job.shift_position("C00004", "Y", 10.0)
+    assert job.render() == text
+
+
+def test_shift_rejected_when_other_command_mentions_position():
+    """移動命令以外（GETS など）が位置を使うときも変えない"""
+    text = load().replace("NOP\n", "NOP\nGETS PX000 C00004\n")
+    job = jbi.parse(text)
+    with pytest.raises(jbi.JbiError, match="GETS"):
+        job.shift_position("C00004", "Y", 10.0)
+    assert job.render() == text
+
+
+def test_shift_rejected_when_position_is_second_target():
+    """同時移動（+MOVJ）の相手になっている位置は変えない"""
+    text = load().replace("MOVL C00005 V=80.0", "MOVL C00005 V=80.0 +MOVJ C00004 VJ=50.00")
+    job = jbi.parse(text)
+    with pytest.raises(jbi.JbiError, match="組になっている"):
+        job.shift_position("C00004", "Y", 10.0)
+    assert job.render() == text
+
+
+def test_shift_checks_every_user_of_position():
+    """同じ位置を複数の命令が使うとき、1つでも止める対象なら変えない"""
+    # C00000 は最初と最後のMOVLで使われている。最後の1つだけをMOVJにする
+    lines = load().splitlines(keepends=True)
+    last = max(i for i, l in enumerate(lines) if l.startswith("MOVL C00000 "))
+    lines[last] = lines[last].replace("MOVL C00000 V=200.0", "MOVJ C00000 VJ=50.00")
+    text = "".join(lines)
+    job = jbi.parse(text)
+    with pytest.raises(jbi.JbiError, match="MOVJ"):
+        job.shift_position("C00000", "Z", 10.0)
+    assert job.render() == text
+
+
+def test_shift_of_unused_position_is_rejected():
+    """どの命令も使っていない位置は、何のための位置か分からないので変えない"""
+    text = load().replace("MOVL C00005 V=80.0\n", "")
+    job = jbi.parse(text)
+    assert "C00005" in job.positions
+    with pytest.raises(jbi.JbiError, match="使っていない"):
+        job.shift_position("C00005", "Y", 10.0)
+    assert job.render() == text
+
+
+def test_shift_used_only_by_plain_movl_is_allowed():
+    """C00000 は2つのMOVL（PL・CRなし）だけが使うので変更できる"""
+    job = jbi.parse(load()).shift_position("C00000", "Z", 10.0)
+    assert job.positions["C00000"].xyz == (450.0, -200.0, 360.0)
+
+
+@pytest.mark.parametrize("suffix", ["APL=3", "ACC=50", "'memo"])
+def test_move_with_unknown_words_is_rejected(suffix):
+    """MOVL Cxxxxx V=数値 の形に無い語が付いた行は、意味が分からないので変えない"""
+    text = load().replace("MOVL C00004 V=80.0", f"MOVL C00004 V=80.0 {suffix}")
+    job = jbi.parse(text)
+    with pytest.raises(jbi.JbiError, match="扱える形"):
+        job.set_speed(_index_of(job, "C00004"), 100.0)
+    with pytest.raises(jbi.JbiError, match="扱える形"):
+        job.shift_position("C00004", "Y", 10.0)
+    assert job.render() == text
