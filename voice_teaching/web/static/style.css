@@ -41,3 +41,28 @@ svg text { font-size: 12px; user-select: none; }
 svg .pt { cursor: pointer; }
 .mode-banner { background: #2d5aa0; color: #fff; font-weight: bold; font-size: 16px; padding: 6px 12px; margin: 0 0 8px; border-radius: 4px; }
 button[disabled] { color: #888; }
+[hidden] { display: none !important; }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+#log-panel { position: sticky; top: 8px; max-height: calc(100vh - 32px); display: flex; flex-direction: column; }
+#work-log { overflow-y: auto; font-size: 13px; padding-left: 20px; margin: 0; }
+#work-log li { margin: 3px 0; }
+#work-log .log-stop { color: #a00; }
+#work-log .log-ask { color: #8a5a00; }
+h3 { font-size: 14px; margin: 6px 0 4px; }
+.notice { background: #f3f3f3; border-left: 4px solid #888; padding: 4px 8px; }
+.heard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.box { border: 1px solid #ccc; border-radius: 4px; padding: 6px 10px; min-height: 2em; background: #fafafa; }
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin: 0; }
+.facts dt { font-weight: bold; }
+.facts dd { margin: 0; }
+.reply { margin-top: 8px; padding: 8px 12px; border-radius: 6px; border: 1px solid #ccc; }
+.reply.ask { background: #fff4e0; border: 2px solid #e0a040; }
+.reply.stop { background: #fff4f4; border: 2px solid #c00; }
+.reply.ok { background: #f2f8f2; border: 1px solid #7a7; }
+.overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); display: flex; align-items: center; justify-content: center; z-index: 10; }
+.confirm-box { background: #fff; width: min(92vw, 1000px); max-height: 92vh; overflow-y: auto; border-radius: 10px; padding: 24px 32px; border: 4px solid #d0602a; }
+.confirm-text { font-size: 26px; font-weight: bold; line-height: 1.5; }
+.confirm-blocked { color: #c00; font-size: 20px; font-weight: bold; border: 2px solid #c00; background: #fff4f4; padding: 8px 12px; }
+button.approve { font-size: 20px; padding: 10px 24px; }
+#export-button { font-size: 16px; padding: 8px 16px; }
+@media (max-width: 1000px) { .layout { grid-template-columns: 1fr; } }

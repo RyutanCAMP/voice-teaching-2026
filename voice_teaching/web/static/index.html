@@ -3,34 +3,49 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ボイスティーチング：ジョブの図と変更案のプレビュー</title>
+<title>ボイスティーチング（シミュレーションモード）</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <header>
   <p id="mode-banner" class="mode-banner" data-mode="simulation">シミュレーションモード（合成ジョブで試すためのモードです。実機用のモードはまだありません）</p>
-  <h1>ジョブの図と変更案のプレビュー</h1>
-  <p class="readonly" id="readonly-note">このページは読むだけです。ジョブは書き出しません。変更案は画面に見せるだけで、ジョブのファイルは変わりません。</p>
+  <h1>ボイスティーチング：音声・文字の指示で変更候補を作る</h1>
+  <p class="readonly" id="readonly-note">元のジョブは変えません。承認ボタンで承認した変更候補だけを、新しいジョブ名でシミュレーション用に出力します（合成ジョブだけ）。実機用の出力・転送・ロボットの起動はしません。</p>
 </header>
 
+<div class="layout">
+<div class="main-col">
+
 <section id="load-panel" class="panel">
-  <label for="file-input">JBIファイルを選ぶ：</label>
+  <label for="file-input">1. JBIファイルを選ぶ：</label>
   <input type="file" id="file-input" accept=".JBI,.jbi">
   <span id="file-name"></span>
-  <p class="small">選んだファイルは、このPCの中のサーバー（127.0.0.1）にだけ送ります。サーバーはファイルを保存しません。</p>
+  <p class="small">選んだファイルは、このPCの中のサーバー（127.0.0.1）にだけ送ります。サーバーはメモリの中だけで扱い、ファイルを保存しません。試すときは samples/dummy/DEMO_PLACE.JBI を選んでください。</p>
   <p id="load-error" class="error" hidden></p>
 </section>
 
 <section id="problems-panel" class="problems" hidden>
-  <h2>このジョブには読めない所があります（変更案はすべて断られます）</h2>
+  <h2>このジョブには読めない所があります（実機用の検査では変更はすべて断られます）</h2>
   <ul id="problems-list"></ul>
 </section>
 
-<!-- 音声の担当が「音声で指示」の欄を足す場所。中身はまだ空。 -->
 <section id="instruction-panel" class="panel" aria-label="指示">
-  <h2>指示</h2>
-  <div id="instruction-slot"></div>
-  <p class="small muted" id="instruction-placeholder">（音声・文字で指示する欄は、あとで追加します）</p>
+  <h2>3. 指示（文字）</h2>
+  <div id="instruction-slot">
+    <div id="voice-input-slot" class="small muted">音声入力は準備中</div>
+    <form id="text-form" class="row">
+      <label for="text-input">文字で指示：</label>
+      <input type="text" id="text-input" size="40" maxlength="500" placeholder="例：この位置をY方向に10mm移動して" disabled>
+      <button type="submit" id="text-send" disabled>指示を送る</button>
+    </form>
+    <p class="small muted">例：「C00004を選択して」「この位置をY方向に10mm移動して」「C00004をZ方向に-5mm移動して」「比較して」「元に戻して」。承認は指示の文字ではできません（確認表示の承認ボタンだけ）。</p>
+    <p class="small notice" id="mock-notice"></p>
+    <div class="heard-grid">
+      <div><h3>聞き取った文字（そのまま）</h3><div id="heard-text" class="box">（まだありません）</div></div>
+      <div><h3>解釈（プログラムが発話から取り出したこと）</h3><div id="facts-view" class="box">（まだありません）</div></div>
+    </div>
+    <div id="reply-message" class="reply" aria-live="polite" hidden></div>
+  </div>
 </section>
 
 <main id="job-area" hidden>
@@ -38,9 +53,9 @@
   <ul id="job-notes" class="notes"></ul>
 
   <section id="figure-panel" class="panel">
-    <h2>図（位置番号つき）</h2>
+    <h2>2. 図（位置番号つき）：点か一覧をクリックして位置を選ぶ</h2>
     <p class="figure-note" id="figure-note">この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。参考表示であり、実際のロボットの動きではありません。</p>
-    <p class="small">線は命令の順に結んでいます。実線は MOVL（PL・CRなし）の区間、点線はそれ以外で「目安」です。点や一覧をクリックすると、その位置と、その位置を使う命令の行を強調します。</p>
+    <p class="small">線は命令の順に結んでいます。実線は MOVL（PL・CRなし）の区間、点線はそれ以外で「目安」です。選んでいる位置：<strong id="selected-name">なし</strong></p>
     <p id="figure-message" class="warn" hidden></p>
     <div id="legend" class="legend" hidden>
       <span class="lg before">変更前（灰色）</span>
@@ -52,41 +67,31 @@
     </div>
   </section>
 
-  <section id="preview-panel" class="panel">
-    <h2>変更案のプレビュー（見るだけ）</h2>
-    <p class="small">検査プログラム（jbi.py）が変更案を作ります。検査に断られたときは、理由を出して何も変えません。1回に動かす量は <span id="max-shift-label"></span> までです。</p>
-    <form id="shift-form" class="row">
-      <strong>位置：</strong>
-      <label>位置 <select id="shift-position"></select></label>
-      <label>軸 <select id="shift-axis"><option>X</option><option>Y</option><option>Z</option></select></label>
-      <label>量(mm) <input type="number" id="shift-delta" step="any" required></label>
-      <button type="submit" id="shift-preview-button">変更案を見る</button>
-    </form>
-    <form id="speed-form" class="row">
-      <strong>速度：</strong>
-      <label>命令の行 <select id="speed-line"></select></label>
-      <label>新しい V= の値 <input type="number" id="speed-value" step="any" required></label>
-      <button type="submit" id="speed-preview-button">変更案を見る</button>
-    </form>
-    <div id="preview-result" aria-live="polite"></div>
-    <button type="button" id="preview-clear" hidden>プレビューを消す</button>
+  <section id="candidate-panel" class="panel">
+    <h2>4. 変更候補のプレビュー（変更前後の差分）</h2>
+    <p class="small">変更候補は検査プログラムが作ります。承認するまで、ジョブは変わりません。1回に動かす量は <span id="max-shift-label"></span> までです。</p>
+    <div id="candidate-view"><p class="muted">変更候補はまだありません。</p></div>
+    <div class="row">
+      <button type="button" id="open-confirm" disabled>確認表示を開く</button>
+      <button type="button" id="compare-button" disabled>比べる</button>
+      <button type="button" id="undo-button" disabled>元に戻す（候補を捨てる）</button>
+    </div>
   </section>
 
-  <!-- 承認と出力の置き場所。まだ動かさない（disabled のまま。JS からも触らない）。 -->
   <section id="approval-panel" class="panel" aria-label="承認と出力">
-    <h2>承認と出力（まだ使えません）</h2>
-    <div id="approval-slot"></div>
+    <h2>5. 承認と出力</h2>
+    <p id="approval-status">まだ承認していません。承認は確認表示の承認ボタンだけで行います（音声・文字では承認しません）。</p>
     <div class="row">
-      <button type="button" id="approve-button" disabled>承認する（まだ使えません）</button>
-      <button type="button" id="export-button" disabled>新しいジョブ名で出力（まだ使えません）</button>
+      <button type="button" id="export-button" disabled>シミュレーション用に出力（合成ジョブだけ・実機に入れない）</button>
     </div>
-    <p class="small muted" id="approval-placeholder">承認はボタンだけで行います（音声だけでは承認しません）。承認していないジョブは出力しません。いまは承認も出力もできません。</p>
+    <p class="small muted">出力先：<code id="out-dir"></code>。出力するのは承認した変更候補だけで、合成ジョブ（samples/dummy/ と同じ中身）のほかは出力しません。</p>
+    <div id="export-result" aria-live="polite" hidden></div>
   </section>
 
   <section id="positions-panel" class="panel">
     <h2>位置の一覧</h2>
     <table id="positions-table">
-      <thead><tr><th>位置</th><th>行</th><th>ファイルの行（そのまま）</th><th>形式</th><th>使っている命令の行</th><th>検査（試しに X +1mm）</th></tr></thead>
+      <thead><tr><th>位置</th><th>行</th><th>ファイルの行（そのまま）</th><th>形式</th><th>使っている命令の行</th><th>実機用の検査（試しに X +1mm）</th></tr></thead>
       <tbody></tbody>
     </table>
   </section>
@@ -99,6 +104,33 @@
     </table>
   </section>
 </main>
+
+</div>
+
+<aside id="log-panel" class="panel" aria-label="作業ログ">
+  <h2>作業ログ</h2>
+  <ol id="work-log"></ol>
+</aside>
+</div>
+
+<div id="confirm-overlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-title" hidden>
+  <div class="confirm-box">
+    <h2 id="confirm-title">確認</h2>
+    <p id="confirm-text" class="confirm-text"></p>
+    <p id="confirm-blocked" class="confirm-blocked" hidden></p>
+    <div id="confirm-diff" class="diff"></div>
+    <p class="small">変更後の経路は、図と実機で人が確かめてください。この確認表示の文はプログラムが変更候補から作っています。</p>
+    <div class="row">
+      <label for="approver-name">承認する人の名前：</label>
+      <input type="text" id="approver-name" maxlength="50" autocomplete="name">
+    </div>
+    <p id="confirm-error" class="error" hidden></p>
+    <div class="row">
+      <button type="button" id="approve-button" class="approve" disabled>承認する（ボタンだけ）</button>
+      <button type="button" id="confirm-close">閉じる（承認しない）</button>
+    </div>
+  </div>
+</div><!-- /confirm-overlay -->
 
 <script src="/static/app.js"></script>
 </body>

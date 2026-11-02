@@ -153,6 +153,11 @@ def job_view(data: bytes) -> dict:
     }
 
 
+def figure_data(job: jbi.Job) -> dict:
+    """図を描くための位置と線だけ（検査の試しは含めない）。変更後のジョブの図に使う。"""
+    return {"positions": _positions(job, with_checks=False), "segments": _segments(job)}
+
+
 def _proposal(p: jbi.ChangeProposal) -> dict:
     return {
         "kind": p.kind, "target": p.target, "line_no": p.line_index + 1,

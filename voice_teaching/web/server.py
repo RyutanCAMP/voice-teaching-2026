@@ -1,8 +1,10 @@
-"""シミュレーション表示の小さなサーバー（標準ライブラリの http.server だけを使う）。
+"""シミュレーションモードの小さなサーバー（標準ライブラリの http.server だけを使う）。
 
 - 127.0.0.1 だけで待ち受ける（ほかのアドレスは指定させない）。
-- 受け取ったジョブはメモリの中だけで扱い、ディスクに保存しない。サーバーから外へは通信しない。
-- 書き出し・保存・転送の機能はない（その経路を作っていない）。
+- 受け取ったジョブと画面の状態（Session）はメモリの中だけで扱い、ディスクに保存しない。サーバーから外へは通信しない。
+- 書き出すのは、ボタンで承認したシミュレーション用のジョブ（合成ジョブだけ）を output/sim/ に出す /api/export だけ。
+  実機用の出力・転送・ロボットの起動の経路は無い。
+- 承認（/api/approve）は画面の承認ボタンからだけ呼ぶ。指示（/api/hear）の経路からは呼ばない。
 - 別のサイトから呼ばれないように、Host と Origin を確かめる。
 """
 from __future__ import annotations
@@ -14,6 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 
 from . import api
+from .flow import WebFlow
 
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
@@ -103,10 +106,50 @@ class Handler(BaseHTTPRequestHandler):
             return None
         return req, job
 
+    def _read_obj(self) -> dict | None:
+        body = self._read_body()
+        if body is None:
+            return None
+        try:
+            req = json.loads(body.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            req = None
+        if not isinstance(req, dict):
+            self._error(400, "要求が読めません")
+            return None
+        return req
+
+    def _flow_post(self, path: str) -> bool:
+        flow: WebFlow = self.server.flow
+        if path == "/api/load":
+            body = self._read_body()
+            if body is not None:
+                self._json(200, flow.load(body))
+            return True
+        routes = {
+            "/api/hear": lambda r: flow.hear(r.get("session_id"), r.get("text"), r.get("source", "text")),
+            "/api/select": lambda r: flow.select(r.get("session_id"), r.get("position")),
+            "/api/compare": lambda r: flow.compare(r.get("session_id")),
+            "/api/undo": lambda r: flow.undo(r.get("session_id")),
+            "/api/state": lambda r: flow.state(r.get("session_id")),
+            # 承認は画面の承認ボタンからだけ。/api/hear からは呼ばない
+            "/api/approve": lambda r: flow.approve(r.get("session_id"), r.get("approver")),
+            "/api/export": lambda r: flow.export(r.get("session_id")),
+        }
+        fn = routes.get(path)
+        if fn is None:
+            return False
+        req = self._read_obj()
+        if req is not None:
+            self._json(200, fn(req))
+        return True
+
     def do_POST(self) -> None:
         if not self._host_ok() or not self._origin_ok():
             return self._error(403, "このサーバーは 127.0.0.1 の画面からだけ使えます")
         path = self.path.split("?", 1)[0]
+        if self._flow_post(path):
+            return
         if path == "/api/parse":
             body = self._read_body()
             if body is not None:
@@ -125,9 +168,11 @@ class Handler(BaseHTTPRequestHandler):
             self._error(404, "ありません")
 
 
-def make_server(host: str = HOST, port: int = DEFAULT_PORT) -> ThreadingHTTPServer:
+def make_server(host: str = HOST, port: int = DEFAULT_PORT, out_dir=None) -> ThreadingHTTPServer:
+    """out_dir はシミュレーション用の出力先（既定は output/sim/）。"""
     if host != HOST:
         raise ValueError("127.0.0.1 以外では待ち受けません")
     srv = ThreadingHTTPServer((HOST, port), Handler)
     srv.daemon_threads = True
+    srv.flow = WebFlow(out_dir=out_dir)
     return srv

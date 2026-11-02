@@ -227,7 +227,9 @@ def test_static_files_have_required_notices_and_no_assertive_words():
     files = static_text()
     assert {"index.html", "app.js", "style.css"} <= set(files)
     html = files["index.html"]
-    assert "このページは読むだけです。ジョブは書き出しません" in html
+    # MVP：元のジョブは変えず、承認した候補だけをシミュレーション用に出力する（実機用の出力・転送・起動は無い）
+    assert "元のジョブは変えません" in html
+    assert "実機用の出力・転送・ロボットの起動はしません" in html
     assert ("この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。"
             "参考表示であり、実際のロボットの動きではありません。") in html
     api_text = json.dumps(api.job_view(demo()), ensure_ascii=False) + api.FIGURE_NOTE
@@ -243,19 +245,18 @@ def test_static_files_load_nothing_from_outside():
         assert "//cdn" not in text, name
 
 
-def test_approve_and_export_buttons_are_placeholders_only():
-    """承認・出力のボタンは置き場所だけ（disabled）。まだ動かさない。"""
+def test_approve_and_export_buttons_start_disabled():
+    """承認・出力のボタンは、最初は使えない（候補ができて承認するまで）。保存・転送・ダウンロードのボタンは無い。"""
     import re
     html = static_text()["index.html"]
     js = static_text()["app.js"]
     buttons = re.findall(r"<button([^>]*)>(.*?)</button>", html, re.S)
     for attrs, text in buttons:
-        if any(w in text for w in ["書き出", "出力", "保存", "転送", "承認", "ダウンロード", "送信"]):
+        if any(w in text for w in ["書き出", "出力", "保存", "転送", "承認する", "ダウンロード", "送信"]):
             assert "disabled" in attrs, text
+        assert not any(w in text for w in ["保存", "転送", "ダウンロード"]), text
     assert re.search(r'<button[^>]*id="approve-button"[^>]*disabled', html)
     assert re.search(r'<button[^>]*id="export-button"[^>]*disabled', html)
-    # JS からは触らない（有効にしない・押しても何もしない）
-    assert "approve-button" not in js and "export-button" not in js
     assert "download" not in js.lower()
 
 
@@ -318,7 +319,7 @@ def test_server_listens_only_on_loopback(running_server):
 def test_server_serves_page_and_parses_without_writing_files(running_server, tmp_path):
     r, body = request(running_server, "GET", "/")
     assert r.status == 200
-    assert "このページは読むだけです" in body.decode("utf-8")
+    assert "元のジョブは変えません" in body.decode("utf-8")
     assert "default-src 'self'" in r.getheader("Content-Security-Policy")
 
     r, body = request(running_server, "POST", "/api/parse", body=demo(),
@@ -352,9 +353,12 @@ def test_server_rejects_foreign_host_and_origin(running_server):
 
 
 def test_server_has_no_write_or_transfer_routes(running_server):
-    for path in ["/api/export", "/api/save", "/api/transfer", "/api/write"]:
+    for path in ["/api/save", "/api/transfer", "/api/write", "/api/start", "/api/send"]:
         r, _ = request(running_server, "POST", path, body=b"{}")
         assert r.status == 404
+    # /api/export はあるが、読み込み・承認の無い要求は断る（何も書かない）
+    r, body = request(running_server, "POST", "/api/export", body=b"{}")
+    assert r.status == 200 and json.loads(body)["ok"] is False
     r, _ = request(running_server, "GET", "/static/../../jbi.py")
     assert r.status == 404
 

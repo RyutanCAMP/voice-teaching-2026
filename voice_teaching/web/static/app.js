@@ -1,14 +1,15 @@
-// ジョブの図と変更案のプレビュー（読むだけ）。
-// - JBI の解析はサーバー側（Python の jbi.py）だけで行う。ここでは JBI を解析しない。
-// - 変更案は画面に見せるだけ。書き出し・保存・転送はしない。
+// ボイスティーチング（シミュレーションモード）の画面。
+// - JBI の解析・変更候補・承認・出力はサーバー側（Python）で行う。ここでは JBI を解析しない。
+// - 指示は文字入力の欄から /api/hear へ送る（音声入力は別作業で準備中）。
+// - 承認は確認表示の承認ボタンからだけ /api/approve を呼ぶ。指示の経路からは呼ばない。
+// - 出力ボタンは承認した後だけ使える。失敗を成功と表示しない。
 // - 外部から何も読み込まない。サーバー（同じ 127.0.0.1）にだけ要求を送る。
 "use strict";
 
 const state = {
-  jobBytes: null,   // 選んだファイルのバイト列（このページのメモリの中だけ）
-  view: null,       // /api/parse の結果
-  selected: null,   // 選んだ位置の名前
-  preview: null,    // /api/preview/* の結果（ok のときだけ）
+  sessionId: null,  // サーバーのメモリにある画面の状態の番号
+  view: null,       // 読み込んだときのジョブの内容（/api/load の view）
+  st: null,         // サーバーの画面の状態（state）
 };
 
 const $ = (id) => document.getElementById(id);
@@ -32,54 +33,62 @@ function svgEl(tag, attrs) {
   return e;
 }
 
-function bytesToBase64(bytes) {
-  let s = "";
-  const step = 0x8000;
-  for (let i = 0; i < bytes.length; i += step) {
-    s += String.fromCharCode.apply(null, bytes.subarray(i, i + step));
-  }
-  return btoa(s);
-}
-
 async function postJson(path, body) {
-  const r = await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  return r.json();
+  try {
+    const r = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return await r.json();
+  } catch (e) {
+    return { ok: false, error: "サーバーに届きませんでした（python -m voice_teaching.web が動いているか確かめてください）" };
+  }
 }
 
-// ---- 読み込み ----
+// ---- 1. 読み込み ----
 $("file-input").addEventListener("change", async (ev) => {
   const f = ev.target.files[0];
   if (!f) return;
   $("file-name").textContent = f.name;
   const bytes = new Uint8Array(await f.arrayBuffer());
-  let view;
+  let res;
   try {
-    const r = await fetch("/api/parse", {
+    const r = await fetch("/api/load", {
       method: "POST",
       headers: { "Content-Type": "application/octet-stream" },
       body: bytes,
     });
-    view = await r.json();
+    res = await r.json();
   } catch (e) {
-    view = { ok: false, error: "サーバーに届きませんでした（python -m voice_teaching.web が動いているか確かめてください）" };
+    res = { ok: false, error: "サーバーに届きませんでした（python -m voice_teaching.web が動いているか確かめてください）" };
   }
-  state.jobBytes = null; state.view = null; state.selected = null; state.preview = null;
-  if (!view.ok) {
-    $("load-error").textContent = "読み込めません：" + (view.error || "理由が分かりません");
+  state.sessionId = null; state.view = null; state.st = null;
+  closeConfirm();
+  if (!res.ok) {
+    $("load-error").textContent = "読み込めません：" + (res.error || "理由が分かりません");
     $("load-error").hidden = false;
     $("job-area").hidden = true;
     $("problems-panel").hidden = true;
+    setInputEnabled(false);
     return;
   }
   $("load-error").hidden = true;
-  state.jobBytes = bytes;
-  state.view = view;
+  state.sessionId = res.session_id;
+  state.view = res.view;
+  state.st = res.state;
+  $("heard-text").textContent = "（まだありません）";
+  $("facts-view").textContent = "（まだありません）";
+  $("reply-message").hidden = true;
+  $("export-result").hidden = true;
+  setInputEnabled(true);
   renderAll();
 });
+
+function setInputEnabled(on) {
+  $("text-input").disabled = !on;
+  $("text-send").disabled = !on;
+}
 
 // ---- 画面全体 ----
 function renderAll() {
@@ -87,35 +96,222 @@ function renderAll() {
   $("job-area").hidden = false;
   $("job-summary").textContent =
     `ジョブ名 ${v.name}・文字コード ${v.encoding}・位置 ${v.positions.length}個・命令 ${v.instructions.length}行`;
-  const notes = $("job-notes");
-  notes.replaceChildren(...v.notes.map((n) => el("li", {}, n)));
-
-  const pl = $("problems-list");
-  pl.replaceChildren(...v.problems.map((p) => el("li", {}, p)));
+  $("job-notes").replaceChildren(...v.notes.map((n) => el("li", {}, n)));
+  $("problems-list").replaceChildren(...v.problems.map((p) => el("li", {}, p)));
   $("problems-panel").hidden = v.problems.length === 0;
-
   $("max-shift-label").textContent = v.max_shift_label;
   $("figure-message").textContent = v.figure_message;
   $("figure-message").hidden = !v.figure_message;
+  renderState();
+}
 
-  const sp = $("shift-position");
-  sp.replaceChildren(...v.positions.map((p) => el("option", { value: p.name }, p.name)));
-  const sl = $("speed-line");
-  sl.replaceChildren(...v.instructions.filter((i) => i.is_move)
-    .map((i) => el("option", { value: String(i.line_no) }, `${i.line_no}行目 ${i.text}`)));
-
-  clearPreview();
+function renderState() {
+  const st = state.st;
+  if (!st) return;
+  $("mock-notice").textContent = st.mock_notice;
+  $("selected-name").textContent = st.selected || "なし";
+  $("out-dir").textContent = st.out_dir;
+  renderCandidate();
+  renderApproval();
+  renderLog();
   renderTables();
   renderFigures();
 }
 
-function select(name) {
-  state.selected = name;
-  if (name) $("shift-position").value = name;
-  renderTables();
-  renderFigures();
+// ---- 位置の選択 ----
+async function select(name) {
+  if (!state.sessionId) return;
+  const res = await postJson("/api/select", { session_id: state.sessionId, position: name });
+  applyResult(res);
 }
 
+function applyResult(res) {
+  if (res.state) state.st = res.state;
+  if (res.ok === false) {
+    showReply("stop", res.error || "理由が分かりません");
+  } else if (res.status && res.status !== "ok") {
+    showReply(res.status, res.message);
+  } else if (res.message) {
+    showReply("ok", res.message);
+  }
+  renderState();
+}
+
+function showReply(status, message) {
+  const box = $("reply-message");
+  const head = { ok: "結果：", ask: "聞き返し：", stop: "止めました（何も変えていません）：" }[status] || "";
+  box.className = "reply " + status;
+  box.replaceChildren(el("strong", {}, head), message);
+  box.hidden = false;
+}
+
+// ---- 3. 指示（文字）。音声入力は別作業で準備中 ----
+$("text-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const text = $("text-input").value.trim();
+  if (!text) return;
+  await sendInstruction(text, "text");
+  $("text-input").value = "";
+});
+
+async function sendInstruction(text, source) {
+  if (!state.sessionId) return;
+  const res = await postJson("/api/hear", { session_id: state.sessionId, text: text, source: source });
+  $("heard-text").textContent = res.heard !== undefined ? res.heard : text;
+  renderFacts(res.facts);
+  applyResult(res);
+  if (res.candidate_made && state.st && state.st.candidate) openConfirm();
+}
+
+function renderFacts(f) {
+  const box = $("facts-view");
+  if (!f) { box.textContent = "（取り出せたことはありません）"; return; }
+  const kindNames = { select: "選ぶ", move: "移動", speed: "速度", compare: "比べる", undo: "元に戻す",
+    approve: "承認・書き出しを求める言葉", start: "起動を求める言葉" };
+  const rows = [
+    ["操作の種類", f.kinds.map((k) => kindNames[k] || k).join("・") || "分かりません"],
+    ["位置番号", f.positions.join("・") || (f.refers_to_selection ? "（選んでいる位置）" : "なし")],
+    ["量", f.amounts.join("・") || "なし"],
+    ["方向（軸）", f.axes.join("・") || "なし"],
+  ];
+  if (f.requested_value !== null) rows.push(["読み取った符号つきの量", String(f.requested_value)]);
+  if (f.unclear_amounts.length) rows.push(["はっきりしない量", f.unclear_amounts.join("・")]);
+  if (f.bad_positions.length) rows.push(["形が違う位置番号", f.bad_positions.join("・")]);
+  if (f.sides.length) rows.push(["左右", f.sides.join("・")]);
+  box.replaceChildren(el("dl", { class: "facts" },
+    ...rows.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)])));
+}
+
+// ---- 4. 変更候補のプレビュー ----
+function renderCandidate() {
+  const st = state.st;
+  const c = st.candidate;
+  const host = $("candidate-view");
+  $("open-confirm").disabled = !c;
+  $("compare-button").disabled = !c;
+  $("undo-button").disabled = !c;
+  if (!c) {
+    host.replaceChildren(el("p", { class: "muted" }, "変更候補はまだありません。"));
+    return;
+  }
+  const parts = [];
+  if (c.blocked_reason) {
+    parts.push(el("div", { class: "result refused" },
+      el("strong", {}, "シミュレーションだけの候補です。実機用の検査では止まりました。"),
+      el("p", {}, "理由：" + c.blocked_reason)));
+  }
+  parts.push(el("div", { class: "result proposal" },
+    el("strong", {}, `変更候補（${c.target}・ファイルの ${c.line_no}行目）。承認するまでジョブは変わりません。`),
+    diffView(c),
+    el("p", {}, `変更前の値：${c.before_value}　変更後の値：${c.after_value}　変化量：${c.delta}`),
+    el("p", {}, "変わる命令の行："),
+    el("ul", {}, ...c.affected.map((a) => el("li", {}, a))),
+    el("p", {}, "注意："),
+    el("ul", {}, ...c.warnings.map((w) => el("li", {}, w)))));
+  host.replaceChildren(...parts);
+}
+
+function diffView(c) {
+  return el("div", { class: "diff" },
+    el("div", { class: "minus" }, `- ${c.line_no}行目  ${c.before_line}`),
+    el("div", { class: "plus" }, `+ ${c.line_no}行目  ${c.after_line}`));
+}
+
+$("compare-button").addEventListener("click", async () => {
+  const res = await postJson("/api/compare", { session_id: state.sessionId });
+  applyResult(res);
+});
+
+$("undo-button").addEventListener("click", async () => {
+  const res = await postJson("/api/undo", { session_id: state.sessionId });
+  closeConfirm();
+  applyResult(res);
+});
+
+// ---- 大きな確認表示（文はサーバーのプログラムが作ったもの） ----
+function openConfirm() {
+  const st = state.st;
+  if (!st || !st.candidate) return;
+  $("confirm-text").textContent = st.confirmation_text || "";
+  $("confirm-blocked").textContent = st.blocked_reason ? "実機用の検査では止まりました：" + st.blocked_reason : "";
+  $("confirm-blocked").hidden = !st.blocked_reason;
+  $("confirm-diff").replaceChildren(diffView(st.candidate));
+  $("confirm-error").hidden = true;
+  $("approve-button").disabled = !st.can_approve;
+  $("confirm-overlay").hidden = false;
+}
+
+function closeConfirm() {
+  $("confirm-overlay").hidden = true;
+}
+
+$("open-confirm").addEventListener("click", openConfirm);
+$("confirm-close").addEventListener("click", closeConfirm);
+
+// ---- 5. 承認（このボタンからだけ） ----
+async function onApproveClick() {
+  const name = $("approver-name").value.trim();
+  if (!name) {
+    $("confirm-error").textContent = "承認する人の名前を入れてください";
+    $("confirm-error").hidden = false;
+    return;
+  }
+  const res = await postJson("/api/approve", { session_id: state.sessionId, approver: name });
+  if (res.state) state.st = res.state;
+  if (res.ok !== true) {
+    $("confirm-error").textContent = "承認できませんでした：" + (res.error || "理由が分かりません");
+    $("confirm-error").hidden = false;
+    renderState();
+    return;
+  }
+  closeConfirm();
+  $("export-result").hidden = true;
+  renderState();
+}
+$("approve-button").addEventListener("click", onApproveClick);
+
+function renderApproval() {
+  const st = state.st;
+  const a = st.approval;
+  $("approval-status").textContent = a
+    ? `${a.approved_by} さんが承認ボタンで承認しました（${a.approved_at}）。出力ボタンが使えます。`
+    : "まだ承認していません。承認は確認表示の承認ボタンだけで行います（指示の文字では承認しません）。";
+  $("export-button").disabled = !st.can_export;
+  $("approve-button").disabled = !st.can_approve;
+  if (!a && !$("export-result").hidden && $("export-result").dataset.ok === "true") {
+    $("export-result").hidden = true;
+  }
+}
+
+// ---- シミュレーション用の出力 ----
+$("export-button").addEventListener("click", async () => {
+  const res = await postJson("/api/export", { session_id: state.sessionId });
+  if (res.state) state.st = res.state;
+  const box = $("export-result");
+  if (res.ok === true) {
+    box.className = "result proposal";
+    box.dataset.ok = "true";
+    box.replaceChildren(el("strong", {}, "シミュレーション用のジョブを出力しました（実機には入れないでください）："),
+      el("div", {}, el("code", {}, res.path)));
+  } else {
+    box.className = "result refused";
+    box.dataset.ok = "false";
+    box.replaceChildren(el("strong", {}, "出力していません。"), el("p", {}, res.error || "理由が分かりません"));
+  }
+  box.hidden = false;
+  renderState();
+});
+
+// ---- 作業ログ ----
+function renderLog() {
+  const ol = $("work-log");
+  ol.replaceChildren(...state.st.log.map((x) =>
+    el("li", { class: "log-" + (x.kind === "止めた理由" ? "stop" : x.kind === "聞き返し" ? "ask" : "info") },
+      el("strong", {}, x.kind + "："), x.text)));
+  ol.scrollTop = ol.scrollHeight;
+}
+
+// ---- 一覧 ----
 function usersOf(name) {
   const p = state.view.positions.find((q) => q.name === name);
   return p ? p.users.map((u) => u.line_no) : [];
@@ -123,8 +319,8 @@ function usersOf(name) {
 
 function renderTables() {
   const v = state.view;
-  const related = new Set(state.selected ? usersOf(state.selected) : []);
-  const hl = new Set(state.preview ? state.preview.highlight_lines : []);
+  const selected = state.st ? state.st.selected : null;
+  const related = new Set(selected ? usersOf(selected) : []);
 
   const pb = $("positions-table").tBodies[0];
   pb.replaceChildren(...v.positions.map((p) => {
@@ -137,7 +333,7 @@ function renderTables() {
     const chk = p.shift_check.ok
       ? el("span", { class: "ok" }, "検査を通る")
       : el("span", { class: "ng" }, "断る：" + p.shift_check.reason);
-    const tr = el("tr", { class: "clickable" + (p.name === state.selected ? " selected" : "") },
+    const tr = el("tr", { class: "clickable" + (p.name === selected ? " selected" : "") },
       el("td", {}, el("strong", {}, p.name)), el("td", {}, p.line_no),
       el("td", {}, el("code", {}, p.line)), el("td", {}, fmt), el("td", {}, users), el("td", {}, chk));
     tr.addEventListener("click", () => select(p.name));
@@ -146,16 +342,13 @@ function renderTables() {
 
   const ib = $("instructions-table").tBodies[0];
   ib.replaceChildren(...v.instructions.map((i) => {
-    let cls = "";
-    if (related.has(i.line_no)) cls = "related";
-    if (hl.has(i.line_no)) cls = "highlight";
     let chk = "";
     if (i.speed_check) {
       chk = i.speed_check.ok
         ? el("span", { class: "ok" }, "検査を通る")
         : el("span", { class: "ng" }, "断る：" + i.speed_check.reason);
     }
-    const tr = el("tr", { class: (i.position ? "clickable " : "") + cls },
+    const tr = el("tr", { class: (i.position ? "clickable " : "") + (related.has(i.line_no) ? "related" : "") },
       el("td", {}, i.line_no), el("td", {}, el("code", {}, i.text)), el("td", {}, chk));
     if (i.position) tr.addEventListener("click", () => select(i.position));
     return tr;
@@ -168,15 +361,17 @@ const AXES = { X: 0, Y: 1, Z: 2 };
 function renderFigures() {
   drawFigure($("fig-xy"), "X", "Y");
   drawFigure($("fig-xz"), "X", "Z");
-  $("legend").hidden = !(state.preview && state.preview.after_positions);
+  const c = state.st && state.st.candidate;
+  $("legend").hidden = !(c && c.after_positions);
 }
 
 function drawFigure(host, axA, axB) {
   const v = state.view;
   const a = AXES[axA], b = AXES[axB];
+  const selected = state.st ? state.st.selected : null;
   const before = v.positions.filter((p) => p.xyz);
-  const pv = state.preview && state.preview.after_positions ? state.preview : null;
-  const after = pv ? pv.after_positions.filter((p) => p.xyz) : [];
+  const c = state.st && state.st.candidate && state.st.candidate.after_positions ? state.st.candidate : null;
+  const after = c ? c.after_positions.filter((p) => p.xyz) : [];
   if (before.length === 0) {
     host.replaceChildren(el("p", { class: "warn" }, "ロボット座標でないため描けません"));
     return;
@@ -197,7 +392,7 @@ function drawFigure(host, axA, axB) {
     for (const s of segs) {
       const p = at[s.from], q = at[s.to];
       if (!p || !q) continue;
-      const related = state.selected && (s.to === state.selected || s.from === state.selected);
+      const related = selected && (s.to === selected || s.from === selected);
       const line = svgEl("line", { x1: sx(p.xyz[a]), y1: sy(p.xyz[b]), x2: sx(q.xyz[a]), y2: sy(q.xyz[b]),
         stroke: color, "stroke-width": related ? width + 1.5 : width, "stroke-opacity": opacity });
       if (!s.solid) line.setAttribute("stroke-dasharray", "6 4");
@@ -208,9 +403,9 @@ function drawFigure(host, axA, axB) {
     }
   };
 
-  if (pv) {
-    drawSegs(v.segments, before, "#9a9a9a", 2, 0.9);           // 変更前（灰色）
-    drawSegs(pv.after_segments, after, "#d0602a", 2, 0.95);    // 変更後（色付き）
+  if (c) {
+    drawSegs(v.segments, before, "#9a9a9a", 2, 0.9);          // 変更前（灰色）
+    drawSegs(c.after_segments, after, "#d0602a", 2, 0.95);    // 変更後（色付き）
   } else {
     drawSegs(v.segments, before, "#4a6fa5", 2, 1);
   }
@@ -225,11 +420,11 @@ function drawFigure(host, axA, axB) {
   for (const list of groups.values()) {
     list.forEach((p, idx) => {
       const x = sx(p.xyz[a]), y = sy(p.xyz[b]);
-      const moved = pv && pv.moved === p.name;
-      const sel = p.name === state.selected;
+      const moved = c && c.moved === p.name;
+      const sel = p.name === selected;
       const g = svgEl("g", { class: "pt" });
       if (sel) g.append(svgEl("circle", { cx: x, cy: y, r: 11, fill: "none", stroke: "#e0a000", "stroke-width": 3 }));
-      g.append(svgEl("circle", { cx: x, cy: y, r: 5, fill: moved ? "#9a9a9a" : (pv ? "#555" : "#d0602a") }));
+      g.append(svgEl("circle", { cx: x, cy: y, r: 5, fill: moved ? "#9a9a9a" : (c ? "#555" : "#d0602a") }));
       const label = svgEl("text", { x: x + 9, y: y - 8 + idx * 14, "font-weight": sel ? "bold" : "normal" });
       label.textContent = p.name + (moved ? "（変更前）" : "");
       g.append(label);
@@ -240,8 +435,8 @@ function drawFigure(host, axA, axB) {
       svg.append(g);
     });
   }
-  if (pv) {
-    const q = after.find((p) => p.name === pv.moved);
+  if (c) {
+    const q = after.find((p) => p.name === c.moved);
     if (q) {
       const x = sx(q.xyz[a]), y = sy(q.xyz[b]);
       svg.append(svgEl("circle", { cx: x, cy: y, r: 6, fill: "#d0602a" }));
@@ -255,88 +450,3 @@ function drawFigure(host, axA, axB) {
   svg.append(ax1, ax2);
   host.replaceChildren(svg);
 }
-
-// ---- 変更案のプレビュー ----
-function clearPreview() {
-  state.preview = null;
-  $("preview-result").replaceChildren();
-  $("preview-clear").hidden = true;
-}
-
-$("preview-clear").addEventListener("click", () => {
-  clearPreview();
-  renderTables();
-  renderFigures();
-});
-
-// 結果の形（api.py）：mode・proposal（あれば）・warnings（注意）・blocked_reason（実機用の検査で止まる理由。無ければ null）。
-// いまは断られたときは proposal が無い。後で sim.py が両方を返す形になっても表示できるようにしておく。
-function showResult(res) {
-  const parts = [];
-  const blocked = res.blocked_reason || (!res.ok ? (res.reason || res.error || "理由が分かりません") : null);
-  if (blocked) {
-    parts.push(el("div", { class: "result refused" },
-      el("strong", {}, res.proposal
-        ? "実機用の検査では止まります（シミュレーションでの表示だけです）。"
-        : "検査に断られました。何も変えていません。"),
-      el("p", {}, "理由：" + blocked)));
-  }
-  if (res.proposal) {
-    const p = res.proposal;
-    const unit = p.kind === "shift" ? "mm" : "";
-    parts.push(el("div", { class: "result proposal" },
-      el("strong", {}, `変更案（${p.target}・ファイルの ${p.line_no}行目）。見るだけで、ジョブは変わりません。`),
-      el("div", { class: "diff" },
-        el("div", { class: "minus" }, "変更前  " + p.before_line),
-        el("div", { class: "plus" }, "変更後  " + p.after_line)),
-      el("p", {}, `指示の値：${p.requested}${unit}　変更前の値：${p.before_value}　丸めた後の実際の値：${p.after_value}` +
-        (p.kind === "shift" ? `　実際の変化量：${fmtNum(p.actual_delta)}mm` : "")),
-      el("p", {}, "変わる命令の行："),
-      el("ul", {}, ...p.affected.map((a) => el("li", {}, a))),
-      el("p", {}, "注意："),
-      el("ul", {}, ...(res.warnings || p.warnings).map((w) => el("li", {}, w)))));
-    state.preview = res;
-    if (p.kind === "shift" && res.moved) state.selected = res.moved;
-  } else {
-    state.preview = null;
-  }
-  $("preview-result").replaceChildren(...parts);
-  $("preview-clear").hidden = !res.proposal;
-  renderTables();
-  renderFigures();
-}
-
-function fmtNum(x) {
-  return Math.round(x * 1e6) / 1e6;
-}
-
-function numberOrRaw(text) {
-  // 空や数値でない入力は、そのまま文字で送り、検査プログラムに断らせる
-  const t = text.trim();
-  if (t === "") return null;
-  const n = Number(t);
-  return Number.isFinite(n) ? n : t;
-}
-
-$("shift-form").addEventListener("submit", async (ev) => {
-  ev.preventDefault();
-  if (!state.jobBytes) return;
-  const res = await postJson("/api/preview/shift", {
-    job_base64: bytesToBase64(state.jobBytes),
-    position: $("shift-position").value,
-    axis: $("shift-axis").value,
-    delta_mm: numberOrRaw($("shift-delta").value),
-  });
-  showResult(res);
-});
-
-$("speed-form").addEventListener("submit", async (ev) => {
-  ev.preventDefault();
-  if (!state.jobBytes) return;
-  const res = await postJson("/api/preview/speed", {
-    job_base64: bytesToBase64(state.jobBytes),
-    line_no: Number($("speed-line").value),
-    speed: numberOrRaw($("speed-value").value),
-  });
-  showResult(res);
-});
