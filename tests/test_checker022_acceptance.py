@@ -176,11 +176,19 @@ def test_direction_names_are_only_the_confirmed_ones():
 
 # ---- 内部 Safety レビュー（955f47c）の P1・P2 ----
 @pytest.mark.parametrize("text", ["ワイ 3mm下げて", "ワイ、3mm下げて", "ワイ3ミリ下げて", "ワイは3mm下げて",
-                                  "ワイざひょうを3mm下げて", "エックス 5mm上げて"])
+                                  "エックス 5mm上げて"])
 def test_spoken_axis_without_particle_is_not_dropped(text):
     # P1：カタカナの軸名の後に「の・を」などが無くても、軸を捨てて Z にしない（2つの読み方 → 2択）
     r = hear(text)
     assert r["status"] == "ask" and cand(r) is None and len(r["choices"]) == 2
+
+
+def test_spoken_axis_with_hiragana_zahyou_is_asked_without_choices():
+    # P1 の「ワイざひょうを3mm下げて」：2026-11-03 の知らない言葉の対策（docs/UNKNOWN_WORDS_PLAN.md）から、
+    # ひらがなの「ざひょう」は読み取りで使わない言葉なので、2択ではなく、選択肢なしで聞き返す（軸を捨てて Z にしないのは同じ）
+    r = hear("ワイざひょうを3mm下げて")
+    assert r["status"] == "ask" and cand(r) is None and r["choices"] == []
+    assert "「ざひょう」" in r["message"]
 
 
 @pytest.mark.parametrize("text", ["XY座標を3mm下げて", "XYを3mm下げて"])

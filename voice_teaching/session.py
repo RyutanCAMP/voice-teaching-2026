@@ -106,7 +106,9 @@ class Session:
         v = ut.pre_check(facts)
         if v.status != "ok":
             self._locked = True  # 聞き返し・止めた発話では、Claude が量を作って提案しても使わない
-        self._awaiting_answer = facts if v.status == "ask" else None
+        # 知らない言葉で聞き返したときは、次の発話を答えとして前の発話に足さない（言い直しを新しい指示として読む。
+        # 前の発話の残り「下げて」と合わせて、知らない言葉を捨てた候補にしない）
+        self._awaiting_answer = facts if v.status == "ask" and not facts.unknown_words else None
         choices = v.choices
         if self.selected is not None:
             # 選択肢の文には、聞き返したときの位置を必ず入れる（あとで別の位置を選んでも、その位置に当てない）

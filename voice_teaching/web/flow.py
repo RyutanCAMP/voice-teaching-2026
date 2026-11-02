@@ -347,6 +347,7 @@ def _facts(f: ut.UtteranceFacts | None) -> dict | None:
         "refers_to_selection": f.refers_to_selection,
         "requested_value": f.requested_value(),
         "stop_reasons": list(f.stop_reasons),
+        "unknown_words": list(f.unknown_words),  # 読み取りで使わなかった言葉（移動・速度の指示なら聞き返す）
     }
 
 
