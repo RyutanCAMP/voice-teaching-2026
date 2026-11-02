@@ -162,17 +162,20 @@ export class View3D {
     const len = Math.hypot(dx, dy);
     const g = svgEl("g", { class: "inset" });
     g.append(svgEl("rect", { x: x0, y: y0, width: S, height: S, rx: 14, fill: "#fff", stroke: "#e5e5ea" }));
-    const cx = x0 + S / 2, cy = y0 + S / 2 + 6;
+    const cx = x0 + S / 2, cy = y0 + S / 2 + 12;
     let ux = 0, uy = -1;
     if (len > 0.01) { ux = dx / len; uy = dy / len; }
-    const L = 34;  // 窓の中では、向きはそのまま・長さは決まった大きさで見せる
+    const L = 24;  // 窓の中では、向きはそのまま・長さは決まった大きさで見せる
     const ax = cx - ux * L, ay = cy - uy * L, bx = cx + ux * L, by = cy + uy * L;
     g.append(svgEl("line", { x1: ax, y1: ay, x2: bx, y2: by, stroke: "#ff6a1a", "stroke-width": 3, "stroke-linecap": "round" }));
     g.append(svgEl("circle", { cx: ax, cy: ay, r: 7, fill: "#a1a6ad" }));
     g.append(svgEl("circle", { cx: bx, cy: by, r: 8, fill: "#ff6a1a" }));
     const head = svgEl("text", { x: x0 + 12, y: y0 + 20, class: "inset-head" });
-    head.textContent = "変更の向き（拡大）";
-    const amt = svgEl("text", { x: x0 + S - 12, y: y0 + 20, "text-anchor": "end", fill: "#c4470a", "font-weight": "700", class: "inset-amt" });
+    head.textContent = "変更（拡大）";
+    const sub = svgEl("text", { x: x0 + 12, y: y0 + 34, class: "inset-head" });
+    sub.textContent = "長さは実寸ではありません";
+    g.append(sub);
+    const amt = svgEl("text", { x: x0 + S / 2, y: y0 + S - 12, "text-anchor": "middle", fill: "#c4470a", "font-weight": "700", class: "inset-amt" });
     amt.textContent = label;
     g.append(head, amt);
     svg.append(g);
@@ -192,14 +195,19 @@ export class View3D {
     for (let x = Math.ceil(x0 / step) * step; x <= x1; x += step) line([x, y0, z0], [x, y1, z0], { stroke: "#dcdce2", "stroke-width": 1 });
     for (let y = Math.ceil(y0 / step) * step; y <= y1; y += step) line([x0, y, z0], [x1, y, z0], { stroke: "#dcdce2", "stroke-width": 1 });
     // 軸（床の角から、格子1目盛りの長さ）
-    const o = [x0, y0, z0];
-    const axes = [["X", [step, 0, 0], "#e5484d"], ["Y", [0, step, 0], "#30a46c"], ["Z", [0, 0, step], "#0a84ff"]];
+    const pts = this.data.points.map((p) => this.project(p.xyz));
+    const mx = pts.reduce((a, q) => a + q[0], 0) / pts.length, my = pts.reduce((a, q) => a + q[1], 0) / pts.length;
+    const corners = [[x0, y0, z0], [x1, y0, z0], [x0, y1, z0], [x1, y1, z0]];
+    const far = (c) => { const q = this.project(c); return Math.hypot(q[0] - mx, q[1] - my); };
+    const o = corners.reduce((a, c) => (far(c) > far(a) ? c : a));
+    const sx = o[0] === x0 ? 1 : -1, sy = o[1] === y0 ? 1 : -1;  // 角から床の内側へ向けて描く（＋の向きは矢印の先の文字で示す）
+    const axes = [["X", [sx * step, 0, 0], "#e5484d"], ["Y", [0, sy * step, 0], "#30a46c"], ["Z", [0, 0, step], "#0a84ff"]];
     for (const [name, dv, color] of axes) {
       const end = [o[0] + dv[0], o[1] + dv[1], o[2] + dv[2]];
       line(o, end, { stroke: color, "stroke-width": 2 });
       const p = this.project(end);
       const t = svgEl("text", { x: p[0] + 4, y: p[1] - 4, fill: color, class: "axis3", "font-weight": "600" });
-      t.textContent = name + "+";
+      t.textContent = name + (name === "X" ? (sx > 0 ? "+" : "−") : name === "Y" ? (sy > 0 ? "+" : "−") : "+");
       g.append(t);
     }
     const s = svgEl("text", { x: 12, y: this.H - 12, class: "axis" });

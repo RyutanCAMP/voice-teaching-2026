@@ -240,7 +240,7 @@ function renderSteps() {
     text = "JOBファイルをドロップしてください";
     primary = "drop-zone";
   } else if (step === 2) {
-    text = "図の点か、下の番号を押してください";
+    text = "点か番号を押してください";
   } else if (step === 3) {
     if (recording()) {
       text = "どうぞ、話してください";
@@ -336,7 +336,7 @@ function showReply(status, message) {
   box.className = "reply " + status;
   if (status === "ok") box.replaceChildren(el("p", {}, message));
   else if (status === "ask") box.replaceChildren(friendly("ask", message));
-  else if (/まで(です)?|上限/.test(message || "")) box.replaceChildren(friendly("limit", message));
+  else if (/上限[^。]*を超え/.test(message || "")) box.replaceChildren(friendly("limit", message));  // 移動量の上限を超えたときだけ
   else box.replaceChildren(friendly("stop", message));
   box.hidden = false;
   $("voice-status").textContent = "";

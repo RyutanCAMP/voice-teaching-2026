@@ -200,11 +200,9 @@
       <div>
         <ul id="confirm-warnings" class="confirm-warnings" aria-label="この変更の注意"></ul>
         <div id="confirm-diff" class="diff"></div>
-        <p class="fine">変わる命令の行：</p>
-        <ul id="confirm-affected" class="confirm-affected"></ul>
-        <p class="fine">灰色＝変更前、オレンジ＝変更後。点を命令の順に直線で結んだ目安で、ロボット本体の動きではありません。変更後の経路は、図と実機で人が確かめてください。</p>
+        <details class="fine"><summary>変わる命令の行</summary><ul id="confirm-affected" class="confirm-affected"></ul></details>
+        <p class="fine">灰色＝変更前、オレンジ＝変更後。点を命令の順に直線で結んだ目安で、ロボット本体の動きではありません。ロボット本体・関節は描いていません。動作や干渉を保証するシミュレーターではありません。経路は人が確かめてください。</p>
         <p class="fine confirm-figure-note">この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。参考表示であり、実際のロボットの動きではありません。</p>
-        <p class="fine">3D はジョブの X・Y・Z をそのまま点で描いたもので、ロボット本体・関節は描いていません。動作や干渉を保証するシミュレーターではありません。</p>
         <p class="fine">シミュレーション用の確認です。実機用の出力・転送・ロボットの起動はしません。</p>
       </div>
     </div>

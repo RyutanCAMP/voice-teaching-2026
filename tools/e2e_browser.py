@@ -224,8 +224,12 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
         page.mouse.move(x, y); page.mouse.down(); page.wait_for_timeout(ms); page.mouse.up()
 
     def pos_of(page, name):
-        box = pt(page, name).bounding_box()
-        return (round(box["x"] + box["width"] / 2), round(box["y"] + box["height"] / 2))
+        # 再生中は描き直されるので、探す・測るを1回で行う
+        x, y = page.evaluate("""(name) => {
+          const g = [...document.querySelectorAll('#fig-3d g.pt3')].find((e) => e.dataset.names.split(' ').includes(name));
+          const cs = g.querySelectorAll('circle'); const r = cs[cs.length - 1].getBoundingClientRect();
+          return [r.x + r.width / 2, r.y + r.height / 2]; }""", name)
+        return (round(x), round(y))
 
     # ドロップのデータを作るのに evaluate を使うので、この確認のページだけ CSP を外す（画面のファイルは変えない）
     ctx = browser.new_context(viewport={"width": 1500, "height": 1000}, bypass_csp=True)
@@ -388,6 +392,11 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
           "3D に変更後の経路（オレンジ）と変更後の点を出す")
     check(pg.text_content("#fig-3d .inset-amt") == "Z +10.000mm",
           f"小さな変更も見えるよう、拡大の窓に向きと量を出す：{pg.text_content('#fig-3d .inset-amt')}")
+    gap = pg.evaluate("""() => {  // 再生中は描き直されるので、同じ時点の2つの四角を1回で測る
+      const h = document.querySelector('#fig-3d .inset-head').getBoundingClientRect();
+      const a = document.querySelector('#fig-3d .inset-amt').getBoundingClientRect();
+      return a.top - h.bottom; }""")
+    check(gap > 0, f"拡大の窓の見出しと量が重ならない（間 {gap:.0f}px）")
     check(cards(pg) == ["candidate-panel"] and primaries(pg) == 1
           and "primary" in (pg.get_attribute("#open-confirm", "class") or ""),
           "ステップ4は「確認して承認へ」だけが目立つ")

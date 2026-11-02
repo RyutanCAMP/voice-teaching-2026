@@ -129,3 +129,19 @@ def test_confirm_shows_unplottable_note_3d_limit_and_affected_lines():
 def test_live_mic_turns_off_after_a_while():
     v = text("app.js")
     assert "LIVE_MAX_MS" in v and "state.live = false" in v
+
+
+# ---- 内部 Safety 再レビュー #1：「量を超えています」の見出しは、移動量の上限を超えたときだけ ----
+def test_limit_heading_only_for_amount_limit():
+    j = text("app.js")
+    m = re.search(r'else if \(/(.+?)/\.test\(message \|\| ""\)\) box\.replaceChildren\(friendly\("limit"', j)
+    assert m
+    rx = re.compile(m.group(1))
+    from voice_teaching import jbi, utterance
+    wf = WebFlow(interpreter=MockInterpreter())
+    sid = wf.load(DEMO_C.read_bytes())["session_id"]
+    wf.select(sid, "C00005")
+    over = wf.hear(sid, "この位置を上に50mm", "text")["message"]
+    assert rx.search(over)
+    for msg in ["指示の文字が長すぎます（500文字まで）", utterance.SIDE_MESSAGE, jbi.SPEED_DISABLED_MESSAGE]:
+        assert not rx.search(msg), msg
