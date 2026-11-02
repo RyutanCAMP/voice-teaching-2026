@@ -167,7 +167,9 @@ class Handler(BaseHTTPRequestHandler):
                 req, job = got
                 self._json(200, api.preview_speed(job, req.get("line_no"), req.get("speed")))
         else:
-            self._error(404, "ありません")
+            # 本文を読んでから断る（読まずに閉じると、Windows では相手側で接続が中断されることがある）
+            if self._read_body() is not None:
+                self._error(404, "ありません")
 
 
 def make_server(host: str = HOST, port: int = DEFAULT_PORT, out_dir=None, interpreter=None) -> ThreadingHTTPServer:
