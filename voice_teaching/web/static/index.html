@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ボイスティーチング：ジョブの図と変更案のプレビュー</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>ジョブの図と変更案のプレビュー</h1>
+  <p class="readonly" id="readonly-note">このページは読むだけです。ジョブは書き出しません。変更案は画面に見せるだけで、ジョブのファイルは変わりません。</p>
+</header>
+
+<section id="load-panel" class="panel">
+  <label for="file-input">JBIファイルを選ぶ：</label>
+  <input type="file" id="file-input" accept=".JBI,.jbi">
+  <span id="file-name"></span>
+  <p class="small">選んだファイルは、このPCの中のサーバー（127.0.0.1）にだけ送ります。サーバーはファイルを保存しません。</p>
+  <p id="load-error" class="error" hidden></p>
+</section>
+
+<section id="problems-panel" class="problems" hidden>
+  <h2>このジョブには読めない所があります（変更案はすべて断られます）</h2>
+  <ul id="problems-list"></ul>
+</section>
+
+<!-- 音声の担当が「音声で指示」の欄を足す場所。中身はまだ空。 -->
+<section id="instruction-panel" class="panel" aria-label="指示">
+  <h2>指示</h2>
+  <div id="instruction-slot"></div>
+  <p class="small muted" id="instruction-placeholder">（音声・文字で指示する欄は、あとで追加します）</p>
+</section>
+
+<main id="job-area" hidden>
+  <p id="job-summary"></p>
+  <ul id="job-notes" class="notes"></ul>
+
+  <section id="figure-panel" class="panel">
+    <h2>図（位置番号つき）</h2>
+    <p class="figure-note" id="figure-note">この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。参考表示であり、実際のロボットの動きではありません。</p>
+    <p class="small">線は命令の順に結んでいます。実線は MOVL（PL・CRなし）の区間、点線はそれ以外で「目安」です。点や一覧をクリックすると、その位置と、その位置を使う命令の行を強調します。</p>
+    <p id="figure-message" class="warn" hidden></p>
+    <div id="legend" class="legend" hidden>
+      <span class="lg before">変更前（灰色）</span>
+      <span class="lg after">変更後（色付き）</span>
+    </div>
+    <div class="figs">
+      <figure><figcaption>上から見た図（X・Y）</figcaption><div id="fig-xy" class="fig"></div></figure>
+      <figure><figcaption>横から見た図（X・Z）</figcaption><div id="fig-xz" class="fig"></div></figure>
+    </div>
+  </section>
+
+  <section id="preview-panel" class="panel">
+    <h2>変更案のプレビュー（見るだけ）</h2>
+    <p class="small">検査プログラム（jbi.py）が変更案を作ります。検査に断られたときは、理由を出して何も変えません。1回に動かす量は <span id="max-shift-label"></span> までです。</p>
+    <form id="shift-form" class="row">
+      <strong>位置：</strong>
+      <label>位置 <select id="shift-position"></select></label>
+      <label>軸 <select id="shift-axis"><option>X</option><option>Y</option><option>Z</option></select></label>
+      <label>量(mm) <input type="number" id="shift-delta" step="any" required></label>
+      <button type="submit" id="shift-preview-button">変更案を見る</button>
+    </form>
+    <form id="speed-form" class="row">
+      <strong>速度：</strong>
+      <label>命令の行 <select id="speed-line"></select></label>
+      <label>新しい V= の値 <input type="number" id="speed-value" step="any" required></label>
+      <button type="submit" id="speed-preview-button">変更案を見る</button>
+    </form>
+    <div id="preview-result" aria-live="polite"></div>
+    <button type="button" id="preview-clear" hidden>プレビューを消す</button>
+  </section>
+
+  <section id="positions-panel" class="panel">
+    <h2>位置の一覧</h2>
+    <table id="positions-table">
+      <thead><tr><th>位置</th><th>行</th><th>ファイルの行（そのまま）</th><th>形式</th><th>使っている命令の行</th><th>検査（試しに X +1mm）</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <section id="instructions-panel" class="panel">
+    <h2>命令の行</h2>
+    <table id="instructions-table">
+      <thead><tr><th>行</th><th>命令</th><th>速度の検査（試しに +1）</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
