@@ -100,7 +100,7 @@ def test_request_shape():
         assert t["strict"] is True
         sch = t["input_schema"]
         assert sch["additionalProperties"] is False and set(sch["required"]) == set(sch["properties"])
-    assert kw["tools"][0]["input_schema"]["properties"]["direction"]["enum"] == ["上", "下", "右", "左"]
+    assert kw["tools"][0]["input_schema"]["properties"]["direction"]["enum"][:4] == ["上", "下", "右", "左"]  # 軸と向き（X+ など）は test_claude_axis
     # 送るのは発話・選んでいる位置・位置番号の一覧だけ
     body = json.loads(kw["messages"][0]["content"])
     assert body == {"utterance": "この位置を上に10mm移動して", "selected_position": "C00004",

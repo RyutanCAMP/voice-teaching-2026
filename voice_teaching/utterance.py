@@ -294,6 +294,12 @@ def pre_check(facts: UtteranceFacts) -> Verdict:
                     "1回の指示で変えるのは1つの位置だけです。1つずつ指示してください")
     op = facts.op
     if op == "move":
+        if len(facts.amounts) > 1 or len(facts.axes) > 1:
+            moves = _split_moves(facts.raw)
+            if moves:  # 2つ以上の変更：各軸の量を、プログラムが読んだとおりに示して、1つずつ指示してもらう
+                listed = "、".join(f"{a}方向 {_fmt(v)}mm" for a, v in moves)
+                return _ask(f"変更が{len(moves)}つ入っています（{listed}）。"
+                            "1回に動かすのは1つの方向だけです。1つずつ指示してください")
         if facts.sides:
             return _ask(SIDE_MESSAGE)
         v = _amount_check(facts, "mm", "何mm動かしますか？")
@@ -314,6 +320,30 @@ def pre_check(facts: UtteranceFacts) -> Verdict:
     elif "select" in facts.kinds and not facts.positions and not facts.refers_to_selection:
         return _ask("どの位置ですか？ 位置番号（C と5桁の数字）で言ってください")
     return OK
+
+
+_SPLIT_MOVES = re.compile(r"[、,，。]|そして|それから")
+
+
+def _split_moves(raw: str) -> list[tuple[str, float]] | None:
+    """「上に2mm、Yプラスに3mm」を、区切りごとの（軸, 符号つきの量）に分ける。1つでも読めなければ None。
+
+    1つの変更にまとめることはしない（各軸の量を示して、1つずつ指示してもらうためだけに使う）。
+    """
+    parts = [p for p in _SPLIT_MOVES.split(raw) if p.strip()]
+    if len(parts) < 2:
+        return None
+    out = []
+    for part in parts:
+        f = read_utterance(part)
+        if (f.op != "move" or f.sides or f.unclear_amounts or len(f.axes) != 1 or len(f.amounts) != 1
+                or f.amounts[0].unit != "mm" or f.positions):
+            return None
+        v = f.requested_value()
+        if v is None:
+            return None
+        out.append((f.axis, v))
+    return out
 
 
 def _amount_check(facts: UtteranceFacts, unit: str, missing_question: str) -> Verdict:
