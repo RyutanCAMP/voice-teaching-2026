@@ -609,7 +609,10 @@ def _read(raw: str, question: bool) -> UtteranceFacts:
     for m in _PLACE.finditer(rest):
         blank(m.start(), m.end())
     # 場所の言葉を行き先に使った（「置くところに」「置き場所へ」「置く位置まで」）
-    place_dest = bool(place and re.match(r"\s?(?:に|へ|まで)", rest[place.end():]))
+    dest = re.match(r"\s?(?:まで|に|へ)", rest[place.end():]) if place else None
+    place_dest = dest is not None
+    if dest:
+        blank(place.end(), place.end() + dest.end())  # 行き先の「に・へ・まで」は読んだ（知らない言葉にしない。下で断る）
     negations, undo_negations = _negation_words(text, heard)
     if undo_negations and _plain_undo(text, kinds):
         undo_negations = ()  # 元に戻す指示の言葉そのもの（「やめて」「取り消して」）は打ち消しにしない
@@ -788,13 +791,10 @@ def _place_check(facts: UtteranceFacts, selected: str | None) -> Verdict:
 
 
 def _pre_check(facts: UtteranceFacts, selected: str | None = None) -> Verdict:
-    v = _pre_check_core(facts)
-    if v.status == "ok" and facts.op in ("move", "speed") and facts.place_ref:
-        return _place_check(facts, selected)
-    return v
+    return _pre_check_core(facts, selected)
 
 
-def _pre_check_core(facts: UtteranceFacts) -> Verdict:
+def _pre_check_core(facts: UtteranceFacts, selected: str | None = None) -> Verdict:
     found = facts.negations + facts.undo_negations
     if found:
         # 打ち消しの言葉を捨てて、言ったことと逆の操作にしない。選択・比較・元に戻すも含めて、いちばん先に止める（選択肢も出さない）。
@@ -827,6 +827,9 @@ def _pre_check_core(facts: UtteranceFacts) -> Verdict:
     if op in ("move", "speed") and facts.unknown_words:
         # 知らない言葉を捨てて、残りの言葉だけで候補にしない。選択肢も出さない（どれを出しても推測か、言葉を捨てることになる）
         return _ask(unknown_words_message(facts.unknown_words, op))
+    if op in ("move", "speed") and facts.place_ref and not facts.sides:  # 右・左は下の SIDE_MESSAGE
+        # 場所の言葉は、量・向きを聞く前に調べる（「置くところへ動かして」に「何mm？」と聞いて、続きの答えで別の位置の候補にしない）
+        return _place_check(facts, selected)
     if op in ("move", "speed") and facts.stray_signs > 0:
         return _ask("プラス・マイナスがどこに付くか分かりません。「Xのマイナス5ミリ」のように、軸のすぐ後に言ってください")
     if op == "move":

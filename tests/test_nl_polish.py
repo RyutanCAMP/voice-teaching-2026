@@ -405,3 +405,36 @@ def test_desu_only_right_after_an_amount(text):
     # 「です」は量のすぐ後の文の終わりだけ（読んだ言葉の後でも、量の後でなければ聞き返す）
     r = hear(text)
     assert r["status"] == "ask" and cand(r) is None, (text, r.get("message"))
+
+
+# ---- 対話のブランチの Safety 再レビュー：場所の言葉を行き先にした指示は、量・向きを聞く前に断る ----
+DEST_MSG = "「{p}」へ動かす指示は扱いません"
+
+
+@pytest.mark.parametrize("source", SOURCES)
+@pytest.mark.parametrize("selected", [True, False])
+@pytest.mark.parametrize("text,place", [
+    ("置くところへ動かして", "置くところ"), ("置くところに動かして", "置くところ"), ("置き場所へ移動", "置き場所"),
+    ("置き場所まで動かして", "置き場所"), ("置くところへ3mm動かして", "置くところ"), ("置く位置まで3mm移動して", "置く位置"),
+    ("置くところに下に3mm", "置くところ"),
+])
+def test_place_as_destination_is_refused_before_amount_questions(text, place, selected, source):
+    w = WebFlow()
+    sid = w.load(DEMO_C)["session_id"]
+    if selected:
+        w.select(sid, "C00004")
+    r = w.hear(sid, text, source=source)
+    assert r["status"] == "ask" and cand(r) is None and r["choices"] == [], (text, r.get("message"))
+    assert r["message"].startswith(DEST_MSG.format(p=place)), r["message"]
+    assert "何mm" not in r["message"]
+    # 続けて「下に3mm」と言っても、行き先の続きとしては読まない（新しい指示。量の答えにしない）
+    r2 = w.hear(sid, "3mm", source=source)
+    assert cand(r2) is None
+
+
+@pytest.mark.parametrize("text", ["置き場所の置くところを下に3mm", "置くところを手前手前に", "置くところを手前の奥に3mm",
+                                  "置き場所の置くところに3mm", "C00005の置くところへ動かして"])
+def test_odd_place_sentences_make_no_candidate(text):
+    for source in SOURCES:
+        r = hear(text, source)
+        assert r["status"] in ("ask", "stop") and cand(r) is None, (text, r.get("message"))
