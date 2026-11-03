@@ -493,3 +493,37 @@ body:not(.in-dialog) .side > #dialog-panel { order: 1; }  /* 会話のあと（�
 @media (max-width: 1100px) { .confirm-grid { grid-template-columns: minmax(0, 1fr); } }
 .confirm-grid > * { min-width: 0; }
 .confirm-warnings li, .confirm-affected li { overflow-wrap: anywhere; }
+
+/* ---- Claude に聞く：ロボットと話す欄（CHECKER_031 E1・E2・E4・7） ---- */
+#ask-panel .bubbles.talk { max-height: 320px; gap: 10px; }
+.bubble.claude { align-self: flex-start; background: #fff; border: 1px solid #ddd6fb; border-left: 4px solid #5e5ce6;
+  border-bottom-left-radius: 5px; box-shadow: 0 2px 10px rgba(94, 92, 230, 0.08); font-size: 15px; }
+.bubble.claude .who { color: #5b3cc4; opacity: 1; }
+.bubble.app.notice { align-self: center; max-width: 96%; background: #fff7e6; color: #8a5300; font-size: 12.5px; border-radius: 10px; }
+.bubble.app.taught { background: #eaf7ee; color: #1d5c32; border: 1px solid #b7e2c4; }
+.bubble.app.record { font-size: 12.5px; }
+.bubble .said { overflow-wrap: anywhere; }
+/* 考えています…（点が順に光る） */
+.bubble.thinking .said { color: var(--sub); }
+.bubble.thinking .dots { display: inline-flex; gap: 4px; margin-left: 6px; vertical-align: middle; }
+.bubble.thinking .dots i { width: 6px; height: 6px; border-radius: 50%; background: #5e5ce6; opacity: 0.25; animation: talkdot 1.2s infinite ease-in-out; }
+.bubble.thinking .dots i:nth-child(2) { animation-delay: 0.2s; }
+.bubble.thinking .dots i:nth-child(3) { animation-delay: 0.4s; }
+@keyframes talkdot { 0%, 80%, 100% { opacity: 0.25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
+/* 印：人が教えた（緑・実線・✓）と、AI の推定（紫・点線・?）。色と文字の両方で分ける */
+.mark { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 999px; margin-right: 6px; white-space: nowrap; }
+.mark-human { color: #1d5c32; background: #d9f2e1; border: 1.5px solid #34a853; }
+.mark-ai { color: #5b3cc4; background: #f3f0ff; border: 1.5px dashed #8e7cf0; }
+.mark-mismatch { color: #b3261e; background: #fdecea; border: 1.5px solid #d93025; }
+.guesses { margin-top: 6px; }
+.guess { margin: 2px 0; font-size: 13px; color: #4a3d8f; }
+.supplement { margin: 6px 0 0; font-size: 12px; color: var(--sub); font-family: "SF Mono", Consolas, monospace; overflow-wrap: anywhere; }
+.supplement .sup-head { font-family: inherit; font-weight: 600; color: #8a5300; }
+.talk-choices { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.talk-choices .choice { flex: 1 1 100%; min-width: 0; font-size: 13px; padding: 9px 10px; overflow-wrap: anywhere; text-align: left; }
+.memory { margin-top: 10px; padding: 8px 12px; border: 1.5px solid #b7e2c4; background: #f4fbf6; border-radius: 12px; }
+.memory-head { font-size: 12px; font-weight: 700; color: #1d5c32; }
+.memory-list { list-style: none; margin: 4px 0 0; padding: 0; font-size: 13px; }
+.memory-item { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
+.memory-text { font-weight: 700; }
+.memory-target { color: var(--sub); font-size: 12px; overflow-wrap: anywhere; }

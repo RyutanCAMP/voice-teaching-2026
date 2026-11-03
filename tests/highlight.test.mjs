@@ -137,3 +137,20 @@ test('updownConfirmLine: one line only when confirmed', () => {
   for (const u of [undefined, null, [], { status: 'unconfirmed', confirmed_by: '唐川' }, { status: 'mismatch' }, { status: 'changed' }])
     assert.equal(updownConfirmLine(u), '', JSON.stringify(u));
 });
+
+// ---- 「Claude に聞く」の答えで光らせる区間（CHECKER_031 E4） ----
+import { askHighlightLook, isAskHighlighted } from '../voice_teaching/web/static/highlight.js';
+test('ask highlight keeps the dash of MOVJ and other segments (not shown as a straight path)', () => {
+  assert.equal(askHighlightLook('movj').dash, segmentLook('movj').dash);
+  assert.equal(askHighlightLook('other').dash, segmentLook('other').dash);
+  assert.equal(askHighlightLook('movl').dash, null);
+  assert.equal(askHighlightLook('unknown').dash, segmentLook('other').dash);
+  assert.ok(askHighlightLook('movj').width < askHighlightLook('movl').width);
+});
+test('ask highlight uses only the line numbers from the server', () => {
+  assert.equal(isAskHighlighted({ line_no: 22 }, [21, 22]), true);
+  assert.equal(isAskHighlighted({ line_no: 27 }, [21, 22]), false);
+  assert.equal(isAskHighlighted({ line_no: '22' }, [22]), false);
+  assert.equal(isAskHighlighted({ line_no: 22 }, undefined), false);
+  assert.equal(isAskHighlighted(null, [22]), false);
+});

@@ -233,7 +233,13 @@ def test_updown_words_allowed_only_when_confirmed(tmp_path):
 
 
 def test_numbers_from_facts_and_user_are_allowed(tmp_path):
-    r, _ = ask_one(tmp_path, answer("C00001〜C00003 の動きが、21〜26行目に2回あります。Zのマイナス45mm動きます。", [21]))
+    # 位置番号は最初の説明では使わない（CHECKER_031 E1。tests/test_claude_talk.py）。2回目の答えで数の検査を確かめる
+    fake = FakeClient(answer("同じ動きを2回くり返しています。", [21]),
+                      answer("C00001〜C00003 の動きが、21〜26行目に2回あります。Zのマイナス45mm動きます。", [21],
+                             tool_id="toolu_02"))
+    ex, c = explainer(tmp_path, fake), conv()
+    ex.ask(c, "このロボット、何をしている？")
+    r = ex.ask(c, "くわしく教えて")
     assert r["reply_by"] == "claude", r["reply"]
     r, _ = ask_one(tmp_path, answer("この動作を3回に変更しますか？", [21], "change_request",
                                     {"kind": "repeat", "from_count": 2, "to_count": 3}), text="そう。じゃあ3回にして")

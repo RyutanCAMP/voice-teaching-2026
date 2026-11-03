@@ -9,7 +9,7 @@
 // - 回数の変更の候補（data.repeat）：区間の近くに「×2 → ×3」の印。足した回の線（元からある線と同じ線）を変更後の色で重ねる。
 //   再生では、区間の線（サーバーの seg.cycle）ごとに「2回目」を印の横に出す。新しい点・新しい線は描かない
 "use strict";
-import { displayMinus, segmentLook, segmentTitle } from "/static/highlight.js";
+import { displayMinus, segmentLook, segmentTitle, askHighlightLook, isAskHighlighted } from "/static/highlight.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const DEFAULT_YAW = -0.75;    // 最初の向き（ラジアン）
@@ -129,6 +129,19 @@ export class View3D {
       svg.append(line);
       lines[key].push(line);
     };
+    // 「Claude に聞く」の答えの根拠の区間（サーバーが行番号から決めた highlight.lines）を、下に太い色の帯で光らせる。
+    // MOVJ・目安の区間は点線・破線のまま（直線の通り道に見せない）
+    for (const s of d.segments) {
+      if (!isAskHighlighted(s, d.askLines)) continue;
+      const at = Object.fromEntries(d.points.map((p) => [p.name, p.xyz]));
+      if (!at[s.from] || !at[s.to]) continue;
+      const p = this.project(at[s.from]), q = this.project(at[s.to]);
+      const look = askHighlightLook(s.kind);
+      const glow = svgEl("line", { x1: p[0], y1: p[1], x2: q[0], y2: q[1], stroke: look.color, "stroke-width": look.width,
+        "stroke-opacity": look.opacity, "stroke-linecap": "round", class: `ask-hl seg-${look.kind}`, "data-line": s.line_no });
+      if (look.dash) glow.setAttribute("stroke-dasharray", look.dash);
+      svg.append(glow);
+    }
     for (const s of d.segments) seg(s, d.points, c ? "#a1a6ad" : "#c7cbd1", 2.5, "before");
     // 変更後は、動かす点に触れる区間だけ（ほかの区間は変更前と同じ線なので描き直さない）
     if (c && !d.repeat) for (const s of c.segments) if (s.from === c.moved || s.to === c.moved) seg(s, c.points, cAfter, 3, "after");

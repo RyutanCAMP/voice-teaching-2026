@@ -78,7 +78,8 @@ async function postJson(path, body) {
   try {
     const r = await fetch(path, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      // 前の画面の番号を見出しで渡す。サーバーが読むのは読込（サンプル）のときだけ（同じ中身なら人が教えた意味を引き継ぐ）
+      headers: previousHeader({ "Content-Type": "application/json" }),
       body: JSON.stringify(body),
     });
     return await r.json();
@@ -104,6 +105,11 @@ function resetForLoad() {
   $("text-input").value = "";
 }
 
+// 前に見ていた画面の番号（同じ中身を読み直したとき、サーバーが「人が教えた意味」を引き継ぐか決める。中身で決める）
+function previousHeader(h) {
+  return state.sessionId ? { ...h, "X-VT-Previous-Session": state.sessionId } : h;
+}
+
 async function loadFile(f) {
   if (!f || recording()) return;
   resetForLoad();
@@ -112,7 +118,7 @@ async function loadFile(f) {
   try {
     const r = await fetch("/api/load", {
       method: "POST",
-      headers: { "Content-Type": "application/octet-stream" },
+      headers: previousHeader({ "Content-Type": "application/octet-stream" }),
       body: bytes,
     });
     res = await r.json();
@@ -237,6 +243,10 @@ function renderUpdown(u) {
 function renderState() {
   const st = state.st;
   if (!st) return;
+  // 「Claude に聞く」の欄に、データ（候補・承認）が変わったかもしれないことを知らせる（欄がサーバーに確かめ直す）
+  const c = st.candidate;
+  window.dispatchEvent(new CustomEvent("vt:state", { detail: { sessionId: state.sessionId,
+    key: JSON.stringify([c ? c.kind : null, c ? c.target : null, c ? c.after_value : null, st.approval ? st.approval.approved_at : null]) } }));
   $("mock-notice").textContent = st.mock_notice;
   // 解釈のしかた（モックか本物の Claude か）を、いつも見える上の帯で区別する
   const claude = st.interpreter && st.interpreter.kind === "claude";
@@ -943,8 +953,18 @@ function data3d() {
     blocked: Object.fromEntries(v.positions.filter((p) => !p.shift_check.ok).map((p) => [p.name, p.shift_check.reason])),
     // Claude（モック）が出した位置の候補（確かめている間だけ光らせる。選んではいない）
     candidates: dialogStep() === "confirm_position" ? state.st.dialog.candidates.map((x) => x.position)
-      : (window.vtAskHighlight || []),  // 「Claude に聞く」の根拠の行の位置（光らせるだけ。選択ではない）
+      : askHighlight().positions,  // 「Claude に聞く」の根拠の行の位置（光らせるだけ。選択ではない）
+    // 「Claude に聞く」の答えの根拠の区間（サーバーが行番号から決めた行。光らせるだけ）。位置の確認中は出さない
+    askLines: dialogStep() === "confirm_position" ? [] : askHighlight().lines,
   };
+}
+
+// explain.js が置く、光らせる範囲（{positions, lines}。サーバーが根拠の行番号から決めたもの）。形が違えば何も光らせない
+function askHighlight() {
+  const h = window.vtAskHighlight;
+  if (Array.isArray(h)) return { positions: h, lines: [] };  // 根拠の行を押したとき（その行の位置だけ）
+  if (h && Array.isArray(h.positions) && Array.isArray(h.lines)) return h;
+  return { positions: [], lines: [] };
 }
 
 $("view-reset").addEventListener("click", () => view3d.reset());
@@ -1251,6 +1271,7 @@ const voice = new SpeechInput(Recognition, {
     }
     if ($("voice-to-ask") && $("voice-to-ask").checked && !$("ask-panel").hidden) {
       $("ask-input").value = text;  // 「Claude に聞く」欄に入れるだけ。自動では送らない
+      window.dispatchEvent(new CustomEvent("vt:ask-voice", { detail: { text } }));  // 直さずに送れば source=voice
       state.liveAt = Date.now();
       state.netRetry = 0;
       state.quiet = 0;

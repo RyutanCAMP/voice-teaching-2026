@@ -95,7 +95,12 @@
         <span id="ask-model" class="dlg-engine"></span>
       </div>
       <p id="ask-nokey" class="warn" hidden></p>
-      <ol id="ask-turns" class="bubbles" aria-live="polite"></ol>
+      <ol id="ask-turns" class="bubbles talk" aria-live="polite"></ol>
+      <!-- 人が教えた意味（サーバーのメモリの中だけ。この会話の中だけ。保存しない） -->
+      <div id="ask-memory-box" class="memory" hidden>
+        <span class="memory-head">覚えていること</span>
+        <ul id="ask-memory" class="memory-list"></ul>
+      </div>
       <form id="ask-form" class="text-form">
         <label for="ask-input" class="sr-only">Claude に聞く文</label>
         <input type="text" id="ask-input" maxlength="500" placeholder="このロボット、何をしている？" disabled>
@@ -104,7 +109,7 @@
       <label class="fine"><input type="checkbox" id="voice-to-ask"> 🎤 で聞き取った文を、この欄に入れる</label>
       <p id="ask-usage" class="fine"></p>
       <button type="button" id="ask-reset" class="link small" disabled>会話をやり直す</button>
-      <p class="fine">Claude は読み込んだ動作を説明するだけです。答えで、ジョブ・変更候補・承認は変わりません。変更は、プログラムの確認と承認ボタンを通して行います。根拠の行を押すと、図でその位置を光らせます（選択ではありません）。</p>
+      <p class="fine">Claude は読み込んだ動作を説明するだけです。答えで、ジョブ・変更候補・承認は変わりません。変更は、プログラムの確認と承認ボタンを通して行います。答えが出ると、根拠の行の範囲を図で光らせます（選択ではありません）。教えてもらった意味は、この会話の中だけで使います（保存しません。変更してよい範囲は変わりません）。</p>
     </section>
   </section>
 
