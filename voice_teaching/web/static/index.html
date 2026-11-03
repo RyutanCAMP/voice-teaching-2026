@@ -19,6 +19,21 @@
     <li id="step-3" class="step"><span class="num">3</span><span class="label">音声で指示</span></li>
     <li id="step-4" class="step"><span class="num">4</span><span class="label">確かめて承認</span></li>
   </ol>
+  <div class="help-wrap">
+    <button type="button" id="help-button" class="help-btn" aria-expanded="false" aria-controls="help-pop" aria-label="使い方" title="使い方">？</button>
+    <div id="help-pop" class="help-pop" role="dialog" aria-label="使い方" hidden>
+      <p class="help-head">たとえば、こう話します</p>
+      <ul class="help-examples">
+        <li>「Y座標を3ミリ下げて」</li>
+        <li>「Yのマイナス3ミリ」</li>
+        <li>「この位置を上に10ミリ」</li>
+      </ul>
+      <p class="help-line">一文字の『Yを…』は聞き違えやすいので、『Y座標を…』と言ってください</p>
+      <p class="help-line">話した文は欄に入るだけ。『次へ』で送ります</p>
+      <p class="help-line">聞き取った文がちがうときは、直してから送ってください</p>
+      <p class="help-line">承認は確認表示のボタンだけです</p>
+    </div><!-- /help-pop -->
+  </div>
   <button type="button" id="engineer-toggle" class="link" aria-expanded="false" aria-controls="engineer-view">詳細表示</button>
 </header>
 
@@ -29,7 +44,7 @@
     <p class="drop-small"><label for="file-input" class="file-label">またはファイルを選ぶ</label></p>
     <input type="file" id="file-input" accept=".JBI,.jbi">
   </div>
-  <p class="hint">試すときは samples/dummy/DEMO_C_PLACE.JBI</p>
+  <p class="sample-row"><button type="button" id="sample-button" class="link">サンプルで試す</button></p>
   <p id="load-error" class="error" hidden></p>
 </section>
 
@@ -59,14 +74,13 @@
       <div class="play-text">
         <div id="legend" class="legend" hidden>
           <span class="lg before">変更前</span>
-          <span class="lg after">変更後</span>
+          <span class="lg after" id="legend-after">変更後</span>
+          <span class="lg stopped" id="legend-stopped" hidden>灰色の点線＝止まった候補（承認できません）</span>
         </div>
         <span id="play-status" class="play-status" aria-live="polite"></span>
       </div>
     </div>
-    <p id="play-note" class="fine">点を命令の順に直線で結んだ目安です。ロボット本体の動きではありません。</p>
-    <p id="view3d-note" class="fine">3D はジョブの X・Y・Z をそのまま点で描いたもので、ロボット本体・関節は描いていません。動作や干渉を保証するシミュレーターではありません。</p>
-    <p id="figure-note" class="fine">この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。参考表示であり、実際のロボットの動きではありません。</p>
+    <p class="fine figure-notes"><span id="play-note">点を命令の順に直線で結んだ目安です。ロボット本体の動きではありません。</span> <span id="view3d-note">3D はジョブの X・Y・Z をそのまま点で描いたもので、ロボット本体・関節は描いていません。動作や干渉を保証するシミュレーターではありません。</span> <span id="figure-note">この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。参考表示であり、実際のロボットの動きではありません。</span></p>
   </section>
 
   <!-- 右：今のステップの操作だけ -->
@@ -86,6 +100,7 @@
             <div class="mic-row">
               <button type="button" id="mic-button" class="mic-big" disabled aria-label="マイクをONにする" aria-pressed="false">🎤</button>
               <p id="mic-label" class="mic-label">マイク OFF</p>
+              <p id="mic-hint" class="fine mic-hint" hidden></p>
               <div class="rec-buttons">
                 <button type="button" id="voice-stop" disabled>話し終わった</button>
                 <button type="button" id="voice-cancel" class="link" disabled>マイクをOFF</button>
@@ -106,6 +121,7 @@
           <p id="browser-note" class="browser-note" hidden><span>アプリの中で開いた画面では、音声を使えないことがあります。Google Chrome で開いてください</span> <button type="button" id="copy-url" class="link small">アドレスをコピー</button></p>
           <p id="voice-unsupported" class="warn" hidden>このブラウザでは音声入力を使えません。文字で入力してください</p>
         </div>
+        <label for="text-input" id="heard-label" class="heard-label" hidden>聞き取った文（直せます）</label>
         <form id="text-form" class="text-form">
           <label for="text-input" class="sr-only">指示の文</label>
           <input type="text" id="text-input" maxlength="500" placeholder="この位置を上に10mm" disabled>
@@ -146,7 +162,7 @@
         </ul>
         <h3>音声と通信</h3>
         <fieldset class="voice-mode" id="voice-mode-set">
-          <legend>マイクの方式（ふだんは選ばなくて大丈夫です。初めて 🎤 を押したときに聞きます）</legend>
+          <legend>マイクの方式（ふだんは選ばなくてかまいません。初めて 🎤 を押したときに聞きます）</legend>
           <label><input type="radio" name="voice-mode" id="voice-mode-browser" value="browser"><span>ブラウザー標準</span></label>
           <label><input type="radio" name="voice-mode" id="voice-mode-local" value="local"><span>端末内のみ（試験的・この PC では不安定）</span></label>
         </fieldset>
@@ -196,6 +212,7 @@
 </main>
 
 <footer class="foot">
+  <span id="app-version" class="ver">Ver.__VT_VERSION__</span>
   <p id="readonly-note">元のジョブは変えません。実機用の出力・転送・ロボットの起動はしません。</p>
 </footer>
 
@@ -212,6 +229,7 @@
         <div id="confirm-diff" class="diff"></div>
         <details class="fine"><summary>変わる命令の行</summary><ul id="confirm-affected" class="confirm-affected"></ul></details>
         <p class="fine">灰色＝変更前、オレンジ＝変更後。点を命令の順に直線で結んだ目安で、ロボット本体の動きではありません。ロボット本体・関節は描いていません。動作や干渉を保証するシミュレーターではありません。経路は人が確かめてください。</p>
+        <p id="confirm-stopped-legend" class="fine stopped-legend" hidden>灰色の点線＝止まった候補（承認できません）</p>
         <p class="fine confirm-figure-note">この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。参考表示であり、実際のロボットの動きではありません。</p>
         <p class="fine">シミュレーション用の確認です。実機用の出力・転送・ロボットの起動はしません。</p>
       </div>

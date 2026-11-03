@@ -3,17 +3,32 @@
 // - ドラッグで回転、ホイールで拡大・縮小、点を押して選ぶ、視点を戻す。重なって見える点は、押すと選び分けの一覧を出す。
 // - 経路は JOB の命令の順に点を直線で結んだ目安。再生は線の上を印が動くだけで、ロボットの動きではない。
 // - 画面の上下は Z、奥行きは X・Y を回して見せる（表示の向きだけ。指示の方向の解釈には使わない）。
+// - 変更候補があるときは、動かす点に触れる区間（入る・出る）だけを変更後の色で描く。止まった候補は灰色の点線。
 "use strict";
+import { displayMinus } from "/static/highlight.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const DEFAULT_YAW = -0.75;    // 最初の向き（ラジアン）
 const DEFAULT_PITCH = 0.42;
 const OVERLAP_PX = 6;         // この距離より近く見える点は、まとめて選び分ける
+const C_AFTER = "#ff6a1a", C_AFTER_TEXT = "#c4470a";
+const C_STOPPED = "#8e8e93";  // 止まった候補（承認できない）の変更後：オレンジにしない
 
 function svgEl(tag, attrs) {
   const e = document.createElementNS(SVG_NS, tag);
   for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, String(v));
   return e;
+}
+
+// 文字の幅の目安（px・12px の文字）。名前の重なりを避けるためだけに使う
+function textWidth(s) {
+  let w = 0;
+  for (const ch of String(s)) w += ch.charCodeAt(0) < 0x2000 ? 7 : 12;
+  return w;
+}
+
+function overlaps(a, b) {
+  return a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0;
 }
 
 function niceStep(span) {
@@ -28,6 +43,9 @@ export class View3D {
   constructor(host, opts = {}) {
     this.host = host;
     this.onPick = opts.onPick || null;
+    this.onView = opts.onView || null;  // 回した・拡大した・戻したとき（「視点を戻す」を出すかどうか）
+    this.hint = opts.hint !== false;    // 「ドラッグで回す・ホイールで拡大」を出す（確認表示の中では出さない）
+    this.interacted = false;            // 一度でも回した・拡大したら、操作のヒントは出さない
     this.W = opts.width || 720;
     this.H = opts.height || 480;
     this.data = null;
@@ -56,6 +74,12 @@ export class View3D {
     this.yaw = DEFAULT_YAW; this.pitch = DEFAULT_PITCH; this.zoom = 1;
     this.closeChooser();
     this.render();
+    this.onView && this.onView();
+  }
+
+  // 最初の向き・大きさから変えたか
+  changed() {
+    return this.yaw !== DEFAULT_YAW || this.pitch !== DEFAULT_PITCH || this.zoom !== 1;
   }
 
   // 世界座標 → 画面（x, y, 奥行き）
@@ -78,6 +102,8 @@ export class View3D {
       role: "img", "aria-label": "3D の点と経路（ドラッグで回す・ホイールで拡大縮小）" });
     this._floor(svg);
     const c = d.after;
+    const stopped = !!(c && d.stopped);
+    const cAfter = stopped ? C_STOPPED : C_AFTER, cAfterText = stopped ? C_STOPPED : C_AFTER_TEXT;
     // 経路（命令の順に結んだ直線）
     const lines = { before: [], after: [] };
     const seg = (s, pts, color, w, key) => {
@@ -86,15 +112,18 @@ export class View3D {
       if (!a || !b) return;
       const p = this.project(a), q = this.project(b);
       const line = svgEl("line", { x1: p[0], y1: p[1], x2: q[0], y2: q[1], stroke: color, "stroke-width": w,
-        "stroke-linecap": "round", class: "seg " + key });
+        "stroke-linecap": "round", class: "seg " + key, "data-from": s.from, "data-to": s.to });
       if (!s.solid) line.setAttribute("stroke-dasharray", "6 5");
+      // 止まった候補は、目安の区間（6 5 の破線）と見分けられる細かい点線
+      if (key === "after" && stopped) { line.setAttribute("stroke-dasharray", "0.5 7"); line.setAttribute("stroke-width", "4"); }
       const t = svgEl("title", {}); t.textContent = `${s.line_no}行目 ${s.text}${s.solid ? "" : "（目安）"}`;
       line.append(t);
       svg.append(line);
       lines[key].push(line);
     };
     for (const s of d.segments) seg(s, d.points, c ? "#a1a6ad" : "#c7cbd1", 2.5, "before");
-    if (c) for (const s of c.segments) seg(s, c.points, "#ff6a1a", 3, "after");
+    // 変更後は、動かす点に触れる区間だけ（ほかの区間は変更前と同じ線なので描き直さない）
+    if (c) for (const s of c.segments) if (s.from === c.moved || s.to === c.moved) seg(s, c.points, cAfter, 3, "after");
     this.lines = lines;
 
     // 点（奥から手前の順に描く）。近く見える点は1つの印にまとめ、押すと選び分ける
@@ -106,6 +135,7 @@ export class View3D {
       if (g) g.names.push(it.p.name); else groups.push({ s: it.s, names: [it.p.name], p: it.p });
     }
     const moved = c ? c.moved : null;
+    const labelBoxes = [];  // 置いた名前の四角（変更後の名前を重ならない所に置くため）
     for (const g of groups) {
       const [x, y] = g.s;
       const sel = g.names.includes(d.selected);
@@ -118,10 +148,16 @@ export class View3D {
       el.append(svgEl("circle", { cx: x, cy: y, r: 16, fill: "transparent" }));  // 押しやすい大きさ
       if (sel) el.append(svgEl("circle", { cx: x, cy: y, r: 12, fill: "rgba(10,132,255,0.15)", stroke: "#0a84ff", "stroke-width": 2 }));
       el.append(svgEl("circle", { cx: x, cy: y, r: 6, fill: isMoved ? "#a1a6ad" : (sel ? "#0a84ff" : "#1d1d1f") }));
-      const label = svgEl("text", { x: x + 12, y: y - 8, fill: sel ? "#0a84ff" : "#6e6e73",
-        "font-weight": sel ? "600" : "400" });
-      label.textContent = g.names.join(" / ");
-      el.append(label);
+      // 動かす点の名前は、変更後の点の横に1つだけ出す（変更前の名前と重ならないように）
+      const shownNames = isMoved && c ? g.names.filter((n) => n !== moved) : g.names;
+      if (shownNames.length) {
+        const label = svgEl("text", { x: x + 12, y: y - 8, fill: sel && !isMoved ? "#0a84ff" : "#6e6e73",
+          "font-weight": sel && !isMoved ? "600" : "400" });
+        label.textContent = shownNames.join(" / ");
+        el.append(label);
+        labelBoxes.push({ x0: x + 12, x1: x + 12 + textWidth(label.textContent), y0: y - 20, y1: y - 4 });
+      }
+      labelBoxes.push({ x0: x - 8, x1: x + 8, y0: y - 8, y1: y + 8 });  // 点そのもの
       const t = svgEl("title", {});
       t.textContent = g.names.map((n) => {
         const p = d.points.find((q) => q.name === n);
@@ -136,13 +172,21 @@ export class View3D {
       const p0 = d.points.find((p) => p.name === moved);
       if (q && p0) {
         const a = this.project(p0.xyz), b = this.project(q.xyz);
-        svg.append(svgEl("line", { x1: a[0], y1: a[1], x2: b[0], y2: b[1], stroke: "#ff6a1a", "stroke-width": 2 }));
-        svg.append(svgEl("circle", { cx: b[0], cy: b[1], r: 7, fill: "#ff6a1a", class: "after-pt" }));
-        svg.append(svgEl("circle", { cx: b[0], cy: b[1], r: 14, fill: "none", stroke: "#ff6a1a", "stroke-width": 1.5, "stroke-opacity": 0.5 }));
-        const lab = svgEl("text", { x: b[0] + 14, y: b[1] + 18, fill: "#c4470a", "font-weight": "600" });
-        lab.textContent = `${moved}（変更後）`;
+        svg.append(svgEl("line", { x1: a[0], y1: a[1], x2: b[0], y2: b[1], stroke: cAfter, "stroke-width": 2 }));
+        svg.append(svgEl("circle", { cx: b[0], cy: b[1], r: 7, fill: cAfter, class: "after-pt" }));
+        svg.append(svgEl("circle", { cx: b[0], cy: b[1], r: 14, fill: "none", stroke: cAfter, "stroke-width": 1.5, "stroke-opacity": 0.5 }));
+        const text = `${moved} ${displayMinus(d.delta_label || "")}`.trim();
+        const tw = textWidth(text);
+        // 同じ所にほかの位置（共用の座標など）の名前があっても重ならないように、右下・左・右上・下の順に空いている所を探す
+        const spots = [[b[0] + 14, b[1] + 18, "start"], [b[0] - 20, b[1] + 4, "end"], [b[0] + 14, b[1] - 22, "start"],
+          [b[0] - 20, b[1] + 22, "end"], [b[0] + 14, b[1] + 36, "start"], [b[0] - 20, b[1] - 18, "end"]];
+        const box = ([x, y, anchor]) => (anchor === "start"
+          ? { x0: x, x1: x + tw, y0: y - 13, y1: y + 3 } : { x0: x - tw, x1: x, y0: y - 13, y1: y + 3 });
+        const spot = spots.find((s) => !labelBoxes.some((q) => overlaps(box(s), q))) || spots[0];
+        const lab = svgEl("text", { x: spot[0], y: spot[1], "text-anchor": spot[2], fill: cAfterText, "font-weight": "600", class: "moved-label" });
+        lab.textContent = text;
         svg.append(lab);
-        this._inset(svg, p0.xyz, q.xyz, d.delta_label || "");
+        this._inset(svg, p0.xyz, q.xyz, displayMinus(d.delta_label || ""), cAfter, cAfterText);
       }
     }
     if (this.marker) {
@@ -155,7 +199,7 @@ export class View3D {
   }
 
   // 拡大の窓：変更前（灰）と変更後（オレンジ）を大きくして並べる。小さな変更も見えるように
-  _inset(svg, a, b, label) {
+  _inset(svg, a, b, label, color = C_AFTER, textColor = C_AFTER_TEXT) {
     const S = 132, x0 = this.W - S - 12, y0 = 12;
     const pa = this.project(a), pb = this.project(b);
     const dx = pb[0] - pa[0], dy = pb[1] - pa[1];
@@ -167,15 +211,15 @@ export class View3D {
     if (len > 0.01) { ux = dx / len; uy = dy / len; }
     const L = 24;  // 窓の中では、向きはそのまま・長さは決まった大きさで見せる
     const ax = cx - ux * L, ay = cy - uy * L, bx = cx + ux * L, by = cy + uy * L;
-    g.append(svgEl("line", { x1: ax, y1: ay, x2: bx, y2: by, stroke: "#ff6a1a", "stroke-width": 3, "stroke-linecap": "round" }));
+    g.append(svgEl("line", { x1: ax, y1: ay, x2: bx, y2: by, stroke: color, "stroke-width": 3, "stroke-linecap": "round" }));
     g.append(svgEl("circle", { cx: ax, cy: ay, r: 7, fill: "#a1a6ad" }));
-    g.append(svgEl("circle", { cx: bx, cy: by, r: 8, fill: "#ff6a1a" }));
+    g.append(svgEl("circle", { cx: bx, cy: by, r: 8, fill: color }));
     const head = svgEl("text", { x: x0 + 12, y: y0 + 20, class: "inset-head" });
     head.textContent = "変更（拡大）";
     const sub = svgEl("text", { x: x0 + 12, y: y0 + 34, class: "inset-head" });
     sub.textContent = "長さは実寸ではありません";
     g.append(sub);
-    const amt = svgEl("text", { x: x0 + S / 2, y: y0 + S - 12, "text-anchor": "middle", fill: "#c4470a", "font-weight": "700", class: "inset-amt" });
+    const amt = svgEl("text", { x: x0 + S / 2, y: y0 + S - 12, "text-anchor": "middle", fill: textColor, "font-weight": "700", class: "inset-amt" });
     amt.textContent = label;
     g.append(head, amt);
     svg.append(g);
@@ -202,17 +246,37 @@ export class View3D {
     const o = corners.reduce((a, c) => (far(c) > far(a) ? c : a));
     const sx = o[0] === x0 ? 1 : -1, sy = o[1] === y0 ? 1 : -1;  // 角から床の内側へ向けて描く（＋の向きは矢印の先の文字で示す）
     const axes = [["X", [sx * step, 0, 0], "#e5484d"], ["Y", [0, sy * step, 0], "#30a46c"], ["Z", [0, 0, step], "#0a84ff"]];
+    // 軸の文字は、点と点の名前に重ならない所に置く（軸の線の上を、先の方から根元の方へずらして探す）
+    const taken = pts.flatMap((q) => [
+      { x0: q[0] - 9, x1: q[0] + 9, y0: q[1] - 9, y1: q[1] + 9 },          // 点
+      { x0: q[0] + 10, x1: q[0] + 110, y0: q[1] - 22, y1: q[1] - 2 }]);    // 点の名前（右上）
+    const hit = (r) => taken.some((b) => r.x0 < b.x1 && r.x1 > b.x0 && r.y0 < b.y1 && r.y1 > b.y0);
     for (const [name, dv, color] of axes) {
       const end = [o[0] + dv[0], o[1] + dv[1], o[2] + dv[2]];
       line(o, end, { stroke: color, "stroke-width": 2 });
-      const p = this.project(end);
-      const t = svgEl("text", { x: p[0] + 4, y: p[1] - 4, fill: color, class: "axis3", "font-weight": "600" });
+      let at = null;
+      for (const f of [1, 0.8, 0.6, 0.4, 1.25]) {
+        const p = this.project([o[0] + dv[0] * f, o[1] + dv[1] * f, o[2] + dv[2] * f]);
+        for (const [ox, oy] of [[4, -4], [-26, -4], [4, 14], [-26, 14]]) {
+          const r = { x0: p[0] + ox, x1: p[0] + ox + 22, y0: p[1] + oy - 12, y1: p[1] + oy + 2 };
+          if (!hit(r)) { at = [p[0] + ox, p[1] + oy]; break; }
+        }
+        if (at) break;
+      }
+      if (!at) { const p = this.project(end); at = [p[0] + 4, p[1] - 4]; }
+      const t = svgEl("text", { x: at[0], y: at[1], fill: color, class: "axis3", "font-weight": "600" });
       t.textContent = name + (name === "X" ? (sx > 0 ? "+" : "−") : name === "Y" ? (sy > 0 ? "+" : "−") : "+");
+      taken.push({ x0: at[0], x1: at[0] + 22, y0: at[1] - 12, y1: at[1] + 2 });
       g.append(t);
     }
     const s = svgEl("text", { x: 12, y: this.H - 12, class: "axis" });
     s.textContent = `格子 ${step}mm`;
     g.append(s);
+    if (this.hint && !this.interacted) {
+      const hint = svgEl("text", { x: 12, y: this.H - 28, class: "hint3" });
+      hint.textContent = "ドラッグで回す・ホイールで拡大";
+      g.append(hint);
+    }
     svg.append(g);
   }
 
@@ -271,10 +335,11 @@ export class View3D {
       if (!start || !(ev.buttons & 1)) return;
       const dx = ev.clientX - start.x, dy = ev.clientY - start.y;
       if (!this.dragged && Math.hypot(dx, dy) < 4) return;
-      if (!this.dragged) { this.dragged = true; this.closeChooser(); h.setPointerCapture?.(ev.pointerId); }
+      if (!this.dragged) { this.dragged = true; this.interacted = true; this.closeChooser(); h.setPointerCapture?.(ev.pointerId); }
       this.yaw = start.yaw + dx * 0.006;
       this.pitch = Math.max(0.05, Math.min(1.3, start.pitch + dy * 0.006));  // 床が裏返らない範囲
       this.render();
+      this.onView && this.onView();
     });
     const end = () => { start = null; this.downNames = null; setTimeout(() => { this.dragged = false; }, 0); };
     h.addEventListener("pointerup", (ev) => {
@@ -288,9 +353,11 @@ export class View3D {
     h.addEventListener("wheel", (ev) => {
       if (!this.data) return;
       ev.preventDefault();
+      this.interacted = true;
       this.closeChooser();
       this.zoom = Math.max(0.6, Math.min(5, this.zoom * Math.exp(-ev.deltaY * 0.0012)));
       this.render();
+      this.onView && this.onView();
     }, { passive: false });
     h.addEventListener("click", (ev) => {
       if (this.justPicked) { this.justPicked = false; return; }  // 点を押した直後の click では閉じない
