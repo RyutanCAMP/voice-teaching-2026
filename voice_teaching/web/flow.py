@@ -112,12 +112,20 @@ class WebFlow:
         def run(e: _Entry) -> dict:
             self._cancel_approval(e, "新しい指示があったため")
             f0 = ut.read_utterance(text)
-            out = (self._dialog_turn(e, text, source, f0) if e.dialog.step is not None
+            talking = e.dialog.step is not None
+            out = (self._dialog_turn(e, text, source, f0) if talking
                    else self._maybe_start_dialog(e, text, source, f0))
             if out is not None:
                 return out
-            e.dialog.estimated = None  # ふつうの指示：推定（未確定）の名前は使わない
-            return self._instruction(e, text, source)
+            out = self._instruction(e, text, source)
+            s = e.session
+            if out.get("candidate_made") or (s.facts is not None and s.facts.op == "undo" and out.get("status") == "ok"):
+                e.dialog.estimated = None  # ふつうの指示が通った：推定（未確定）の名前は使わない（断られた発話では消さない）
+            if talking:  # 会話の途中の新しい指示：会話をやめたことを知らせる
+                out["message"] = dg.ENDED_NEW + (out.get("message") or "")
+                out["dialog"] = True
+                e.dialog.say(APP_SPEAKER, out["message"], out.get("status") or "ok")
+            return out
         return self._run(sid, run)
 
     def _instruction(self, e: _Entry, text: str, source: str) -> dict:
@@ -188,29 +196,42 @@ class WebFlow:
             return None
         two = dg.count_place_words(text) >= 2
         fs = None
+        refused = None
         if not two:
-            fs = ut.read_utterance(dg.substitute_opening(text, word))
-            if fs.place_ref or not dg.handled_by_dialogue(fs):
-                two = bool(fs.place_ref)
-                if not two:
-                    return None  # 会話が受け持たない理由で止まる・聞き返す文：今の流れの答えをそのまま返す
+            sub = dg.substitute_opening(text, word)
+            fs = ut.read_utterance(sub)
+            if not fs.kinds and not fs.unknown_words and not fs.unclear_amounts:
+                # 「置くところを3mm」「置くところ」：動かす指示として読む（方向・量が無いのは、会話が受け持つ理由）
+                fs = ut.read_utterance(sub + "移動")
+            if fs.place_ref:
+                two = True
+            elif not dg.handled_by_dialogue(fs):
+                # 会話が受け持たない理由（D1 の2つの読み方・知らない言葉・符号 など）：その答えをそのまま返す。
+                # 選択肢の文には場所の言葉が無く、別の位置に当たるおそれがあるので、選択肢は出さない
+                refused = ut.pre_check(fs)
+        est = d.estimated
         d.start(word, rel, dg.Slots())
+        d.estimated = est
         self._human(e, text, source)
         if two:  # 場所の言葉が2つ：1つずつ（候補は頼まない）
-            d.end()
+            d.end(clear_estimate=False)
             return self._dialog_out(e, text, source, f0, "ask", dg.TWO_PLACES)
+        if refused is not None:
+            d.end(clear_estimate=False)
+            return self._dialog_out(e, text, source, f0, refused.status, refused.message)
         if s.candidate is not None:  # 承認待ちの候補がある：位置の候補も頼まない
-            d.end()
+            d.end(clear_estimate=False)
             return self._dialog_out(e, text, source, f0, "stop", PENDING_MESSAGE, who="アプリ")
         fs = ut.read_utterance(dg.substitute_opening(text, word))
         if fs.unknown_words:  # B1：知らない言葉を捨てて読まない
-            d.end()
+            d.end(clear_estimate=False)
             return self._dialog_out(e, text, source, f0, "ask", ut.unknown_words_message(fs.unknown_words, "move"),
                                     who="アプリ")
         slots = dg.read_slots(fs, opening=True)
         if slots.problem:
-            d.end()
+            d.end(clear_estimate=False)
             return self._dialog_out(e, text, source, f0, "stop" if slots.stop else "ask", slots.problem)
+        d.estimated = None  # 新しい会話を始めた：前の推定は使わない
         d.amount, d.axis, d.sign = slots.amount, slots.axis, slots.sign
         if rel:  # 向きの言葉だけ：方向は必ず6つのボタンで聞く（始めの発話からは決めない）
             d.axis = d.sign = None
@@ -297,9 +318,12 @@ class WebFlow:
             d.end()
             return self._dialog_out(e, text, source, f0, "ok", dg.END_UNDO)
         if f0.positions or f0.bad_positions or f0.op in ("speed", "compare") or "select" in f0.kinds:
-            d.end()  # 新しい指示：会話をやめて、ふつうに読む
+            d.end()  # 新しい指示：会話をやめて、ふつうに読む（hear が「会話をやめて…」と知らせる）
             return None
         self._human(e, text, source)
+        if d.confirm_go:  # 手で選んだ位置の確かめ：［go］のボタンのほかでは進めない
+            return self._dialog_out(e, text, source, f0, v.status if v.status == "stop" else "ask",
+                                    v.message if v.status == "stop" else dg.GO_BUTTON)
         if getattr(f0, "repeat", None) or getattr(f0, "question", False):
             # 繰り返し・疑問の形は、今の pre_check の答えのまま（量として使わない）
             return self._dialog_out(e, text, source, f0, v.status if v.status != "ok" else "ask",

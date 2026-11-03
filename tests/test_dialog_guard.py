@@ -297,3 +297,85 @@ def test_qa_p3_7_note_mentions_mock():
 def test_qa_p3_5_dialog_card_before_input_in_dom():
     html = (ROOT / "voice_teaching" / "web" / "static" / "index.html").read_text(encoding="utf-8")
     assert html.index('id="dialog-panel"') < html.index('id="instruction-panel"')
+
+
+# ======================================================================
+# 再レビュー（fd8ec24）の直し
+# ======================================================================
+def go_step():
+    w, sid = start()
+    r = w.hear(sid, "置くところをYのマイナス3mm")
+    r = w.choose(sid, "other", dlg(r)["turn"])
+    r = w.select(sid, "C00004")
+    assert [c["id"] for c in dlg(r)["choices"]] == ["go"]
+    return w, sid, r
+
+
+# QA P2-A：［go］の段では、ボタンのほかは進めない（位置・軸・符号・量のそろった新しい指示だけは、会話をやめてふつうの流れへ）
+@pytest.mark.parametrize("source", SOURCES)
+@pytest.mark.parametrize("text", ["3mm", "下に3mm", "Yのマイナス3mm", "はい", "そうそう"])
+def test_qa_p2a_go_step_needs_the_button(text, source):
+    w, sid, r = go_step()
+    r = w.hear(sid, text, source=source)
+    assert r["state"]["candidate"] is None and dlg(r)["step"] == "ask_move"
+    assert [c["id"] for c in dlg(r)["choices"]] == ["go"]
+    if text not in ("はい", "そうそう"):
+        assert r["message"] == dg.GO_BUTTON
+
+
+@pytest.mark.parametrize("source", SOURCES)
+def test_qa_p2a_complete_new_instruction_ends_dialogue_and_says_so(source):
+    w, sid, r = go_step()
+    r = w.hear(sid, "C00004を下に3mm", source=source)
+    assert r["candidate_made"] and r["state"]["candidate"]["target"] == "C00004 Z"
+    assert dlg(r)["step"] is None and r["message"].startswith(dg.ENDED_NEW)
+    assert dlg(r)["turns"][-1]["who"] == "アプリ" and dlg(r)["turns"][-1]["text"].startswith(dg.ENDED_NEW)
+
+
+# QA P2-B：始めの関門（handled_by_dialogue）を固定する
+def test_qa_p2b_gate_amount_only_starts_dialogue_and_asks_direction():
+    w, sid = start()
+    r = w.hear(sid, "置くところを3mm")
+    assert r["status"] == "ask" and dlg(r)["step"] == "confirm_position"
+    assert r["message"] == "「置くところ」は C00005 のことでしょうか？"
+    r = w.hear(sid, "はい")
+    assert dlg(r)["step"] == "ask_move" and dlg(r)["amount_mm"] == 3.0 and len(dlg(r)["choices"]) == 6
+    assert r["message"] == dg.ASK_DIR.format(amount="3")
+
+
+def test_qa_p2b_gate_place_word_alone_starts_dialogue_and_asks_both():
+    w, sid = start()
+    r = w.hear(sid, "置くところ")
+    assert r["status"] == "ask" and dlg(r)["step"] == "confirm_position"
+    r = w.hear(sid, "はい")
+    assert dlg(r)["step"] == "ask_move" and r["message"] == dg.ASK_MOVE and len(dlg(r)["choices"]) == 6
+
+
+def test_qa_p2b_gate_d1_gives_two_readings_message():
+    c = Counting()
+    w, sid = start(select="C00001", interp=c)
+    r = w.hear(sid, "置くところをYに3mm下げて")
+    assert r["status"] == "ask" and dlg(r)["step"] is None and c.locates == 0
+    assert r["message"].startswith("Y と、上げ・下げ（上下＝Z）の2つの読み方があります")
+    assert r["choices"] == []  # 選択肢の文には場所の言葉が無い（別の位置に当てない）ので出さない
+    assert r["state"]["selected"] == "C00001"
+
+
+# QA P3-A：推定（未確定）は、断られた・聞き返された発話では消さない
+@pytest.mark.parametrize("text", ["バイオ", "承認して", "そうじゃなくて", "置くところと取るところを3mm下げて"])
+def test_qa_p3a_estimate_survives_refused_utterances(text):
+    w, sid = start()
+    w.hear(sid, "置くところを3mm下げて")
+    r = w.hear(sid, "はい")
+    assert r["state"]["candidate"]["estimated"] is not None
+    r = w.hear(sid, text)
+    assert r["state"]["candidate"] is not None and r["state"]["candidate"]["estimated"] is not None
+
+
+def test_qa_p3a_estimate_survives_refusal_in_ask_move():
+    w, sid = start()
+    w.hear(sid, "置くところを少し手前にして")
+    w.hear(sid, "はい")
+    for t in ("バイオ", "OK", "下げないで"):
+        r = w.hear(sid, t)
+        assert dlg(r)["estimated"] is not None, t

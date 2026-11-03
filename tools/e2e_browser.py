@@ -656,6 +656,7 @@ def check_dialog(browser, check, shots: Path | None, errors: list) -> None:
               f"会話：手で選んだ位置でも、方向は6つのボタン（推定の印は付けない）：{labels(pg)}")
         send(pg, "右に3mm")
         until(pg, lambda: "「右」が X・Y・Z のどれに当たるか" in last_said(pg))
+        # （このあと 6つの方向のボタンの確認）
         check(pg.get_attribute("#step-3", "aria-current") == "step" and len(labels(pg)) == 6,
               "会話：「右に3mm」は軸にしない（6つのボタンで聞き直す）")
         shot(pg, "d7_six_directions.png")
@@ -689,15 +690,61 @@ def check_dialog(browser, check, shots: Path | None, errors: list) -> None:
         until(pg, lambda: labels(pg) and labels(pg)[0] == "X＋ 25mm")
         pg.locator("#dialog-choices button", has_text="Z−（下）25mm").click()
         until(pg, lambda: pg.get_attribute("#step-4", "aria-current") == "step" or pg.is_visible("#reply-message"))
-        seen = pg.inner_text(".side")
-        check("20" in seen and ("上限" in seen or "超え" in seen),
-              "会話の最後の 25mm は 20mm の検査で止まり、その理由が見える")
+        reply = pg.inner_text("#reply-message") if pg.is_visible("#reply-message") else ""
+        last = bubbles(pg)[-1] if bubbles(pg) else ["", ""]
+        check("-25mm" in reply and "20mm" in reply and "超える" in reply
+              and last[0] == "アプリ" and "-25mm" in last[1] and "超える" in last[1],
+              f"会話の最後の 25mm は 20mm の検査で止まり、その理由が返事の欄とアプリの吹き出しに見える：{reply[:50]}")
         if pg.get_attribute("#step-4", "aria-current") == "step":
             pg.click("#open-confirm")
             pg.wait_for_selector("#confirm-overlay:not([hidden])")
             check(not pg.is_enabled("#approve-button"), "会話の最後の 25mm は承認できない")
             pg.click("#confirm-close")
         shot(pg, "d12_limit.png")
+        pg.close()
+
+        # ---- 2c. 手で選んだ位置の確かめ（［go］）：見出しは「この内容で動かしますか？」、文字では進めない ----
+        pg = browser.new_page(viewport={"width": 1280, "height": 720})
+        watch(pg)
+        pg.add_init_script(FAKE_RECOGNITION)
+        pg.goto(url)
+        pg.click("#sample-button")
+        pg.wait_for_selector("#job-area:not([hidden])")
+        pg.click("#talk-first")
+        send(pg, "置くところをYのマイナス3mm")
+        until(pg, lambda: labels(pg) == ["C00005 です", "ほかの位置"])
+        pg.locator("#dialog-choices button", has_text="ほかの位置").click()
+        until(pg, lambda: pg.get_attribute("#step-2", "aria-current") == "step")
+        pg.locator("#position-chips button", has_text="C00004").click()
+        until(pg, lambda: labels(pg) == ["C00004 を Y −3mm 動かす"])
+        check(pg.inner_text("#next-action") == "この内容で動かしますか？" and last_said(pg) == "C00004 を Y −3mm 動かしますか？",
+              "手で選んだ位置では、すぐ候補にせず［C00004 を Y −3mm 動かす］のボタン1つで確かめる（見出し「この内容で動かしますか？」）")
+        shot(pg, "d13_go_step.png")
+        send(pg, "3mm")
+        until(pg, lambda: "ボタンを押してください" in last_said(pg))
+        check(pg.get_attribute("#step-3", "aria-current") == "step" and labels(pg) == ["C00004 を Y −3mm 動かす"],
+              "確かめの段では、文字の「3mm」では進めない（ボタンを押すよう求める）")
+        pg.locator("#dialog-choices button", has_text="C00004 を Y −3mm 動かす").click()
+        until(pg, lambda: pg.get_attribute("#step-4", "aria-current") == "step")
+        check("Y方向に −3.000mm" in pg.inner_text("#candidate-view") and "推定" not in pg.inner_text("#candidate-view"),
+              "ボタンで確かめると候補になる（手で選んだ位置なので推定の印は付けない）")
+        pg.close()
+
+        # ---- 2d. 390px：送ったあと、見出しが上の帯の下に隠れない ----
+        pg = browser.new_page(viewport={"width": 390, "height": 844})
+        watch(pg)
+        pg.add_init_script(FAKE_RECOGNITION)
+        pg.goto(url)
+        pg.click("#sample-button")
+        pg.wait_for_selector("#job-area:not([hidden])")
+        pg.click("#talk-first")
+        send(pg, "置くところを少し手前にして")
+        until(pg, lambda: labels(pg) == ["C00005 です", "ほかの位置"])
+        pg.wait_for_timeout(200)
+        gap = pg.evaluate("""() => document.querySelector('#next-action').getBoundingClientRect().top
+                              - document.querySelector('.top').getBoundingClientRect().bottom""")
+        check(gap >= 0, f"390px：送ったあと、見出し（次にすること）が上の帯の下に隠れない（間 {gap:.0f}px）")
+        shot(pg, "d14_390.png")
         pg.close()
 
         # ---- 3. くり返しの2択（「2回」）→ どちらでも、動きは足せないと伝える。候補なし・解釈の係も呼ばない ----

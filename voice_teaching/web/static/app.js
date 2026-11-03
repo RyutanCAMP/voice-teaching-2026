@@ -278,7 +278,8 @@ function renderSteps() {
     text = dialogStep() === "pick" ? "位置を選んでください" : "点か番号を押してください";
   } else if (step === 3 && dialogStep()) {
     // Claude との会話の途中：選択肢はどれも同じ重さ（目立たせない）。声でも答えられる
-    text = dialogStep() === "confirm_position" ? "この位置で合っていますか？" : "方向と量を教えてください";
+    const go = st.dialog.choices.length === 1 && st.dialog.choices[0].id === "go";
+    text = dialogStep() === "confirm_position" ? "この位置で合っていますか？" : go ? "この内容で動かしますか？" : "方向と量を教えてください";
     if (recording()) primary = "voice-stop";
     else if ($("text-input").value.trim()) primary = "text-send";
     else if (!st.dialog.choices.length) primary = $("voice-controls").hidden ? "text-send" : "mic-button";
@@ -483,6 +484,15 @@ async function sendInstruction(text, source) {
   applyResult(res, false);
   // 候補ができたら、まず図で変更前後の経路を再生して見せる（承認は確認表示のボタンだけ）
   if (res.candidate_made && state.st && state.st.candidate) startPlayback();
+  keepHeadingInView();
+}
+
+// 小さな画面：送ったあと、見出し（次にすること）が上の帯の下に隠れないようにする
+function keepHeadingInView() {
+  if (window.innerWidth > 600) return;
+  const top = $("next-action").getBoundingClientRect().top;
+  const bar = document.querySelector(".top").getBoundingClientRect().bottom;
+  if (top < bar + 4) $("next-action").scrollIntoView({ block: "start" });
 }
 
 function renderFacts(f) {
@@ -571,6 +581,7 @@ async function chooseDialog(id, turn) {
   const res = await postJson("/api/dialog", { session_id: state.sessionId, choice: id, turn: turn });
   applyResult(res, false);
   if (res.candidate_made && state.st && state.st.candidate) startPlayback();
+  keepHeadingInView();
 }
 
 // ---- 4. 変更候補（要点だけをカードに。詳しくは詳細表示） ----

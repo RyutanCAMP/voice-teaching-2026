@@ -72,6 +72,8 @@ STALE = "この選択肢は古くなりました。もう一度話してくだ�
 PENDING = "承認待ちの変更候補があります。比べるか、元に戻してから指示してください"
 OTHER_LABEL = "ほかの位置"
 TWO_PLACES = "位置が2つあります。1つずつ指示してください"
+GO_BUTTON = "動かすときは、上のボタンを押してください（この段では、声や文字では進めません）"
+ENDED_NEW = "会話をやめて、新しい指示として読みました。"
 AFFIRM_BUTTON = "位置はボタンで選んでください（「はい」などは、位置の候補を聞いたすぐあとだけ使えます）"
 ZERO_AMOUNT = "移動量が0のため、変更しません"
 CONFIRM_GO = "{pos} を {dir} {amount}mm 動かしますか？"
@@ -355,12 +357,13 @@ class Dialog:
         self.turns = []
         self.proposal_mark, self.confirm_go = -1, False
 
-    def end(self) -> None:
-        """会話を終える。推定（未確定）の名前も消す（候補ができたときは、呼んだ側が残す）。"""
+    def end(self, clear_estimate: bool = True) -> None:
+        """会話を終える。推定（未確定）の名前も消す（候補ができたとき・断っただけのときは、呼んだ側が残す）。"""
         self.step = None
         self.candidates = []
         self.confirm_go = False
-        self.estimated = None
+        if clear_estimate:
+            self.estimated = None
         self.turn += 1
 
     def say(self, who: str, text: str, kind: str = "say") -> None:
