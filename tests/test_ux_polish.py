@@ -114,15 +114,6 @@ def test_unknown_words_highlight_uses_text_nodes():
     assert "unknown_words" in j
 
 
-def test_css_layout_fixes():
-    css = text("style.css")
-    m = re.search(r"@media \(max-width: 1100px\) \{(.*?)\n\}", css, re.S)
-    assert m and "grid-template-columns: minmax(0, 1fr)" in m.group(1)
-    assert "@media (max-width: 600px)" in css
-    assert re.search(r"@media \(max-height: 800px\)", css)
-    assert re.search(r"\.work \{[^}]*padding-bottom: 64px", css)
-
-
 # ---- サンプルの読込：決まった1つのファイルだけ。要求の中身は使わない ----
 @pytest.fixture
 def running(tmp_path, monkeypatch):

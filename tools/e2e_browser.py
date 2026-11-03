@@ -56,6 +56,19 @@ Object.defineProperty(window, "webkitSpeechRecognition", { value: undefined, con
 """
 
 
+def label_overlaps_page(page, host="#fig-3d"):
+    """3D の点の名前と、動かす点の名前（変更量つき）の四角が重なっている組。"""
+    return page.evaluate("""(host) => {
+      const els = [...document.querySelectorAll(host + ' g.pt3 > text, ' + host + ' text.moved-label')];
+      const r = els.map((e) => [e.textContent, e.getBoundingClientRect()]);
+      const out = [];
+      for (let i = 0; i < r.length; i++) for (let j = i + 1; j < r.length; j++) {
+        const a = r[i][1], b = r[j][1];
+        if (a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top) out.push([r[i][0], r[j][0]]);
+      }
+      return out; }""", host)
+
+
 def _primaries(page):
     return page.locator("button.primary:not([disabled]):visible, .drop-zone.primary:visible").count()
 
@@ -70,6 +83,14 @@ def check_ux_polish(browser, url, check, shots: Path | None) -> None:
     def no_hscroll(page):
         w = page.evaluate("() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]")
         return w[0] <= w[1], w
+
+    def note_gap(page):
+        # 画面のいちばん上（scrollY=0）で、図の注意の下の端と、下の固定の帯の上の端の間（負なら隠れている）
+        page.evaluate("window.scrollTo(0, 0)")
+        page.wait_for_timeout(100)
+        return page.evaluate("""() => document.querySelector('.foot').getBoundingClientRect().top
+                                - document.querySelector('#figure-note').getBoundingClientRect().bottom""")
+
 
     # ---- 1280×720：版・使い方の小窓・サンプルで試す・図の注意・止まった候補の帯 ----
     pg = browser.new_page(viewport={"width": 1280, "height": 720})
@@ -93,12 +114,9 @@ def check_ux_polish(browser, url, check, shots: Path | None) -> None:
     pg.wait_for_selector("#job-area:not([hidden])")
     check(pg.inner_text("#file-name") == "DEMO_C_PLACE.JBI" and pg.get_attribute("#step-2", "aria-current") == "step"
           and pg.is_visible("#fig-3d svg"), "「サンプルで試す」で DEMO_C_PLACE を読み、3D で位置を選ぶステップになる")
-    pg.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-    pg.wait_for_timeout(100)
-    gap = pg.evaluate("""() => document.querySelector('.foot').getBoundingClientRect().top
-                         - document.querySelector('#figure-note').getBoundingClientRect().bottom""")
-    check(gap >= 0, f"1280×720：下の帯に図の注意が隠れない（間 {gap:.0f}px）")
-    pg.evaluate("window.scrollTo(0, 0)")
+    # 図の注意は、読み込んだ直後の画面（スクロールしない）で、下の帯に隠れない（682d1ab では隠れていた）
+    gap = note_gap(pg)
+    check(gap >= 0, f"1280×720：読み込んだ直後、下の帯に図の注意が隠れない（間 {gap:.0f}px）")
     shot(pg, "L1280_a_loaded.png")
 
     # 止まる位置（C00000）：確認表示を開くと、赤い帯が見える所にある。変更後はオレンジにしない
@@ -107,8 +125,21 @@ def check_ux_polish(browser, url, check, shots: Path | None) -> None:
     pg.fill("#text-input", FAKE_TEXT)
     pg.click("#text-send")
     until(pg, lambda: pg.get_attribute("#step-4", "aria-current") == "step")
-    colors = pg.eval_on_selector_all("#fig-3d line.seg.after", "els => els.map(e => e.getAttribute('stroke'))")
-    check(colors and "#ff6a1a" not in colors, f"止まった候補の変更後は、オレンジにしない（灰色の点線）：{colors}")
+    pg.wait_for_timeout(300)
+    gap = note_gap(pg)
+    check(gap >= 0, f"1280×720：変更候補のステップでも、下の帯に図の注意が隠れない（間 {gap:.0f}px）")
+    after = pg.eval_on_selector_all("#fig-3d line.seg.after",
+                                    "els => els.map(e => [e.getAttribute('stroke'), e.getAttribute('stroke-dasharray')])")
+    est = set(pg.eval_on_selector_all("#fig-3d line.seg.before[stroke-dasharray]",
+                                      "els => els.map(e => e.getAttribute('stroke-dasharray'))"))
+    check(after and all(c != "#ff6a1a" and d and d not in est for c, d in after),
+          f"止まった候補の変更後は、オレンジにしない（目安の破線 {sorted(est)} と違う点線）：{after}")
+    to_color = pg.evaluate("() => getComputedStyle(document.querySelector('#candidate-view .cand-change .to')).color")
+    check(pg.is_visible("#legend-stopped") and pg.is_hidden("#legend-after")
+          and "灰色の点線＝止まった候補（承認できません）" in pg.inner_text("#legend") and to_color != "rgb(196, 71, 10)",
+          f"止まった候補：凡例に「灰色の点線＝止まった候補」、カードの変更後の値はオレンジにしない（{to_color}）")
+    ov = label_overlaps_page(pg)
+    check(not ov, f"同じ座標の位置（C00000・C00007）の名前と、動かす点の名前が重ならない：{ov}")
     shot(pg, "L1280_b_blocked_card.png")
     pg.click("#open-confirm")
     pg.wait_for_selector("#confirm-overlay:not([hidden])")
@@ -116,6 +147,11 @@ def check_ux_polish(browser, url, check, shots: Path | None) -> None:
     r = pg.evaluate("() => { const b = document.querySelector('#confirm-blocked').getBoundingClientRect(); return [b.top, b.bottom]; }")
     check(pg.is_visible("#confirm-blocked") and r[0] >= 0 and r[1] <= 720 and not pg.is_enabled("#approve-button"),
           f"1280×720：止まった候補の確認表示で、赤い「承認できません」の帯が見える（上 {r[0]:.0f}px・下 {r[1]:.0f}px）")
+    to_color = pg.evaluate("() => getComputedStyle(document.querySelector('#confirm-xyz .cand-change .to')).color")
+    check(to_color != "rgb(196, 71, 10)" and pg.is_visible("#confirm-stopped-legend")
+          and "灰色の点線＝止まった候補（承認できません）" in pg.inner_text("#confirm-stopped-legend"),
+          f"確認表示でも、止まった候補の変更後の値はオレンジにせず（{to_color}）、凡例に止まった候補の線を出す")
+    check("ドラッグで回す" not in pg.text_content("#confirm-figure svg"), "確認表示の図には操作のヒントを出さない")
     shot(pg, "L1280_c_blocked_confirm.png")
     pg.click("#confirm-close")
     pg.close()
@@ -127,6 +163,12 @@ def check_ux_polish(browser, url, check, shots: Path | None) -> None:
     ok, w = no_hscroll(pg)
     check(ok, f"390px：最初の画面は横にはみ出さない（{w}）")
     shot(pg, "P390_a_start.png", full=True)
+    pg.click("#help-button")
+    hb = pg.locator("#help-pop").bounding_box()
+    check(hb is not None and hb["x"] >= 0 and hb["x"] + hb["width"] <= 390 and no_hscroll(pg)[0],
+          f"390px：使い方の小窓は画面の内側に収まる（x {hb and round(hb['x'])}・幅 {hb and round(hb['width'])}）")
+    shot(pg, "P390_d_help.png")
+    pg.keyboard.press("Escape")
     pg.click("#sample-button")
     pg.wait_for_selector("#job-area:not([hidden])")
     pg.wait_for_timeout(200)
@@ -352,6 +394,21 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
                   f"「アドレスをコピー」だけが目立ち、マイクは薄い（不透明度 {mic_op}）")
             if shots is not None:
                 pg3.screenshot(path=str(shots / "8b_other_network.png"))
+            # 聞き返しの見出しは、「この画面では音声を使えません」より先に出す
+            pg3.fill("#text-input", "少し動かして")
+            pg3.click("#text-send")
+            until(pg3, lambda: pg3.is_visible("#reply-message"))
+            check(pg3.inner_text("#next-action") == "もう一度、言い直してください"
+                  and "primary" in (pg3.get_attribute("#copy-url", "class") or ""),
+                  f"Chrome 以外でも、聞き返しの間は聞き返しの見出しを出す：{pg3.inner_text('#next-action')}")
+            # 別のジョブを読んでも、Chrome 以外なら案内は残す
+            pg3.set_input_files("#file-input", str(REPO / "samples/dummy/DEMO_C_PLACE.JBI"))
+            until(pg3, lambda: pg3.inner_text("#file-name") == "DEMO_C_PLACE.JBI")
+            pg3.locator("#position-chips button", has_text="C00005").first.click()
+            until(pg3, lambda: pg3.inner_text("#voice-position strong") == "C00005")
+            check("need-chrome" in (pg3.get_attribute("body", "class") or "")
+                  and pg3.inner_text("#next-action") == "この画面では音声を使えません",
+                  "Chrome 以外では、別のジョブを読んでも Chrome の案内を残す")
             pg3.close()
 
             # 聞き返しの短い選択肢（CHECKER_021 10章・CHECKER_022）：「Yを3mm下げて」は2択。押すと候補を作るだけ（承認しない）
@@ -381,6 +438,8 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check("Y方向に −3.000mm" in cv and "150.000" in cv and "147.000" in cv and pg4.is_hidden("#export-button")
                   and pg4.is_enabled("#open-confirm"),
                   "選択肢を押すと Y −3mm の候補（変更前後の XYZ 付き）になるだけで、承認・出力はされない（確認へ進む）")
+            ov4 = label_overlaps_page(pg4)
+            check(not ov4, f"3D の名前どうしが重ならない（Y −3mm の候補）：{ov4}")
             change = pg4.inner_text("#candidate-view .cand-change")
             check(re.sub(r"\s", "", change) == "Y150.000→147.000",
                   f"候補のカードに、変わる値を大きく（サーバーの値のまま）：{change}")
@@ -527,6 +586,7 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     pg.mouse.move(cx, cy); pg.mouse.down(); pg.mouse.move(cx + 120, cy - 40, steps=8); pg.mouse.up()
     a1 = pos_of(pg, "C00005")
     check(a0 != a1 and pg.is_visible("#view-reset"), f"ドラッグで視点が回り、「視点を戻す」が出る（C00005 の画面の位置 {a0} → {a1}）")
+    check("ドラッグで回す" not in pg.text_content("#fig-3d svg"), "一度回すと、操作のヒントは消える")
     check(pg.get_attribute("#step-2", "aria-current") == "step", "回しただけでは位置は選ばれない")
     shot(pg, "2b_rotated.png")
     p, q = pos_of(pg, "C00002"), pos_of(pg, "C00005")
@@ -538,6 +598,7 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     check(d2 > d1 * 1.3, f"ホイールで拡大できる（点の間 {d1}px → {d2}px）")
     pg.click("#view-reset")
     check(pos_of(pg, "C00005") == a0 and pg.is_hidden("#view-reset"), "「視点を戻す」で最初の向き・大きさに戻る（ボタンは隠れる）")
+    check("ドラッグで回す" not in pg.text_content("#fig-3d svg"), "視点を戻しても、操作のヒントは出し直さない")
 
     # 重なって見える点（C00000 と C00007）は、押すと選び分けの一覧が出る
     pt(pg, "C00000").click()

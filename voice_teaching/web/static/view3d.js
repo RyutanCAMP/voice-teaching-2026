@@ -20,6 +20,17 @@ function svgEl(tag, attrs) {
   return e;
 }
 
+// 文字の幅の目安（px・12px の文字）。名前の重なりを避けるためだけに使う
+function textWidth(s) {
+  let w = 0;
+  for (const ch of String(s)) w += ch.charCodeAt(0) < 0x2000 ? 7 : 12;
+  return w;
+}
+
+function overlaps(a, b) {
+  return a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0;
+}
+
 function niceStep(span) {
   const raw = span / 8;
   const p = Math.pow(10, Math.floor(Math.log10(raw)));
@@ -33,6 +44,8 @@ export class View3D {
     this.host = host;
     this.onPick = opts.onPick || null;
     this.onView = opts.onView || null;  // 回した・拡大した・戻したとき（「視点を戻す」を出すかどうか）
+    this.hint = opts.hint !== false;    // 「ドラッグで回す・ホイールで拡大」を出す（確認表示の中では出さない）
+    this.interacted = false;            // 一度でも回した・拡大したら、操作のヒントは出さない
     this.W = opts.width || 720;
     this.H = opts.height || 480;
     this.data = null;
@@ -101,7 +114,8 @@ export class View3D {
       const line = svgEl("line", { x1: p[0], y1: p[1], x2: q[0], y2: q[1], stroke: color, "stroke-width": w,
         "stroke-linecap": "round", class: "seg " + key, "data-from": s.from, "data-to": s.to });
       if (!s.solid) line.setAttribute("stroke-dasharray", "6 5");
-      if (key === "after" && stopped) line.setAttribute("stroke-dasharray", "3 5");
+      // 止まった候補は、目安の区間（6 5 の破線）と見分けられる細かい点線
+      if (key === "after" && stopped) { line.setAttribute("stroke-dasharray", "0.5 7"); line.setAttribute("stroke-width", "4"); }
       const t = svgEl("title", {}); t.textContent = `${s.line_no}行目 ${s.text}${s.solid ? "" : "（目安）"}`;
       line.append(t);
       svg.append(line);
@@ -121,6 +135,7 @@ export class View3D {
       if (g) g.names.push(it.p.name); else groups.push({ s: it.s, names: [it.p.name], p: it.p });
     }
     const moved = c ? c.moved : null;
+    const labelBoxes = [];  // 置いた名前の四角（変更後の名前を重ならない所に置くため）
     for (const g of groups) {
       const [x, y] = g.s;
       const sel = g.names.includes(d.selected);
@@ -140,7 +155,9 @@ export class View3D {
           "font-weight": sel && !isMoved ? "600" : "400" });
         label.textContent = shownNames.join(" / ");
         el.append(label);
+        labelBoxes.push({ x0: x + 12, x1: x + 12 + textWidth(label.textContent), y0: y - 20, y1: y - 4 });
       }
+      labelBoxes.push({ x0: x - 8, x1: x + 8, y0: y - 8, y1: y + 8 });  // 点そのもの
       const t = svgEl("title", {});
       t.textContent = g.names.map((n) => {
         const p = d.points.find((q) => q.name === n);
@@ -158,8 +175,16 @@ export class View3D {
         svg.append(svgEl("line", { x1: a[0], y1: a[1], x2: b[0], y2: b[1], stroke: cAfter, "stroke-width": 2 }));
         svg.append(svgEl("circle", { cx: b[0], cy: b[1], r: 7, fill: cAfter, class: "after-pt" }));
         svg.append(svgEl("circle", { cx: b[0], cy: b[1], r: 14, fill: "none", stroke: cAfter, "stroke-width": 1.5, "stroke-opacity": 0.5 }));
-        const lab = svgEl("text", { x: b[0] + 14, y: b[1] + 18, fill: cAfterText, "font-weight": "600", class: "moved-label" });
-        lab.textContent = `${moved} ${displayMinus(d.delta_label || "")}`.trim();
+        const text = `${moved} ${displayMinus(d.delta_label || "")}`.trim();
+        const tw = textWidth(text);
+        // 同じ所にほかの位置（共用の座標など）の名前があっても重ならないように、右下・左・右上・下の順に空いている所を探す
+        const spots = [[b[0] + 14, b[1] + 18, "start"], [b[0] - 20, b[1] + 4, "end"], [b[0] + 14, b[1] - 22, "start"],
+          [b[0] - 20, b[1] + 22, "end"], [b[0] + 14, b[1] + 36, "start"], [b[0] - 20, b[1] - 18, "end"]];
+        const box = ([x, y, anchor]) => (anchor === "start"
+          ? { x0: x, x1: x + tw, y0: y - 13, y1: y + 3 } : { x0: x - tw, x1: x, y0: y - 13, y1: y + 3 });
+        const spot = spots.find((s) => !labelBoxes.some((q) => overlaps(box(s), q))) || spots[0];
+        const lab = svgEl("text", { x: spot[0], y: spot[1], "text-anchor": spot[2], fill: cAfterText, "font-weight": "600", class: "moved-label" });
+        lab.textContent = text;
         svg.append(lab);
         this._inset(svg, p0.xyz, q.xyz, displayMinus(d.delta_label || ""), cAfter, cAfterText);
       }
@@ -247,9 +272,11 @@ export class View3D {
     const s = svgEl("text", { x: 12, y: this.H - 12, class: "axis" });
     s.textContent = `格子 ${step}mm`;
     g.append(s);
-    const hint = svgEl("text", { x: 12, y: this.H - 28, class: "hint3" });
-    hint.textContent = "ドラッグで回す・ホイールで拡大";
-    g.append(hint);
+    if (this.hint && !this.interacted) {
+      const hint = svgEl("text", { x: 12, y: this.H - 28, class: "hint3" });
+      hint.textContent = "ドラッグで回す・ホイールで拡大";
+      g.append(hint);
+    }
     svg.append(g);
   }
 
@@ -308,7 +335,7 @@ export class View3D {
       if (!start || !(ev.buttons & 1)) return;
       const dx = ev.clientX - start.x, dy = ev.clientY - start.y;
       if (!this.dragged && Math.hypot(dx, dy) < 4) return;
-      if (!this.dragged) { this.dragged = true; this.closeChooser(); h.setPointerCapture?.(ev.pointerId); }
+      if (!this.dragged) { this.dragged = true; this.interacted = true; this.closeChooser(); h.setPointerCapture?.(ev.pointerId); }
       this.yaw = start.yaw + dx * 0.006;
       this.pitch = Math.max(0.05, Math.min(1.3, start.pitch + dy * 0.006));  // 床が裏返らない範囲
       this.render();
@@ -326,6 +353,7 @@ export class View3D {
     h.addEventListener("wheel", (ev) => {
       if (!this.data) return;
       ev.preventDefault();
+      this.interacted = true;
       this.closeChooser();
       this.zoom = Math.max(0.6, Math.min(5, this.zoom * Math.exp(-ev.deltaY * 0.0012)));
       this.render();

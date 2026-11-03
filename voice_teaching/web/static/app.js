@@ -93,6 +93,8 @@ function resetForLoad() {
   state.live = false;  // ジョブが変わったらマイクは OFF に戻す
   state.voiceFinal = null;
   state.unknownWords = [];
+  // Chrome 以外の案内は、ブラウザーの確かめが通るとき（Chrome・Edge）だけ消す。Chrome 以外では残す
+  if (BROWSER !== "other") { state.needChrome = false; document.body.classList.remove("need-chrome"); }
   $("voice-hint").hidden = true;
   $("voice-consent").hidden = true;
   $("text-input").value = "";
@@ -266,19 +268,20 @@ function renderSteps() {
     const asking = !reply.hidden && reply.classList.contains("ask");
     const askText = asking && reply.querySelector("button.choice:not([disabled])") && !state.unknownWords.length
       ? "どちらですか？" : "もう一度、言い直してください";
-    if (state.needChrome && !recording() && !$("text-input").value.trim()) {
-      text = "この画面では音声を使えません";
-      primary = "copy-url";
-    } else if (recording()) {
+    if (recording()) {
       text = asking ? askText : "どうぞ、話してください";
       primary = "voice-stop";
     } else if ($("text-input").value.trim()) {
       text = "文を確かめて「次へ」";
       primary = "text-send";
-    } else if (asking) {
+    } else if (asking) {  // 聞き返しの見出しは、Chrome の案内より先に出す
       text = askText;
       // 選択肢があるときは、どれも同じ重さ（目立たせるボタンを作らない）
-      primary = askText === "どちらですか？" ? null : $("voice-controls").hidden ? "text-send" : "mic-button";
+      primary = askText === "どちらですか？" ? null
+        : state.needChrome ? "copy-url" : $("voice-controls").hidden ? "text-send" : "mic-button";
+    } else if (state.needChrome) {
+      text = "この画面では音声を使えません";
+      primary = "copy-url";
     } else if (!$("voice-consent").hidden) {
       text = "音声入力を使いますか？";
       primary = "consent-yes";
@@ -498,7 +501,7 @@ function renderCandidate() {
 
 // 変わる値を大きく：「Y 150.000 → 147.000」（サーバーの before_value・after_value をそのまま。表示でマイナスだけ − に）
 function changeLine(axis, c) {
-  return el("p", { class: "cand-change" }, `${axis} ${displayMinus(c.before_value)}`,
+  return el("p", { class: "cand-change" + (c.blocked_reason ? " stopped" : "") }, `${axis} ${displayMinus(c.before_value)}`,
     el("span", { class: "arrow" }, "→"), el("span", { class: "to" }, displayMinus(c.after_value)));
 }
 
@@ -558,6 +561,7 @@ function openConfirm() {
   $("confirm-blocked").textContent = st.blocked_reason
     ? "この変更は承認できません。閉じて「元に戻す」を押し、別の位置を選んでください" + reason : "";
   $("confirm-blocked").hidden = !st.blocked_reason;
+  $("confirm-stopped-legend").hidden = !st.blocked_reason;
   // U1：承認ボタンを押す画面に、候補の注意をすべて出す（右のカードは確認表示に隠れるため）
   const notes = [...st.candidate.warnings];  // 候補の注意は全部（一部だけにしない）
   if (state.view.figure_message) notes.push(state.view.figure_message);  // 図に描けない点がある
@@ -747,7 +751,7 @@ const view3d = new View3D($("fig-3d"), { onPick: (name) => {
   }
   select(name);
 }, onView: () => { $("view-reset").hidden = $("fig-3d").hidden || !view3d.changed(); } });
-const confirm3d = new View3D($("confirm-figure"), { width: 640, height: 440 });  // 確認表示の中では選び直さない
+const confirm3d = new View3D($("confirm-figure"), { width: 640, height: 440, hint: false });  // 確認表示の中では選び直さない
 
 function data3d() {
   const v = state.view;
@@ -781,6 +785,9 @@ function renderFigures() {
   drawFigure($("fig-yz"), "Y", "Z", false);
   const c = state.st && state.st.candidate;
   $("legend").hidden = !(c && c.after_positions);
+  // 止まった候補：変更後の線は灰色の点線。凡例もそれに合わせる
+  $("legend-after").hidden = !!(c && c.blocked_reason);
+  $("legend-stopped").hidden = !(c && c.blocked_reason);
   $("play-button").disabled = !state.view || state.view.segments.length === 0 || recording();
 }
 
@@ -835,7 +842,7 @@ function drawFigure(host, axA, axB, big) {
     drawSegs(c.after_segments, after, cAfter, w + 0.5, "after");
     for (const x of segLines.after) {
       if (x.seg.from !== c.moved && x.seg.to !== c.moved) x.line.setAttribute("stroke", "transparent");
-      else if (stopped) x.line.setAttribute("stroke-dasharray", "3 5");
+      else if (stopped) { x.line.setAttribute("stroke-dasharray", "0.5 7"); x.line.setAttribute("stroke-width", "4"); }  // 目安の破線と見分ける
     }
   } else {
     drawSegs(v.segments, before, C_LINE, w, "before");
@@ -1033,6 +1040,8 @@ const voice = new SpeechInput(Recognition, {
     state.liveAt = Date.now();
     state.netRetry = 0;
     state.quiet = 0;
+    state.needChrome = false;  // 声を文字にできた：Chrome の案内は要らない
+    document.body.classList.remove("need-chrome");
     renderSteps();
     renderMic();
     renderSignHint();
@@ -1131,8 +1140,7 @@ function startListening() {
   $("voice-error").hidden = true;
   $("voice-hint").hidden = true;
   $("voice-partial").textContent = "";
-  state.needChrome = false;
-  document.body.classList.remove("need-chrome");
+  if (BROWSER !== "other") { state.needChrome = false; document.body.classList.remove("need-chrome"); }
   closeConfirm();
   state.voiceToken = { sessionId: state.sessionId, selected: state.st ? state.st.selected : null };
   state.resumeArmed = false;
