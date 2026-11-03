@@ -745,3 +745,80 @@ def test_static_talk_panel_marks_and_thinking():
     assert ".mark-human" in css and ".mark-ai" in css
     for path in ("/api/approve", "/api/export", "/api/hear", "/api/select", "/api/dialog"):
         assert path not in js
+
+
+# ======== 台本 Ver.6.1 Scene 3（3-1 読む・3-2 教える・3-3 変える） ========
+SCENE_31 = "待機の位置から作業の場所へ動き、下りて戻る動きを2回くり返してから、待機の位置に戻ります。何をする作業ですか？"
+
+
+def confirmed_config(tmp_path) -> Path:
+    """DEMO_BUTTON_REPEAT の座標系で、上下の向きの仮の設定（テストの一時フォルダだけ。実機で確かめたものではない）。"""
+    from voice_teaching import updown
+    obj = updown.build_config(jbi.load(DEMO), updown.DEFAULT_ROBOT, "テスト（一時フォルダの仮の設定）",
+                              "テスト用の仮の設定。実機で確かめたものではない")
+    return Path(updown.write_config(obj, tmp_path / "updown_demo.json", overwrite=True))
+
+
+def test_scene_3_1_updown_confirmed_allows_down_and_back_and_marks_roles_as_ai_guess(tmp_path):
+    w, fake = flow(tmp_path, answer(SCENE_31, [21, 22, 23, 24, 25, 26]), updown_config=confirmed_config(tmp_path))
+    sid = w.load(demo_bytes())["session_id"]
+    assert w.state(sid)["state"]["updown"]["status"] == "confirmed"
+    r = w.ask(sid, "このロボット、何をしている？")
+    assert r["reply_by"] == "claude" and r["reply"] == SCENE_31  # Claude の文は書き換えない
+    facts = json.loads(fake.requests[0]["messages"][0]["content"][0]["text"])["job_facts"]
+    assert facts["updown"]["status"] == "confirmed"
+    # 「待機の位置」「作業の場所」は、プログラムが事実として知らない：AI の推定（未確定）の印で示す（登録しない）
+    assert r["guesses"] == [SCENE_31.split("。")[0] + "。"] and meanings(w, sid) == []
+    assert r["highlight"]["lines"] == [21, 22, 23, 24, 25, 26]  # 下りて戻る区間（2回分）を光らせる
+    assert r["supplement"] == ["21〜26行目：C00001→C00002→C00003（2回）"]  # 番号は補足
+
+
+def test_scene_3_1_updown_unconfirmed_needs_z_words(tmp_path):
+    w, fake = flow(tmp_path, answer(SCENE_31, [21]))
+    sid = w.load(demo_bytes())["session_id"]
+    assert w.state(sid)["state"]["updown"]["status"] != "confirmed"
+    assert w.ask(sid, "このロボット、何をしている？")["reply"] == cx.FIXED_UPDOWN
+    w2, fake2 = flow(tmp_path, answer("Zのマイナスへ動いて戻る動きを2回くり返します。何をする作業ですか？", [21]))
+    sid2 = w2.load(demo_bytes())["session_id"]
+    assert w2.ask(sid2, "このロボット、何をしている？")["reply_by"] == "claude"
+
+
+def test_scene_3_2_and_3_3_teach_then_three_times(tmp_path):
+    w, fake = flow(tmp_path, answer(SCENE_31, [21, 22, 23, 24, 25, 26]), updown_config=confirmed_config(tmp_path))
+    sid = w.load(demo_bytes())["session_id"]
+    w.ask(sid, "このロボット、何をしている？")
+    # 3-2 教える
+    fake.add(answer("分かりました。ボタンを押す動きを、2回くり返しているんですね。", [21, 22, 23, 24, 25, 26]))
+    r = w.ask(sid, "ボタンを押してるんだよ")
+    assert r["reply_by"] == "claude" and r["reply"].startswith("分かりました。ボタンを押す動き")
+    m = r["talk"]["meanings"]
+    assert [(x["text"], x["mark"], x["positions"]) for x in m] == [
+        ("ボタンを押してる", talk.HUMAN_MARK, ["C00001", "C00002", "C00003"])]  # 吹き出しと 3D の印に使う
+    assert r["guesses"] == []
+    # 3-3 変える（このブランチでは変更エンジンにつながない：記録と固定の文だけ）
+    fake.add(answer("ボタンを押す動きを、2回から3回にしますか？", [21, 22, 23, 24, 25, 26], "change_request",
+                    {"kind": "repeat", "from_count": 2, "to_count": 3}))
+    r = w.ask(sid, "じゃあ、3回にして")
+    assert r["reply_by"] == "claude" and r["reply"] == "ボタンを押す動きを、2回から3回にしますか？"
+    assert r["notes"] == [cx.READ_ONLY_NOTE] and r["highlight"]["lines"] == [21, 22, 23, 24, 25, 26]
+    rec = r["change_record"]
+    assert (rec["program_from"], rec["program_total"], rec["claude_from"], rec["claude_total"]) == (2, 3, 2, 3)
+    assert rec["block"] == {"positions": ["C00001", "C00002", "C00003"], "first_line": 21, "last_line": 26, "count": 2}
+    assert rec["evidence_matches_block"] is True and rec["mismatch"] is False
+    st = w.state(sid)["state"]
+    assert st["candidate"] is None and st["approval"] is None and w._entries[sid].session.candidate is None
+
+
+def test_scene_3_3_evidence_not_matching_the_block_is_reported(tmp_path):
+    w, fake = flow(tmp_path)
+    sid = first_turn(w, fake)
+    fake.add(answer("この動作の回数を、2回から3回にしますか？", [27], "change_request",
+                    {"kind": "repeat", "from_count": 2, "to_count": 3}))
+    rec = w.ask(sid, "じゃあ、3回にして")["change_record"]
+    assert rec["evidence_matches_block"] is False and rec["evidence_lines"] == [27]
+
+
+def test_scene_3_taught_mark_is_drawn_in_3d():
+    js = (STATIC / "explain.js").read_text(encoding="utf-8")
+    v3 = (STATIC / "view3d.js").read_text(encoding="utf-8")
+    assert "vtTaught" in js and "_taughtMarks" in v3 and "（人が教えた）" in v3

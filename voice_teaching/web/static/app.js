@@ -956,6 +956,8 @@ function data3d() {
       : askHighlight().positions,  // 「Claude に聞く」の根拠の行の位置（光らせるだけ。選択ではない）
     // 「Claude に聞く」の答えの根拠の区間（サーバーが行番号から決めた行。光らせるだけ）。位置の確認中は出さない
     askLines: dialogStep() === "confirm_position" ? [] : askHighlight().lines,
+    // 人が教えた意味（「Claude に聞く」の欄が置く。サーバーのメモリの中だけのもの）。図に印を出すだけ
+    taught: Array.isArray(window.vtTaught) ? window.vtTaught : [],
   };
 }
 

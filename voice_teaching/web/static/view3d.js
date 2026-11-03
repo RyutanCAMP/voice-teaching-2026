@@ -221,6 +221,7 @@ export class View3D {
       }
     }
     if (d.repeat) this._repeatMark(svg, d, labelBoxes, cAfterText);
+    if ((d.taught || []).length) this._taughtMarks(svg, d);
     if (this.marker && this.marker.xyz) {  // MOVJ・目安の区間の間は xyz が無い（印を出さない）
       const m = this.project(this.marker.xyz);
       svg.append(svgEl("circle", { cx: m[0], cy: m[1], r: 9, fill: this.marker.color, stroke: "#fff", "stroke-width": 3, class: "marker" }));
@@ -237,6 +238,26 @@ export class View3D {
   }
 
   // 回数の変更の印：区間の点の近くに「C00001〜C00003 ×2 → ×3」、右上の窓に回数（数はサーバーの文字のまま）
+  // 人が教えた意味（「Claude に聞く」の欄。サーバーのメモリの中だけ）：対象の点の上に、緑の印と文字で出す。
+  // AI の推定とは別の印（緑・実線・✓）。位置はジョブの点の座標の真ん中（描くだけ。変更の範囲には使わない）
+  _taughtMarks(svg, d) {
+    const at = Object.fromEntries(d.points.map((p) => [p.name, p.xyz]));
+    for (const t of d.taught) {
+      const pts = (t.positions || []).map((n) => at[n]).filter(Boolean);
+      if (!pts.length || typeof t.text !== "string") continue;
+      const s = pts.map((v) => this.project(v));
+      const x = s.reduce((a, q) => a + q[0], 0) / s.length, y = Math.min(...s.map((q) => q[1])) - 26;
+      const label = `✓ ${t.text}（人が教えた）`;
+      const w = textWidth(label) + 16;
+      const g = svgEl("g", { class: "taught-mark" });
+      g.append(svgEl("rect", { x: x - w / 2, y: y - 15, width: w, height: 22, rx: 11, fill: "#d9f2e1", stroke: "#34a853", "stroke-width": 1.5 }));
+      const tx = svgEl("text", { x, y: y + 1, "text-anchor": "middle", fill: "#1d5c32", "font-weight": "700" });
+      tx.textContent = label;
+      g.append(tx);
+      svg.append(g);
+    }
+  }
+
   _repeatMark(svg, d, boxes, textColor) {
     const r = d.repeat;
     const pts = d.points.filter((p) => r.positions.includes(p.name)).map((p) => this.project(p.xyz));

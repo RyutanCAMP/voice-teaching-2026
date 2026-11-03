@@ -836,6 +836,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check_ux_polish(b, url, check, shots)
             check_c026(b, url, check, shots)
             check_dialog(b, check, shots, errors, updown_cfg["DEMO_C_PLACE.JBI"])
+            check_talk(b, check, shots, errors, out)
             check_updown_unconfirmed(b, check, shots, errors)
 
             # SpeechRecognition が無いブラウザー
@@ -853,6 +854,90 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
         srv.server_close()
     check(not errors, f"画面のエラー：{errors or 'なし'}")
     return fails
+
+
+def check_talk(browser, check, shots: Path | None, errors: list, out: Path) -> None:
+    """Claude に聞く（CHECKER_031・台本 Ver.6.1 Scene 3）。偽の client（本物の API は呼ばない）。
+    返事のたびに根拠の区間が自動で光る・「考えています…」・人が教えた意味の印（吹き出し・覚えていること・3D）・話し手・390px。"""
+    import time
+    from types import SimpleNamespace
+
+    from voice_teaching import claude_explain as cx
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import server
+
+    def ans(i, reply, lines, intent="explain", change=None):
+        data = {"reply": reply, "evidence_lines": lines, "intent": intent, "change_request": change}
+        return SimpleNamespace(stop_reason="tool_use", content=[
+            SimpleNamespace(type="tool_use", id=f"toolu_e2e{i}", name="answer", input=data)],
+            usage=SimpleNamespace(input_tokens=10, output_tokens=5, cache_creation_input_tokens=0,
+                                  cache_read_input_tokens=0, cache_creation=None))
+
+    block = [21, 22, 23, 24, 25, 26]
+    replies = [ans(1, "同じ動きを2回くり返しています。何をする動きか、教えてもらえますか？", block),
+               ans(2, "分かりました。ボタンを押す動きを、2回くり返しているんですね。", block),
+               ans(3, "ボタンを押す動きを、2回から3回にしますか？", block, "change_request",
+                   {"kind": "repeat", "from_count": 2, "to_count": 3})]
+
+    class Slow:
+        def __init__(self):
+            self.messages = self
+
+        def create(self, **kw):
+            time.sleep(0.6)  # 「考えています…」を見るため
+            return replies.pop(0)
+
+    ex = cx.Explainer("sk-ant-api03-E2E-FAKE", "claude-sonnet-5-5", client=Slow(),
+                      usage_log=cx.UsageLog(out / "talk_usage.jsonl"))
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None, explainer=ex)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    try:
+        for width in (1280, 390):
+            pg = browser.new_page(viewport={"width": width, "height": 900})
+            pg.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
+            pg.goto(url)
+            pg.set_input_files("#file-input", str(REPO / "samples/dummy/DEMO_BUTTON_REPEAT.JBI"))
+            pg.wait_for_selector("#ask-panel:not([hidden])")
+            until(pg, lambda: pg.is_enabled("#ask-send"))
+            if width == 390:
+                w = pg.evaluate("document.documentElement.scrollWidth")
+                check(w <= 390, f"会話 390px：「Claude に聞く」の欄があっても横にはみ出さない（{w}px）")
+                pg.close()
+                continue
+            pg.fill("#ask-input", "このロボット、何をしている？")
+            pg.click("#ask-send")
+            pg.wait_for_selector("#ask-turns .thinking", timeout=3000)
+            check("考えています" in pg.inner_text("#ask-turns .thinking"), "会話：返事を待つ間「考えています…」が出る")
+            pg.wait_for_selector("#ask-turns .bubble.claude:not(.thinking)")
+            until(pg, lambda: pg.locator("#fig-3d line.ask-hl").count() == 6)
+            check(pg.locator("#fig-3d line.ask-hl").count() == 6,
+                  "会話：返事が出たら、根拠の区間（21〜26行目）が 3D で自動で光る（押さなくてよい）")
+            check("21〜26行目：C00001→C00002→C00003（2回）" in pg.inner_text("#ask-turns .supplement"),
+                  "会話：番号は補足として小さく出る")
+            whos = pg.locator("#ask-turns .bubble .who").all_inner_texts()
+            check(any(x.startswith("Claude") for x in whos) and "人" in whos, f"会話：話し手（人・Claude）が出る：{whos}")
+            pg.fill("#ask-input", "ボタンを押してるんだよ")
+            pg.click("#ask-send")
+            until(pg, lambda: pg.locator("#fig-3d g.taught-mark").count() == 1)
+            check(pg.locator("#ask-turns .bubble.taught .mark-human").count() == 1
+                  and pg.is_visible("#ask-memory-box") and "ボタンを押してる" in pg.inner_text("#ask-memory"),
+                  "会話：人が教えた意味が「人が教えた（この会話の中だけ）」の印で吹き出しと覚えていることの欄に出る")
+            check("（人が教えた）" in (pg.text_content("#fig-3d g.taught-mark") or ""), "会話：3D にも「人が教えた」の印が出る")
+            pg.fill("#ask-input", "じゃあ、3回にして")
+            pg.click("#ask-send")
+            until(pg, lambda: pg.locator("#ask-turns .bubble.record").count() == 1)
+            txt = pg.inner_text("#ask-turns")
+            check("ボタンを押す動きを、2回から3回にしますか？" in txt and cx.READ_ONLY_NOTE in txt
+                  and pg.is_disabled("#approve-button") and pg.is_hidden("#approval-status"),
+                  "会話：「3回にして」は確かめる文とアプリの決まった文だけ（候補・承認は作らない）")
+            check(pg.locator("#ask-turns .who", has_text="アプリ").count() >= 2, "会話：アプリの文は「アプリ」と出る")
+            if shots:
+                pg.screenshot(path=str(shots / "TALK_1280_scene3.png"), full_page=True)
+            pg.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
 
 
 class CountingInterpreter:

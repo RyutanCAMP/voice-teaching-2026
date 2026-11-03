@@ -145,6 +145,8 @@ SYSTEM = (
     "番号と命令は、アプリが根拠の行（evidence_lines）から補足として画面に出します。根拠にした命令の行は evidence_lines に"
     "行番号（instructions の line）で示します。命令の行の文字列（命令の名前と位置番号と速度など）は、いつも reply に写しません。\n"
     "- 「ジョブ」「JOB」とは言わず、「動作データ」と言います。\n"
+    "- 位置の役割（待機の位置・作業の場所など）は job_facts に無い推定です。言うときは、アプリが「AI の推定（未確定）」の印を"
+    "付けます。目的は決めつけず、確かめる質問にします。\n"
     "- 質問は1回の返事に1つまで（「？」は1つまで）。\n"
     "- 数は算用数字で、job_facts と利用者の文と taught_by_human にある数だけを使います。新しく計算した数（合計・時間・距離など）は"
     "書きません。数が要らないところは、数を使わずに言います。\n"
@@ -772,7 +774,8 @@ class Explainer:
             # 回数の言葉に打ち消し・ためらい（画面では Claude を呼ばずに止める。CLI ではここで）：回数を言う文を使わない
             why = shown = count.stop
             change, notes, count = None, [], None
-        record = talk.change_record(count, intent, change)
+        ev_lines = [e["line"] for e in conv.evidence(data["evidence_lines"])]
+        record = talk.change_record(count, intent, change, ev_lines)
         if shown is None and record is not None and record["mismatch"] and intent == "change_request":
             why = shown = talk.COUNT_MISMATCH  # 人の文の回数と Claude の数が違う：Claude の文（数を言う）は使わない
         conv.pending_result = RESULT_SHOWN if why is None else RESULT_HIDDEN.format(why=why)
@@ -782,7 +785,8 @@ class Explainer:
                 "reply_by": "claude" if shown is None else "app", "checked": why,
                 "notes": notes, "evidence": conv.evidence(data["evidence_lines"]),
                 "intent": intent, "change_request": change, "change_record": record,
-                "guesses": talk.ai_guesses(reply) if shown is None else [], **meter}
+                "guesses": (talk.ai_guesses(reply, [t.get("meaning", "") for t in taught or []])
+                            if shown is None else []), **meter}
 
 
 def _fail(message: str, status: str, **extra) -> dict:

@@ -271,12 +271,22 @@ _GUESS = ("ようです", "ような", "ように見え", "らしい", "かも�
           "見られ", "考えられ", "でしょう", "のでは")
 
 
-def ai_guesses(reply: str) -> list[str]:
-    """Claude の返事の中の推定の言葉（文）。表示するだけで、登録はしない。"""
+# 位置の役割の言葉（待機の位置・作業の場所など）。プログラムは事実として知らないので、Claude が言ったら AI の推定として示す
+ROLE_WORDS = ("待機", "作業の場所", "作業場所", "作業位置", "作業の位置", "ホーム", "原点", "退避", "置く場所", "置き場",
+              "取る場所", "取り出し", "部品", "ワーク")
+
+
+def ai_guesses(reply: str, taught: list[str] | None = None) -> list[str]:
+    """Claude の返事の中の推定の言葉（文）。推定の言い方の文と、位置の役割の言葉（人が教えていないもの）がある文。
+    表示するだけで、登録はしない。"""
     out = []
+    taught_text = "".join(taught or [])
     for s in re.split(r"(?<=[。！!？?])", reply):
         s = s.strip()
-        if s and any(w in s for w in _GUESS):
+        if not s:
+            continue
+        roles = [w for w in ROLE_WORDS if w in s and w not in taught_text]
+        if any(w in s for w in _GUESS) or roles:
             out.append(s)
     return out
 
@@ -348,7 +358,8 @@ def read_count(text: str, blocks: list[Block], last_evidence=()) -> CountReading
     return CountReading(reason="回数が読めません", target=target, target_note=note)
 
 
-def change_record(reading: CountReading | None, intent: str | None, change: dict | None) -> dict | None:
+def change_record(reading: CountReading | None, intent: str | None, change: dict | None,
+                  evidence_lines=None) -> dict | None:
     """変更の希望の記録（表示だけ）。プログラムが読んだ回数と、Claude の change_request の数を並べ、違えば食い違い。"""
     claude_repeat = change if (intent == "change_request" and change and change.get("kind") == "repeat") else None
     if reading is None and claude_repeat is None:
@@ -364,6 +375,7 @@ def change_record(reading: CountReading | None, intent: str | None, change: dict
     else:
         mismatch = claude_total != prog_total
     target = reading.target if reading else None
+    ev = list(evidence_lines or [])
     return {
         "kind": "repeat",
         "program_total": prog_total, "program_keep": keep,
@@ -371,6 +383,13 @@ def change_record(reading: CountReading | None, intent: str | None, change: dict
         "claude_total": claude_total, "claude_from": claude_repeat.get("from_count") if claude_repeat else None,
         "mismatch": bool(mismatch),
         "target": target.label if target else None,
+        # 変更エンジンにつなぐときに使う事実（このブランチでは記録と表示だけ）：プログラムが見つけた区間・今の回数・
+        # Claude の根拠の行がその区間に全部入っているか
+        "program_from": target.count if target else None,
+        "block": ({"positions": list(target.positions), "first_line": target.first_line, "last_line": target.last_line,
+                   "count": target.count} if target else None),
+        "evidence_lines": ev,
+        "evidence_matches_block": bool(target and ev and all(target.contains(n) for n in ev)),
         "target_note": (reading.target_note if reading else None) if target is None else None,
         "note": CHANGE_RECORD_NOTE,
     }
@@ -681,6 +700,7 @@ class TalkMemory:
             if b is None:
                 continue
             items.append({"text": m.text, "target": m.target_text(b), "position": m.position,
+                          "positions": [m.position] if m.position else list(b.positions),
                           "lines": b.lines() if m.position is None else [], "mark": HUMAN_MARK, "by": "human"})
         p = self.pending
         return {

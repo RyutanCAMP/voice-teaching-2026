@@ -93,6 +93,13 @@ function renderTalk(t) {
     el("span", { class: "memory-target" }, m.target)));
   list.replaceChildren(...items);
   $("ask-memory-box").hidden = items.length === 0;
+  // 3D の図にも「人が教えた」の印を出す（描くだけ）
+  // 変わったときだけ描き直す（描き直すと再生が止まるため）
+  const taught = (t.meanings || []).map((m) => ({ text: m.text, positions: m.positions || [] }));
+  if (JSON.stringify(taught) !== JSON.stringify(window.vtTaught || [])) {
+    window.vtTaught = taught;
+    window.dispatchEvent(new CustomEvent("vt:highlight"));
+  }
   for (const n of t.notices || []) addTurn("アプリ", n, "app notice");
 }
 
@@ -191,6 +198,7 @@ window.addEventListener("vt:session", (ev) => {
   $("ask-usage").textContent = "";
   $("ask-memory").replaceChildren();
   $("ask-memory-box").hidden = true;
+  window.vtTaught = [];
   highlight({ positions: [], lines: [] });
   $("ask-panel").hidden = !ask.sessionId;
   renderLock();
