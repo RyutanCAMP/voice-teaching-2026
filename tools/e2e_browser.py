@@ -2033,12 +2033,14 @@ def check_updown_unconfirmed(browser, check, shots: Path | None, errors: list) -
               f"上下の設定なし：「上下の向き：未確認（Z＋・Z−で指示）」と出す（{pg.inner_text('#updown-status')!r}）")
         det = pg.inner_text("#updown-detail") if pg.is_visible("#updown-detail") else ""
         check(det == "上下の向き：未確認（HC20DT）", f"S30-1：設定なしのサーバーでもロボット名（--robot）を出す（{det!r}）")
-        side = len("".join(pg.inner_text(".side").split()))
+        side = len("".join(pg.evaluate("""() => [...document.querySelectorAll('.side > :not(#ask-panel)')]
+            .filter((e) => e.offsetParent !== null).map((e) => e.innerText).join('')""").split()))  # 会話の欄（PC 版で右側）は数えない
         check(side <= 80, f"上下の設定なし：次にすることを足しても、音声のカードの右側の文字は80文字まで（{side}文字）")
         # 不一致・変更済みの表示の文に入れ替えても 80文字まで（表示の文だけを入れ替えて数える。サーバーの状態は変えない）
         for other in ("上下の向き：確認した座標系・ツールと違います", "上下の向き：設定が変わっています"):
             pg.evaluate("t => { document.querySelector('#updown-status').textContent = t; }", other)
-            side2 = len("".join(pg.inner_text(".side").split()))
+            side2 = len("".join(pg.evaluate("""() => [...document.querySelectorAll('.side > :not(#ask-panel)')]
+            .filter((e) => e.offsetParent !== null).map((e) => e.innerText).join('')""").split()))  # 会話の欄（PC 版で右側）は数えない
             check(side2 <= 80, f"上下の向き「{other}」の表示でも、音声のカードの右側の文字は80文字まで（{side2}文字）")
         pg.evaluate("t => { document.querySelector('#updown-status').textContent = t; }", "上下の向き：未確認（Z＋・Z−で指示）")
         pg.fill("#text-input", ph)
@@ -2246,7 +2248,9 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
           "方式を選ぶ欄は出さず（詳細表示の中）、マイクのボタンだけが目立つ")
     check(pg.inner_text("#mic-label") == "マイク OFF" and pg.get_attribute("#mic-button", "aria-pressed") == "false",
           "マイクは最初 OFF と出る")
-    side = chars(pg, ".side")
+    # 右側の文字の量は、操作のカード（会話の欄は PC 版の画面で右側に移したので数えない）
+    side = len("".join(pg.evaluate("""() => [...document.querySelectorAll('.side > :not(#ask-panel)')]
+        .filter((e) => e.offsetParent !== null).map((e) => e.innerText).join('')""").split()))
     check(all(pg.is_visible(s) for s in ["#voice-position", "#mic-button", "#text-input", "#text-send"])
           and pg.inner_text("#text-send") == "次へ" and side <= 80,
           f"音声のカードは「位置・マイク・入力欄・次へ」（右側の文字 {side}文字。80文字まで）")

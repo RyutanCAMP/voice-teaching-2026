@@ -615,3 +615,20 @@ svg .dest-mark { pointer-events: none; }
 .memory-item { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
 .memory-text { font-weight: 700; }
 .memory-target { color: var(--sub); font-size: 12px; overflow-wrap: anywhere; }
+
+/* ---- PC 版の画面（docs/UI_PC_LAYOUT.md・唐川さん承認）：左に 3D（いつも見える）、右に会話と操作（右だけスクロール） ---- */
+@media (min-width: 1100px) {
+  .work { grid-template-columns: minmax(0, 62fr) minmax(420px, 38fr); align-items: start; }
+  .stage { position: sticky; top: 76px; max-height: calc(100vh - 76px - 44px); overflow-y: auto; }
+  .side { top: 76px; max-height: calc(100vh - 76px - 44px); overflow-y: auto; overscroll-behavior: contain; }
+  #ask-panel .bubbles.talk { max-height: 38vh; overflow-y: auto; }
+}
+@media (min-width: 1100px) {
+  /* 詳細表示を開いている間は、3D も右側も固定しない（詳細表示に重ねない） */
+  .work:has(#engineer-view:not([hidden])) .stage,
+  .work:has(#engineer-view:not([hidden])) .side { position: static; max-height: none; overflow: visible; }
+}
+@media (min-width: 1100px) and (max-height: 800px) {
+  /* PC 版で左の列が狭くなる分、背の低い画面で動きの並びを出すときは図を少し小さくし、図の注意まで1画面に収める（注意は隠さない） */
+  .stage:has(#play-seq:not([hidden])) .fig-3d svg, .stage:has(#play-seq:not([hidden])) .fig-main svg { max-height: calc(50vh - 130px); }
+}
