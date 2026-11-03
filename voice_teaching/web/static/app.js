@@ -209,7 +209,7 @@ function renderState() {
   $("mock-notice").textContent = st.mock_notice;
   // 解釈のしかた（モックか本物の Claude か）を、いつも見える上の帯で区別する
   const claude = st.interpreter && st.interpreter.kind === "claude";
-  $("interp-badge").textContent = claude ? "解釈：Claude" : "解釈：モック";
+  $("interp-badge").textContent = claude ? `解釈：Claude（${st.interpreter.model}）` : "解釈：モック";
   $("interp-badge").classList.toggle("claude", claude);
   $("interp-badge").title = st.mock_notice;
   $("interp-badge").hidden = false;
