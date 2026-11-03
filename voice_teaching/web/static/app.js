@@ -316,8 +316,13 @@ function renderSteps() {
   // （録音しながら承認・出力できないように）
   const cards = { 2: "select-panel", 3: "instruction-panel", 4: "candidate-panel" };
   for (const [n, id] of Object.entries(cards)) {
-    $(id).hidden = id === "instruction-panel" ? !(step === 2 || step === 3) : Number(n) !== step;
+    // ステップ4は、承認のあとだけ入口（文字の欄だけ）を出す（承認のあとの説明の質問のため）
+    const approvedNow = !!(state.st && state.st.approval);
+    $(id).hidden = id === "instruction-panel" ? !(step === 2 || step === 3 || (step === 4 && approvedNow)) : Number(n) !== step;
   }
+  // ステップ4では、マイク（録音）を出さない・押せない（録音と承認・出力が重ならない。今までの決まり）。承認のあとは文字の欄だけ
+  $("voice-input-slot").hidden = step === 4;
+  if (step === 4) $("mic-button").disabled = true;
   renderDialog();
   // 次に押すものを1つだけ目立たせる
   for (const id of ["drop-zone", "mic-button", "voice-stop", "consent-yes", "text-send", "open-confirm", "undo-button", "export-button", "copy-url"]) {
@@ -1708,7 +1713,7 @@ function updateLocks() {
   $("voice-mode-local").disabled = rec;
   $("voice-mode-reset").disabled = rec;
   $("voice-position").disabled = rec;
-  $("mic-button").disabled = rec || !loaded || !Recognition;
+  $("mic-button").disabled = rec || !loaded || !Recognition || currentStep() === 4;  // ステップ4では録音しない
   $("voice-stop").disabled = !rec;
   $("voice-cancel").disabled = !rec;
   document.body.classList.toggle("recording", rec);

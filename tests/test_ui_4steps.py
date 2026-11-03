@@ -73,9 +73,9 @@ def test_next_action_area_exists_and_js_marks_current_step():
 
 def test_only_the_current_step_card_is_shown():
     """右側には、今のステップのカードだけを出す（前後のカードは隠す）。
-    入口は1つ（11/4 唐川さんの指示③）：指示の欄（会話の入口）だけはステップ2・3で出す。ステップ4では出さない（録音しながら承認しない）"""
+    入口は1つ（11/4 唐川さんの指示③）：指示の欄（会話の入口）だけはステップ2・3と、承認のあとのステップ4で出す（承認の前は出さない）"""
     j = js()
-    assert re.search(r'\$\(id\)\.hidden\s*=\s*id === "instruction-panel" \? !\(step === 2 \|\| step === 3\) : Number\(n\)\s*!==\s*step', j)
+    assert re.search(r'\$\(id\)\.hidden\s*=\s*id === "instruction-panel" \? !\(step === 2 \|\| step === 3 \|\| \(step === 4 && approvedNow\)\) : Number\(n\)\s*!==\s*step', j)
 
 
 # ---- 1. 読込はドラッグ＆ドロップが中心 ----

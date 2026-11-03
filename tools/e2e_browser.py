@@ -1378,8 +1378,11 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check(True, "承認すると出力ボタンが使える")
 
             # 承認・出力の段階（ステップ4）では、マイクのカードを出さない（録音と承認・出力が重ならない）
-            check(pg.is_hidden("#mic-button") and pg.is_hidden("#instruction-panel"),
+            check(pg.is_hidden("#mic-button") and pg.is_disabled("#mic-button"),
                   "ステップ4ではマイクを出さない（録音しながら承認・出力できない）")
+            # 11/4 唐川さんの確認項目6：承認のあとは、説明の質問のために文字の欄だけ出す（マイクは出さない）
+            check(pg.is_visible("#text-input") and pg.is_enabled("#text-send"),
+                  "承認のあとは、文字の欄から説明の質問ができる（マイクは出さない）")
 
             pg.click("#export-button")
             pg.wait_for_selector("#export-result:not([hidden])")

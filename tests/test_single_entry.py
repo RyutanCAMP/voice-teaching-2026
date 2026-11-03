@@ -43,9 +43,16 @@ def test_status_line_is_drawn_from_the_server_state_only():
     assert "status-line" not in ex  # 会話（Claude の答え）の側からは書かない
 
 
-def test_entry_card_is_hidden_at_step_4():
+def test_entry_card_at_step_4_only_after_approval():
+    # 承認の前のステップ4では出さない（確認して承認へ、だけを目立たせる）。承認のあとは説明の質問のために出す
     js = (STATIC / "app.js").read_text(encoding="utf-8")
-    assert 'id === "instruction-panel" ? !(step === 2 || step === 3)' in js
+    assert 'id === "instruction-panel" ? !(step === 2 || step === 3 || (step === 4 && approvedNow))' in js
+    # ステップ4では、マイクを出さない・押せない（承認のあとも文字の欄だけ）
+    assert '$("voice-input-slot").hidden = step === 4;' in js and "|| currentStep() === 4;" in js
+    # 録音中は、確認表示・承認・出力のボタンを押せない
+    for b in ('$("open-confirm").disabled = !c || recording();', '$("approve-button").disabled = !st.can_approve || recording();',
+              '$("export-button").disabled = !st.can_export || recording();'):
+        assert b in js, b
 
 
 def test_backchannel_question_and_button_words_after_approval_keep_it(tmp_path):

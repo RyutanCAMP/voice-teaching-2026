@@ -140,12 +140,17 @@ async function refreshInfo() {
   if (!ask.sessionId) return;
   const r = await post({ session_id: ask.sessionId, info: true });
   ask.hasKey = !!(r && r.ok && r.has_key);
-  $("ask-model").textContent = r && r.ok ? (r.has_key ? "Claude（" + r.model + "）" : "") : "";
+  $("ask-model").textContent = r && r.ok ? (r.has_key ? speaker(r.model) : "") : "";
   $("ask-nokey").textContent = r && r.ok && !r.has_key ? r.notice : (r && !r.ok ? r.error : "");
   $("ask-nokey").hidden = !$("ask-nokey").textContent;
   if (r && r.ok) renderTalk(r.talk);
   showUsage(r);
   renderLock();
+}
+
+// 話し手の名前。tools/demo_mock.py の台本の答え（claude-mock-…）は、本物の Claude と見分けがつくように出す
+function speaker(model) {
+  return /^claude-mock/.test(model || "") ? "モック（台本の答え・本物の Claude ではありません）" : "Claude（" + model + "）";
 }
 
 function showReply(r) {
@@ -163,7 +168,7 @@ function showReply(r) {
   const asking = r.status === "ask_which" && r.talk && r.talk.pending;
   if (r.reply && !asking) {
     const isClaude = r.reply_by === "claude";
-    const li = addTurn(isClaude ? "Claude（" + r.model + "）" : "アプリ", r.reply, isClaude ? "claude" : "app");
+    const li = addTurn(isClaude ? speaker(r.model) : "アプリ", r.reply, isClaude ? "claude" : "app");
     if ((r.guesses || []).length) {  // AI の推定（未確定）：登録はしない。表示だけ
       const g = el("div", { class: "guesses" });
       for (const s of r.guesses) g.append(el("p", { class: "guess" }, mark("ai", ask.marks.ai || "AI の推定（未確定）"), s));
