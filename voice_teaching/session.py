@@ -19,12 +19,13 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
 from . import jbi
+from . import repeat_count as rc
 from . import updown as ud
 from . import utterance as ut
 
@@ -57,6 +58,9 @@ class Comparison:
     warnings: tuple[str, ...]
     confirmation: str         # 大きな確認表示の文
     blocked_reason: str | None = None
+    # 回数の変更（kind="repeat"）のときだけ：見出しと、足す（+）・消す（-）行の差分 (符号, 1から数えた行番号, 行)
+    heading: str = ""
+    diff: tuple[tuple[str, int, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -130,6 +134,8 @@ class Session:
         """新しい発話。source（voice / text）は記録だけに使い、結果は変えない。"""
         if ut.is_explain_choice(text):
             return self.explain_only(text, source)
+        if rc.is_repeat_request(text):
+            return self._hear_repeat(text, source)  # 回数の変更：プログラムだけで読む（docs/REPEAT_COUNT_DESIGN.md）
         facts = ut.read_utterance(text)
         prev = self._awaiting_answer
         followup, self._updown_followup = self._updown_followup, None
@@ -196,6 +202,81 @@ class Session:
         except jbi.JbiError as e:
             return ut.Verdict("stop", str(e))
         return v
+
+    def _hear_repeat(self, text: str, source: str) -> Reply:
+        """「C00001からC00003の作業を2回から3回にして」：読み取り・聞き返し・候補まで、プログラムだけで行う（Claude は呼ばない）。
+
+        先に今の検査（打ち消し・承認の言葉・ほかの変更との混ざり・疑問の形）をかける。数はジョブから数えて文に入れる。
+        この発話では、解釈の係のほかの提案を受け付けない（_locked）。
+        """
+        facts = ut.read_utterance(text)
+        # 読めなかった言葉は、回数の変更の決まった形で読めなかった言葉だけ（「から」「作業」を読めない言葉として示さない）
+        facts = replace(facts, unknown_words=rc.leftovers(facts.question_text or text) if rc.read(facts.question_text or text) is None else ())
+        self.facts = facts
+        self._locked = True
+        self.forget_question()
+        self._log("発話", f"{'音声' if source == 'voice' else '文字'}：{text}")
+        self.updown_status()
+        found = facts.negations + facts.undo_negations
+        if found:
+            return self._reply("stop", ut.NEGATION_MESSAGE.format(word="".join(f"「{w}」" for w in found)), facts=facts)
+        if facts.stop_reasons:
+            return self._reply("stop", "。".join(facts.stop_reasons), facts=facts)
+        if (facts.amounts or set(facts.kinds) & {"move", "speed", "compare", "undo", "select"} or facts.axes
+                or facts.sides or facts.vertical or facts.relative_dir or facts.place_ref):
+            return self._reply("stop", rc.MIXED_MESSAGE, facts=facts)
+        if facts.question:
+            t = facts.question_text
+            if t and rc.read(t) is not None:
+                return self._reply("ask", f"「{t}」でよいですか？", facts=facts, choices=((t, t),))
+            return self._reply("ask", ut.QUESTION_RESTATE_MESSAGE, facts=facts)
+        req = rc.read(text)
+        if req is None:
+            return self._reply("ask", rc.unknown_message(rc.leftovers(text)), facts=facts)
+        if self.candidate is not None:
+            return self._reply("stop", self.pending_message, facts=facts)
+        try:
+            block = self._job.find_repeat(req.start, req.end)
+        except jbi.JbiError as e:
+            return self._reply("stop", str(e), facts=facts)
+        n, target = block.count, block.target
+        ok = lambda m: jbi.repeat_count_problem(n, m, target) is None  # noqa: E731
+        in_range = lambda m: jbi.REPEAT_MIN_TOTAL <= m <= jbi.REPEAT_MAX_TOTAL  # noqa: E731
+        if req.add is not None:
+            # 「3回追加して」：合計か、足すのかが分からない。合計が 1〜5 回を超えるものは選択肢に出さない
+            k = req.add
+            choices = tuple(c for c in (
+                (f"合計{k}回にする", rc.canonical(req.start, req.end, n, k)) if in_range(k) else None,
+                (f"{k}回足して合計{n + k}回にする", rc.canonical(req.start, req.end, n, n + k)) if in_range(n + k) else None,
+            ) if c is not None)
+            if not choices:
+                return self._reply("stop", jbi.repeat_count_problem(n, k, target) or rc.FORM_UNKNOWN, facts=facts)
+            return self._reply("ask", rc.add_message(target, n, k), facts=facts, choices=choices)
+        total = req.total
+        if not in_range(total):
+            return self._reply("stop", jbi.repeat_count_problem(n, total, target), facts=facts)
+        if req.said_count is not None and req.said_count != n:
+            choices = tuple((f"合計{m}回にする", rc.canonical(req.start, req.end, n, m)) for m in (n - 1, n + 1) if ok(m))
+            return self._reply("ask", rc.mismatch_message(target, n), facts=facts, choices=choices)
+        if req.said_count is None:
+            why = jbi.repeat_count_problem(n, total, target)
+            if why is not None:
+                return self._reply("stop", why, facts=facts)  # どう答えても止まるものは、聞き返さない
+            return self._reply("ask", rc.confirm_message(target, n, total), facts=facts,
+                               choices=((f"{n}回 → {total}回にする", rc.canonical(req.start, req.end, n, total)),))
+        try:
+            change = self._job.plan_repeat(req.start, req.end, total)
+        except jbi.JbiError as e:
+            return self._reply("stop", str(e), facts=facts)
+        self.candidate = change
+        self.candidate_utterance = facts.raw
+        self.candidate_blocked_reason = None
+        self.candidate_updown = self.updown
+        self._candidate_value_change = False
+        self._candidate_position = None  # 位置ごとの候補ではない（位置を選び直すと捨てる）
+        c = self._comparison()
+        self._log("候補", c.confirmation)
+        return self._reply("ok", c.confirmation, facts=facts, comparison=c, candidate_made=True)
 
     def explain_only(self, text: str, source: str = "text") -> Reply:
         """［説明です］（「〜します」の2択）：何もしない。候補・選択中の位置・元のジョブは変えない（CHECKER_026 M3）。"""
@@ -356,6 +437,8 @@ class Session:
 
     def _comparison(self) -> Comparison:
         ch = self.candidate
+        if ch.kind == "repeat":
+            return _repeat_comparison(ch)
         before, after = _changed_token(ch.before_line, ch.after_line)
         delta = Decimal(after) - Decimal(before)
         delta_text = f"{'+' if delta >= 0 else ''}{delta}"
@@ -393,6 +476,20 @@ class Session:
 
     def _log(self, kind: str, text: str) -> None:
         self.log.append((kind, text))
+
+
+def _repeat_comparison(ch: "jbi.RepeatProposal") -> Comparison:
+    """回数の変更の比較。数はすべてプログラムが入れる。"""
+    head = f"{ch.target} の作業を {ch.before_count}回 → {ch.after_count}回 にします"
+    diff = tuple(("+", i + 1, t) for i, t in ch.added) + tuple(("-", i + 1, t) for i, t in ch.removed)
+    how = ("同じ動きを1回ぶん足します（新しい位置・新しい移動の線は作りません）。" if ch.added
+           else "最後の1回ぶんの行を消します（新しい位置・新しい移動の線は作りません）。")
+    text = f"{head}。{how}これでいいですか？ 承認は画面のボタンで行います"
+    return Comparison(
+        kind="repeat", target=ch.target, line_number=ch.line_index + 1, before_line="", after_line="",
+        before_value=str(ch.before_count), after_value=str(ch.after_count),
+        delta=f"{ch.after_count - ch.before_count:+d}", affected=tuple(ch.affected), warnings=tuple(ch.warnings),
+        confirmation=text, heading=head, diff=diff)
 
 
 def _changed_token(before_line: str, after_line: str) -> tuple[str, str]:

@@ -6,6 +6,8 @@
 //   再生の印は MOVL の区間だけ線の上を動く。MOVJ・目安の区間では印を消し、終わったら終点に置く。
 // - 画面の上下は Z、奥行きは X・Y を回して見せる（表示の向きだけ。指示の方向の解釈には使わない）。
 // - 変更候補があるときは、動かす点に触れる区間（入る・出る）だけを変更後の色で描く。止まった候補は灰色の点線。
+// - 回数の変更の候補（data.repeat）：区間の近くに「×2 → ×3」の印。足した回の線（元からある線と同じ線）を変更後の色で重ねる。
+//   再生では、区間の線（サーバーの seg.cycle）ごとに「2回目」を印の横に出す。新しい点・新しい線は描かない
 "use strict";
 import { displayMinus, segmentLook, segmentTitle } from "/static/highlight.js";
 
@@ -129,7 +131,11 @@ export class View3D {
     };
     for (const s of d.segments) seg(s, d.points, c ? "#a1a6ad" : "#c7cbd1", 2.5, "before");
     // 変更後は、動かす点に触れる区間だけ（ほかの区間は変更前と同じ線なので描き直さない）
-    if (c) for (const s of c.segments) if (s.from === c.moved || s.to === c.moved) seg(s, c.points, cAfter, 3, "after");
+    if (c && !d.repeat) for (const s of c.segments) if (s.from === c.moved || s.to === c.moved) seg(s, c.points, cAfter, 3, "after");
+    // 回数の変更：足した回の線だけを変更後の色で重ねる（元からある線と同じ線。新しい線は無い）
+    if (c && d.repeat && d.repeat.after > d.repeat.before) {
+      for (const s of c.segments) if (s.cycle === d.repeat.after) seg(s, c.points, cAfter, 3, "after");
+    }
     this.lines = lines;
 
     // 点（奥から手前の順に描く）。近く見える点は1つの印にまとめ、押すと選び分ける
@@ -201,13 +207,49 @@ export class View3D {
         this._inset(svg, p0.xyz, q.xyz, displayMinus(d.delta_label || ""), cAfter, cAfterText);
       }
     }
+    if (d.repeat) this._repeatMark(svg, d, labelBoxes, cAfterText);
     if (this.marker && this.marker.xyz) {  // MOVJ・目安の区間の間は xyz が無い（印を出さない）
       const m = this.project(this.marker.xyz);
       svg.append(svgEl("circle", { cx: m[0], cy: m[1], r: 9, fill: this.marker.color, stroke: "#fff", "stroke-width": 3, class: "marker" }));
+      const n = this.marker.seg && this.marker.seg.cycle;
+      if (d.repeat && Number.isInteger(n)) {  // 回数の変更：再生中の区間が何回目か
+        const t = svgEl("text", { x: m[0] - 14, y: m[1] + 26, "text-anchor": "end", fill: this.marker.color, "font-weight": "700", class: "cycle-label" });
+        t.textContent = `${n}回目`;
+        svg.append(t);
+      }
     }
     this.host.querySelector("svg")?.remove();
     this.host.prepend(svg);
     this.svg = svg;
+  }
+
+  // 回数の変更の印：区間の点の近くに「C00001〜C00003 ×2 → ×3」、右上の窓に回数（数はサーバーの文字のまま）
+  _repeatMark(svg, d, boxes, textColor) {
+    const r = d.repeat;
+    const pts = d.points.filter((p) => r.positions.includes(p.name)).map((p) => this.project(p.xyz));
+    if (pts.length) {
+      const text = `${r.target} ${r.label}`, tw = textWidth(text);
+      const right = Math.max(...pts.map((q) => q[0])), left = Math.min(...pts.map((q) => q[0]));
+      const top = Math.min(...pts.map((q) => q[1])), bottom = Math.max(...pts.map((q) => q[1]));
+      // 点・点の名前に重ならない所を探す（右・右下・左・下・上の順）
+      const spots = [[right + 90, (top + bottom) / 2], [right + 90, bottom + 20], [left - tw - 24, (top + bottom) / 2],
+        [left, bottom + 34], [left, top - 30], [right + 140, top - 10]];
+      const box = ([x, y]) => ({ x0: x, x1: x + tw, y0: y - 13, y1: y + 3 });
+      const [x, y] = spots.find((s) => !boxes.some((q) => overlaps(box(s), q))) || spots[0];
+      const lab = svgEl("text", { x, y, fill: textColor, "font-weight": "700", class: "repeat-label" });
+      lab.textContent = text;
+      svg.append(lab);
+      boxes.push(box([x, y]));
+    }
+    const S = 132, x0 = this.W - S - 12, y0 = 12;
+    const g = svgEl("g", { class: "inset repeat-inset" });
+    g.append(svgEl("rect", { x: x0, y: y0, width: S, height: 84, rx: 14, fill: "#fff", stroke: "#e5e5ea" }));
+    const head = svgEl("text", { x: x0 + 12, y: y0 + 20, class: "inset-head" });
+    head.textContent = "区間を通る回数";
+    const amt = svgEl("text", { x: x0 + S / 2, y: y0 + 60, "text-anchor": "middle", fill: textColor, "font-weight": "700", class: "inset-amt" });
+    amt.textContent = r.label;
+    g.append(head, amt);
+    svg.append(g);
   }
 
   // 拡大の窓：変更前（灰）と変更後（オレンジ）を大きくして並べる。小さな変更も見えるように

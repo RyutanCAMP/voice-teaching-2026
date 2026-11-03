@@ -75,6 +75,26 @@ class SimProposal:
 
 
 @dataclass(frozen=True)
+class SimRepeatProposal:
+    """回数の変更のシミュレーションの候補（docs/REPEAT_COUNT_DESIGN.md）。承認されるまで出力しない。
+
+    実機用の検査（jbi.plan_repeat）を通ったものだけ。止まったものは参考の候補も作らない（blocked_reason は常に None）。
+    first_line は足した（消した）最初の行。足すときは new_bytes の、消すときは original_bytes の行番号（0 から）。
+    """
+    mode: str  # 常に "sim"
+    start: str
+    end: str
+    before_count: int
+    after_count: int
+    first_line: int
+    cycle_lines: tuple[bytes, ...]  # 足す・消す1回分の行（改行コードを含むバイト列）
+    warnings: tuple[str, ...]
+    original_bytes: bytes
+    new_bytes: bytes
+    blocked_reason: None = None
+
+
+@dataclass(frozen=True)
 class Approval:
     """ボタンでの承認の記録。承認したときのバイト列の指紋を持つ。"""
     original_sha256: str
@@ -178,10 +198,39 @@ def _simulate_blocked(job, original, position, axis, delta_mm, reason, users) ->
         original_bytes=original, new_bytes=new)
 
 
+def simulate_repeat(job: jbi.Job, start: str, end: str, new_total: int) -> SimRepeatProposal:
+    """回数の変更の候補。実機用の検査（jbi.plan_repeat）に断られたら SimError（参考の候補は作らない）。"""
+    original = job.render_bytes()
+    try:
+        cp = job.plan_repeat(start, end, new_total)
+    except jbi.JbiError as e:
+        raise SimError(str(e)) from None
+    new = cp.new_job.render_bytes()
+    enc = job.encoding
+    cycle = tuple(line.encode(enc) for line in cp.block.cycle_lines)
+    if _repeat_diff_ok(original, new, cp.line_index, cycle, added=cp.after_count > cp.before_count) is not True:
+        raise SimError("足す（消す）1回分の行のほかにも違いが出たため、候補を作りません")
+    return SimRepeatProposal(
+        mode="sim", start=start, end=end, before_count=cp.before_count, after_count=cp.after_count,
+        first_line=cp.line_index, cycle_lines=cycle, warnings=tuple(cp.warnings),
+        original_bytes=original, new_bytes=new)
+
+
+def _repeat_diff_ok(a: bytes, b: bytes, at: int, cycle: tuple[bytes, ...], added: bool) -> bool:
+    """b が、a の at 行目に cycle を足した（added）／a の at 行目から cycle を消したものと、行単位でちょうど同じか。"""
+    la, lb = _LINES.findall(a), _LINES.findall(b)
+    if b"".join(la) != a or b"".join(lb) != b:
+        return False
+    n = len(cycle)
+    if added:
+        return lb[at:at + n] == list(cycle) and lb[:at] + lb[at + n:] == la
+    return la[at:at + n] == list(cycle) and la[:at] + la[at + n:] == lb
+
+
 # ---- 2. 承認（ボタンから呼ぶ。音声の文字からは呼ばない） ----
-def approve(proposal: SimProposal, approved_by: str, updown=None) -> Approval:
+def approve(proposal: "SimProposal | SimRepeatProposal", approved_by: str, updown=None) -> Approval:
     """updown：承認したときの上下の向きの照合の結果（updown.UpdownStatus）。記録に残すだけで、判定は呼ぶ側（web/flow.py）。"""
-    if not isinstance(proposal, SimProposal) or proposal.mode != "sim":
+    if not isinstance(proposal, (SimProposal, SimRepeatProposal)) or proposal.mode != "sim":
         raise SimError("シミュレーションの候補ではないため、承認できません")
     if not isinstance(approved_by, str) or not approved_by.strip():
         raise SimError("承認した人の名前がないため、承認できません")
@@ -201,6 +250,8 @@ def approve(proposal: SimProposal, approved_by: str, updown=None) -> Approval:
 # ---- 3. シミュレーション用の出力 ----
 def export_sim(proposal: SimProposal, approval: Approval) -> Path:
     """承認した変更候補を、シミュレーション専用のフォルダ（DEFAULT_OUT_DIR）に <ジョブ名>_SIM.JBI.txt で書く。"""
+    if isinstance(proposal, SimRepeatProposal):
+        return _export_repeat(proposal, approval)
     if not isinstance(proposal, SimProposal) or proposal.mode != "sim":
         raise SimError("シミュレーションの候補ではないため、出力しません")
     if proposal.blocked_reason:
@@ -256,6 +307,67 @@ def export_sim(proposal: SimProposal, approval: Approval) -> Path:
         raise SimError(f"書き出しに失敗しました（{e}）") from None
 
     # 書いた後に：読み戻して一致を確かめる
+    try:
+        back = _read_back(path)
+    except OSError:
+        back = None
+    if back != data:
+        _remove_quietly(path)
+        raise SimError("書き出したファイルを読み戻すと中身が違ったため、ファイルを消しました")
+    return path
+
+
+def _export_repeat(proposal: SimRepeatProposal, approval: Approval) -> Path:
+    """回数の変更の出力。元との違いが「足した（消した）1回分の行」と「//NAME の1行」だけのときだけ書く。"""
+    if proposal.mode != "sim" or proposal.blocked_reason:
+        raise SimError("シミュレーションの候補ではないため、出力しません")
+    if not isinstance(approval, Approval):
+        raise SimError("承認されていないため、出力しません")
+    if (approval.original_sha256 != _sha(proposal.original_bytes)
+            or approval.new_sha256 != _sha(proposal.new_bytes)):
+        raise SimError("承認の後でデータが変わったため、出力しません")
+    if not _is_synthetic(proposal.original_bytes):
+        raise SimError("シミュレーションモードでは、合成ジョブ以外は出力しません")
+    try:
+        original = jbi.parse_bytes(proposal.original_bytes)
+        again = original.plan_repeat(proposal.start, proposal.end, proposal.after_count)
+        changed = jbi.parse_bytes(proposal.new_bytes)
+    except jbi.JbiError:
+        raise SimError("承認した変更を作り直せなかったため、出力しません") from None
+    if again.new_job.render_bytes() != proposal.new_bytes:
+        raise SimError("承認した変更と、変更後のジョブの中身が合わないため、出力しません")
+    new_name = changed.name + SIM_SUFFIX
+    if not _NAME_OK.fullmatch(new_name):
+        raise SimError("ジョブ名に使えない文字が入っているため、出力しません")
+    name_index = _name_line_index(changed.lines)
+    if name_index >= proposal.first_line:
+        raise SimError("ジョブ名の行の場所が読めないため、出力しません")
+    lines = list(changed.lines)
+    _, ending = _split_ending(lines[name_index])
+    lines[name_index] = f"//NAME {new_name}{ending}"
+    try:
+        data = "".join(lines).encode(changed.encoding)
+    except UnicodeEncodeError:
+        raise SimError("ジョブ名を変えたジョブを書き出せないため、出力しません") from None
+    # 書く前に：元との差が「足した（消した）1回分の行」と「//NAME の1行」だけであること
+    named = _LINES.findall(proposal.original_bytes)
+    named[name_index] = lines[name_index].encode(changed.encoding)
+    if not _repeat_diff_ok(b"".join(named), data, proposal.first_line, proposal.cycle_lines,
+                           added=proposal.after_count > proposal.before_count):
+        raise SimError("承認した回数の変更の行とジョブ名の行のほかにも違いがあるため、出力しません")
+    out = Path(DEFAULT_OUT_DIR)
+    if out.resolve() == SAMPLES_DIR.resolve():
+        raise SimError("合成ジョブの置き場所には出力しません")
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / f"{new_name}{SIM_EXTENSION}"
+    try:
+        with open(path, "xb") as f:
+            f.write(data)
+    except FileExistsError:
+        raise SimError(f"{path.name} が既にあるため、上書きしません") from None
+    except OSError as e:
+        _remove_quietly(path)
+        raise SimError(f"書き出しに失敗しました（{e}）") from None
     try:
         back = _read_back(path)
     except OSError:

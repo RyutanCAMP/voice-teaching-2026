@@ -75,6 +75,11 @@ export function trimDecimal(s) {
 
 export function confirmHeading(c, dir = "") {
   if (!c || typeof c !== "object") return "";
+  if (c.kind === "repeat") {
+    // 回数の変更（docs/REPEAT_COUNT_DESIGN.md）：「C00001〜C00003 の作業を 2回 → 3回 にします」。数はサーバーの文字のまま
+    if (!c.target || c.before_value == null || c.after_value == null) return "";
+    return `${c.target} の作業を ${c.before_value}回 → ${c.after_value}回 にします`;
+  }
   if (c.kind === "speed") {
     if (!c.target || c.before_value == null || c.after_value == null) return "";
     return `${c.target}の速度を V=${c.before_value} から V=${c.after_value} に変えます`;
@@ -85,6 +90,19 @@ export function confirmHeading(c, dir = "") {
   // 止まった候補は「動かします」と言わない（承認も出力もできない）
   const sp = dir ? "" : " ";  // 「（上へ）」のあとは空けない
   return c.blocked_reason ? `${amount}${sp}動かす候補（承認できません）` : `${amount}${sp}動かします`;
+}
+
+// ---- 回数の変更の印（docs/REPEAT_COUNT_DESIGN.md 5章）。数はサーバーの文字のまま ----
+export function repeatCountLabel(c) {
+  if (!c || typeof c !== "object" || c.before_value == null || c.after_value == null) return "";
+  return `×${c.before_value} → ×${c.after_value}`;
+}
+
+// 再生中の区間の線が、何回目の区間か（サーバーの seg.cycle。区間の外・分からないときは ""）
+export function cycleStatus(seg, target) {
+  const n = seg && seg.cycle;
+  if (!Number.isInteger(n) || n < 1) return "";
+  return `${n}回目（${target}）`;
 }
 
 // ---- 上下の向きの状態（サーバーの state.updown）。無いときは null（何も出さない） ----

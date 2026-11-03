@@ -594,3 +594,76 @@ def test_figure_data_counts_and_kinds():
     # 足した回の線は、元からある線（同じ位置の組）だけ
     old_pairs = {(s["from"], s["to"]) for s in before}
     assert {(s["from"], s["to"]) for s in after} == old_pairs
+
+
+# ======================================================================
+# 8. つなぎの移動を暗黙に作らない（唐川さんの追加の指示 2026-11-03）
+#    変更後の移動の区間（直前の移動の行き先 → 命令の行）が、すべて変更前のジョブにあること
+# ======================================================================
+def test_two_to_three_has_no_new_segment_and_says_so():
+    job = demo_job()
+    p = job.plan_repeat("C00001", "C00003", 3)
+    assert jbi.new_move_segments(job, p.new_job) == []
+    assert len(jbi.move_segments(p.new_job)) == len(jbi.move_segments(job)) + 3  # 区間の数は増えてよい
+    note = [w for w in p.warnings if w.startswith("新しい移動の区間はありません")]
+    assert note and "6 種類" in note[0]  # 初めの MOVJ C00000・C00000→C00001・C00001→C00002・C00002→C00003・C00003→C00001・C00003→C00004
+
+
+def test_entry_and_exit_moves_are_unchanged():
+    job = demo_job()
+    p = job.plan_repeat("C00001", "C00003", 3)
+    segs = {i: (a, t) for a, t, i in jbi.move_segments(p.new_job)}
+    assert segs[p.new_block.first_line] == ("C00000", "MOVL C00001 V=150.0")
+    assert segs[p.new_block.end_line] == ("C00003", "MOVJ C00004 VJ=25.00")
+
+
+def test_one_to_two_would_make_a_new_connector():
+    # 1回のジョブを手で2回にした形：C00003 → C00001 のつなぎの移動が、今のジョブに無い
+    one = demo_job().plan_repeat("C00001", "C00003", 1).new_job
+    two = jbi.parse_bytes(DEMO)
+    fresh = jbi.new_move_segments(one, two)
+    assert [(a, t) for a, t, _ in fresh] == [("C00003", "MOVL C00001 V=150.0")]
+    msg = jbi.new_segment_message(fresh[0])
+    assert msg.startswith("C00003 から C00001 への移動") and "今のジョブにありません" in msg and "回数は変えません" in msg
+    with pytest.raises(jbi.JbiError):
+        one.plan_repeat("C00001", "C00003", 2)
+
+
+def test_guard_stops_even_if_a_new_segment_slipped_through(monkeypatch):
+    # 区間の数え方を通っても、変更後に新しい区間があれば候補を作らない（独立の検査）
+    real = jbi.move_segments
+    def fake(job):
+        segs = real(job)
+        if len(segs) > 8:  # 変更後のジョブだけ
+            segs = segs + [("C00004", "MOVL C00001 V=150.0", 999)]
+        return segs
+    monkeypatch.setattr(jbi, "move_segments", fake)
+    with pytest.raises(jbi.JbiError) as e:
+        demo_job().plan_repeat("C00001", "C00003", 3)
+    assert "C00004 から C00001 への移動" in str(e.value) and "新しい移動を作るため" in str(e.value)
+
+
+@pytest.mark.parametrize("data", [
+    insert_after(DEMO, lines(DEMO).index(CYCLE[2]) + 1, b"MOVL C00004 V=150.0\r\n"),   # 区間の間に別の移動
+    # 最後の回のあとが区間の始点へ戻る（C00001 の行がもう1つ。区間の行の数が合わない）
+    variant((b"MOVJ C00004 VJ=25.00", b"MOVL C00001 V=150.0\r\nMOVJ C00004 VJ=25.00")),
+])
+def test_shapes_without_a_known_connector_are_refused(data):
+    with pytest.raises(jbi.JbiError):
+        jbi.parse_bytes(data).plan_repeat("C00001", "C00003", 3)
+
+
+def test_flow_shows_the_no_new_segment_fact():
+    w, sid = start()
+    c = cand(w.hear(sid, SAY))
+    assert any(x.startswith("新しい移動の区間はありません") for x in c["warnings"])
+
+
+def test_heard_sentence_does_not_mark_the_fixed_words_as_unknown():
+    # 「から」「作業」「にして」を、読めなかった言葉として画面で目立たせない（回数の変更の決まった形で読めた言葉）
+    w, sid = start()
+    r = w.hear(sid, SAY)
+    assert r["facts"]["unknown_words"] == []
+    w2, sid2 = start()
+    r2 = w2.hear(sid2, "C00001からC00003のバイオを3回にして")
+    assert r2["facts"]["unknown_words"] == ["バイオ"]

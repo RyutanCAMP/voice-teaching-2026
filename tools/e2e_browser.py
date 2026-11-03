@@ -513,6 +513,88 @@ def check_c026(browser, url, check, shots: Path | None) -> None:
         pg.close()
 
 
+REPEAT_SAY = "C00001からC00003の作業を2回から3回にして"
+
+
+def check_repeat(browser, url, check, shots: Path | None, out: Path, errors: list) -> None:
+    """デモ用ジョブ（DEMO_BUTTON_REPEAT）を読む → 指示 → 候補（×2 → ×3）→ 3D の再生で「3回目」→ 確認表示（見出し・差分・注意）
+    → 承認ボタン → 出力。声の「はい」では承認しないことは tests/test_repeat_count.py で確かめる。"""
+    def shot(page, name):
+        if shots is not None:
+            shots.mkdir(parents=True, exist_ok=True)
+            page.screenshot(path=str(shots / name))
+
+    pg = browser.new_page(viewport={"width": 1400, "height": 1000})
+    pg.on("console", lambda m: errors.append(f"console {m.type}: {m.text}") if m.type == "error" else None)
+    pg.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
+    pg.add_init_script(FAKE_RECOGNITION)
+    pg.goto(url)
+    pg.set_input_files("#file-input", str(REPO / "samples/dummy/DEMO_BUTTON_REPEAT.JBI"))
+    pg.wait_for_selector("#job-area:not([hidden])")
+    pg.click('.view-tab[data-view="3d"]')
+    shot(pg, "R1_loaded_3d.png")
+    pg.locator("#position-chips button", has_text="C00001").first.click()
+    until(pg, lambda: pg.inner_text("#voice-position strong") == "C00001")
+    pg.fill("#text-input", REPEAT_SAY)
+    pg.click("#text-send")
+    until(pg, lambda: pg.get_attribute("#step-4", "aria-current") == "step")
+    card = pg.inner_text("#candidate-view")
+    check("C00001〜C00003" in card and "×2 → ×3" in card, f"回数の変更：候補のカードに区間と ×2 → ×3：{card[:60]}")
+    check("新しい移動の区間はありません" in card, "回数の変更：候補の注意に「新しい移動の区間はありません」")
+    detail = pg.text_content("#candidate-detail") or ""
+    check(detail.count("+ ") == 3 and "MOVL C00002 V=30.0" in detail, f"回数の変更：詳細に足す3行の差分：{detail[:120]}")
+    check(pg.locator("#fig-3d text.repeat-label").count() == 1
+          and "×2 → ×3" in (pg.text_content("#fig-3d text.repeat-label") or ""), "回数の変更：3D に「×2 → ×3」の印")
+    # 再生（候補ができると自動で始まる）：区間の線ごとに「1回目」〜「3回目」。MOVJ は直線で動かさない
+    seen, shot_done, waited = set(), False, 0
+    while waited < 30000:
+        t = pg.inner_text("#play-status")
+        if t:
+            seen.add(t)
+        if "変更後" in t and "3回目" in t and not shot_done:
+            shot(pg, "R2_playing_3rd.png")
+            shot_done = True
+        if t == "再生が終わりました":
+            break
+        pg.wait_for_timeout(40)
+        waited += 40
+    joined = " / ".join(sorted(seen))
+    check(any("変更前" in x and "2回目" in x for x in seen) and any("変更後" in x and "3回目" in x for x in seen),
+          f"回数の変更：再生で、変更前は2回目まで・変更後は3回目まで数える：{joined[:200]}")
+    check(not any("変更前" in x and "3回目" in x for x in seen), "回数の変更：変更前の再生には3回目が無い")
+    check(any("MOVJ：関節移動" in x for x in seen), "回数の変更：MOVJ の区間は関節移動として出す（直線で再生しない）")
+    pg.click("#open-confirm")
+    pg.wait_for_selector("#confirm-overlay:not([hidden])")
+    title = pg.inner_text("#confirm-title")
+    check(title == "C00001〜C00003 の作業を 2回 → 3回 にします", f"回数の変更：確認表示の見出し：{title}")
+    diff = pg.inner_text("#confirm-diff")
+    check(diff.count("+ ") == 3 and "MOVL C00001 V=150.0" in diff, f"回数の変更：確認表示の差分は足す3行：{diff}")
+    warn = pg.inner_text("#confirm-warnings")
+    check(all(w in warn for w in ("同じ動きを1回ぶん足します", "サイクルの時間が長くなります",
+                                  "物理的な安全の保証ではありません", "新しい移動の区間はありません")),
+          "回数の変更：確認表示に固定の注意をすべて出す")
+    check(not any(w in pg.inner_text("#confirm-overlay") for w in ("安全です", "当たります", "干渉します")),
+          "回数の変更：確認表示に安全・距離を断定する言葉が無い")
+    check(pg.locator("#confirm-figure text.repeat-label").count() == 1, "回数の変更：確認表示の 3D にも ×2 → ×3")
+    check(pg.is_enabled("#approve-button"), "回数の変更：承認ボタンが使える")
+    shot(pg, "R3_confirm.png")
+    pg.fill("#approver-name", "e2e確認")
+    pg.click("#approve-button")
+    until(pg, lambda: pg.is_enabled("#export-button"))
+    shot(pg, "R4_approved.png")
+    pg.click("#export-button")
+    pg.wait_for_selector("#export-result:not([hidden])")
+    f = out / "sim" / "DEMO_BUTTON_REPEAT_SIM.JBI.txt"
+    check(f.is_file() and "出力しました" in pg.inner_text("#export-result"), f"回数の変更：出力 {f.name}")
+    if f.is_file():
+        a = (REPO / "samples/dummy/DEMO_BUTTON_REPEAT.JBI").read_bytes().splitlines()
+        b = f.read_bytes().splitlines()
+        check(len(b) == len(a) + 3 and b.count(b"MOVL C00002 V=30.0") == 3 and b[1] == b"//NAME DEMO_BUTTON_REPEAT_SIM",
+              f"回数の変更：出力は3行増えてジョブ名だけ変わる（{len(a)} → {len(b)}行）")
+    shot(pg, "R5_exported.png")
+    pg.close()
+
+
 def until(pg, cond, timeout_ms: int = 5000) -> None:
     """条件が成り立つまで待つ（画面の CSP が文字列の評価を禁じているので、Python 側で確かめる）。"""
     waited = 0
@@ -650,6 +732,8 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             srv.flow.updown_config = updown_cfg["DEMO_C_PLACE.JBI"]
             # 4ステップの画面（DEMO_C_PLACE をドラッグ＆ドロップ）
             check_four_steps(b, url, check, shots)
+            # 作業の回数を変える（2回 → 3回。docs/REPEAT_COUNT_DESIGN.md）
+            check_repeat(b, url, check, shots, out, errors)
 
             # Chrome 以外（ChatGPT のアプリの中のブラウザーなど）：Chrome で開くよう案内し、通信の失敗は聞き直さない
             pg3 = b.new_page()
