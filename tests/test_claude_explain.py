@@ -240,7 +240,8 @@ def test_numbers_from_facts_and_user_are_allowed(tmp_path):
     ex, c = explainer(tmp_path, fake), conv()
     ex.ask(c, "このロボット、何をしている？")
     r = ex.ask(c, "くわしく教えて")
-    assert r["reply_by"] == "claude", r["reply"]
+    # CHECKER_032 P1-4（唐川さん 11/3 夜）：移動量（数＋mm）は Claude の文に書かせない。事実の数と同じでも表示しない
+    assert r["reply_by"] == "app" and r["reply"] == cx.FIXED_AMOUNT, r["reply"]
     r, _ = ask_one(tmp_path, answer("この動作を3回に変更しますか？", [21], "change_request",
                                     {"kind": "repeat", "from_count": 2, "to_count": 3}), text="そう。じゃあ3回にして")
     assert r["reply_by"] == "claude"

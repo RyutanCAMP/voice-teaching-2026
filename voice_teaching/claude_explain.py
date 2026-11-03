@@ -109,6 +109,8 @@ REFUSED = "Claude がこの質問への答えを断りました"
 FIXED_FORBIDDEN = ("Claude の答えに、このアプリで使わない言葉（安全や距離を決めつける言葉）が入っていたため、表示しません。"
                    "安全や距離は、このアプリでは判断しません")
 FIXED_NUMBER = "Claude の答えに、プログラムが計算していない数が入っていたため、表示しません"
+FIXED_AMOUNT = "Claude の答えに移動量（mm）が入っていたため、表示しません（量はプログラムが計算し、指示の欄で確かめます）"
+FIXED_POSITION = "Claude の答えに、このジョブに無い位置番号が入っていたため、表示しません"
 FIXED_UPDOWN = ("Claude の答えに「上」「下」の言葉が入っていましたが、上下の向きはまだ確認されていないため、表示しません"
                 "（Z方向として扱います）")
 FIXED_JOB_TEXT = "Claude の答えに、ジョブの命令のような文字列が入っていたため、表示しません（命令の行は根拠の行で示します）"
@@ -792,7 +794,14 @@ class Explainer:
             places = {len(r["positions"]) for r in repeats}
             said_now = {c for c in talk.reply_counts(conv.utterances[-1] if conv.utterances else "") if c is not None}
             from_to, strict = None, False
-            if record is not None and intent == "change_request":
+            if talk.reply_amount_problem(data["reply"]):
+                why = shown = FIXED_AMOUNT
+            elif talk.reply_unknown_positions(data["reply"], (conv.facts or {}).get("positions")):
+                why = shown = FIXED_POSITION
+            # この文に回数がある（count）なら、Claude の intent が explain でも変更の確認と同じ照らし合わせ
+            if shown is not None:
+                pass
+            elif record is not None and (intent == "change_request" or count is not None):
                 # 変更の確認：今の回数と、この文から読んだ回数だけ（前の文で言った回数は使わない）
                 prog_from = record["program_from"]
                 if prog_from is None and len(rep_counts) == 1:
@@ -806,15 +815,16 @@ class Explainer:
                 if cf is not None and prog_from is not None and cf != prog_from:
                     record["mismatch"] = True
             else:
-                allowed = set(rep_counts)
-                for u in conv.utterances:
-                    allowed |= {c for c in talk.reply_counts(u) if c is not None}
-            problem = talk.reply_count_problem(data["reply"], allowed, from_to, places=places or None, strict_from_to=strict)
-            if problem is not None and intent == "change_request" and record is not None:
+                allowed = set(rep_counts)  # 説明：プログラムが数えた回数だけ（利用者が言った数は、説明の文の根拠にしない）
+            problem = (None if shown is not None else
+                       talk.reply_count_problem(data["reply"], allowed, from_to, places=places or None, strict_from_to=strict,
+                                                current_counts=rep_counts))
+            if problem is not None and record is not None and (intent == "change_request" or count is not None):
                 record["mismatch"] = True  # 回数の食い違い（検証エラー）。Claude の文は使わない
             elif problem is not None:
                 why = shown = FIXED_NUMBER
-        if shown is None and record is not None and record["mismatch"] and intent == "change_request":
+        if (shown is None and record is not None and record["mismatch"]
+                and (intent == "change_request" or count is not None)):
             why = shown = talk.COUNT_MISMATCH  # 人の文の回数と Claude の数が違う：Claude の文（数を言う）は使わない
         conv.pending_result = RESULT_SHOWN if why is None else RESULT_HIDDEN.format(why=why)
         reply = data["reply"] if shown is None else shown

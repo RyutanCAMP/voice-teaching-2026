@@ -439,7 +439,21 @@ def change_record(reading: CountReading | None, intent: str | None, change: dict
 _KANJI_NUM = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
 _REPLY_COUNT = re.compile(r"(\d+|[一二三四五六七八九十]+)\s*(?:回|度)")
 _REPLY_PLACES = re.compile(r"(\d+|[一二三四五六七八九十]+)\s*(?:か所|カ所|ヶ所|ヵ所|箇所|個所)")
-_REPLY_FROM_TO = re.compile(r"(\d+|[一二三四五六七八九十]+)\s*回\s*から\s*(\d+|[一二三四五六七八九十]+)\s*回")
+_REPLY_FROM_TO = re.compile(r"(\d+|[一二三四五六七八九十]+)\s*(?:回|度)\s*から\s*(\d+|[一二三四五六七八九十]+)\s*(?:回|度)")
+# 移動量（mm・ミリ・cm・センチ）：量はプログラムが計算する。Claude の文には書かせない（CHECKER_032 P1-4・K14）
+_REPLY_AMOUNT = re.compile(r"(?:\d+(?:\.\d+)?|[一二三四五六七八九十]+)\s*(?:mm|ミリ|cm|センチ)", re.I)
+_REPLY_POSITION = re.compile(r"C\s?([0-9]{5})")
+
+
+def reply_amount_problem(text: str) -> bool:
+    """Claude の文に移動量（数＋mm・ミリなど）があるか。"""
+    return bool(_REPLY_AMOUNT.search(_nfkc(text)))
+
+
+def reply_unknown_positions(text: str, names) -> list[str]:
+    """Claude の文の位置番号のうち、ジョブに無いもの（CHECKER_032 K03）。"""
+    known = set(names or [])
+    return [f"C{m.group(1)}" for m in _REPLY_POSITION.finditer(_nfkc(text)) if f"C{m.group(1)}" not in known]
 _REPLY_TIME = re.compile(r"\d+(?:\.\d+)?\s*(?:秒|分|時間)|[一二三四五六七八九十]+\s*(?:秒|分間|時間)")
 
 
@@ -460,8 +474,12 @@ def reply_counts(text: str) -> list[int | None]:
     return [_count_value(m.group(1)) for m in _REPLY_COUNT.finditer(_nfkc(text))]
 
 
+_REPLY_CURRENT = re.compile(r"(\d+|[一二三四五六七八九十]+)\s*(?:回|度)\s*(?:くり返|繰り返|くりかえ|繰返)し\s*(?:てい|てる|ます)")
+
+
 def reply_count_problem(text: str, allowed_counts: set[int], from_to: tuple[int, int] | None = None,
-                        places: set[int] | None = None, strict_from_to: bool = False) -> str | None:
+                        places: set[int] | None = None, strict_from_to: bool = False,
+                        current_counts: set[int] | None = None) -> str | None:
     """Claude の文の回数が、プログラムが数えた・読んだ回数と合うか。合わなければ理由（"time"・"from_to"・"count"・"places"）。
     from_to：変更の確認のときの（プログラムが数えた今の回数, 利用者の文から読んだ回数）。
     strict_from_to：今の回数をプログラムが決められないとき、「N回からM回」はどれも検証エラーにする。
@@ -476,6 +494,10 @@ def reply_count_problem(text: str, allowed_counts: set[int], from_to: tuple[int,
             return "from_to"
     if places is not None and any(_count_value(m.group(1)) not in places for m in _REPLY_PLACES.finditer(t)):
         return "places"
+    # 今の様子を言う文（「N回くり返しています」）は、プログラムが数えた回数だけ（利用者が言った数では確かめない）
+    if current_counts is not None and any(_count_value(m.group(1)) not in current_counts
+                                          for m in _REPLY_CURRENT.finditer(t)):
+        return "current"
     if any(c is None or c not in allowed_counts for c in reply_counts(t)):
         return "count"
     return None

@@ -127,3 +127,58 @@ def test_places_and_do_are_checked_too(tmp_path, reply):
     f.add(T.answer(reply, BLOCK))
     r = w.ask(sid, "このロボット、何をしている？")
     assert r["reply_by"] == "app"
+
+
+# ---- 再レビュー（029b290：FAIL）と CHECKER_032 P1-4・K03 ----
+@pytest.mark.parametrize("first", [WIDE, BLOCK])
+def test_reversed_count_with_do_is_caught(tmp_path, first):
+    w, f, sid = wide_taught(tmp_path, first)
+    f.add(T.answer("ボタンを押す動作を3度から2度に変更しますか？", BLOCK, "change_request",
+                   {"kind": "repeat", "from_count": 2, "to_count": 3}))
+    r = w.ask(sid, "じゃあ、3回にして")
+    assert r["reply_by"] == "app" and r["change_record"]["mismatch"] is True
+
+
+def test_explain_intent_with_a_count_in_the_utterance_uses_change_rules(tmp_path):
+    # Claude が intent=explain と答えても、この文に回数があれば、変更の確認と同じ照らし合わせ
+    w, f, sid = wide_taught(tmp_path)
+    f.add(T.answer("できますが、何回にしますか？", BLOCK))
+    w.ask(sid, "5回にもできる？")
+    f.add(T.answer("ボタンを押す動作を2回から5回に変更しますか？", BLOCK))
+    r = w.ask(sid, "じゃあ、3回にして")
+    assert r["reply_by"] == "app" and reply_not_shown(r, "2回から5回")
+
+
+def test_user_number_does_not_confirm_an_explanation_claim(tmp_path):
+    w, f, sid = wide_taught(tmp_path)
+    f.add(T.answer("はい、同じ動きを5回くり返しています。", BLOCK))
+    r = w.ask(sid, "5回くり返してる？")
+    assert r["reply_by"] == "app" and reply_not_shown(r, "5回くり返しています")
+
+
+def reply_not_shown(r, part):
+    return part not in r["reply"]
+
+
+@pytest.mark.parametrize("reply", [
+    "C00002 のZを30.0ミリ変えると良いです。",   # K14（30.0 は速度の V=30.0 と同じ数）
+    "C00002 を3ミリ下げましょう。",             # K07（上下が確認済みでも）
+    "Zを5mm下げると、押す深さが変わります。",
+    "三ミリ下げるとよいです。",
+])
+def test_amounts_in_claude_text_are_not_shown(tmp_path, reply):
+    w, f = T.flow(tmp_path, updown_config=T.confirmed_config(tmp_path))
+    sid = w.load(T.demo_bytes())["session_id"]
+    f.add(T.answer(reply, BLOCK))
+    r = w.ask(sid, "このロボット、何をしている？")
+    assert r["reply_by"] == "app" and reply not in r["reply"]
+    assert w._entries[sid].session.candidate is None
+
+
+def test_position_not_in_the_job_is_not_shown(tmp_path):
+    # K03：ジョブに無い位置番号（C00009）が入った答えは出さない
+    w, f = T.flow(tmp_path)
+    sid = w.load(T.demo_bytes())["session_id"]
+    f.add(T.answer("C00009 でボタンを押しています。何の作業ですか？", BLOCK))
+    r = w.ask(sid, "このロボット、何をしている？")
+    assert r["reply_by"] == "app" and "C00009" not in r["reply"]
