@@ -1,7 +1,8 @@
 // 読めなかった言葉（facts.unknown_words）を、聞き取った文の中で目立たせるための分け方（CHECKER_023 B1）。
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { splitUnknown, displayMinus } from '../voice_teaching/web/static/highlight.js';
+import { splitUnknown, displayMinus, segmentLook, segmentTitle, trimDecimal, confirmHeading, updownStatus }
+  from '../voice_teaching/web/static/highlight.js';
 
 test('unknown words are split out in order', () => {
   assert.deepEqual(splitUnknown('バイオ 3ミリ 下げて', ['バイオ']), [
@@ -31,4 +32,86 @@ test('regex characters in words are treated literally', () => {
 test('displayMinus only swaps ASCII hyphen for U+2212', () => {
   assert.equal(displayMinus('Y -3.000mm'), 'Y −3.000mm');
   assert.equal(displayMinus('+10.000'), '+10.000');
+});
+
+// ---- CHECKER_026 S-MOVJ：区間の見た目（MOVJ を直線移動のように見せない） ----
+test('segmentLook: MOVL is solid and the marker may move along it', () => {
+  const l = segmentLook('movl');
+  assert.equal(l.kind, 'movl');
+  assert.equal(l.dash, null);
+  assert.equal(l.animate, true);
+});
+test('segmentLook: MOVJ is a thin gray dotted line, labelled, and the marker does not move along it', () => {
+  const j = segmentLook('movj'), l = segmentLook('movl'), o = segmentLook('other');
+  assert.equal(j.kind, 'movj');
+  assert.ok(j.dash && j.dash !== o.dash, 'MOVJ の点線は、目安の破線と違う');
+  assert.ok(j.width < l.width, 'MOVJ は細い');
+  assert.ok(j.color, 'MOVJ は決まった灰色');
+  assert.equal(j.animate, false);
+  assert.equal(j.label, '関節移動（MOVJ）：実際の通り道は直線ではありません');
+});
+test('segmentLook: unknown or missing kind is treated as other (never as MOVL)', () => {
+  for (const k of ['other', undefined, null, '', 'MOVL', 'movc', 1]) {
+    const o = segmentLook(k);
+    assert.equal(o.kind, 'other', String(k));
+    assert.equal(o.dash, '6 5');
+    assert.equal(o.animate, false);
+  }
+});
+test('segmentTitle: line, text, and the label for MOVJ / other', () => {
+  assert.equal(segmentTitle({ line_no: 12, text: 'MOVL C00001 V=80.0', kind: 'movl' }), '12行目 MOVL C00001 V=80.0');
+  assert.equal(segmentTitle({ line_no: 13, text: 'MOVJ C00006 VJ=25.00', kind: 'movj' }),
+    '13行目 MOVJ C00006 VJ=25.00\n関節移動（MOVJ）：実際の通り道は直線ではありません');
+  assert.equal(segmentTitle({ line_no: 9, text: 'MOVC C00003 V=250.0', kind: 'other' }), '9行目 MOVC C00003 V=250.0（目安）');
+});
+
+// ---- CHECKER_026 S5：確認表示の見出し（数字はサーバーの候補のデータから。計算しない） ----
+test('trimDecimal only removes trailing zeros of the given text', () => {
+  assert.equal(trimDecimal('-3.000'), '-3');
+  assert.equal(trimDecimal('+10.000'), '+10');
+  assert.equal(trimDecimal('-0.500'), '-0.5');
+  assert.equal(trimDecimal('+12.340'), '+12.34');
+  assert.equal(trimDecimal('100'), '100');
+  assert.equal(trimDecimal('abc'), 'abc');
+});
+test('confirmHeading: one line, position, axis and amount', () => {
+  const c = { kind: 'shift', target: 'C00005 Y', delta: '-3.000', before_value: '150.000', after_value: '147.000' };
+  assert.equal(confirmHeading(c), 'C00005 を Y −3mm 動かします');
+  assert.equal(confirmHeading({ ...c, target: 'C00004 Z', delta: '+10.000' }, '（上へ）'), 'C00004 を Z +10mm（上へ）動かします');
+  assert.ok(!confirmHeading(c).includes('\n'));
+});
+test('confirmHeading: a stopped candidate does not say it will move', () => {
+  const c = { kind: 'shift', target: 'C00000 Z', delta: '+10.000', blocked_reason: '入る命令が MOVJ' };
+  const h = confirmHeading(c);
+  assert.equal(h, 'C00000 を Z +10mm 動かす候補（承認できません）');
+  assert.ok(!h.endsWith('動かします'));
+});
+test('confirmHeading: speed and missing data', () => {
+  assert.equal(confirmHeading({ kind: 'speed', target: '12行目', before_value: '80.0', after_value: '88.0' }),
+    '12行目の速度を V=80.0 から V=88.0 に変えます');
+  assert.equal(confirmHeading(null), '');
+  assert.equal(confirmHeading({ kind: 'shift', target: 'C00005' }), '');
+});
+
+// ---- 上下の向きの状態（state.updown。無いときは何も出さない） ----
+test('updownStatus: nothing when the server does not send it', () => {
+  for (const u of [undefined, null, 'confirmed', 3, []]) assert.equal(updownStatus(u), null, String(u));
+});
+test('updownStatus: four states', () => {
+  assert.deepEqual(updownStatus({ status: 'unconfirmed' }), { text: '上下の向き：未確認', tone: 'unconfirmed', title: '' });
+  assert.deepEqual(updownStatus({ status: 'confirmed', confirmed_by: '唐川', confirmed_at: '2026-11-03T14:00:00+09:00', message: 'FRAME の設定で確認' }),
+    { text: '上下の向き：確認済み（唐川・11/3 14:00）', tone: 'confirmed', title: 'FRAME の設定で確認' });
+  assert.equal(updownStatus({ status: 'mismatch' }).text, '上下の向き：確認したジョブと違います');
+  assert.equal(updownStatus({ status: 'mismatch' }).tone, 'warn');
+  assert.equal(updownStatus({ status: 'changed' }).text, '上下の向き：設定が変わっています');
+  assert.equal(updownStatus({ status: 'changed' }).tone, 'warn');
+});
+test('updownStatus: confirmed with partial data, and unknown status is never shown as confirmed', () => {
+  assert.equal(updownStatus({ status: 'confirmed', confirmed_by: '唐川' }).text, '上下の向き：確認済み（唐川）');
+  assert.equal(updownStatus({ status: 'confirmed', confirmed_at: '2026-11-03 09:05' }).text, '上下の向き：確認済み（11/3 09:05）');
+  assert.equal(updownStatus({ status: 'confirmed', confirmed_at: '昨日' }).text, '上下の向き：確認済み（昨日）');
+  assert.equal(updownStatus({ status: 'confirmed' }).text, '上下の向き：確認済み');
+  for (const s of ['ok', 'CONFIRMED', undefined, '']) {
+    assert.deepEqual(updownStatus({ status: s, confirmed_by: '唐川' }), { text: '上下の向き：未確認', tone: 'unconfirmed', title: '' }, String(s));
+  }
 });

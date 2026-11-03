@@ -72,6 +72,12 @@
     <div class="play-row">
       <button type="button" id="play-button" class="play" disabled aria-label="経路を再生">▶</button>
       <div class="play-text">
+        <!-- 区間の種類（CHECKER_026 S-MOVJ）。MOVJ・目安の区間は、そのジョブにあるときだけ出す -->
+        <div id="legend-kinds" class="legend kinds" hidden>
+          <span class="lg movl">MOVL：直線移動</span>
+          <span class="lg movj" id="legend-movj" hidden title="関節移動（MOVJ）：実際の通り道は直線ではありません">MOVJ：関節移動（通り道は表示していません）</span>
+          <span class="lg other" id="legend-other" hidden>破線：直線とは限りません（目安）</span>
+        </div>
         <div id="legend" class="legend" hidden>
           <span class="lg before">変更前</span>
           <span class="lg after" id="legend-after">変更後</span>
@@ -109,6 +115,7 @@
     <section id="instruction-panel" class="card" aria-label="音声で指示">
       <div id="instruction-slot">
         <button type="button" id="voice-position" class="position-pill" title="位置を選び直す"></button>
+        <p id="updown-status" class="updown fine" hidden></p>
         <div id="voice-input-slot">
           <div id="voice-controls">
             <div class="mic-row">
@@ -191,8 +198,10 @@
         </ul>
         <h3>図と再生</h3>
         <ul class="small">
-          <li>図の線は命令の順に結んでいます。実線は MOVL（PL・CRなし）の区間、点線はそれ以外で「目安」です。</li>
-          <li>再生は、位置の点を直線で結んだ線の上を印が動くだけです。腕の姿勢・関節の動き・速度・PL による角の丸め・待ち時間は再現していません。</li>
+          <li>図の線は命令の順に結んでいます。実線は MOVL（PL・CR なし、または PL=0）の直線移動の区間です。</li>
+          <li>細い灰色の点線は MOVJ（関節移動）の区間です。実際の通り道は直線ではなく、ジョブの点だけでは分からないため、表示していません。</li>
+          <li>破線はそれ以外（MOVC・PL が 1 以上など）の区間で「目安」です。</li>
+          <li>再生は、MOVL の区間だけ線の上を印が動きます。MOVJ と目安の区間では、印は線の上を動かず、終点へ移るだけです。腕の姿勢・関節の動き・速度・PL による角の丸め・待ち時間は再現していません。</li>
         </ul>
         <div class="figs-small">
           <figure data-view="xy"><figcaption>X・Y（上から見る）</figcaption><div id="fig-xy" class="fig fig-thumb"></div></figure>
@@ -232,8 +241,9 @@
 
 <div id="confirm-overlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-title" hidden>
   <div class="confirm-box">
-    <h2 id="confirm-title" class="sr-only">確認</h2>
     <p id="confirm-blocked" class="confirm-blocked" hidden></p>
+    <!-- 見出しは1行（CHECKER_026 S5）。位置・軸・量はサーバーの候補のデータから入れる。長い説明は下の小さな文 -->
+    <h2 id="confirm-title" class="confirm-title">確認</h2>
     <p id="confirm-text" class="confirm-text"></p>
     <div class="confirm-grid">
       <div id="confirm-figure" class="fig confirm-figure"></div>
@@ -243,6 +253,7 @@
         <div id="confirm-diff" class="diff"></div>
         <details class="fine"><summary>変わる命令の行</summary><ul id="confirm-affected" class="confirm-affected"></ul></details>
         <p class="fine">灰色＝変更前、オレンジ＝変更後。点を命令の順に直線で結んだ目安で、ロボット本体の動きではありません。ロボット本体・関節は描いていません。動作や干渉を保証するシミュレーターではありません。経路は人が確かめてください。</p>
+        <p id="confirm-movj-legend" class="fine movj-legend" hidden>細い灰色の点線＝関節移動（MOVJ）。実際の通り道は直線ではありません（表示していません）</p>
         <p id="confirm-stopped-legend" class="fine stopped-legend" hidden>灰色の点線＝止まった候補（承認できません）</p>
         <p class="fine confirm-figure-note">この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。参考表示であり、実際のロボットの動きではありません。</p>
         <p class="fine">シミュレーション用の確認です。実機用の出力・転送・ロボットの起動はしません。</p>
