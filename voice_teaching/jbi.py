@@ -413,6 +413,10 @@ class Job:
         分からないもの・扱わない形は JbiError（理由の文）。"""
         return _find_repeat(self, start, end)
 
+    def find_repeat_blocks(self) -> list["RepeatBlock"]:
+        """範囲を言わない指示のために、ジョブの中の数えられる区間（2回以上続けて書かれたもの）をすべて探す。"""
+        return _find_repeat_blocks(self)
+
     def plan_repeat(self, start: str, end: str, new_total: int) -> "RepeatProposal":
         """区間の回数を new_total（今の回数 ±1、合計 1〜5 回、今が2回以上のときだけ）にした変更案。元の Job は変えない。"""
         return _plan_repeat(self, start, end, new_total)
@@ -456,7 +460,8 @@ class Job:
 
 # ---- 作業の回数の変更（docs/REPEAT_COUNT_DESIGN.md） ----
 # 区間（1サイクル）がジョブの中に続けてそのまま N 回書かれている形だけを数える。JUMP・ラベル・カウンタの繰り返しは扱わない。
-# 今が2回以上のときだけ、±1 回、合計 1〜5 回（デモの範囲）。足すのは最後の回の直後に1回分（1回目と同じバイト列）だけ。
+# 今が2回以上のときだけ、+1 回、合計 1〜5 回（デモの範囲）。足すのは最後の回の直後に1回分（1回目と同じバイト列）だけ。
+# 減らす変更は、このプロトタイプでは扱わない（唐川さんの決定 2026-11-03）。
 # 変えるのは INST 部の命令の行の並びだけ（位置の値・ヘッダー・ほかの行は変えない。新しい位置は作らない）
 REPEAT_MIN_TOTAL = 1
 REPEAT_MAX_TOTAL = 5
@@ -466,11 +471,10 @@ REPEAT_WARNINGS_ADD = (
     "サイクルの時間が長くなります",
     REPEAT_NOT_SAFETY,
 )
-REPEAT_WARNINGS_REMOVE = (
-    "最後の1回ぶんの行を消します。新しい位置・新しい移動の線は作りません",
-    "サイクルの時間が短くなります",
-    REPEAT_NOT_SAFETY,
-)
+# 誤解させないための固定文（唐川さんの決定 2026-11-03）：DOUT・TIMER を含む作業全体の繰り返しは対象外
+REPEAT_SCOPE_NOTE = ("繰り返すのは移動の行だけです。信号（DOUT）や待ち時間（TIMER）を含む作業は、"
+                     "このプロトタイプでは対象外です")
+REPEAT_DECREASE_MESSAGE = "減らす変更は、このプロトタイプでは扱いません"
 _POS_NAME = re.compile(r"C[0-9]{5}")
 
 
@@ -511,9 +515,9 @@ class RepeatProposal:
     end: str
     before_count: int
     after_count: int
-    line_index: int               # 足した最初の行（new_job の行番号）／消した最初の行（元のジョブの行番号）。0 から
+    line_index: int               # 足した最初の行（new_job の行番号）。0 から
     added: tuple[tuple[int, str], ...]    # (new_job の行番号, 行の中身)
-    removed: tuple[tuple[int, str], ...]  # (元のジョブの行番号, 行の中身)
+    removed: tuple[tuple[int, str], ...]  # 消した行。減らす変更は扱わないので、いつも空
     affected: tuple[str, ...]
     warnings: tuple[str, ...]
     new_job: "Job"
@@ -530,13 +534,13 @@ def repeat_count_problem(current: int, total: object, target: str) -> str | None
                 f"{total}回にはしません")
     if total == current:
         return f"{target} は今 {current} 回で、同じ回数のため、変更しません"
+    if total < current:
+        return f"{target} は今 {current} 回です。{REPEAT_DECREASE_MESSAGE}"
     if current < 2:
         return (f"{target} は今 {current} 回です。回数は、今が2回以上のときだけ変えます"
                 "（1回から増やすと、区間と区間のつなぎの、新しい移動の線ができるため）。変更しません")
-    if abs(total - current) != 1:
-        ok = [n for n in (current - 1, current + 1) if REPEAT_MIN_TOTAL <= n <= REPEAT_MAX_TOTAL]
-        return (f"回数は1回ずつ（今の {current} 回から {'か'.join(f'{n}回' for n in ok)}）だけ変えます。"
-                f"{total}回にはしません")
+    if total != current + 1:
+        return f"回数は1回ずつ（今の {current} 回から {current + 1}回）だけ増やします。{total}回にはしません"
     return None
 
 
@@ -575,9 +579,15 @@ def _inst_header_index(job: Job) -> int:
     raise JbiError("命令の見出し（//INST）が見つからないため、変更しません")
 
 
-def _repeat_line_reason(i: int, body: str, ins: Instruction | None, seq: frozenset[str], target: str) -> str:
-    """区間の中（区間と区間の間を含む）にある、区間の行でない行の理由の文。"""
+def _repeat_line_reason(i: int, body: str, ins: Instruction | None, seq: frozenset[str], target: str,
+                        edge: bool = False) -> str:
+    """区間の中（区間と区間の間を含む）にある、区間の行でない行の理由の文。edge：区間の位置を使う最初か最後の行。"""
     where = f"（{i + 1}行目「{body}」）"
+    if edge and ins is not None and ins.command != "MOVL" and not body.startswith("'"):
+        # 区間の前後の命令（例 区間の前の MOVJ C00001）が区間の位置を使っている：実際の行に合わせて書く（QA P2-7）
+        used = next((r for r in ins.refs if r in seq), None)
+        if used is not None:
+            return f"区間の位置 {used} が、区間の外の {ins.command} でも使われているため、複写しません{where}"
     if body.startswith("'"):
         return f"区間の中に コメントの行 があるため、複写しません{where}"
     if ins is None:
@@ -639,8 +649,10 @@ def _find_repeat(job: Job, start: str, end: str) -> RepeatBlock:
         ins = by_index.get(i)
         if (ins is not None and ins.position in seqset and ins.refs == (ins.position,)
                 and _EDITABLE_MOVL.fullmatch(body)):
+            if ins.speed is None or ins.speed <= 0:  # 速度 0 の行は複写しない（QA P2-8）
+                raise JbiError(f"{i + 1}行目「{body}」は速度が 0 のため、複写しません")
             continue
-        raise JbiError(_repeat_line_reason(i, body, ins, seqset, target))
+        raise JbiError(_repeat_line_reason(i, body, ins, seqset, target, edge=i in (lo, hi)))
     size = len(seq)
     order = "→".join(seq)
     for j, i in enumerate(region):
@@ -662,6 +674,25 @@ def _find_repeat(job: Job, start: str, end: str) -> RepeatBlock:
     return RepeatBlock(positions=tuple(seq), count=count, first_line=lo, cycle_lines=first)
 
 
+def _find_repeat_blocks(job: Job) -> list[RepeatBlock]:
+    if job.problems:
+        return []
+    plain = [ins for ins in job.instructions
+             if ins.command == "MOVL" and ins.position is not None and _EDITABLE_MOVL.fullmatch(ins.text)]
+    found: dict[tuple[str, ...], RepeatBlock] = {}
+    for k, a in enumerate(plain):
+        for b in plain[k + 1:k + 11]:  # 1回分は10行まで（デモの範囲）
+            if int(b.position[1:]) <= int(a.position[1:]):
+                continue
+            try:
+                blk = _find_repeat(job, a.position, b.position)
+            except JbiError:
+                continue
+            if blk.count >= 2:
+                found.setdefault(blk.positions, blk)
+    return list(found.values())
+
+
 def _plan_repeat(job: Job, start: str, end: str, new_total: int) -> RepeatProposal:
     block = _find_repeat(job, start, end)
     n = block.count
@@ -670,16 +701,9 @@ def _plan_repeat(job: Job, start: str, end: str, new_total: int) -> RepeatPropos
         raise JbiError(why)
     size, stop = block.cycle_len, block.end_line
     lines = list(job.lines)
-    if new_total > n:
-        at = stop
-        new_lines = lines[:stop] + list(block.cycle_lines) + lines[stop:]
-        added = tuple((at + j, _split_ending(block.cycle_lines[j])[0]) for j in range(size))
-        removed: tuple[tuple[int, str], ...] = ()
-    else:
-        at = stop - size
-        new_lines = lines[:at] + lines[stop:]
-        added = ()
-        removed = tuple((at + j, _split_ending(lines[at + j])[0]) for j in range(size))
+    at = stop  # 最後の回の直後に1回分を足すだけ（減らす変更は repeat_count_problem で止めている）
+    new_lines = lines[:stop] + list(block.cycle_lines) + lines[stop:]
+    added = tuple((at + j, _split_ending(block.cycle_lines[j])[0]) for j in range(size))
     new_job = parse("".join(new_lines), encoding=job.encoding)
     new_job.baseline = dict(job.baseline)
     try:
@@ -721,23 +745,19 @@ def _plan_repeat(job: Job, start: str, end: str, new_total: int) -> RepeatPropos
     if (new_job.lines[:k + 1] != job.lines[:k + 1]
             or {p: v.values for p, v in new_job.positions.items()} != {p: v.values for p, v in job.positions.items()}):
         raise JbiError("変更後のジョブで位置やヘッダーが変わってしまうため、変更しません")
-    if new_total > n:
-        conn = block.first_line + size  # 2回目の最初の行（区間の最後 → 最初へのつなぎの移動）
-        affected = (
-            f"{at + 1}〜{at + size}行目（足す行。{new_total}回目の {block.target}）",
-            f"{block.positions[-1]} から {block.positions[0]} へのつなぎの移動は、元のジョブの "
-            f"{conn + 1}行目「{_split_ending(lines[conn])[0]}」と同じ移動です",
-        )
-        warnings = REPEAT_WARNINGS_ADD
-    else:
-        affected = (f"{at + 1}〜{at + size}行目（消す行。{n}回目の {block.target}）",)
-        warnings = REPEAT_WARNINGS_REMOVE
+    conn = block.first_line + size  # 2回目の最初の行（区間の最後 → 最初へのつなぎの移動）
+    affected = (
+        f"{at + 1}〜{at + size}行目（足す行。{new_total}回目の {block.target}）",
+        f"{block.positions[-1]} から {block.positions[0]} へのつなぎの移動は、元のジョブの "
+        f"{conn + 1}行目「{_split_ending(lines[conn])[0]}」と同じ移動です",
+    )
+    warnings = REPEAT_WARNINGS_ADD + (REPEAT_SCOPE_NOTE,)
     kinds = len({(p, t) for p, t, _ in move_segments(job)})
     warnings = tuple(warnings) + (
         f"新しい移動の区間はありません（変更のあとも、今のジョブにある {kinds} 種類の移動の区間だけです。プログラムで確かめました）",)
     return RepeatProposal(
         kind="repeat", target=block.target, start=start, end=end, before_count=n, after_count=new_total,
-        line_index=at, added=added, removed=removed, affected=affected, warnings=tuple(warnings),
+        line_index=at, added=added, removed=(), affected=affected, warnings=tuple(warnings),
         new_job=new_job, block=block, new_block=nb)
 
 

@@ -22,6 +22,8 @@ const HOLD_MS = 700;          // MOVJ・目安の区間で、印を消してお�
 function svgEl(tag, attrs) {
   const e = document.createElementNS(SVG_NS, tag);
   for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, String(v));
+  // 文字の大きさ：画面の CSS（svg text { font-size: 12px }）より強く、CSP（style 属性は使えない）でも効くように CSSOM で入れる
+  if (attrs && attrs["data-fs"]) e.style.fontSize = `${attrs["data-fs"]}px`;
   return e;
 }
 
@@ -122,6 +124,10 @@ export class View3D {
         stroke: look.color && key === "before" ? look.color : color, "stroke-width": w * look.width + (playing ? 1.5 : 0),
         "stroke-linecap": "round", class: `seg ${key} seg-${look.kind}`, "data-kind": look.kind, "data-from": s.from, "data-to": s.to });
       if (look.dash) line.setAttribute("stroke-dasharray", look.dash);
+      // 回数の変更の範囲を確かめている間：その範囲の線を光らせる（会話の位置の候補と同じ色）
+      if (key === "before" && (d.rangeLines || []).includes(s.line_no)) {
+        line.setAttribute("stroke", "#5e5ce6"); line.setAttribute("stroke-width", "5"); line.classList.add("range");
+      }
       // 止まった候補は、目安の区間（6 5 の破線）・MOVJ の点線と見分けられる細かい点線
       if (key === "after" && stopped) { line.setAttribute("stroke-dasharray", "0.5 7"); line.setAttribute("stroke-width", "4"); }
       const t = svgEl("title", {}); t.textContent = segmentTitle(s);
@@ -223,32 +229,48 @@ export class View3D {
     this.svg = svg;
   }
 
-  // 回数の変更の印：区間の点の近くに「C00001〜C00003 ×2 → ×3」、右上の窓に回数（数はサーバーの文字のまま）
+  // 回数の変更の印：区間の点の近くに「C00001〜C00003 ×2 → ×3」（読み込んだ直後は「×2」）、右上の窓に回数。
+  // 数はサーバーの文字のまま。文字は図の中に収まる所に置く（はみ出すなら別の所。QA P1-4）
   _repeatMark(svg, d, boxes, textColor) {
     const r = d.repeat;
     const pts = d.points.filter((p) => r.positions.includes(p.name)).map((p) => this.project(p.xyz));
     if (pts.length) {
-      const text = `${r.target} ${r.label}`, tw = textWidth(text);
+      const text = `${r.target} ${r.label}`, tw = Math.ceil(textWidth(text) * 1.25);
       const right = Math.max(...pts.map((q) => q[0])), left = Math.min(...pts.map((q) => q[0]));
       const top = Math.min(...pts.map((q) => q[1])), bottom = Math.max(...pts.map((q) => q[1]));
-      // 点・点の名前に重ならない所を探す（右・右下・左・下・上の順）
-      const spots = [[right + 90, (top + bottom) / 2], [right + 90, bottom + 20], [left - tw - 24, (top + bottom) / 2],
-        [left, bottom + 34], [left, top - 30], [right + 140, top - 10]];
-      const box = ([x, y]) => ({ x0: x, x1: x + tw, y0: y - 13, y1: y + 3 });
-      const [x, y] = spots.find((s) => !boxes.some((q) => overlaps(box(s), q))) || spots[0];
-      const lab = svgEl("text", { x, y, fill: textColor, "font-weight": "700", class: "repeat-label" });
+      const box = ([x, y]) => ({ x0: x, x1: x + tw, y0: y - 14, y1: y + 4 });
+      const inside = (q) => q.x0 >= 8 && q.x1 <= this.W - 8 && q.y0 >= 8 && q.y1 <= this.H - 8;
+      // 点・点の名前・右上の窓に重ならず、図の中に収まる所を探す（右・右下・左・下・上の順）
+      const inset = { x0: this.W - 156, x1: this.W, y0: 0, y1: 110 };
+      const spots = [[right + 90, (top + bottom) / 2], [right + 24, bottom + 24], [left - tw - 24, (top + bottom) / 2],
+        [left - tw / 2, bottom + 40], [left - tw / 2, top - 30], [left - tw - 24, bottom + 24], [12, this.H - 44]];
+      const spot = spots.find((s) => inside(box(s)) && !boxes.some((q) => overlaps(box(s), q)) && !overlaps(box(s), inset))
+        || spots.find((s) => inside(box(s))) || [12, this.H - 44];
+      const lab = svgEl("text", { x: spot[0], y: spot[1], fill: textColor, "font-weight": "700", "data-fs": 13, class: "repeat-label" });
       lab.textContent = text;
       svg.append(lab);
-      boxes.push(box([x, y]));
+      boxes.push(box(spot));
     }
-    const S = 132, x0 = this.W - S - 12, y0 = 12;
+    // 右上の窓：変更後の回数（×3）を大きく、変更前（×2）を灰色で小さく。候補が無ければ今の回数だけ
+    const S = 140, x0 = this.W - S - 12, y0 = 12;
     const g = svgEl("g", { class: "inset repeat-inset" });
-    g.append(svgEl("rect", { x: x0, y: y0, width: S, height: 84, rx: 14, fill: "#fff", stroke: "#e5e5ea" }));
-    const head = svgEl("text", { x: x0 + 12, y: y0 + 20, class: "inset-head" });
+    g.append(svgEl("rect", { x: x0, y: y0, width: S, height: 92, rx: 14, fill: "#fff", stroke: "#e5e5ea" }));
+    const head = svgEl("text", { x: x0 + 12, y: y0 + 22, class: "inset-head", "data-fs": 12 });
     head.textContent = "区間を通る回数";
-    const amt = svgEl("text", { x: x0 + S / 2, y: y0 + 60, "text-anchor": "middle", fill: textColor, "font-weight": "700", class: "inset-amt" });
-    amt.textContent = r.label;
-    g.append(head, amt);
+    g.append(head);
+    if (r.after != null) {
+      const was = svgEl("text", { x: x0 + 14, y: y0 + 70, fill: "#8e8e93", "data-fs": 18, "font-weight": "600", class: "repeat-was" });
+      was.textContent = `×${r.before} →`;
+      const now = svgEl("text", { x: x0 + S - 14, y: y0 + 74, "text-anchor": "end", fill: textColor, "data-fs": 34,
+        "font-weight": "800", class: "repeat-now" });
+      now.textContent = `×${r.after}`;
+      g.append(was, now);
+    } else {
+      const now = svgEl("text", { x: x0 + S / 2, y: y0 + 72, "text-anchor": "middle", fill: "#6e6e73", "data-fs": 30,
+        "font-weight": "700", class: "repeat-now" });
+      now.textContent = `×${r.before}`;
+      g.append(now);
+    }
     svg.append(g);
   }
 

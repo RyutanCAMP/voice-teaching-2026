@@ -102,6 +102,9 @@ class Session:
         self.log: list[tuple[str, str]] = []
         # 承認待ちの候補があるときの文。web/flow.py が承認の有無で選ぶ（承認は Session の外にある）
         self.pending_message = PENDING_MESSAGE
+        # 回数の変更の範囲の確認（ボタンを待っている間だけ。dict）。新しい指示・選び直し・元に戻すで捨てる
+        self.repeat_range: dict | None = None
+        self._range_turn = 0
 
     @classmethod
     def from_file(cls, path: str | Path, **kw) -> "Session":
@@ -132,6 +135,7 @@ class Session:
     # ---- 発話 ----
     def hear(self, text: str, source: str = "text") -> Reply:
         """新しい発話。source（voice / text）は記録だけに使い、結果は変えない。"""
+        self.forget_range()  # 新しい指示：範囲の確認は捨てる（声の「はい」でも確定しない）
         if ut.is_explain_choice(text):
             return self.explain_only(text, source)
         if rc.is_repeat_request(text):
@@ -204,79 +208,126 @@ class Session:
         return v
 
     def _hear_repeat(self, text: str, source: str) -> Reply:
-        """「C00001からC00003の作業を2回から3回にして」：読み取り・聞き返し・候補まで、プログラムだけで行う（Claude は呼ばない）。
+        """「C00001からC00003の作業を2回から3回にして」：読み取り・聞き返し・範囲の確認まで、プログラムだけで行う（Claude は呼ばない）。
 
-        先に今の検査（打ち消し・承認の言葉・ほかの変更との混ざり・疑問の形）をかける。数はジョブから数えて文に入れる。
+        先に今の検査（打ち消し・承認の言葉・ほかの変更との混ざり）をかける。数はジョブから数えて文に入れる。
+        候補はここでは作らない。範囲を示して、人がボタン（confirm_repeat）で確定してから作る（唐川さんの決定 2026-11-03）。
+        疑問の形（「…3回にして？」）も、範囲の確認のボタン1回で確かめる（QA P2-9）。
         この発話では、解釈の係のほかの提案を受け付けない（_locked）。
         """
         facts = ut.read_utterance(text)
+        body = facts.question_text or text
         # 読めなかった言葉は、回数の変更の決まった形で読めなかった言葉だけ（「から」「作業」を読めない言葉として示さない）
-        facts = replace(facts, unknown_words=rc.leftovers(facts.question_text or text) if rc.read(facts.question_text or text) is None else ())
+        facts = replace(facts, unknown_words=rc.leftovers(body) if rc.read(body) is None else ())
         self.facts = facts
         self._locked = True
         self.forget_question()
         self._log("発話", f"{'音声' if source == 'voice' else '文字'}：{text}")
         self.updown_status()
+
+        def stop(msg: str) -> Reply:
+            return self._reply("stop", msg, facts=facts)
+
+        def stop_job(msg: str) -> Reply:  # ジョブを調べて止まったとき：対象外のことも短く添える
+            return stop(f"{msg.rstrip('。')}。{jbi.REPEAT_SCOPE_NOTE}")
+
         found = facts.negations + facts.undo_negations
         if found:
-            return self._reply("stop", ut.NEGATION_MESSAGE.format(word="".join(f"「{w}」" for w in found)), facts=facts)
+            return stop(ut.NEGATION_MESSAGE.format(word="".join(f"「{w}」" for w in found)))
         if facts.stop_reasons:
-            return self._reply("stop", "。".join(facts.stop_reasons), facts=facts)
+            return stop("。".join(facts.stop_reasons))
         if (facts.amounts or set(facts.kinds) & {"move", "speed", "compare", "undo", "select"} or facts.axes
                 or facts.sides or facts.vertical or facts.relative_dir or facts.place_ref):
-            return self._reply("stop", rc.MIXED_MESSAGE, facts=facts)
-        if facts.question:
-            t = facts.question_text
-            if t and rc.read(t) is not None:
-                return self._reply("ask", f"「{t}」でよいですか？", facts=facts, choices=((t, t),))
-            return self._reply("ask", ut.QUESTION_RESTATE_MESSAGE, facts=facts)
-        req = rc.read(text)
+            return stop(rc.MIXED_MESSAGE)
+        if rc.has_decimal_count(body):
+            return stop(rc.DECIMAL_MESSAGE)
+        req = rc.read(body)
         if req is None:
-            return self._reply("ask", rc.unknown_message(rc.leftovers(text)), facts=facts)
+            return self._reply("ask", rc.unknown_message(rc.leftovers(body)), facts=facts)
         if self.candidate is not None:
-            return self._reply("stop", self.pending_message, facts=facts)
-        try:
-            block = self._job.find_repeat(req.start, req.end)
-        except jbi.JbiError as e:
-            return self._reply("stop", str(e), facts=facts)
+            return stop(self.pending_message)
+        if req.start is not None:
+            try:
+                block = self._job.find_repeat(req.start, req.end)
+            except jbi.JbiError as e:
+                return stop_job(str(e))
+        else:
+            # 範囲を言わない：ジョブに数えられる区間が1つだけなら、その区間を示して確かめる（QA P1-1）
+            blocks = self._job.find_repeat_blocks()
+            if len(blocks) != 1:
+                return self._reply("ask", rc.RANGE_NEEDED, facts=facts)
+            block = blocks[0]
+        start, end = block.positions[0], block.positions[-1]
         n, target = block.count, block.target
         ok = lambda m: jbi.repeat_count_problem(n, m, target) is None  # noqa: E731
-        in_range = lambda m: jbi.REPEAT_MIN_TOTAL <= m <= jbi.REPEAT_MAX_TOTAL  # noqa: E731
         if req.add is not None:
-            # 「3回追加して」：合計か、足すのかが分からない。合計が 1〜5 回を超えるものは選択肢に出さない
+            # 「3回追加して」：合計か、足すのかが分からない。増やす向きで、押せば候補になるものだけを出す（P1-2・P2-1・P2-2）
             k = req.add
-            choices = tuple(c for c in (
-                (f"合計{k}回にする", rc.canonical(req.start, req.end, n, k)) if in_range(k) else None,
-                (f"{k}回足して合計{n + k}回にする", rc.canonical(req.start, req.end, n, n + k)) if in_range(n + k) else None,
-            ) if c is not None)
-            if not choices:
-                return self._reply("stop", jbi.repeat_count_problem(n, k, target) or rc.FORM_UNKNOWN, facts=facts)
+            opts = [m for m in dict.fromkeys((k, n + k)) if m > n and ok(m)]
+            if not opts:
+                return stop(jbi.repeat_count_problem(n, n + k, target) or rc.FORM_UNKNOWN)
+            choices = tuple((f"合計{m}回にする" if m == k else f"{k}回足して合計{m}回にする", rc.canonical(start, end, n, m))
+                            for m in opts)
             return self._reply("ask", rc.add_message(target, n, k), facts=facts, choices=choices)
-        total = req.total
-        if not in_range(total):
-            return self._reply("stop", jbi.repeat_count_problem(n, total, target), facts=facts)
+        total = n + 1 if req.one_more else req.total
         if req.said_count is not None and req.said_count != n:
-            choices = tuple((f"合計{m}回にする", rc.canonical(req.start, req.end, n, m)) for m in (n - 1, n + 1) if ok(m))
-            return self._reply("ask", rc.mismatch_message(target, n), facts=facts, choices=choices)
-        if req.said_count is None:
-            why = jbi.repeat_count_problem(n, total, target)
-            if why is not None:
-                return self._reply("stop", why, facts=facts)  # どう答えても止まるものは、聞き返さない
-            return self._reply("ask", rc.confirm_message(target, n, total), facts=facts,
-                               choices=((f"{n}回 → {total}回にする", rc.canonical(req.start, req.end, n, total)),))
+            # 言った今の回数がジョブと違う：言った向きが増やす向きで、押せば候補になるものだけを出す。無ければ止める
+            if total > req.said_count and ok(n + 1):
+                return self._reply("ask", rc.mismatch_message(target, n), facts=facts,
+                                   choices=((f"合計{n + 1}回にする", rc.canonical(start, end, n, n + 1)),))
+            why = jbi.REPEAT_DECREASE_MESSAGE if total < req.said_count else (
+                jbi.repeat_count_problem(n, total, target) or jbi.repeat_count_problem(n, n + 1, target) or "")
+            return stop(f"このジョブでは、{target} は今 {n} 回です。{why}")
+        why = jbi.repeat_count_problem(n, total, target)
+        if why is not None:
+            return stop(why)
         try:
-            change = self._job.plan_repeat(req.start, req.end, total)
+            self._job.plan_repeat(start, end, total)  # 試すだけ（候補はボタンのあと）
         except jbi.JbiError as e:
-            return self._reply("stop", str(e), facts=facts)
+            return stop_job(str(e))
+        self._range_turn += 1
+        texts = tuple(_strip_ending(x) for x in block.cycle_lines)
+        first, last = block.first_line + 1, block.first_line + block.cycle_len
+        self.repeat_range = {
+            "turn": self._range_turn, "start": start, "end": end, "target": target, "total": total, "count": n,
+            "positions": list(block.positions), "cycle_lines": list(texts),
+            "line_nos": list(range(first, last + 1)),
+            "block_line_nos": list(range(first, block.end_line + 1)),
+            "yes_label": rc.RANGE_YES_LABEL, "no_label": rc.RANGE_NO_LABEL, "note": jbi.REPEAT_SCOPE_NOTE,
+        }
+        return self._reply("ask", rc.range_message(first, last, texts, n, block.end_line, total), facts=facts)
+
+    def forget_range(self) -> None:
+        """範囲の確認を捨てる（新しい指示・位置の選び直し・元に戻す）。古いボタンを押しても候補にならない。"""
+        self.repeat_range = None
+
+    def confirm_repeat(self, turn: object, choice: object) -> Reply:
+        """範囲の確認のボタン（画面からだけ）。今の範囲の確認の番号（turn）と合うときだけ使う。声では呼ばない。"""
+        rr = self.repeat_range
+        if (rr is None or isinstance(turn, bool) or not isinstance(turn, int) or turn != rr["turn"]
+                or choice not in ("yes", "no")):
+            return self._reply("stop", rc.RANGE_STALE)
+        self.repeat_range = None
+        if choice == "no":
+            self._log("選択", f"ボタン：{rc.RANGE_NO_LABEL}")
+            return self._reply("ok", rc.RANGE_NO_REPLY)
+        self._log("選択", f"ボタン：{rc.RANGE_YES_LABEL}（{rr['target']}・{rr['line_nos'][0]}〜{rr['line_nos'][-1]}行目）")
+        if self.candidate is not None:
+            return self._reply("stop", self.pending_message)
+        try:
+            change = self._job.plan_repeat(rr["start"], rr["end"], rr["total"])  # 元のジョブから作り直す
+        except jbi.JbiError as e:
+            return self._reply("stop", str(e))
         self.candidate = change
-        self.candidate_utterance = facts.raw
+        self.candidate_utterance = self.facts.raw if self.facts is not None else None
         self.candidate_blocked_reason = None
-        self.candidate_updown = self.updown
+        self.candidate_updown = self.updown_status()
         self._candidate_value_change = False
         self._candidate_position = None  # 位置ごとの候補ではない（位置を選び直すと捨てる）
+        self._locked = True
         c = self._comparison()
         self._log("候補", c.confirmation)
-        return self._reply("ok", c.confirmation, facts=facts, comparison=c, candidate_made=True)
+        return self._reply("ok", c.confirmation, comparison=c, candidate_made=True)
 
     def explain_only(self, text: str, source: str = "text") -> Reply:
         """［説明です］（「〜します」の2択）：何もしない。候補・選択中の位置・元のジョブは変えない（CHECKER_026 M3）。"""
@@ -323,6 +374,7 @@ class Session:
             return self._reply("stop", f"位置 {name} はこのジョブにありません")
         self.selected = name
         self.forget_question()  # 位置の選び直し：前の聞き返しの答えを、この位置に当てない（CHECKER_028 A）
+        self.forget_range()
         msg = f"位置 {name} を選びました"
         if self.candidate is not None and self._candidate_position != name:
             self._discard()
@@ -359,6 +411,7 @@ class Session:
 
     def undo(self) -> Reply:
         self.forget_question()  # 元に戻す・キャンセル：未確定の聞き返しも捨てる（CHECKER_028 A）
+        self.forget_range()
         if self.candidate is None:
             return self._reply("ok", "元に戻す変更候補はありません。元のジョブはそのままです")
         self._discard()
@@ -478,12 +531,15 @@ class Session:
         self.log.append((kind, text))
 
 
+def _strip_ending(line: str) -> str:
+    return line.rstrip("\r\n")
+
+
 def _repeat_comparison(ch: "jbi.RepeatProposal") -> Comparison:
     """回数の変更の比較。数はすべてプログラムが入れる。"""
     head = f"{ch.target} の作業を {ch.before_count}回 → {ch.after_count}回 にします"
     diff = tuple(("+", i + 1, t) for i, t in ch.added) + tuple(("-", i + 1, t) for i, t in ch.removed)
-    how = ("同じ動きを1回ぶん足します（新しい位置・新しい移動の線は作りません）。" if ch.added
-           else "最後の1回ぶんの行を消します（新しい位置・新しい移動の線は作りません）。")
+    how = "同じ動きを1回ぶん足します（新しい位置・新しい移動の線は作りません）。"
     text = f"{head}。{how}これでいいですか？ 承認は画面のボタンで行います"
     return Comparison(
         kind="repeat", target=ch.target, line_number=ch.line_index + 1, before_line="", after_line="",

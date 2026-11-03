@@ -22,7 +22,7 @@ DEMO_C = (Path(__file__).resolve().parent.parent / "samples" / "dummy" / "DEMO_C
 # 一時フォルダの確認済みの設定（DEMO_C_PLACE。conftest.updown_demo_c）を当てる。設定が無いときの動きは tests/test_updown.py
 pytestmark = pytest.mark.usefixtures("updown_demo_c")
 SOURCES = ["voice", "text"]
-REPEAT_STOP = "このアプリでは、動きの追加・繰り返しはできません。位置の修正だけです"
+REPEAT_STOP = ut.REPEAT_STOP_MESSAGE  # 回数の変更（feat/repeat-count）と食い違わない文に直した（QA P1-1）
 
 
 def new():

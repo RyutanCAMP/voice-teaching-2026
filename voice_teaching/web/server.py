@@ -159,6 +159,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/state": lambda r: flow.state(r.get("session_id")),
             # 会話の選択肢のボタン（位置の候補・ほかの位置・方向）。今の選択肢の番号（turn）が合うときだけ。承認はしない
             "/api/dialog": lambda r: flow.choose(r.get("session_id"), r.get("choice"), r.get("turn")),
+            # 回数の変更の範囲の確認のボタン（［この範囲を繰り返す］［違う］）。候補を作るだけで、承認はしない
+            "/api/repeat": lambda r: flow.repeat_choose(r.get("session_id"), r.get("choice"), r.get("turn")),
             # 承認は画面の承認ボタンからだけ。/api/hear からは呼ばない
             "/api/approve": lambda r: flow.approve(r.get("session_id"), r.get("approver")),
             "/api/export": lambda r: flow.export(r.get("session_id")),

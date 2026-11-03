@@ -442,6 +442,32 @@ function applyResult(res, showOk = true) {
     showReply("ok", res.message);
   }
   renderState();
+  renderRepeatRange();
+}
+
+// 回数の変更の範囲の確認（サーバーの state.repeat_range）：［この範囲を繰り返す］［違う］のボタン。声では確定しない。
+// 押すと /api/repeat に、今の確認の番号（turn）と一緒に送る。番号が古ければサーバーが断る
+function renderRepeatRange() {
+  const rr = state.st && state.st.repeat_range;
+  const box = $("reply-message");
+  for (const x of box.querySelectorAll(".range-choices, .range-note")) x.remove();
+  if (!rr || box.hidden) return;
+  const row = el("div", { class: "choices range-choices" });
+  const send = async (choice) => {
+    if (recording()) return;
+    for (const x of row.querySelectorAll("button")) x.disabled = true;  // 2回押しても1回だけ送る
+    const res = await postJson("/api/repeat", { session_id: state.sessionId, choice: choice, turn: rr.turn });
+    applyResult(res);
+    if (res.candidate_made && state.st && state.st.candidate) startPlayback();
+    keepHeadingInView();
+  };
+  const yes = el("button", { type: "button", class: "choice", id: "range-yes" }, rr.yes_label);
+  const no = el("button", { type: "button", class: "choice", id: "range-no" }, rr.no_label);
+  yes.addEventListener("click", () => send("yes"));
+  no.addEventListener("click", () => send("no"));
+  row.append(yes, no);
+  box.append(el("p", { class: "fine range-note" }, rr.note), row);
+  renderSteps();  // 見出し（どちらですか？）を、ボタンに合わせる
 }
 
 function showReply(status, message, choices) {
@@ -921,18 +947,27 @@ function data3d() {
   const v = state.view;
   const c = state.st && state.st.candidate && state.st.candidate.after_positions ? state.st.candidate : null;
   const rep = c && c.kind === "repeat" ? c : null;
+  const rr = state.st && state.st.repeat_range;
+  const blocks = v.repeat_blocks || [];
+  // 回数の印：候補があれば ×2 → ×3。無ければ、読み込んだ直後から今の回数（区間が1つのときだけ）
+  const repeat = rep ? { target: rep.target, positions: rep.repeat.positions, label: repeatCountLabel(rep),
+    before: rep.repeat.before_count, after: rep.repeat.after_count }
+    : blocks.length === 1 ? { target: blocks[0].target, positions: blocks[0].positions, label: `×${blocks[0].count}`,
+      before: blocks[0].count, after: null } : null;
   return {
     points: v.positions.filter((p) => p.xyz),
     segments: rep ? rep.before_segments : v.segments,  // 回数の変更：区間の線に回の番号（cycle）が付いたもの
-    repeat: rep ? { target: rep.target, positions: rep.repeat.positions, label: repeatCountLabel(rep),
-      before: rep.repeat.before_count, after: rep.repeat.after_count } : null,
+    repeat,
+    // 範囲を確かめている間：範囲の線（区間に入る最初の線を除く）を光らせる
+    rangeLines: rr ? rr.block_line_nos.slice(1) : [],
     selected: state.st ? state.st.selected : null,
     after: c ? { points: c.after_positions.filter((p) => p.xyz), segments: c.after_segments, moved: c.moved } : null,
     delta_label: c && !rep ? `${c.target.split(" ")[1]} ${c.delta}mm` : "",
     stopped: !!(c && c.blocked_reason),  // 止まった候補：変更後をオレンジにしない
     blocked: Object.fromEntries(v.positions.filter((p) => !p.shift_check.ok).map((p) => [p.name, p.shift_check.reason])),
     // Claude（モック）が出した位置の候補（確かめている間だけ光らせる。選んではいない）
-    candidates: dialogStep() === "confirm_position" ? state.st.dialog.candidates.map((x) => x.position) : [],
+    candidates: dialogStep() === "confirm_position" ? state.st.dialog.candidates.map((x) => x.position)
+      : rr ? rr.positions : [],  // 回数の変更の範囲の点も、同じ輪で光らせる（選んではいない）
   };
 }
 

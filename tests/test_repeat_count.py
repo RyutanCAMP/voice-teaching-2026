@@ -1,9 +1,10 @@
-"""受入テスト：作業の回数を変える（「C00001からC00003の作業を2回から3回にして」）。実装より先に書いた。
+"""受入テスト：作業の回数を変える（「C00001からC00003の作業を2回から3回にして」）。
 
 設計は docs/REPEAT_COUNT_DESIGN.md。デモ用ジョブは samples/dummy/DEMO_BUTTON_REPEAT.JBI（架空のジョブ）。
 - 区間がジョブの中に続けてそのまま N 回書かれている形だけを数える。JUMP・ラベル・カウンタは扱わない
-- 区間の中は「MOVL 位置 V=数値」（PL なし、またはちょうど PL=0）だけ。ほかの行があれば止める
-- 今が2回以上・±1・合計1〜5回だけ。足すのは最後の回の直後に1回分（同じバイト列）だけ
+- 区間の中は「MOVL 位置 V=数値」（PL なし、またはちょうど PL=0。速度 0 は不可）だけ。ほかの行があれば止める
+- 今が2回以上・+1 回・合計1〜5回だけ。減らす変更は扱わない（唐川さんの決定 2026-11-03）
+- 繰り返す範囲は、人がボタン（［この範囲を繰り返す］）で確定してから候補にする。声の「はい」では確定しない
 - 承認は画面のボタンだけ。出力は合成ジョブだけ。元のジョブは変えない
 - 検査を通ったことは、物理的な安全の保証ではない
 """
@@ -17,20 +18,27 @@ from voice_teaching import repeat_count as rc
 from voice_teaching import utterance as ut
 from voice_teaching.session import Session
 from voice_teaching.web import api
-from voice_teaching.web.flow import WebFlow
+from voice_teaching.web import flow as flow_mod
+from voice_teaching.web.flow import UPDOWN_CHANGED_APPROVE, WebFlow
 
 ROOT = Path(__file__).resolve().parent.parent
 DEMO_PATH = ROOT / "samples" / "dummy" / "DEMO_BUTTON_REPEAT.JBI"
 DEMO = DEMO_PATH.read_bytes()
+DEMO_C = (ROOT / "samples" / "dummy" / "DEMO_C_PLACE.JBI").read_bytes()
 SAY = "C00001からC00003の作業を2回から3回にして"
 CYCLE = [b"MOVL C00001 V=150.0\r\n", b"MOVL C00002 V=30.0\r\n", b"MOVL C00003 V=150.0\r\n"]
 FIXED_WARNINGS = ("同じ動きを1回ぶん足します。新しい位置・新しい移動の線は作りません",
                   "サイクルの時間が長くなります",
                   "検査を通ったことは、物理的な安全の保証ではありません")
+SCOPE = "繰り返すのは移動の行だけです。信号（DOUT）や待ち時間（TIMER）を含む作業は、このプロトタイプでは対象外です"
 
 
 def lines(data: bytes) -> list[bytes]:
     return data.splitlines(keepends=True)
+
+
+FIRST = lines(DEMO).index(CYCLE[0])              # 1回目の最初の行（0 から）
+END = FIRST + 6                                  # 2回目の次の行（0 から）
 
 
 def inst_start(data: bytes) -> int:
@@ -41,8 +49,13 @@ def demo_job() -> jbi.Job:
     return jbi.parse_bytes(DEMO)
 
 
+def one_cycle() -> bytes:
+    """区間が1回だけのジョブ（2回目の3行を消した版。テストの中だけで作る）。"""
+    ls = lines(DEMO)
+    return b"".join(ls[:FIRST + 3] + ls[END:])
+
+
 def variant(*pairs: tuple[bytes, bytes], count: int = 1) -> bytes:
-    """デモ用ジョブの行を書き換えた版（テストの中だけで作る。ファイルにはしない）。"""
     data = DEMO
     for old, new in pairs:
         assert old in data, old
@@ -80,8 +93,8 @@ def counting():
     return Counting()
 
 
-def start(interp=None, data=DEMO, select="C00001"):
-    w = WebFlow(interpreter=interp or ci.MockInterpreter())
+def start(interp=None, data=DEMO, select="C00001", **kw):
+    w = WebFlow(interpreter=interp or ci.MockInterpreter(), **kw)
     r = w.load(data)
     assert r["ok"], r
     sid = r["session_id"]
@@ -92,6 +105,19 @@ def start(interp=None, data=DEMO, select="C00001"):
 
 def cand(r):
     return r["state"]["candidate"]
+
+
+def rng(r):
+    return r["state"]["repeat_range"]
+
+
+def to_candidate(w, sid, text=SAY):
+    """指示 → 範囲の確認 →［この範囲を繰り返す］のボタン。"""
+    r = w.hear(sid, text)
+    assert r["status"] == "ask" and rng(r) is not None and cand(r) is None, r
+    r2 = w.repeat_choose(sid, "yes", rng(r)["turn"])
+    assert r2["status"] == "ok" and r2["candidate_made"] is True, r2
+    return r2
 
 
 # ======================================================================
@@ -110,15 +136,21 @@ def test_demo_job_is_synthetic_ascii_crlf_without_dout_or_wait():
 
 def test_demo_has_the_cycle_written_twice():
     b = demo_job().find_repeat("C00001", "C00003")
-    assert b.positions == ("C00001", "C00002", "C00003")
-    assert b.count == 2
-    assert [x.encode() for x in b.cycle_lines] == CYCLE
-    assert b.first_line == lines(DEMO).index(CYCLE[0])
+    assert b.positions == ("C00001", "C00002", "C00003") and b.count == 2
+    assert [x.encode() for x in b.cycle_lines] == CYCLE and b.first_line == FIRST
+    assert [x.positions for x in demo_job().find_repeat_blocks()] == [("C00001", "C00002", "C00003")]
 
 
-def test_patterns_md_explains_the_demo_job():
-    text = (ROOT / "samples" / "dummy" / "PATTERNS.md").read_text(encoding="utf-8")
-    assert "DEMO_BUTTON_REPEAT.JBI" in text
+def test_docs_explain_the_demo_and_what_is_out_of_scope():
+    for f in (ROOT / "samples" / "dummy" / "PATTERNS.md", ROOT / "docs" / "REPEAT_COUNT_DESIGN.md"):
+        text = f.read_text(encoding="utf-8")
+        assert "DEMO_BUTTON_REPEAT.JBI" in text and SCOPE in text, f
+
+
+def test_view_shows_the_count_from_load():
+    v = api.job_view(DEMO)
+    assert v["repeat_blocks"] == [{"target": "C00001〜C00003", "positions": ["C00001", "C00002", "C00003"], "count": 2}]
+    assert api.job_view(DEMO_C)["repeat_blocks"] == []
 
 
 # ======================================================================
@@ -127,50 +159,35 @@ def test_patterns_md_explains_the_demo_job():
 def test_two_to_three_adds_exactly_one_cycle_after_the_last():
     job = demo_job()
     p = job.plan_repeat("C00001", "C00003", 3)
-    assert p.kind == "repeat" and p.target == "C00001〜C00003"
-    assert (p.before_count, p.after_count) == (2, 3)
+    assert p.kind == "repeat" and p.target == "C00001〜C00003" and (p.before_count, p.after_count) == (2, 3)
     old, new = lines(DEMO), lines(p.new_job.render_bytes())
     assert len(new) == len(old) + 3
-    at = job.find_repeat("C00001", "C00003").first_line + 2 * 3  # 最後の回の直後
-    assert new[:at] == old[:at] and new[at + 3:] == old[at:]
-    assert new[at:at + 3] == CYCLE
-    assert [(i, t) for i, t in p.added] == [(at, "MOVL C00001 V=150.0"), (at + 1, "MOVL C00002 V=30.0"),
-                                           (at + 2, "MOVL C00003 V=150.0")]
+    assert new[:END] == old[:END] and new[END + 3:] == old[END:] and new[END:END + 3] == CYCLE
+    assert list(p.added) == [(END, "MOVL C00001 V=150.0"), (END + 1, "MOVL C00002 V=30.0"), (END + 2, "MOVL C00003 V=150.0")]
     assert p.removed == ()
-    # 位置・ヘッダーは同じ（//INST より前はバイト列ごと同じ）
     k = inst_start(DEMO)
     assert new[:k + 1] == old[:k + 1]
     assert {n: q.values for n, q in p.new_job.positions.items()} == {n: q.values for n, q in job.positions.items()}
-    assert p.new_job.problems == [] and p.new_job.name == "DEMO_BUTTON_REPEAT"
-    assert p.new_job.find_repeat("C00001", "C00003").count == 3
-    # 元のジョブは変わらない
+    assert p.new_job.problems == [] and p.new_job.find_repeat("C00001", "C00003").count == 3
     assert job.render_bytes() == DEMO and DEMO_PATH.read_bytes() == DEMO
-    assert tuple(p.warnings[:3]) == FIXED_WARNINGS
-
-
-def test_three_to_two_removes_the_last_cycle_and_gives_back_the_demo():
-    three = demo_job().plan_repeat("C00001", "C00003", 3).new_job
-    p = three.plan_repeat("C00001", "C00003", 2)
-    assert (p.before_count, p.after_count) == (3, 2)
-    assert p.new_job.render_bytes() == DEMO
-    assert len(p.removed) == 3 and p.added == ()
-    assert "サイクルの時間が短くなります" in p.warnings
-    assert "検査を通ったことは、物理的な安全の保証ではありません" in p.warnings
-
-
-def test_two_to_one_only_removes_lines():
-    p = demo_job().plan_repeat("C00001", "C00003", 1)
-    old, new = lines(DEMO), lines(p.new_job.render_bytes())
-    assert len(new) == len(old) - 3 and p.new_job.find_repeat("C00001", "C00003").count == 1
+    assert tuple(p.warnings[:3]) == FIXED_WARNINGS and SCOPE in p.warnings
 
 
 @pytest.mark.parametrize("total,word", [
-    (2, "同じ"), (4, "1回ずつ"), (6, "1〜5"), (0, "1〜5"), (-1, "1〜5"), (99, "1〜5"),
+    (2, "同じ"), (1, "減らす変更は、このプロトタイプでは扱いません"), (4, "1回ずつ"), (6, "1〜5"), (0, "1〜5"),
+    (-1, "1〜5"), (99, "1〜5"),
 ])
 def test_bad_totals_are_refused(total, word):
     with pytest.raises(jbi.JbiError) as e:
         demo_job().plan_repeat("C00001", "C00003", total)
     assert word in str(e.value)
+
+
+def test_three_to_two_is_refused_decrease_is_not_handled():
+    three = demo_job().plan_repeat("C00001", "C00003", 3).new_job
+    with pytest.raises(jbi.JbiError) as e:
+        three.plan_repeat("C00001", "C00003", 2)
+    assert "減らす変更は、このプロトタイプでは扱いません" in str(e.value)
 
 
 @pytest.mark.parametrize("total", [True, 3.0, "3", None, float("nan")])
@@ -180,15 +197,15 @@ def test_total_must_be_a_plain_int(total):
 
 
 def test_one_cycle_cannot_become_two():
-    # 1回だけのジョブ：区間と区間のつなぎの移動が無く、新しい移動の線ができるので止める
-    one = demo_job().plan_repeat("C00001", "C00003", 1).new_job
-    assert one.find_repeat("C00001", "C00003").count == 1
+    one = jbi.parse_bytes(one_cycle())
+    assert one.problems == [] and one.find_repeat("C00001", "C00003").count == 1
     with pytest.raises(jbi.JbiError) as e:
         one.plan_repeat("C00001", "C00003", 2)
     assert "2回以上" in str(e.value) and "新しい移動の線" in str(e.value)
+    assert one.find_repeat_blocks() == []
 
 
-def test_four_to_five_and_five_is_the_top():
+def test_up_to_five_and_five_is_the_top():
     job = demo_job()
     for n in (3, 4, 5):
         job = job.plan_repeat("C00001", "C00003", n).new_job
@@ -206,21 +223,20 @@ MOVL2 = b"MOVL C00002 V=30.0\r\n"
 
 @pytest.mark.parametrize("name,data,word", [
     ("DOUT（区間の中）", insert_after(DEMO, lines(DEMO).index(MOVL2), b"DOUT OT#(1) ON\r\n"), "DOUT"),
-    ("DOUT（区間と区間の間）", insert_after(DEMO, lines(DEMO).index(CYCLE[2]) + 1, b"DOUT OT#(1) ON\r\n"), "DOUT"),
+    ("DOUT（区間と区間の間）", insert_after(DEMO, FIRST + 3, b"DOUT OT#(1) ON\r\n"), "DOUT"),
     ("TIMER", insert_after(DEMO, lines(DEMO).index(MOVL2) + 1, b"TIMER T=0.50\r\n"), "TIMER"),
-    ("コメント", insert_after(DEMO, lines(DEMO).index(CYCLE[2]) + 1, b"'PUSH AGAIN\r\n"), "コメント"),
+    ("コメント", insert_after(DEMO, FIRST + 3, b"'PUSH AGAIN\r\n"), "コメント"),
     ("MOVJ", variant((b"MOVL C00002 V=30.0", b"MOVJ C00002 VJ=10.00"), count=2), "MOVJ"),
     ("PL=1", variant((b"MOVL C00002 V=30.0", b"MOVL C00002 V=30.0 PL=1"), count=2), "PL=1"),
     ("CR", variant((b"MOVL C00002 V=30.0", b"MOVL C00002 V=30.0 CR=5.0"), count=2), "CR"),
+    ("速度 0", variant((b"MOVL C00002 V=30.0", b"MOVL C00002 V=0.0"), count=2), "速度が 0"),
     ("別の速度", variant((b"MOVL C00003 V=150.0\r\nMOVJ", b"MOVL C00003 V=100.0\r\nMOVJ")), "同じではありません"),
     ("PL=0 の有無が違う", variant((b"MOVL C00003 V=150.0\r\nMOVJ", b"MOVL C00003 V=150.0 PL=0\r\nMOVJ")),
      "同じではありません"),
-    ("区間の外の位置への移動", insert_after(DEMO, lines(DEMO).index(CYCLE[2]) + 1, b"MOVL C00004 V=150.0\r\n"), "C00004"),
+    ("区間の外の位置への移動", insert_after(DEMO, FIRST + 3, b"MOVL C00004 V=150.0\r\n"), "C00004"),
 ])
 def test_other_lines_inside_or_between_cycles_stop(name, data, word):
     job = jbi.parse_bytes(data)
-    if b"MOVL C00004 V=150.0" not in data:
-        assert job.problems == [], (name, job.problems)
     with pytest.raises(jbi.JbiError) as e:
         job.plan_repeat("C00001", "C00003", 3)
     msg = str(e.value)
@@ -235,22 +251,29 @@ def test_dout_inside_says_so_plainly():
     assert "区間の中に DOUT があるため、複写しません" in str(e.value)
 
 
+def test_movj_before_the_block_using_a_block_position_names_the_real_line():
+    # QA P2-7：区間の前の MOVJ が区間の位置を使う
+    data = variant((b"MOVJ C00000 VJ=25.00", b"MOVJ C00001 VJ=25.00"))
+    with pytest.raises(jbi.JbiError) as e:
+        jbi.parse_bytes(data).plan_repeat("C00001", "C00003", 3)
+    assert "区間の位置 C00001 が、区間の外の MOVJ でも使われているため" in str(e.value)
+
+
 def test_wait_stops_because_it_is_not_in_the_allow_list():
     data = insert_after(DEMO, lines(DEMO).index(MOVL2), b"WAIT IN#(1)=ON\r\n")
     job = jbi.parse_bytes(data)
-    assert job.problems  # WAIT は許可リストに無い（推測で増やさない）
+    assert job.problems
     with pytest.raises(jbi.JbiError) as e:
         job.plan_repeat("C00001", "C00003", 3)
     assert "WAIT" in str(e.value)
 
 
 @pytest.mark.parametrize("data,start,end,word", [
-    (DEMO, "C00001", "C00009", "ありません"),            # 位置がジョブに無い
-    (DEMO, "C00003", "C00001", "始まり"),                 # 始まりが終わりより後ろ
+    (DEMO, "C00001", "C00009", "ありません"),
+    (DEMO, "C00003", "C00001", "始まり"),
     (DEMO, "C00001", "C00001", "始まり"),
-    (DEMO, "C00001", "C00002", "C00003"),                 # 並びの間にほかの位置への移動がある
-    (DEMO, "C00000", "C00002", "MOVJ"),                   # 区間の位置へ入る命令が MOVJ
-    # 並びが違う（2回目だけ C00002 と C00003 が入れ替わっている）
+    (DEMO, "C00001", "C00002", "C00003"),
+    (DEMO, "C00000", "C00002", "MOVJ"),
     (variant((b"MOVL C00002 V=30.0\r\nMOVL C00003 V=150.0\r\nMOVJ", b"MOVL C00003 V=150.0\r\nMOVL C00002 V=30.0\r\nMOVJ")),
      "C00001", "C00003", "並び"),
 ])
@@ -261,9 +284,8 @@ def test_no_matching_block_stops(data, start, end, word):
 
 
 def test_jump_and_label_style_loops_are_not_handled():
-    data = variant((b"NOP\r\n", b"NOP\r\n*L1\r\n"))
     with pytest.raises(jbi.JbiError) as e:
-        jbi.parse_bytes(data).plan_repeat("C00001", "C00003", 3)
+        jbi.parse_bytes(variant((b"NOP\r\n", b"NOP\r\n*L1\r\n"))).plan_repeat("C00001", "C00003", 3)
     assert "JUMP" in str(e.value)
 
 
@@ -289,23 +311,38 @@ def test_non_robot_position_is_refused():
     ("C00001〜C00003を3回にして", "C00001", "C00003", None, 3),
     ("C00001～C00003の作業を3回にしてください", "C00001", "C00003", None, 3),
     ("えーと、C00001からC00003を2回から3回に変更して", "C00001", "C00003", 2, 3),
-    ("C00001からC00003までの作業を3回から2回にして", "C00001", "C00003", 3, 2),
     ("ｃ００００１からｃ００００３の作業を２回から３回にして", "C00001", "C00003", 2, 3),
+    # Safety P2-3：短い名前（範囲はボタンで人が確定する）
+    ("C1からC3を3回", "C00001", "C00003", None, 3), ("C1〜C3を3回にして", "C00001", "C00003", None, 3),
+    ("C001からC003を3回にして", "C00001", "C00003", None, 3),
+    # QA P1-1・P1-3：範囲を言わない・自然な言い方・漢数字とかな
+    ("3回にして", None, None, None, 3), ("作業を3回にして", None, None, None, 3), ("2回から3回", None, None, 2, 3),
+    ("2回から3回にして", None, None, 2, 3), ("3回に増やして", None, None, None, 3), ("3回にする", None, None, None, 3),
+    ("3回にしたい", None, None, None, 3), ("3回にしてほしい", None, None, None, 3),
+    ("C00001からC00003を3回繰り返して", "C00001", "C00003", None, 3), ("C00001からC00003を3回やって", "C00001", "C00003", None, 3),
+    ("三回にして", None, None, None, 3), ("二回から三回", None, None, 2, 3), ("さんかいにして", None, None, None, 3),
+    ("3かいにして", None, None, None, 3), ("2回から三回にして", None, None, 2, 3),
 ])
 def test_reads_the_fixed_forms(text, start, end, said, total):
-    assert rc.is_repeat_request(text)
+    assert rc.is_repeat_request(text), text
     r = rc.read(text)
-    assert (r.start, r.end, r.said_count, r.total, r.add) == (start, end, said, total, None)
+    assert r is not None, text
+    assert (r.start, r.end, r.said_count, r.total, r.add, r.one_more) == (start, end, said, total, None, False)
+
+
+def test_one_more():
+    r = rc.read("もう1回ふやして")
+    assert r.one_more and r.total is None
 
 
 @pytest.mark.parametrize("text", ["C00001からC00002を2回移動させて", "2回移動させて", "下に3mm", "C00001を選択して",
-                                  "3回にして", "C00001とC00002を2往復させて"])
+                                  "C00001とC00002を2往復させて", "3回下に3mm"])
 def test_other_sentences_are_not_repeat_requests(text):
     assert not rc.is_repeat_request(text)
 
 
 @pytest.mark.parametrize("text,n", [("C00001からC00003を3回追加して", 3), ("C00001〜C00003を1回ふやして", 1),
-                                     ("C00001からC00003の作業を2回増やして", 2), ("C00001からC00003を1回足して", 1)])
+                                     ("C00001からC00003の作業を2回増やして", 2), ("3回追加して", 3)])
 def test_add_words_are_read_as_ambiguous(text, n):
     r = rc.read(text)
     assert r.add == n and r.total is None
@@ -319,76 +356,173 @@ def test_canonical_text_reads_back():
 
 
 # ======================================================================
-# 5. 画面の流れ（WebFlow）：指示 → 候補 → ボタン承認 → 出力
+# 5. 範囲の確認（ボタンで確定する。唐川さんの決定 2026-11-03）
 # ======================================================================
-def test_end_to_end_two_to_three(counting, tmp_path):
+def test_range_is_shown_then_button_makes_the_candidate(counting):
     w, sid = start(counting)
     r = w.hear(sid, SAY, source="voice")
-    assert r["ok"] and r["status"] == "ok" and r["candidate_made"] is True, r
-    assert counting.decides == 0 and r["tool_calls"] == []  # 解釈の係は呼ばない
+    assert r["status"] == "ask" and cand(r) is None and r["choices"] == [] and counting.decides == 0
+    rr = rng(r)
+    assert rr["target"] == "C00001〜C00003" and rr["positions"] == ["C00001", "C00002", "C00003"]
+    assert rr["line_nos"] == [FIRST + 1, FIRST + 2, FIRST + 3] and rr["block_line_nos"] == list(range(FIRST + 1, END + 1))
+    assert rr["count"] == 2 and rr["total"] == 3
+    assert (rr["yes_label"], rr["no_label"]) == ("この範囲を繰り返す", "違う") and rr["note"] == SCOPE
+    assert r["message"] == (f"この範囲（{FIRST + 1}〜{FIRST + 3}行目：MOVL C00001 V=150.0・MOVL C00002 V=30.0・"
+                            f"MOVL C00003 V=150.0）を繰り返しますか？ 今は2回続けて書かれています（{FIRST + 1}〜{END}行目）。合計3回にします")
+    r2 = w.repeat_choose(sid, "yes", rr["turn"])
+    assert r2["candidate_made"] and cand(r2)["kind"] == "repeat" and rng(r2) is None and counting.decides == 0
+
+
+@pytest.mark.parametrize("word", ["はい", "そうそう", "この範囲を繰り返す", "OK", "うん"])
+def test_voice_does_not_confirm_the_range(word):
+    w, sid = start()
+    r = w.hear(sid, SAY)
+    turn = rng(r)["turn"]
+    r2 = w.hear(sid, word, source="voice")
+    assert cand(r2) is None and rng(r2) is None  # 範囲の確認は捨てた
+    r3 = w.repeat_choose(sid, "yes", turn)  # 古いボタン
+    assert r3["status"] == "stop" and r3["message"] == rc.RANGE_STALE and cand(r3) is None
+
+
+def test_no_button_does_nothing():
+    w, sid = start()
+    r = w.hear(sid, SAY)
+    r2 = w.repeat_choose(sid, "no", rng(r)["turn"])
+    assert r2["status"] == "ok" and r2["message"] == rc.RANGE_NO_REPLY and cand(r2) is None and rng(r2) is None
+    assert w.repeat_choose(sid, "yes", rng(r)["turn"])["status"] == "stop"
+
+
+@pytest.mark.parametrize("act", ["select", "undo", "hear", "dialog"])
+def test_range_is_dropped_by_other_actions(act):
+    w, sid = start()
+    turn = rng(w.hear(sid, SAY))["turn"]
+    if act == "select":
+        w.select(sid, "C00002")
+    elif act == "undo":
+        w.undo(sid)
+    elif act == "hear":
+        w.hear(sid, "比較して")
+    else:
+        w.choose(sid, "other", 0)
+    r = w.repeat_choose(sid, "yes", turn)
+    assert r["status"] == "stop" and cand(r) is None
+
+
+@pytest.mark.parametrize("turn,choice", [(None, "yes"), (True, "yes"), ("1", "yes"), (99, "yes"), (1, "maybe"), (1, None)])
+def test_bad_button_values_are_stale(turn, choice):
+    w, sid = start()
+    w.hear(sid, SAY)
+    r = w.repeat_choose(sid, choice, turn)
+    assert r["status"] == "stop" and cand(r) is None
+
+
+def test_new_range_ask_gets_a_new_turn():
+    w, sid = start()
+    t1 = rng(w.hear(sid, SAY))["turn"]
+    t2 = rng(w.hear(sid, SAY))["turn"]
+    assert t2 != t1
+    assert w.repeat_choose(sid, "yes", t1)["status"] == "stop"
+    assert w.repeat_choose(sid, "yes", t2)["candidate_made"]
+
+
+def test_range_button_on_the_server_route():
+    from voice_teaching.web import server
+    src = Path(server.__file__).read_text(encoding="utf-8")
+    assert '"/api/repeat": lambda r: flow.repeat_choose(' in src
+
+
+# ======================================================================
+# 6. 画面の流れ（WebFlow）：指示 → 範囲の確認 → 候補 → ボタン承認 → 出力
+# ======================================================================
+def test_end_to_end_two_to_three(counting):
+    w, sid = start(counting)
+    r = to_candidate(w, sid)
+    assert counting.decides == 0 and r["tool_calls"] == []
     c = cand(r)
     assert c["kind"] == "repeat" and c["target"] == "C00001〜C00003"
     assert c["heading"] == "C00001〜C00003 の作業を 2回 → 3回 にします"
     assert (c["before_value"], c["after_value"]) == ("2", "3")
     assert [d["sign"] for d in c["diff"]] == ["+", "+", "+"]
     assert [d["text"] for d in c["diff"]] == ["MOVL C00001 V=150.0", "MOVL C00002 V=30.0", "MOVL C00003 V=150.0"]
-    assert c["diff"][0]["line_no"] == lines(DEMO).index(CYCLE[2], lines(DEMO).index(CYCLE[2]) + 1) + 2
-    for wtxt in FIXED_WARNINGS:
+    assert c["diff"][0]["line_no"] == END + 1
+    for wtxt in FIXED_WARNINGS + (SCOPE,):
         assert wtxt in c["warnings"]
     assert c["heard"] == SAY
     st = r["state"]
     assert st["can_approve"] is True and st["approval"] is None and st["can_export"] is False
     assert "2回 → 3回" in st["confirmation_text"] and "承認は画面のボタン" in st["confirmation_text"]
-
     a = w.approve(sid, "e2e確認")
     assert a["ok"] is True, a
-    assert a["state"]["approval"]["approved_by"] == "e2e確認" and a["state"]["can_export"] is True
     x = w.export(sid)
-    assert x["ok"] is True, x
-    assert x["file_name"] == "DEMO_BUTTON_REPEAT_SIM.JBI.txt"
-    out = Path(x["path"]).read_bytes()
-    old, new = lines(DEMO), lines(out)
-    assert len(new) == len(old) + 3
-    diff_name = [i for i, (p, q) in enumerate(zip(old, new)) if p != q]
-    assert new[1] == b"//NAME DEMO_BUTTON_REPEAT_SIM\r\n" and diff_name[0] == 1
-    assert b"".join(new[:1] + new[2:]) == b"".join(
-        old[:1] + old[2:lines(DEMO).index(CYCLE[2], lines(DEMO).index(CYCLE[2]) + 1) + 1] + CYCLE
-        + old[lines(DEMO).index(CYCLE[2], lines(DEMO).index(CYCLE[2]) + 1) + 1:])
-    assert DEMO_PATH.read_bytes() == DEMO  # 元のジョブは変わらない
-    assert jbi.parse_bytes(out).find_repeat("C00001", "C00003").count == 3
+    assert x["ok"] is True and x["file_name"] == "DEMO_BUTTON_REPEAT_SIM.JBI.txt", x
+    out = lines(Path(x["path"]).read_bytes())
+    old = lines(DEMO)
+    assert out[1] == b"//NAME DEMO_BUTTON_REPEAT_SIM\r\n"
+    assert out[:1] + out[2:] == old[:1] + old[2:END] + CYCLE + old[END:]
+    assert DEMO_PATH.read_bytes() == DEMO
 
 
-def test_three_to_two_via_flow_is_refused_on_the_demo_because_it_has_two():
+def test_range_less_sentence_on_the_demo_goes_to_the_range_button():
+    # QA P1-1：範囲を言わなくても、区間が1つだけなら範囲の確認へ
+    for text in ("3回にして", "作業を3回にして", "2回から3回", "2回から3回にして", "C1からC3を3回", "C001からC003を3回にして",
+                 "C00001からC00003を3回繰り返して", "C00001からC00003を3回やって", "三回にして", "さんかいにして",
+                 "3回に増やして", "もう1回ふやして", "C00001からC00003の作業を2回から3回にして？"):
+        w, sid = start()
+        r = w.hear(sid, text)
+        assert r["status"] == "ask" and rng(r) is not None and rng(r)["total"] == 3, (text, r["message"])
+
+
+def test_range_less_sentence_without_a_block_asks_for_the_range():
+    w, sid = start(data=DEMO_C)
+    r = w.hear(sid, "3回にして")
+    assert r["status"] == "ask" and r["message"] == rc.RANGE_NEEDED and rng(r) is None and cand(r) is None
+
+
+def test_short_names_not_in_the_job_stop():
     w, sid = start()
-    r = w.hear(sid, "C00001からC00003の作業を3回から2回にして")
-    assert r["status"] == "ask" and cand(r) is None
-    assert "このジョブでは、C00001〜C00003 は今 2 回です。何回にしますか？" in r["message"]
-    assert [c["text"] for c in r["choices"]] == [rc.canonical("C00001", "C00003", 2, 1),
-                                                 rc.canonical("C00001", "C00003", 2, 3)]
+    r = w.hear(sid, "C1からC9を3回にして")
+    assert r["status"] == "stop" and "C00005" in r["message"] and "ありません" in r["message"]
+
+
+def test_decimal_count_stops():
+    w, sid = start()
+    r = w.hear(sid, "C00001からC00003を2.5回にして")
+    assert r["status"] == "stop" and r["message"] == rc.DECIMAL_MESSAGE
+
+
+def test_unknown_form_shows_the_example_first():
+    w, sid = start()
+    r = w.hear(sid, "C00001からC00003のバイオを3回にして")
+    assert r["status"] == "ask" and r["message"].startswith(rc.FORM_UNKNOWN) and "「バイオ」" in r["message"]
+    assert r["choices"] == [] and rng(r) is None
+    assert r["facts"]["unknown_words"] == ["バイオ"]
+
+
+def test_heard_sentence_does_not_mark_the_fixed_words_as_unknown():
+    w, sid = start()
+    assert w.hear(sid, SAY)["facts"]["unknown_words"] == []
 
 
 @pytest.mark.parametrize("text", ["はい", "承認して", "OK", "承認"])
 def test_voice_yes_does_not_approve(text):
     w, sid = start()
-    assert w.hear(sid, SAY)["candidate_made"]
+    to_candidate(w, sid)
     r = w.hear(sid, text, source="voice")
-    assert r["state"]["approval"] is None and r["state"]["can_export"] is False
-    x = w.export(sid)
-    assert x["ok"] is False
-
-
-def test_new_instruction_after_approval_cancels_it():
-    w, sid = start()
-    w.hear(sid, SAY)
-    assert w.approve(sid, "確認者")["ok"]
-    r = w.hear(sid, "比較して")
     assert r["state"]["approval"] is None and r["state"]["can_export"] is False
     assert w.export(sid)["ok"] is False
 
 
+def test_new_instruction_after_approval_cancels_it():
+    w, sid = start()
+    to_candidate(w, sid)
+    assert w.approve(sid, "確認者")["ok"]
+    r = w.hear(sid, "比較して")
+    assert r["state"]["approval"] is None and w.export(sid)["ok"] is False
+
+
 def test_export_needs_approval(tmp_path):
     w, sid = start()
-    w.hear(sid, SAY)
+    to_candidate(w, sid)
     x = w.export(sid)
     assert x["ok"] is False and "承認" in x["error"]
     assert not (tmp_path / "sim").exists() or list((tmp_path / "sim").iterdir()) == []
@@ -396,16 +530,15 @@ def test_export_needs_approval(tmp_path):
 
 def test_approve_needs_a_name():
     w, sid = start()
-    w.hear(sid, SAY)
+    to_candidate(w, sid)
     assert w.approve(sid, "  ")["ok"] is False
 
 
 def test_non_synthetic_job_is_never_exported(tmp_path):
-    # 合成ジョブ（samples/dummy とバイト単位で一致）でない、同じ形のジョブ：候補・承認はできても、出力しない
     data = variant((b"//NAME DEMO_BUTTON_REPEAT", b"//NAME SOME_REAL_JOB"))
     assert not sim._is_synthetic(data)
     w, sid = start(data=data)
-    assert w.hear(sid, SAY)["candidate_made"]
+    to_candidate(w, sid)
     w.approve(sid, "確認者")
     x = w.export(sid)
     assert x["ok"] is False and "合成ジョブ" in x["error"]
@@ -414,60 +547,84 @@ def test_non_synthetic_job_is_never_exported(tmp_path):
 
 def test_undo_discards_and_keeps_the_original():
     w, sid = start()
-    w.hear(sid, SAY)
-    r = w.undo(sid)
-    assert cand(r) is None
+    to_candidate(w, sid)
+    assert cand(w.undo(sid)) is None
     assert w._entries[sid].session.original_bytes == DEMO
 
 
 def test_pending_candidate_blocks_another_repeat_request(counting):
     w, sid = start(counting)
-    first = cand(w.hear(sid, SAY))
-    r = w.hear(sid, "C00001からC00003の作業を3回から4回にして")
-    assert r["status"] == "stop" and "承認待ち" in r["message"]
+    first = cand(to_candidate(w, sid))
+    r = w.hear(sid, "C00001からC00003の作業を2回から3回にして")
+    assert r["status"] == "stop" and "承認待ち" in r["message"] and rng(r) is None
     assert cand(r)["diff"] == first["diff"] and counting.decides == 0
 
 
-# ---- 聞き返し ----
+# ---- P1-5：回数の変更の承認でも、上下の向きの設定の変化・中身の食い違いで断る ----
+def test_updown_change_blocks_repeat_approval(make_updown):
+    path = make_updown("DEMO_BUTTON_REPEAT.JBI")
+    w, sid = start(updown_config=path)
+    to_candidate(w, sid)
+    assert w._entries[sid].session.candidate_updown.confirmed  # 候補を作ったときは確認済み
+    Path(path).write_bytes(Path(path).read_bytes() + b"\n")  # 設定が1バイトでも変われば、照合の結果が変わる
+    a = w.approve(sid, "確認者")
+    assert a["ok"] is False and a["error"] == UPDOWN_CHANGED_APPROVE
+    assert w.export(sid)["ok"] is False
+
+
+def test_repeat_approval_refuses_when_the_rebuilt_bytes_differ(monkeypatch):
+    w, sid = start()
+    to_candidate(w, sid)
+    real = sim.simulate_repeat
+
+    def tampered(job, start_, end_, total):
+        sp = real(job, start_, end_, total)
+        return sim.SimRepeatProposal(**{**sp.__dict__, "new_bytes": sp.new_bytes + b"X"})
+    monkeypatch.setattr(flow_mod.sim, "simulate_repeat", tampered)
+    a = w.approve(sid, "確認者")
+    assert a["ok"] is False and "合わない" in a["error"]
+
+
+# ---- 聞き返し・止める（P1-2・Safety P2-1・P2-2：押せば必ず止まる・逆向きの選択肢は出さない） ----
 def test_said_count_differs_from_the_job(counting):
     w, sid = start(counting)
     r = w.hear(sid, "C00001からC00003の作業を3回から4回にして")
     assert r["status"] == "ask" and cand(r) is None and counting.decides == 0
-    assert r["message"].startswith("このジョブでは、C00001〜C00003 は今 2 回です。何回にしますか？")
-
-
-def test_count_not_said_is_confirmed_first():
-    w, sid = start()
-    r = w.hear(sid, "C00001〜C00003を3回にして")
-    assert r["status"] == "ask" and cand(r) is None
-    assert r["message"] == "このジョブでは、C00001〜C00003 は今 2 回です。2回 → 3回 にしますか？"
+    assert r["message"] == "このジョブでは、C00001〜C00003 は今 2 回です。何回にしますか？"
     assert [c["text"] for c in r["choices"]] == [SAY]
-    r2 = w.hear(sid, r["choices"][0]["text"])
-    assert r2["candidate_made"] and cand(r2)["after_value"] == "3"
+
+
+@pytest.mark.parametrize("text", ["C00001からC00003の作業を3回から2回にして", "C00001からC00003の作業を2回から1回にして",
+                                  "C00001からC00003を1回にして"])
+def test_decrease_is_stopped_without_choices(text):
+    w, sid = start()
+    r = w.hear(sid, text)
+    assert r["status"] == "stop" and r["choices"] == [] and cand(r) is None and rng(r) is None
+    assert "減らす変更は、このプロトタイプでは扱いません" in r["message"]
 
 
 @pytest.mark.parametrize("text,labels,totals", [
-    ("C00001からC00003を3回追加して", ["合計3回にする", "3回足して合計5回にする"], [3, 5]),
-    ("C00001からC00003を4回ふやして", ["合計4回にする"], [4]),        # 2+4=6 は範囲の外：出さない
-    ("C00001からC00003を1回増やして", ["合計1回にする", "1回足して合計3回にする"], [1, 3]),
+    ("C00001からC00003を3回追加して", ["合計3回にする"], [3]),           # 2+3=5 は ±1 でないので出さない
+    ("C00001からC00003を1回増やして", ["1回足して合計3回にする"], [3]),  # 合計1回（減らす）は出さない
+    ("3回追加して", ["合計3回にする"], [3]),
 ])
-def test_add_words_ask_total_or_added(text, labels, totals):
+def test_add_words_ask_only_choices_that_would_work(text, labels, totals):
     w, sid = start()
     r = w.hear(sid, text)
-    assert r["status"] == "ask" and cand(r) is None
-    assert "今 2 回" in r["message"]
+    assert r["status"] == "ask" and cand(r) is None and "今 2 回" in r["message"]
     assert [c["label"] for c in r["choices"]] == labels
     assert [c["text"] for c in r["choices"]] == [rc.canonical("C00001", "C00003", 2, n) for n in totals]
+    r2 = w.hear(sid, r["choices"][0]["text"])
+    assert rng(r2) is not None  # 押すと範囲の確認へ（止まらない）
 
 
-def test_add_choice_beyond_plus_one_then_stops():
+@pytest.mark.parametrize("text", ["C00001からC00003を4回ふやして", "C00001からC00003を9回追加して"])
+def test_add_words_with_no_working_choice_stop(text):
     w, sid = start()
-    r = w.hear(sid, "C00001からC00003を3回追加して")
-    r2 = w.hear(sid, r["choices"][1]["text"])  # 合計5回：±1 ではないので止める
-    assert r2["status"] == "stop" and cand(r2) is None and "1回ずつ" in r2["message"]
+    r = w.hear(sid, text)
+    assert r["status"] == "stop" and r["choices"] == [] and cand(r) is None
 
 
-# ---- 止める ----
 @pytest.mark.parametrize("text,word", [
     ("C00001からC00003の作業を2回から2回にして", "同じ"),
     ("C00001からC00003の作業を2回から6回にして", "1〜5"),
@@ -477,24 +634,32 @@ def test_add_choice_beyond_plus_one_then_stops():
     ("C00001〜C00003を6回にして", "1〜5"),
     ("C00001からC00009の作業を2回から3回にして", "ありません"),
 ])
-def test_refused_counts_stop_without_candidate(text, word, counting):
+def test_refused_counts_stop_without_choices(text, word, counting):
     w, sid = start(counting)
     r = w.hear(sid, text)
-    assert r["status"] == "stop" and cand(r) is None, r
+    assert r["status"] == "stop" and r["choices"] == [] and cand(r) is None, r
     assert word in r["message"] and counting.decides == 0
 
 
-def test_one_to_two_on_a_one_cycle_job_stops(tmp_path):
-    one = demo_job().plan_repeat("C00001", "C00003", 1).new_job.render_bytes()
-    w, sid = start(data=one)
-    r = w.hear(sid, "C00001からC00003の作業を1回から2回にして")
-    assert r["status"] == "stop" and cand(r) is None and "2回以上" in r["message"]
+@pytest.mark.parametrize("text", ["C00001からC00003の作業を1回から2回にして", "C00001からC00003の作業を1回から1回にして",
+                                  "C00001からC00003を2回にして"])
+def test_one_cycle_job_stops_without_dead_end_choices(text):
+    w, sid = start(data=one_cycle())
+    r = w.hear(sid, text)
+    assert r["status"] == "stop" and r["choices"] == [] and cand(r) is None and rng(r) is None, r["message"]
 
 
-def test_said_one_to_two_on_the_demo_asks():
+def test_said_one_to_two_on_the_demo_offers_only_three():
     w, sid = start()
     r = w.hear(sid, "C00001からC00003の作業を1回から2回にして")
-    assert r["status"] == "ask" and "今 2 回" in r["message"] and cand(r) is None
+    assert r["status"] == "ask" and "今 2 回" in r["message"] and [c["text"] for c in r["choices"]] == [SAY]
+
+
+def test_job_reason_stop_adds_the_scope_note():
+    data = insert_after(DEMO, lines(DEMO).index(MOVL2), b"DOUT OT#(1) ON\r\n")
+    w, sid = start(data=data)
+    r = w.hear(sid, SAY)
+    assert r["status"] == "stop" and "DOUT" in r["message"] and SCOPE in r["message"]
 
 
 @pytest.mark.parametrize("text", ["C00001からC00003の作業を3回にしないで", "C00001からC00003を3回にしなくていい",
@@ -502,23 +667,14 @@ def test_said_one_to_two_on_the_demo_asks():
 def test_negation_stops(text):
     w, sid = start()
     r = w.hear(sid, text)
-    assert r["status"] == "stop" and cand(r) is None and "打ち消し" in r["message"]
+    assert r["status"] == "stop" and cand(r) is None and rng(r) is None and "打ち消し" in r["message"]
 
 
-@pytest.mark.parametrize("text,word", [("C00001からC00003のバイオを3回にして", "バイオ"),
-                                        ("C00001からC00003の作業をなんか3回にして", "なんか")])
-def test_unknown_words_ask(text, word):
-    w, sid = start()
-    r = w.hear(sid, text)
-    assert r["status"] == "ask" and cand(r) is None and f"「{word}」" in r["message"]
-    assert r["choices"] == []
-
-
-def test_question_form_is_confirmed_not_made():
+def test_question_form_goes_straight_to_the_range_button():
+    # QA P2-9：2回聞き返さず、範囲の確認のボタン1回で確かめる（候補はボタンのあと）
     w, sid = start()
     r = w.hear(sid, "C00001からC00003の作業を2回から3回にして？")
-    assert r["status"] == "ask" and cand(r) is None
-    assert [c["text"] for c in r["choices"]] == [SAY]
+    assert r["status"] == "ask" and rng(r) is not None and cand(r) is None
 
 
 @pytest.mark.parametrize("text", ["C00001からC00003の作業を3回にしてZプラス3mm", "C00001からC00003を3回にして速度を10%上げて",
@@ -527,8 +683,7 @@ def test_question_form_is_confirmed_not_made():
 def test_mixed_with_other_changes_stops(text, counting):
     w, sid = start(counting)
     r = w.hear(sid, text)
-    assert r["status"] == "stop" and cand(r) is None and "1つ" in r["message"]
-    assert counting.decides == 0
+    assert r["status"] == "stop" and cand(r) is None and "1つ" in r["message"] and counting.decides == 0
 
 
 def test_approve_word_in_the_same_sentence_stops():
@@ -537,106 +692,110 @@ def test_approve_word_in_the_same_sentence_stops():
     assert r["status"] == "stop" and cand(r) is None and r["message"] == ut.APPROVE_MESSAGE
 
 
-@pytest.mark.parametrize("data,word", [
-    (insert_after(DEMO, lines(DEMO).index(MOVL2), b"DOUT OT#(1) ON\r\n"), "DOUT"),
-    (variant((b"MOVL C00002 V=30.0", b"MOVL C00002 V=30.0 PL=1"), count=2), "PL=1"),
-])
-def test_flow_stops_with_the_jbi_reason(data, word):
-    w, sid = start(data=data)
-    r = w.hear(sid, SAY)
-    assert r["status"] == "stop" and cand(r) is None and word in r["message"]
+def test_old_repeat_message_no_longer_contradicts_the_feature():
+    assert "動きの追加・繰り返しはできません" not in ut.REPEAT_STOP_MESSAGE
+    assert "範囲" in ut.REPEAT_STOP_MESSAGE
 
 
-def test_no_assertive_words_anywhere(counting):
-    w, sid = start(counting)
-    msgs = []
+def test_no_assertive_words_anywhere():
+    msgs = [rc.RANGE_NEEDED, rc.RANGE_STALE, rc.RANGE_NO_REPLY, rc.FORM_UNKNOWN, rc.DECIMAL_MESSAGE, SCOPE,
+            ut.REPEAT_STOP_MESSAGE]
     for t in (SAY, "C00001〜C00003を3回にして", "C00001からC00003を3回追加して"):
-        w2, sid2 = start()
-        r = w2.hear(sid2, t)
+        w, sid = start()
+        r = w.hear(sid, t)
         msgs += [r["message"]] + [c["label"] for c in r["choices"]]
-        if cand(r):
-            msgs += cand(r)["warnings"] + [cand(r)["heading"], r["state"]["confirmation_text"]]
-    assert msgs and not any(ut.contains_forbidden(m) for m in msgs)
+    w, sid = start()
+    r = to_candidate(w, sid)
+    msgs += cand(r)["warnings"] + [cand(r)["heading"], r["state"]["confirmation_text"]]
+    assert not any(ut.contains_forbidden(m) for m in msgs)
 
 
 # ======================================================================
-# 6. Session（流れの下の層）
+# 7. 候補を作る経路（Safety P2-5：ソースの形だけでなく、動きで確かめる）
 # ======================================================================
+def test_repeat_candidate_path_does_not_use_plan_shift_or_the_interpreter(monkeypatch, counting):
+    def broken(*a, **k):
+        raise AssertionError("回数の変更の経路で plan_shift が呼ばれました")
+    calls = []
+    real_confirm = Session.confirm_repeat
+
+    def spy(self, turn, choice):
+        calls.append((turn, choice))
+        return real_confirm(self, turn, choice)
+    monkeypatch.setattr(Session, "confirm_repeat", spy)
+    w, sid = start(counting, select=None)
+    monkeypatch.setattr(jbi.Job, "plan_shift", broken)  # 読み込んだあと（読み込みの表示は位置の検査を試すため）
+    r = w.hear(sid, SAY)
+    assert calls == [] and cand(r) is None  # 指示だけでは候補を作らない
+    r2 = w.repeat_choose(sid, "yes", rng(r)["turn"])
+    assert len(calls) == 1 and r2["candidate_made"] and counting.decides == 0
+    s = w._entries[sid].session
+    assert {n: p.values for n, p in s.candidate.new_job.positions.items()} == \
+        {n: p.values for n, p in s.original.positions.items()}  # 位置の値は変わらない
+
+
 def test_session_candidate_keeps_the_original():
     s = Session(demo_job())
     r = s.hear(SAY)
-    assert r.status == "ok" and r.candidate_made
-    assert s.candidate.kind == "repeat" and s.original_bytes == DEMO and s.original.render_bytes() == DEMO
+    assert r.status == "ask" and s.candidate is None and s.repeat_range is not None
     # この発話では、ほかの提案（Claude の道具の呼び出し）を受け付けない
     assert s.propose({"position": "C00001", "axis": "Z", "delta_mm": 1}).status == "stop"
+    r2 = s.confirm_repeat(s.repeat_range["turn"], "yes")
+    assert r2.candidate_made and s.candidate.kind == "repeat" and s.original_bytes == DEMO
     assert s.compare().comparison.kind == "repeat"
 
 
 # ======================================================================
-# 7. 図のデータ：変更前後の回数・区間の線ごとの回・MOVJ の kind
+# 8. 図のデータ
 # ======================================================================
 def test_figure_data_counts_and_kinds():
     w, sid = start()
-    c = cand(w.hear(sid, SAY))
+    c = cand(to_candidate(w, sid))
     rep = c["repeat"]
-    assert rep["before_count"] == 2 and rep["after_count"] == 3
-    assert rep["positions"] == ["C00001", "C00002", "C00003"]
+    assert rep["before_count"] == 2 and rep["after_count"] == 3 and rep["positions"] == ["C00001", "C00002", "C00003"]
     before, after = c["before_segments"], c["after_segments"]
-    # C00000→C00001（1回目に入る）… C00003→C00001（2回目に入る、つなぎの移動）… C00003→C00004（MOVJ・回の外）
     assert [s["cycle"] for s in before] == [1, 1, 1, 2, 2, 2, None]
     assert [s["cycle"] for s in after] == [1, 1, 1, 2, 2, 2, 3, 3, 3, None]
-    assert after[-1]["kind"] == "movj" and before[-1]["kind"] == "movj"  # MOVJ は直線（movl）にしない
+    assert after[-1]["kind"] == "movj" and before[-1]["kind"] == "movj"
     assert all(s["kind"] == "movl" for s in after if s["cycle"])
-    # 新しい位置は作らない（変更後の位置は変更前と同じ）
-    view = api.job_view(DEMO)
-    assert [p["xyz"] for p in c["after_positions"]] == [p["xyz"] for p in view["positions"]]
+    assert [p["xyz"] for p in c["after_positions"]] == [p["xyz"] for p in api.job_view(DEMO)["positions"]]
     assert c["moved"] is None
-    # 足した回の線は、元からある線（同じ位置の組）だけ
-    old_pairs = {(s["from"], s["to"]) for s in before}
-    assert {(s["from"], s["to"]) for s in after} == old_pairs
+    assert {(s["from"], s["to"]) for s in after} == {(s["from"], s["to"]) for s in before}
 
 
 # ======================================================================
-# 8. つなぎの移動を暗黙に作らない（唐川さんの追加の指示 2026-11-03）
-#    変更後の移動の区間（直前の移動の行き先 → 命令の行）が、すべて変更前のジョブにあること
+# 9. つなぎの移動を暗黙に作らない（唐川さんの追加の指示 2026-11-03）
 # ======================================================================
 def test_two_to_three_has_no_new_segment_and_says_so():
     job = demo_job()
     p = job.plan_repeat("C00001", "C00003", 3)
     assert jbi.new_move_segments(job, p.new_job) == []
-    assert len(jbi.move_segments(p.new_job)) == len(jbi.move_segments(job)) + 3  # 区間の数は増えてよい
+    assert len(jbi.move_segments(p.new_job)) == len(jbi.move_segments(job)) + 3
     note = [w for w in p.warnings if w.startswith("新しい移動の区間はありません")]
-    assert note and "6 種類" in note[0]  # 初めの MOVJ C00000・C00000→C00001・C00001→C00002・C00002→C00003・C00003→C00001・C00003→C00004
+    assert note and "6 種類" in note[0]
 
 
 def test_entry_and_exit_moves_are_unchanged():
-    job = demo_job()
-    p = job.plan_repeat("C00001", "C00003", 3)
+    p = demo_job().plan_repeat("C00001", "C00003", 3)
     segs = {i: (a, t) for a, t, i in jbi.move_segments(p.new_job)}
     assert segs[p.new_block.first_line] == ("C00000", "MOVL C00001 V=150.0")
     assert segs[p.new_block.end_line] == ("C00003", "MOVJ C00004 VJ=25.00")
 
 
 def test_one_to_two_would_make_a_new_connector():
-    # 1回のジョブを手で2回にした形：C00003 → C00001 のつなぎの移動が、今のジョブに無い
-    one = demo_job().plan_repeat("C00001", "C00003", 1).new_job
-    two = jbi.parse_bytes(DEMO)
+    one, two = jbi.parse_bytes(one_cycle()), jbi.parse_bytes(DEMO)
     fresh = jbi.new_move_segments(one, two)
     assert [(a, t) for a, t, _ in fresh] == [("C00003", "MOVL C00001 V=150.0")]
     msg = jbi.new_segment_message(fresh[0])
     assert msg.startswith("C00003 から C00001 への移動") and "今のジョブにありません" in msg and "回数は変えません" in msg
-    with pytest.raises(jbi.JbiError):
-        one.plan_repeat("C00001", "C00003", 2)
 
 
 def test_guard_stops_even_if_a_new_segment_slipped_through(monkeypatch):
-    # 区間の数え方を通っても、変更後に新しい区間があれば候補を作らない（独立の検査）
     real = jbi.move_segments
+
     def fake(job):
         segs = real(job)
-        if len(segs) > 8:  # 変更後のジョブだけ
-            segs = segs + [("C00004", "MOVL C00001 V=150.0", 999)]
-        return segs
+        return segs + [("C00004", "MOVL C00001 V=150.0", 999)] if len(segs) > 8 else segs
     monkeypatch.setattr(jbi, "move_segments", fake)
     with pytest.raises(jbi.JbiError) as e:
         demo_job().plan_repeat("C00001", "C00003", 3)
@@ -644,8 +803,7 @@ def test_guard_stops_even_if_a_new_segment_slipped_through(monkeypatch):
 
 
 @pytest.mark.parametrize("data", [
-    insert_after(DEMO, lines(DEMO).index(CYCLE[2]) + 1, b"MOVL C00004 V=150.0\r\n"),   # 区間の間に別の移動
-    # 最後の回のあとが区間の始点へ戻る（C00001 の行がもう1つ。区間の行の数が合わない）
+    insert_after(DEMO, FIRST + 3, b"MOVL C00004 V=150.0\r\n"),
     variant((b"MOVJ C00004 VJ=25.00", b"MOVL C00001 V=150.0\r\nMOVJ C00004 VJ=25.00")),
 ])
 def test_shapes_without_a_known_connector_are_refused(data):
@@ -655,15 +813,17 @@ def test_shapes_without_a_known_connector_are_refused(data):
 
 def test_flow_shows_the_no_new_segment_fact():
     w, sid = start()
-    c = cand(w.hear(sid, SAY))
-    assert any(x.startswith("新しい移動の区間はありません") for x in c["warnings"])
+    assert any(x.startswith("新しい移動の区間はありません") for x in cand(to_candidate(w, sid))["warnings"])
 
 
-def test_heard_sentence_does_not_mark_the_fixed_words_as_unknown():
-    # 「から」「作業」「にして」を、読めなかった言葉として画面で目立たせない（回数の変更の決まった形で読めた言葉）
-    w, sid = start()
-    r = w.hear(sid, SAY)
-    assert r["facts"]["unknown_words"] == []
-    w2, sid2 = start()
-    r2 = w2.hear(sid2, "C00001からC00003のバイオを3回にして")
-    assert r2["facts"]["unknown_words"] == ["バイオ"]
+# ======================================================================
+# 10. 出力の前の差分の確かめ（QA P2-6）
+# ======================================================================
+def test_repeat_diff_check_accepts_only_one_cycle_inserted():
+    new = demo_job().plan_repeat("C00001", "C00003", 3).new_job.render_bytes()
+    cyc = tuple(CYCLE)
+    assert sim._repeat_diff_ok(DEMO, new, END, cyc, added=True) is True
+    assert sim._repeat_diff_ok(DEMO, new.replace(b"V=30.0", b"V=31.0", 1), END, cyc, added=True) is False
+    assert sim._repeat_diff_ok(DEMO, new, END + 1, cyc, added=True) is False
+    assert sim._repeat_diff_ok(DEMO, new + b"NOP\r\n", END, cyc, added=True) is False
+    assert sim._repeat_diff_ok(DEMO.replace(b"V=150.0", b"V=151.0", 1), new, END, cyc, added=True) is False

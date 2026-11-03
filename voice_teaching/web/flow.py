@@ -464,6 +464,7 @@ class WebFlow:
             ids = {c["id"]: c["label"] for c in d.choices()}
             if (d.step is None or isinstance(turn, bool) or not isinstance(turn, int) or turn != d.turn
                     or not isinstance(choice, str) or choice not in ids):
+                e.session.forget_range()  # ほかのボタンを押した：回数の変更の範囲の確認も捨てる（止める側）
                 e.session.log.append(("止めた理由", dg.STALE))
                 return {"ok": True, "status": "stop", "message": dg.STALE, "blocked_reason": None,
                         "candidate_made": False, "choices": [], "dialog": True, "tool_calls": []}
@@ -481,6 +482,16 @@ class WebFlow:
                 return self._dialog_out(e, label, "text", None, "ask", dg.PICK_PROMPT, who="アプリ")
             direction = choice[4:]
             return self._merge_slots(e, label, "text", None, None, direction[0], 1 if direction[1] == "+" else -1)
+        return self._run(sid, run)
+
+    def repeat_choose(self, sid: object, choice: object, turn: object) -> dict:
+        """回数の変更の範囲の確認のボタン（［この範囲を繰り返す］［違う］）。画面のボタンからだけ呼ぶ。
+        今の範囲の確認の番号（turn）と合わなければ使わない。承認・出力は呼ばない（承認は今どおり確認表示のボタン）。"""
+        def run(e: _Entry) -> dict:
+            r = e.session.confirm_repeat(turn, choice)
+            if r.candidate_made:
+                self._remember(e, r)
+            return {"ok": True, "tool_calls": [], **self._reply(e, r)}
         return self._run(sid, run)
 
     def _dispatch(self, e: _Entry, heard: Reply, calls: list[dict]) -> Reply:
@@ -691,6 +702,7 @@ class WebFlow:
     def _begin_instruction(self, e: _Entry) -> None:
         """新しい指示の始め：承認を今どおり取り消す。承認していたときは、承認待ちの文を「承認した変更候補…」にする（S-msg）。"""
         e.session.pending_message = APPROVED_PENDING_MESSAGE if self._approved(e) else PENDING_MESSAGE
+        e.session.forget_range()  # 回数の変更の範囲の確認も捨てる（古いボタンを押しても候補にならない）
         self._cancel_approval(e, "新しい指示があったため")
 
     def _cancel_approval(self, e: _Entry, why: str) -> None:
@@ -762,6 +774,8 @@ class WebFlow:
                             "notice": self.interpreter.notice},
             "log": _log_entries(s.log),
             "dialog": self._dialog_state(e),
+            # 回数の変更の範囲の確認（ボタンを待っている間だけ。行番号・命令の行・回数はプログラムが入れたもの）
+            "repeat_range": _range_state(s.repeat_range),
         }
 
     def _dialog_state(self, e: _Entry) -> dict:
@@ -782,6 +796,14 @@ class WebFlow:
                         "label": getattr(self.interpreter, "locator_label", None) or self._speaker()},
             "turns": list(d.turns),
         }
+
+
+def _range_state(rr: dict | None) -> dict | None:
+    if rr is None:
+        return None
+    keep = ("turn", "target", "total", "count", "positions", "cycle_lines", "line_nos", "block_line_nos",
+            "yes_label", "no_label", "note")
+    return {k: rr[k] for k in keep}
 
 
 def _updown_note(st: "ud.UpdownStatus | None") -> str:
