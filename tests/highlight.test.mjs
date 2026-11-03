@@ -163,3 +163,32 @@ test('updownDetail: nothing when the server does not send it, and names are text
   assert.equal(updownDetail({ status: 'unconfirmed', app_robot: 3 }), '上下の向き：未確認');
   assert.equal(updownDetail({ status: 'confirmed', robot: ['A'], confirmed_by: {} }), '上下の向き：確認済み');
 });
+
+// ---- 「Claude に聞く」の答えで光らせる区間（CHECKER_031 E4） ----
+import { askHighlightLook, isAskHighlighted } from '../voice_teaching/web/static/highlight.js';
+test('ask highlight keeps the dash of MOVJ and other segments (not shown as a straight path)', () => {
+  assert.equal(askHighlightLook('movj').dash, segmentLook('movj').dash);
+  assert.equal(askHighlightLook('other').dash, segmentLook('other').dash);
+  assert.equal(askHighlightLook('movl').dash, null);
+  assert.equal(askHighlightLook('unknown').dash, segmentLook('other').dash);
+  assert.ok(askHighlightLook('movj').width < askHighlightLook('movl').width);
+});
+test('ask highlight uses only the line numbers from the server', () => {
+  assert.equal(isAskHighlighted({ line_no: 22 }, [21, 22]), true);
+  assert.equal(isAskHighlighted({ line_no: 27 }, [21, 22]), false);
+  assert.equal(isAskHighlighted({ line_no: '22' }, [22]), false);
+  assert.equal(isAskHighlighted({ line_no: 22 }, undefined), false);
+  assert.equal(isAskHighlighted(null, [22]), false);
+});
+
+// 前後の移動（highlight.context_lines）は、強調の区間（オレンジ）と見分けられる控えめな見た目（唐川さん 11/3 夜）
+import { askContextLook, ASK_CONTEXT_COLOR, ASK_HIGHLIGHT_COLOR } from '../voice_teaching/web/static/highlight.js';
+test('前後の移動は控えめ：強調と違う色・細い・薄い。MOVJ の点線はそのまま', () => {
+  for (const k of ['movl', 'movj', 'other']) {
+    const c = askContextLook(k), h = askHighlightLook(k);
+    assert.notEqual(c.color, h.color);
+    assert.ok(c.width < h.width && c.opacity < h.opacity);
+    assert.equal(c.dash, segmentLook(k).dash);
+  }
+  assert.notEqual(ASK_CONTEXT_COLOR, ASK_HIGHLIGHT_COLOR);
+});

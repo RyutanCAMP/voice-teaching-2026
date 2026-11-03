@@ -11,7 +11,7 @@
 // - 再生（player.js）：止める・続ける・1つ進む・はじめから。再生中は、その区間の行き先の点の上に小さな印（▼）を出す
 //   （MOVJ でも点の上だけ。線の上は動かさない）。回数の変更の比較では、変更前の再生の間は足した回の線を重ねない
 "use strict";
-import { displayMinus, segmentLook, segmentTitle } from "/static/highlight.js";
+import { displayMinus, segmentLook, segmentTitle, askHighlightLook, askContextLook, isAskHighlighted } from "/static/highlight.js";
 import { Player } from "/static/player.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -148,6 +148,31 @@ export class View3D {
       svg.append(line);
       lines[key].push(line);
     };
+    // 「Claude に聞く」の答えの根拠の区間（サーバーが行番号から決めた highlight.lines）を、下に太い色の帯で光らせる。
+    // MOVJ・目安の区間は点線・破線のまま（直線の通り道に見せない）
+    // 前後の移動（強調の区間の外の根拠の行）は、控えめな色で先に描く（強調の区間の下になる）
+    for (const s of d.segments) {
+      if (!isAskHighlighted(s, d.askContext) || isAskHighlighted(s, d.askLines)) continue;
+      const at = Object.fromEntries(d.points.map((p) => [p.name, p.xyz]));
+      if (!at[s.from] || !at[s.to]) continue;
+      const p = this.project(at[s.from]), q = this.project(at[s.to]);
+      const look = askContextLook(s.kind);
+      const ctx = svgEl("line", { x1: p[0], y1: p[1], x2: q[0], y2: q[1], stroke: look.color, "stroke-width": look.width,
+        "stroke-opacity": look.opacity, "stroke-linecap": "round", class: `ask-hl-context seg-${look.kind}`, "data-line": s.line_no });
+      if (look.dash) ctx.setAttribute("stroke-dasharray", look.dash);
+      svg.append(ctx);
+    }
+    for (const s of d.segments) {
+      if (!isAskHighlighted(s, d.askLines)) continue;
+      const at = Object.fromEntries(d.points.map((p) => [p.name, p.xyz]));
+      if (!at[s.from] || !at[s.to]) continue;
+      const p = this.project(at[s.from]), q = this.project(at[s.to]);
+      const look = askHighlightLook(s.kind);
+      const glow = svgEl("line", { x1: p[0], y1: p[1], x2: q[0], y2: q[1], stroke: look.color, "stroke-width": look.width,
+        "stroke-opacity": look.opacity, "stroke-linecap": "round", class: `ask-hl seg-${look.kind}`, "data-line": s.line_no });
+      if (look.dash) glow.setAttribute("stroke-dasharray", look.dash);
+      svg.append(glow);
+    }
     for (const s of d.segments) seg(s, d.points, c ? "#a1a6ad" : "#c7cbd1", 2.5, "before");
     // 変更後は、動かす点に触れる区間だけ（ほかの区間は変更前と同じ線なので描き直さない）
     if (c && !d.repeat) for (const s of c.segments) if (s.from === c.moved || s.to === c.moved) seg(s, c.points, cAfter, 3, "after");
@@ -233,6 +258,7 @@ export class View3D {
     }
     if (d.repeat) this._repeatMark(svg, d, labelBoxes, cAfterText);
     if (this.marker && this.marker.dest) this._destMark(svg, this.marker.dest, this.marker.color);
+    if ((d.taught || []).length) this._taughtMarks(svg, d);
     if (this.marker && this.marker.xyz) {  // MOVJ・目安の区間の間は xyz が無い（印を出さない）
       const m = this.project(this.marker.xyz);
       svg.append(svgEl("circle", { cx: m[0], cy: m[1], r: 9, fill: this.marker.color, stroke: "#fff", "stroke-width": 3, class: "marker" }));
@@ -241,6 +267,26 @@ export class View3D {
     this.host.querySelector("svg")?.remove();
     this.host.prepend(svg);
     this.svg = svg;
+  }
+
+  // 人が教えた意味（「Claude に聞く」の欄。サーバーのメモリの中だけ）：対象の点の上に、緑の印と文字で出す。
+  // AI の推定とは別の印（緑・実線・✓）。位置はジョブの点の座標の真ん中（描くだけ。変更の範囲には使わない）
+  _taughtMarks(svg, d) {
+    const at = Object.fromEntries(d.points.map((p) => [p.name, p.xyz]));
+    for (const t of d.taught) {
+      const pts = (t.positions || []).map((n) => at[n]).filter(Boolean);
+      if (!pts.length || typeof t.text !== "string") continue;
+      const s = pts.map((v) => this.project(v));
+      const x = s.reduce((a, q) => a + q[0], 0) / s.length, y = Math.min(...s.map((q) => q[1])) - 26;
+      const label = `✓ ${t.text}（人が教えた）`;
+      const w = textWidth(label) + 16;
+      const g = svgEl("g", { class: "taught-mark" });
+      g.append(svgEl("rect", { x: x - w / 2, y: y - 15, width: w, height: 22, rx: 11, fill: "#d9f2e1", stroke: "#34a853", "stroke-width": 1.5 }));
+      const tx = svgEl("text", { x, y: y + 1, "text-anchor": "middle", fill: "#1d5c32", "font-weight": "700" });
+      tx.textContent = label;
+      g.append(tx);
+      svg.append(g);
+    }
   }
 
   // 回数の変更の印：区間の点の近くに「C00001〜C00003 ×2 → ×3」（読み込んだ直後は「×2」）、右上の窓に回数。

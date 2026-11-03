@@ -37,6 +37,8 @@ _STATIC = {
     # 読めなかった言葉を目立たせる分け方・マイナスの表示（依存なし）
     "/static/highlight.js": ("highlight.js", "text/javascript; charset=utf-8"),
     "/static/player.js": ("player.js", "text/javascript; charset=utf-8"),
+    # Claude に聞く（読み取りだけ）の小さな欄
+    "/static/explain.js": ("explain.js", "text/javascript; charset=utf-8"),
 }
 # 「サンプルで試す」で読み込む、決まった1つの架空のジョブ。画面からは名前も場所も渡させない
 SAMPLE_JOB = Path(__file__).resolve().parents[2] / "samples" / "dummy" / "DEMO_C_PLACE.JBI"
@@ -135,12 +137,21 @@ class Handler(BaseHTTPRequestHandler):
             return None
         return req
 
+    def _previous(self) -> str | None:
+        """前に見ていた画面の番号（読み直したとき、同じ中身なら人が教えた意味を引き継ぐため）。見出しの X-VT-Previous-Session。"""
+        v = self.headers.get("X-VT-Previous-Session")
+        return v if isinstance(v, str) and 0 < len(v) <= 64 else None
+
+    def _load(self, flow: WebFlow, data: bytes) -> dict:
+        prev = self._previous()
+        return flow.load(data, prev) if prev is not None else flow.load(data)
+
     def _flow_post(self, path: str) -> bool:
         flow: WebFlow = self.server.flow
         if path == "/api/load":
             body = self._read_body()
             if body is not None:
-                self._json(200, flow.load(body))
+                self._json(200, self._load(flow, body))
             return True
         if path == "/api/sample":
             # 本文は読むだけで使わない（問い合わせの文字列も見ない）。決まった1つのファイルを、アップロードと同じ flow.load に渡す
@@ -150,7 +161,7 @@ class Handler(BaseHTTPRequestHandler):
                 except OSError:
                     self._error(404, "サンプルのジョブが見つかりません")
                 else:
-                    self._json(200, flow.load(data))
+                    self._json(200, self._load(flow, data))
             return True
         routes = {
             "/api/hear": lambda r: flow.hear(r.get("session_id"), r.get("text"), r.get("source", "text")),
@@ -165,6 +176,10 @@ class Handler(BaseHTTPRequestHandler):
             # 承認は画面の承認ボタンからだけ。/api/hear からは呼ばない
             "/api/approve": lambda r: flow.approve(r.get("session_id"), r.get("approver")),
             "/api/export": lambda r: flow.export(r.get("session_id")),
+            # Claude に聞く（読み取りだけ）。答えでジョブ・候補・承認は変わらない。キーは返さない
+            # 人が教えた意味（この画面の中だけ）：sync で確かめ直し、choose・token で「どの動きのことですか？」のボタン
+            "/api/ask": lambda r: flow.ask(r.get("session_id"), r.get("text"), r.get("reset", False), r.get("info", False),
+                                           r.get("source", "text"), r.get("choose"), r.get("token"), r.get("sync", False)),
         }
         fn = routes.get(path)
         if fn is None:
@@ -201,7 +216,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def make_server(host: str = HOST, port: int = DEFAULT_PORT, interpreter=None,
-                updown_config=USE_DEFAULT, robot: str = DEFAULT_ROBOT) -> ThreadingHTTPServer:
+                updown_config=USE_DEFAULT, robot: str = DEFAULT_ROBOT, explainer=None) -> ThreadingHTTPServer:
     """シミュレーション用の出力先は sim.DEFAULT_OUT_DIR（output/sim/）に固定。呼び出し側からは選べない。
 
     updown_config：上下の向きの設定ファイル（None なら設定なし＝未確認。渡さなければ flow.DEFAULT_UPDOWN_CONFIG）。robot：アプリで使うロボットの名前（照合で比べるだけ）。
@@ -210,5 +225,5 @@ def make_server(host: str = HOST, port: int = DEFAULT_PORT, interpreter=None,
         raise ValueError("127.0.0.1 以外では待ち受けません")
     srv = ThreadingHTTPServer((HOST, port), Handler)
     srv.daemon_threads = True
-    srv.flow = WebFlow(interpreter=interpreter, updown_config=updown_config, robot=robot)
+    srv.flow = WebFlow(interpreter=interpreter, updown_config=updown_config, robot=robot, explainer=explainer)
     return srv

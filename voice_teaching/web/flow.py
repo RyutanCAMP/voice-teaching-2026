@@ -26,7 +26,8 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .. import claude_interpreter, jbi, mock_claude, sim
+from .. import claude_explain, claude_interpreter, jbi, mock_claude, sim
+from .. import claude_talk as talk
 from .. import repeat_count as rc
 from .. import dialog as dg
 from .. import updown as ud
@@ -80,6 +81,9 @@ class _Entry:
     loaded_sha256: str | None = None              # 読み込んだときのバイト列の sha256（承認のあとの「元の動作データ：変わっていません」に使う）
     dialog: dg.Dialog = field(default_factory=dg.Dialog)  # Claude との会話の状態（メモリの中だけ。保存しない）
     frame: object | None = None                   # 案B：FRAME（まだ無い。あれば label・aliases で位置を決める）
+    explain: "claude_explain.Conversation | None" = None  # Claude に聞く（読み取りだけ）の会話。メモリの中だけ
+    # 人が教えた意味（この画面の会話の中だけ。ファイル・records/・作業ログに書かない。/api/hear の流れは読まない）
+    talk: "talk.TalkMemory | None" = None
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     # Session に渡すシミュレーション（実機用の検査に断られたときだけ呼ばれる）
@@ -105,7 +109,10 @@ class _Entry:
 
 class WebFlow:
     def __init__(self, max_sessions: int = MAX_SESSIONS, interpreter=None,
-                 updown_config: "str | Path | None | object" = USE_DEFAULT, robot: str = ud.DEFAULT_ROBOT):
+                 updown_config: "str | Path | None | object" = USE_DEFAULT, robot: str = ud.DEFAULT_ROBOT,
+                 explainer: "claude_explain.Explainer | None" = None):
+        # Claude に聞く係（読み取りだけ。/api/ask）。答えでジョブ・候補・承認は変えない
+        self.explainer = explainer if explainer is not None else claude_explain.Explainer.from_env()
         # 解釈の係：本物の Claude（ANTHROPIC_API_KEY があるとき）か、偽のClaude（モック）
         self.interpreter = interpreter if interpreter is not None else claude_interpreter.from_env()
         self.max_sessions = max_sessions
@@ -116,7 +123,9 @@ class WebFlow:
         self._lock = threading.Lock()
 
     # ---- 読込 ----
-    def load(self, data: bytes) -> dict:
+    def load(self, data: bytes, previous: object = None) -> dict:
+        """読み込む。previous（前に見ていた画面の番号）があり、中身（//NAME と ///DATE を除いた指紋）が同じなら、
+        人が教えた意味を引き継ぐ（E2-1）。違えば引き継がない（E2-2）。ファイル名では決めない。"""
         view = api.job_view(data)
         if not view.get("ok"):
             return {"ok": False, "error": view.get("error") or "ジョブを読めません"}
@@ -127,6 +136,14 @@ class WebFlow:
         entry.session = Session(job, simulate=entry.simulate,
                                 updown_check=ud.checker(self.updown_config, self.robot))
         entry.session.log.append((self._who(), self.interpreter.notice))
+        entry.talk = talk.TalkMemory(content_hash=job.normalized_hash())
+        with self._lock:
+            prev = self._entries.get(previous) if isinstance(previous, str) else None
+        if prev is not None:
+            with prev.lock:
+                if prev.talk is not None and prev.talk.content_hash == entry.talk.content_hash:
+                    entry.talk.meanings = list(prev.talk.meanings)
+                    entry.talk.recheck(job)  # 同じ中身でも、対象の区間が見つかるかを確かめ直す
         sid = secrets.token_urlsafe(16)
         with self._lock:
             self._entries[sid] = entry
@@ -708,6 +725,124 @@ class WebFlow:
                                           f"{_updown_note(e.approval_updown)}"))
             return {"ok": True, "path": full, "file_name": Path(path).name}
         return self._run(sid, run)
+
+    # ---- Claude に聞く（読み取りだけ。docs/CLAUDE_API.md 8章・CHECKER_031 E1〜E7） ----
+    def ask(self, sid: object, text: object = None, reset: object = False, info: object = False,
+            source: object = "text", choose: object = None, token: object = None, sync: object = False) -> dict:
+        """読み込んだジョブについて Claude に聞く。Session（候補・承認・選択・作業ログ）には触らない。
+        会話の文脈と人が教えた意味は、この画面の中だけ（保存しない）。データ（ジョブ・候補・承認・上下の向きの照合）が
+        変わったら、会話を区切る（新しい会話にして「データが変わったので…」と知らせる）。
+
+        - sync：データの変化を確かめ、人が教えた意味と知らせだけを返す（Claude を呼ばない）
+        - choose・token：「どの動きのことですか？」のボタン（Claude を呼ばない。番号が今のものと合うときだけ）
+        - source：voice か text（どちらも同じ検査を通る。記録して返すだけ）
+        """
+        with self._lock:
+            e = self._entries.get(sid) if isinstance(sid, str) else None
+        if e is None:
+            return {"ok": False, "error": NO_SESSION}
+        if info is True:
+            with e.lock:
+                notices = self._talk_sync(e)
+                tstate = self._talk_state(e, notices)
+            return {"ok": True, "status": "info", **self.explainer.info(), "talk": tstate}
+        if source not in SOURCES:
+            return {"ok": False, "error": "聞く文の種類（voice か text）が分かりません"}
+        notice = None
+        with e.lock:  # 状態は読むだけ。Claude を呼ぶ間はこの錠を持たない（ほかの操作を止めない）
+            s = e.session
+            notices = self._talk_sync(e)
+            if sync is True:
+                return {"ok": True, "status": "sync", "talk": self._talk_state(e, notices)}
+            if choose is not None:
+                o = e.talk.choose(choose, token, s.original, self._current_job(e))
+                return self._talk_reply(e, o, notices, source)
+            st = s.updown_status()
+            key = (hashlib.sha256(s.original_bytes).hexdigest(), st.token)
+            if reset is True or e.explain is None or e.explain.key != key:
+                if e.explain is not None and e.explain.turns and reset is not True:
+                    notice = "ジョブか上下の向きの設定が変わったため、新しい会話にしました"
+                e.explain = claude_explain.Conversation.start(s.original_bytes, s.original, st)
+                if e.explain.facts is not None:
+                    e.explain.facts["change_state"] = self._change_state(e)
+                e.talk.last_evidence = ()
+            if reset is True:
+                e.talk.clear()  # 会話をやり直す：人が教えた意味も、この会話の中だけなので消す
+                return {"ok": True, "status": "reset", **self.explainer.info(),
+                        "talk": self._talk_state(e, notices)}
+            conv = e.explain
+            if not isinstance(text, str) or not text.strip() or len(text) > claude_explain.MAX_TEXT:
+                return {**self.explainer.ask(conv, text), "talk": self._talk_state(e, notices)}
+            text = text.strip()
+            pending = s.candidate is not None
+            if pending and talk.looks_like_change(text):
+                # 承認待ちの候補がある：Claude に変更の希望を受けさせない（呼ばない）。説明だけ
+                return self._app_reply(e, talk.PENDING_EXPLAIN_ONLY, notices, source, "explain_only", text)
+            blocks = talk.repeat_blocks(s.original)
+            count = talk.read_count(text, blocks, e.talk.last_evidence)
+            if count is not None and count.stop:
+                # 回数の言葉に打ち消し・ためらい（「3回にしないで」「そう、じゃなくて4回」「たぶん3回」）：読まない・呼ばない
+                return self._app_reply(e, count.stop, notices, source, "count_refused", text)
+            o = e.talk.consider(text, s.original, self._current_job(e))
+            if o.kind in ("ask", "refused"):
+                return self._talk_reply(e, o, notices, source, said=text)
+            taught_note = o.message if o.kind in ("taught", "replaced") else None
+            taught = e.talk.facts_for_claude(s.original)
+            version = e.talk.signature
+        out = self.explainer.ask(conv, text, taught=taught, allow_change=not pending, count=count)
+        with e.lock:
+            if out.get("ok") and e.explain is conv and e.talk.signature is version:
+                e.talk.last_evidence = tuple(ev["line"] for ev in out.get("evidence", []))
+            hl, sup = talk.highlight_and_supplement(conv.job, out.get("evidence", []) if out.get("ok") else [])
+            out.update(highlight=hl, supplement=sup, source=source, heard=text,
+                       taught_note=taught_note, talk=self._talk_state(e, notices))
+        if notice:
+            out["conversation_notice"] = notice
+        return out
+
+    def _current_job(self, e: _Entry) -> jbi.Job:
+        """今のデータ：承認待ち・承認済みの候補があれば、その変更後のジョブ。無ければ読み込んだジョブ。"""
+        ch = e.session.candidate
+        return ch.new_job if ch is not None and getattr(ch, "new_job", None) is not None else e.session.original
+
+    def _change_state(self, e: _Entry) -> dict:
+        ch = e.session.candidate
+        kinds = {"shift": "位置の移動", "repeat": "回数の変更", "speed": "速度の変更"}
+        return {"pending_candidate": ch is not None and not self._approved(e), "approved": self._approved(e),
+                "kind": kinds.get(getattr(ch, "kind", None)) if ch is not None else None,
+                "note": "説明は、読み込んだ元の動作データについて。変更はアプリのプログラムと承認ボタンで行う"}
+
+    def _talk_sync(self, e: _Entry) -> list[str]:
+        """データ（ジョブの中身・候補・承認）が変わったか。変わったら、意味を確かめ直し、会話を区切る。知らせの文を返す。"""
+        s = e.session
+        sig = (e.talk.content_hash, s.candidate, e.approval)
+        if e.talk.sync(sig, self._current_job(e)):
+            if e.explain is not None and e.explain.turns:
+                e.talk.notices.insert(0, talk.DATA_CHANGED)
+            e.explain = None  # 会話を区切る：次に聞くときは新しい事実（変更候補の状態も）で始める
+        return e.talk.take_notices()
+
+    def _talk_state(self, e: _Entry, notices: list[str]) -> dict:
+        return {**e.talk.state(self._current_job(e)), "notices": list(notices)}
+
+    def _app_reply(self, e: _Entry, message: str, notices: list[str], source: str, status: str,
+                   heard: str | None = None) -> dict:
+        """アプリの決まった文で答える（Claude は呼ばない）。"""
+        return {"ok": True, "status": status, "reply": message, "reply_by": "app", "checked": None, "notes": [],
+                "evidence": [], "intent": None, "change_request": None, "change_record": None, "guesses": [],
+                "highlight": {"lines": [], "positions": []}, "supplement": [], "source": source, "heard": heard,
+                "taught_note": None, "talk": self._talk_state(e, notices)}
+
+    def _talk_reply(self, e: _Entry, o: "talk.Outcome", notices: list[str], source: str,
+                    said: str | None = None) -> dict:
+        status = {"ask": "ask_which", "refused": "not_taught", "taught": "taught", "replaced": "taught"}[o.kind]
+        out = self._app_reply(e, o.message or "", notices, source, status, said)
+        if o.kind in ("taught", "replaced"):  # ボタンで選んで登録した：アプリの知らせだけ（Claude は呼ばない）
+            out["taught_note"], out["reply"] = o.message, ""
+        if o.block is not None:  # 確かめている区間を光らせる（行番号からプログラムが決める）
+            out["highlight"], out["supplement"] = talk.highlight_and_supplement(
+                e.session.original, [{"line": o.block.first_line}])
+        return out
 
     # ---- 内部 ----
     def _run(self, sid: object, fn) -> dict:

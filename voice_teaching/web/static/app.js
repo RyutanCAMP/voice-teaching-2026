@@ -83,7 +83,8 @@ async function postJson(path, body) {
   try {
     const r = await fetch(path, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      // 前の画面の番号を見出しで渡す。サーバーが読むのは読込（サンプル）のときだけ（同じ中身なら人が教えた意味を引き継ぐ）
+      headers: previousHeader({ "Content-Type": "application/json" }),
       body: JSON.stringify(body),
     });
     return await r.json();
@@ -109,6 +110,11 @@ function resetForLoad() {
   $("text-input").value = "";
 }
 
+// 前に見ていた画面の番号（同じ中身を読み直したとき、サーバーが「人が教えた意味」を引き継ぐか決める。中身で決める）
+function previousHeader(h) {
+  return state.sessionId ? { ...h, "X-VT-Previous-Session": state.sessionId } : h;
+}
+
 async function loadFile(f) {
   if (!f || recording()) return;
   resetForLoad();
@@ -117,7 +123,7 @@ async function loadFile(f) {
   try {
     const r = await fetch("/api/load", {
       method: "POST",
-      headers: { "Content-Type": "application/octet-stream" },
+      headers: previousHeader({ "Content-Type": "application/octet-stream" }),
       body: bytes,
     });
     res = await r.json();
@@ -130,6 +136,7 @@ async function loadFile(f) {
 // 読み込みの結果を画面に出す（ファイルから読んでも、サンプルでも同じ）
 function applyLoad(res, fileName) {
   state.sessionId = null; state.view = null; state.st = null;
+  announceSession();
   closeConfirm();
   stopPlayback();
   if (!res.ok) {
@@ -159,7 +166,16 @@ function applyLoad(res, fileName) {
   document.body.classList.add("loaded");
   renderAll();
   updateLocks();
+  announceSession();
 }
+
+// 「Claude に聞く（読み取りだけ）」の欄（explain.js）に、今の画面の番号を知らせる。欄は答えを表示するだけ
+function announceSession() {
+  window.dispatchEvent(new CustomEvent("vt:session", { detail: { sessionId: state.sessionId } }));
+}
+// 根拠の行を押したとき：その位置を図で光らせる（選択ではない）。聞き終わったら、マイク ON ならまた聞く
+window.addEventListener("vt:highlight", () => { if (state.view) renderFigures(); });
+window.addEventListener("vt:ask-done", () => { state.resumeArmed = true; resumeLive(); });
 
 $("file-input").addEventListener("change", (ev) => loadFile(ev.target.files[0]));
 
@@ -240,6 +256,10 @@ function renderUpdown(u) {
 function renderState() {
   const st = state.st;
   if (!st) return;
+  // 「Claude に聞く」の欄に、データ（候補・承認）が変わったかもしれないことを知らせる（欄がサーバーに確かめ直す）
+  const c = st.candidate;
+  window.dispatchEvent(new CustomEvent("vt:state", { detail: { sessionId: state.sessionId,
+    key: JSON.stringify([c ? c.kind : null, c ? c.target : null, c ? c.after_value : null, st.approval ? st.approval.approved_at : null]) } }));
   $("mock-notice").textContent = st.mock_notice;
   // 解釈のしかた（モックか本物の Claude か）を、いつも見える上の帯で区別する
   const claude = st.interpreter && st.interpreter.kind === "claude";
@@ -1044,8 +1064,26 @@ function data3d() {
     blocked: Object.fromEntries(v.positions.filter((p) => !p.shift_check.ok).map((p) => [p.name, p.shift_check.reason])),
     // Claude（モック）が出した位置の候補（確かめている間だけ光らせる。選んではいない）
     candidates: dialogStep() === "confirm_position" ? state.st.dialog.candidates.map((x) => x.position)
-      : rr ? rr.positions : [],  // 回数の変更の範囲の点も、同じ輪で光らせる（選んではいない）
+      : rr ? rr.positions : askHighlight().positions,  // 回数の変更の範囲の点・「Claude に聞く」の根拠の行の位置（光らせるだけ。選択ではない）
+    // 「Claude に聞く」の答えの根拠の区間（サーバーが行番号から決めた行。光らせるだけ）。位置の確認中は出さない
+    askLines: dialogStep() === "confirm_position" ? [] : askHighlight().lines,
+    askContext: dialogStep() === "confirm_position" ? [] : askHighlight().context_lines,  // 前後の移動（控えめ）
+    // 人が教えた意味（「Claude に聞く」の欄が置く。サーバーのメモリの中だけのもの）。図に印を出すだけ
+    taught: Array.isArray(window.vtTaught) ? window.vtTaught : [],
   };
+}
+
+// explain.js が置く、光らせる範囲（{positions, lines}。サーバーが根拠の行番号から決めたもの）。形が違えば何も光らせない
+function askHighlight() {
+  const h = window.vtAskHighlight;
+  if (Array.isArray(h)) return { positions: h, lines: [] };  // 根拠の行を押したとき（その行の位置だけ）
+  if (h && Array.isArray(h.positions) && Array.isArray(h.lines)) {
+    const entry = Array.isArray(h.entry_lines) ? h.entry_lines : [];
+    const context = (Array.isArray(h.context_lines) ? h.context_lines : []).concat(entry);
+    // 区間に外から入ってくる線（entry_lines）は強調しない（前後の移動と同じく控えめ）
+    return { positions: h.positions, lines: h.lines.filter((n) => !entry.includes(n)), context_lines: context };
+  }
+  return { positions: [], lines: [], context_lines: [] };
 }
 
 $("view-reset").addEventListener("click", () => view3d.reset());
@@ -1534,6 +1572,15 @@ const voice = new SpeechInput(Recognition, {
     // 録音を始めたときとジョブ・位置が違えば使わない
     if (!t || t.sessionId !== state.sessionId || t.selected !== (state.st ? state.st.selected : null)) {
       showVoiceError("話している間に位置が変わったので、使いませんでした。もう一度どうぞ");
+      return;
+    }
+    if ($("voice-to-ask") && $("voice-to-ask").checked && !$("ask-panel").hidden) {
+      $("ask-input").value = text;  // 「Claude に聞く」欄に入れるだけ。自動では送らない
+      window.dispatchEvent(new CustomEvent("vt:ask-voice", { detail: { text } }));  // 直さずに送れば source=voice
+      state.liveAt = Date.now();
+      state.netRetry = 0;
+      state.quiet = 0;
+      renderMic();
       return;
     }
     $("text-input").value = text;  // 入力欄に入れるだけ。自動では送らない
