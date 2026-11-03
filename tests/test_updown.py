@@ -117,7 +117,8 @@ def test_config_has_the_items_of_11_1(make_updown):
     assert obj["confirmed_by"] and obj["confirmed_at"] and obj["evidence"]
     assert obj["robot"] == "HC20DT"
     assert obj["job"]["positions"] == ["C00005"] and len(obj["job"]["structure_hash"]) == 64
-    assert obj["coordinate"] == {"postype": "ROBOT", "rectan": True, "user": None, "tool": 0}
+    assert obj["coordinate"] == {"postype": "ROBOT", "rectan": True, "user": None, "tool": 0,
+                                 "frame": None, "relative_job": False}  # 判断③：FRAME・RJ も照合する
     assert obj["fingerprint"] == updown.content_fingerprint(obj)
 
 

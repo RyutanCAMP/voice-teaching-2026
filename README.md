@@ -64,6 +64,7 @@ python -m voice_teaching.web          # 表示された http://127.0.0.1:8765/ �
   python -m voice_teaching.updown check --job samples/dummy/DEMO_C_PLACE.JBI
   ```
 - サーバーは `python -m voice_teaching.web --updown-config records/updown.json --robot HC20DT`（どちらも既定値）。
+- 照合は、伏せた位置（`--positions`）の X・Y・Z 以外のすべて（ほかの位置の値・命令・`///ATTR` の RJ・`////FRAME ROBOT`・ツール番号・座標系・ロボット名）で行います（唐川さんの判断③）。伏せる位置は、変更できる位置だけを3つまで、ジョブの位置の半分より少なく。全部の位置や変更できない位置を伏せようとすると、register は断ります。
 - この設定は「誰が何を根拠に確かめたか」の記録で、本人確認（署名）でも、安全の保証でもありません。
 
 ### Claude API の設定（秘密の情報はリポジトリに入れない）
