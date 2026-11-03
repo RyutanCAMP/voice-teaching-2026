@@ -494,6 +494,7 @@ def parse(text: str, encoding: str = "utf-8") -> Job:
     frames: list[tuple[int, str, str | None]] = []  # (行, 行の中身, 場所の問題)
     pos_unknown: list[tuple[int, str]] = []  # POS 部の知らない指示行（最後の位置より後ろにあるものは止める）
     inst_body_seen = False  # INST 部で、指示行でない行（命令・コメント）がもう出たか
+    inst_head: list[str] = []  # INST 部の始めの指示行（FRAME の行を含む）。命令・コメントの前まで。相対ジョブの並びの判定に使う
 
     def problem(i: int, body: str, why: str) -> None:
         job.problems.append(f"{i + 1}行目「{body}」は{why}")
@@ -605,6 +606,8 @@ def parse(text: str, encoding: str = "utf-8") -> Job:
             continue
 
         # INST部
+        if not inst_body_seen and (body.startswith("///") or _FRAME_LIKE.match(body)):
+            inst_head.append(body)
         if _FRAME_LIKE.match(body):
             if body != FRAME_ROBOT_LINE:
                 problem(i, body, f"扱えません：FRAME の行は、ちょうど「{FRAME_ROBOT_LINE}」の形だけを扱います")
@@ -671,9 +674,28 @@ def parse(text: str, encoding: str = "utf-8") -> Job:
     for i, body in pos_unknown:
         if i > last_pos:
             problem(i, body, "扱えません：POS 部の最後の位置より後ろにある、知らない指示行です")
+    if "INST" in seen_headers and not attr_lines:
+        # ///ATTR の無い JOB は変更の対象にしない（唐川さんの決定 2026-11-03）
+        job.problems.append("///ATTR の行がありません")
     job.relative_frame = _check_frame(job, frames, attr_args, attr_lines)
+    if job.relative_frame is not None and not _rj_head_ok(inst_head):
+        # 相対ジョブは、INST 部の始めがちょうど DATE → ATTR → FRAME → GROUP1 の順のときだけ（唐川さんの決定 2026-11-03）。
+        # FRAME の行のほかの条件で止めたときは、その理由だけを出す（理由を短く）
+        job.problems.append(RJ_ORDER_PROBLEM)
+        job.relative_frame = None
     job.baseline = {name: p.values for name, p in job.positions.items()}
     return job
+
+
+RJ_ORDER_PROBLEM = ("扱えません：相対ジョブの INST 部の始めの並びが「///DATE …」→「///ATTR SC,RW,RJ」→"
+                    "「////FRAME ROBOT」→「///GROUP1 RB1」ではありません")
+
+
+def _rj_head_ok(head: list[str]) -> bool:
+    """相対ジョブの INST 部の始めの指示行が、ちょうど ///DATE … → ///ATTR SC,RW,RJ → ////FRAME ROBOT → ///GROUP1 RB1 か。
+    この4行のほかの指示行（///COMM・///LVARS など）が始めにあれば、並びが違うとして止める（実機で確かめた形だけ）。"""
+    return (len(head) == 4 and head[0].startswith("///DATE ") and head[1] == "///ATTR SC,RW,RJ"
+            and head[2] == FRAME_ROBOT_LINE and head[3] == "///GROUP1 RB1")
 
 
 def _check_frame(job: Job, frames: list[tuple[int, str, str | None]], attr_args: list[str],
