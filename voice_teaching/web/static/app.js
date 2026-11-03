@@ -337,6 +337,10 @@ function renderSteps() {
   } else if (!st.approval) {
     text = "動きを確かめてください";
     primary = "open-confirm";
+  } else if (st.exportable === false) {
+    // 実機の JOB（合成ジョブでない）：承認しても出力しない。出力を促さない（内部 QA の再レビュー P1-1）
+    text = "承認しました（変更案の確認のみ。実機用JOBは出力できません）";
+    primary = "undo-button";
   } else if (!st.exported) {
     text = "承認しました。出力してください";
     primary = "export-button";

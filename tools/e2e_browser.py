@@ -272,6 +272,56 @@ WIDE_FONT_CSS = "body, body * { letter-spacing: 0.08em !important; }"
 MOVJ_LABEL = "関節移動（MOVJ）：実際の通り道は直線ではありません"
 
 
+REVIEW_ONLY = "変更案の確認のみ。実機用JOBは出力できません"
+
+
+def check_review_only(browser, url, check, shots: Path | None) -> None:
+    """実機の JOB（合成ジョブでない）：確認表示と承認のあとに「変更案の確認のみ」の帯。出力ボタンを出さず、出力を促さない。
+    合成ジョブでは帯を出さず、今どおり出力ボタンが出る（唐川さんの指示・内部 QA の再レビュー P1-1・P2-6）。"""
+    data = (REPO / "samples/dummy/DEMO_C_PLACE.JBI").read_bytes()
+    with tempfile.TemporaryDirectory() as d:
+        cases = [("DEMO_C_PLACE.JBI", REPO / "samples/dummy/DEMO_C_PLACE.JBI", True)]
+        other = Path(d) / "DEMO_C_PLACX.JBI"  # 名前の行を1文字変えた写し＝合成ジョブではない（実機の JOB の代わり）
+        other.write_bytes(data.replace(b"//NAME DEMO_C_PLACE", b"//NAME DEMO_C_PLACX", 1))
+        cases.append(("DEMO_C_PLACX.JBI", other, False))
+        for name, path, synthetic in cases:
+            for width in (1280, 390):
+                pg = browser.new_page(viewport={"width": width, "height": 900})
+                pg.goto(url)
+                pg.set_input_files("#file-input", str(path))
+                until(pg, lambda: pg.inner_text("#file-name") == name)
+                pg.locator("#position-chips button", has_text="C00005").click()
+                until(pg, lambda: pg.inner_text("#voice-position strong") == "C00005")
+                pg.fill("#text-input", "Zマイナス3ミリ")
+                pg.click("#text-send")
+                until(pg, lambda: pg.get_attribute("#step-4", "aria-current") == "step")
+                pg.click("#open-confirm")
+                pg.wait_for_selector("#confirm-overlay:not([hidden])")
+                band = pg.is_visible("#confirm-review-only")
+                check(band == (not synthetic) and (synthetic or pg.inner_text("#confirm-review-only") == REVIEW_ONLY),
+                      f"{name}（{width}px）：確認表示の「確認のみ」の帯は、合成ジョブでないときだけ出る（{band}）")
+                pg.fill("#approver-name", "e2e")
+                pg.click("#approve-button")
+                until(pg, lambda: pg.is_visible("#approval-status") or pg.is_hidden("#confirm-overlay"))
+                if pg.is_visible("#confirm-close"):
+                    pg.click("#confirm-close")
+                pg.wait_for_timeout(300)
+                head = pg.inner_text("#next-action")
+                exp_btn = pg.is_visible("#export-button")
+                band2 = pg.is_visible("#export-review-only")
+                if synthetic:
+                    check(exp_btn and not band2 and "出力してください" in head,
+                          f"{name}（{width}px）：承認のあと、出力ボタンが出て出力を案内する（{head!r}）")
+                else:
+                    check(not exp_btn and band2 and "出力してください" not in head and "確認のみ" in head
+                          and "primary" not in (pg.get_attribute("#export-button", "class") or ""),
+                          f"{name}（{width}px）：承認のあと、出力ボタンを出さず、出力を促さない（見出し {head!r}）")
+                    if shots is not None:
+                        shots.mkdir(parents=True, exist_ok=True)
+                        pg.screenshot(path=str(shots / f"review_only_{width}.png"))
+                pg.close()
+
+
 def check_c026(browser, url, check, shots: Path | None) -> None:
     def shot(page, name, full=False):
         if shots is not None:
@@ -751,6 +801,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
 
             check_ux_polish(b, url, check, shots)
             check_c026(b, url, check, shots)
+            check_review_only(b, url, check, shots)
             check_dialog(b, check, shots, errors, updown_cfg["DEMO_C_PLACE.JBI"])
             check_updown_unconfirmed(b, check, shots, errors)
 
