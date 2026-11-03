@@ -165,6 +165,7 @@ class Handler(BaseHTTPRequestHandler):
             return True
         routes = {
             "/api/hear": lambda r: flow.hear(r.get("session_id"), r.get("text"), r.get("source", "text")),
+            "/api/talk": lambda r: flow.talk(r.get("session_id"), r.get("text"), r.get("source", "text")),  # Step F：入口を1つに
             "/api/select": lambda r: flow.select(r.get("session_id"), r.get("position")),
             "/api/compare": lambda r: flow.compare(r.get("session_id")),
             "/api/undo": lambda r: flow.undo(r.get("session_id")),

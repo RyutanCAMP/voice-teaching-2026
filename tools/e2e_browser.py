@@ -1615,12 +1615,23 @@ def check_talk(browser, check, shots: Path | None, errors: list, out: Path) -> N
             pg.click("#ask-send")
             until(pg, lambda: pg.locator("#ask-turns .bubble.record").count() == 1)
             txt = pg.inner_text("#ask-turns")
-            check("ボタンを押す動きを、2回から3回にしますか？" in txt and cx.READ_ONLY_NOTE in txt
+            check("ボタンを押す動きを、2回から3回にしますか？" in txt and "範囲を確かめてください" in txt
                   and pg.is_disabled("#approve-button") and pg.is_hidden("#approval-status"),
                   "会話：「3回にして」は確かめる文とアプリの決まった文だけ（候補・承認は作らない）")
             check(pg.locator("#ask-turns .who", has_text="アプリ").count() >= 2, "会話：アプリの文は「アプリ」と出る")
+            # Step F：同じ入口から、プログラムが作った決まった文で範囲の確認のボタンへ（候補はボタンを押してから）
+            pg.wait_for_selector("#range-yes", timeout=5000)
+            check(pg.is_visible("#range-yes") and pg.get_attribute("#step-4", "aria-current") != "step"
+                  and "C00001から" not in pg.input_value("#ask-input"),
+                  "Step F：会話の欄の「じゃあ、3回にして」から、範囲の確認のボタンが出る（まだ候補ではない）")
             if shots:
                 pg.screenshot(path=str(shots / "TALK_1280_scene3.png"), full_page=True)
+            pg.click("#range-yes")
+            until(pg, lambda: pg.get_attribute("#step-4", "aria-current") == "step")
+            check(pg.is_hidden("#approval-status") and pg.is_enabled("#open-confirm"),
+                  "Step F：範囲のボタンを押すと回数の変更の候補になる（承認はまだ。確認表示のボタンで）")
+            if shots:
+                pg.screenshot(path=str(shots / "TALK_1280_scene3_candidate.png"), full_page=True)
             pg.close()
     finally:
         srv.shutdown()

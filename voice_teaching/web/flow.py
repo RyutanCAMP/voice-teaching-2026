@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import secrets
 import threading
 from collections import OrderedDict
@@ -37,6 +38,10 @@ from . import api
 
 MAX_SESSIONS = 8
 MAX_TEXT = 500
+STEP_F_RANGE_NOTE = ("範囲を確かめてください。［この範囲を繰り返す］を押すと、変更の候補になります"
+                     "（承認は、そのあとの確認表示のボタンで行います）")
+# Step F：承認・出力・転送・起動など、ボタンだけで行う操作の言葉。会話の道（Claude）へは送らず、指示の道の決まった文で止める
+_BUTTON_ONLY_WORDS = re.compile(r"承認|出力|書き出|転送|送信|保存|起動|実行|スタート")
 SOURCES = ("voice", "text")
 NO_SESSION = "このジョブの画面の情報がありません（時間が経って捨てたか、サーバーを起動し直しました）。ジョブを読み込み直してください"
 NOT_DECIDED = "指示から変更の内容を決められませんでした。位置番号・方向・量（mm）を、もう一度指示してください"
@@ -727,6 +732,87 @@ class WebFlow:
         return self._run(sid, run)
 
     # ---- Claude に聞く（読み取りだけ。docs/CLAUDE_API.md 8章・CHECKER_031 E1〜E7） ----
+    # ---- Step F：発話の入口を1つに（docs/STEP_F_UNIFIED_INPUT.md。CHECKER_031 3章・唐川さんの指示 11/3 夜） ----
+    def talk(self, sid: object, text: object, source: object = "text") -> dict:
+        """1つの入口で受ける（声・文字）。振り分けはまずプログラムが決める：
+        - 承認・起動などの言葉・会話の途中・範囲の確認の途中・はっきりした指示（位置・速度・選択・元に戻す など）→ 指示の道（hear）
+        - 回数の変更の希望（プログラムが人の文から回数を読めた）→ 会話の道（ask：Claude が答える。読み取りだけ）＋
+          変更の道へは、プログラムが作った決まった文（rc.canonical）だけを渡す（範囲の確認のボタン → 候補）
+        - それ以外（説明・意味を教える）→ 会話の道（ask）
+        Claude の答えの数・座標は使わない。候補を作るのは今までの道（_accept・confirm_repeat）だけ。"""
+        if not isinstance(text, str) or not text.strip():
+            return {"ok": False, "error": "指示の文字がありません"}
+        if len(text) > MAX_TEXT:
+            return {"ok": False, "error": f"指示の文字が長すぎます（{MAX_TEXT}文字まで）"}
+        if source not in SOURCES:
+            return {"ok": False, "error": "指示の種類（voice か text）が分かりません"}
+        with self._lock:
+            e = self._entries.get(sid) if isinstance(sid, str) else None
+        if e is None:
+            return {"ok": False, "error": NO_SESSION}
+        text = text.strip()
+        with e.lock:
+            route = self._talk_route(e, text)
+        ask_out = hear_out = None
+        via: list[str] = []
+        if route == "button":
+            with e.lock:
+                e.session.log.append(("発話", f"{'音声' if source == 'voice' else '文字'}：{text}"))
+                e.session.log.append(("止めた理由", ut.APPROVE_MESSAGE))
+            hear_out = {"ok": True, "status": "stop", "message": ut.APPROVE_MESSAGE, "heard": text, "source": source}
+            via.append("button")
+        elif route == "hear":
+            hear_out = self.hear(sid, text, source)
+            via.append("hear")
+        else:
+            ask_out = self.ask(sid, text, source=source)
+            via.append("ask")
+            if route == "count":
+                with e.lock:
+                    refused = ask_out.get("status") in ("count_refused", "explain_only")
+                    canon = None if (refused or e.session.candidate is not None) else self._repeat_canonical(e, text)
+                if canon is not None:
+                    hear_out = self.hear(sid, canon, "text")  # プログラムが作った文（人の文は会話の道の記録にある）
+                    via.append("hear")
+                    with e.lock:
+                        started = e.session.repeat_range is not None
+                    if started and isinstance(ask_out, dict):
+                        # 範囲の確認を始めた：「読み取りだけ」「候補は作りません」の文は、今の状態と合わないので、次にすることの文にする
+                        ask_out["notes"] = [STEP_F_RANGE_NOTE]
+                        ask_out["change_record"] = None
+        with e.lock:
+            state = self._state(sid, e)
+        return {"ok": True, "via": via, "ask": ask_out, "hear": hear_out, "state": state, "heard": text, "source": source}
+
+    def _talk_route(self, e: _Entry, text: str) -> str:
+        """振り分け（決定論）："hear"（指示の道）・"count"（回数の変更の希望）・"ask"（会話の道）。"""
+        s = e.session
+        f = ut.read_utterance(text)
+        if not f.stop_reasons and _BUTTON_ONLY_WORDS.search(ut.normalize(text)):
+            return "button"  # 出力・保存など：状態を変えず、ボタンで行うことを伝えるだけ
+        if f.stop_reasons or e.dialog.step is not None or s.repeat_range is not None:
+            return "hear"  # 承認・起動などは今の決まった文で止める／会話・範囲の確認の続きは今の道で
+        if e.talk.pending is not None:
+            return "ask"  # 「どの動きのことですか？」の途中（ボタンで確かめる）
+        count = talk.read_count(text, talk.repeat_blocks(s.original), e.talk.last_evidence)
+        if count is not None:
+            return "count"
+        if rc.is_repeat_request(text) or f.kinds or f.axes or f.positions or f.amounts or f.place_ref or f.shimasu_text:
+            return "hear"  # プログラムが指示として読める（Claude を呼ばない）
+        return "ask"
+
+    def _repeat_canonical(self, e: _Entry, text: str) -> str | None:
+        """回数の変更の希望から、変更の道へ渡す決まった文を作る（プログラムが読んだ区間・今の回数・利用者の文の回数だけ）。"""
+        s = e.session
+        blocks = talk.repeat_blocks(s.original)
+        count = talk.read_count(text, blocks, e.talk.last_evidence)
+        if count is None or count.stop or count.keep or count.total is None:
+            return None
+        block = count.target or (blocks[0] if len(blocks) == 1 else None)
+        if block is None:
+            return text  # 区間が決まらない：利用者の文のまま変更の道へ（範囲を聞き返す）
+        return rc.canonical(block.positions[0], block.positions[-1], block.count, count.total)
+
     def ask(self, sid: object, text: object = None, reset: object = False, info: object = False,
             source: object = "text", choose: object = None, token: object = None, sync: object = False) -> dict:
         """読み込んだジョブについて Claude に聞く。Session（候補・承認・選択・作業ログ）には触らない。

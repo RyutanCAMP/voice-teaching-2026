@@ -22,6 +22,17 @@ function el(tag, attrs, ...children) {
 
 const money = (x) => (typeof x === "number" && isFinite(x) ? "$" + x.toFixed(4) : "料金不明");
 
+// Step F：会話の欄の文は1つの入口（/api/talk）へ送る。説明・教える・回数の変更・位置の変更の振り分けはサーバーのプログラム
+async function postTalk(body) {
+  try {
+    const r = await fetch("/api/talk", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body) });
+    return await r.json();
+  } catch (_) {
+    return { ok: false, error: "アプリにつながりません。アプリを起動し直して、もう一度どうぞ" };
+  }
+}
+
 async function post(body) {
   try {
     const r = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" },
@@ -76,7 +87,7 @@ function showUsage(r) {
 }
 
 function renderLock() {
-  const on = !!ask.sessionId && ask.hasKey && !ask.busy;
+  const on = !!ask.sessionId && !ask.busy;  // キーが無くても送れる（プログラムの道。説明は Claude が要る）
   $("ask-input").disabled = !ask.sessionId || ask.busy;
   $("ask-send").disabled = !on;
   $("ask-reset").disabled = !ask.sessionId || ask.busy;
@@ -229,7 +240,7 @@ window.addEventListener("vt:ask-voice", (ev) => { ask.voiceText = ev.detail && e
 $("ask-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const text = $("ask-input").value.trim();
-  if (!text || !ask.sessionId || ask.busy || !ask.hasKey) return;
+  if (!text || !ask.sessionId || ask.busy) return;
   const source = ask.voiceText !== null && text === ask.voiceText.trim() ? "voice" : "text";
   ask.voiceText = null;
   ask.busy = true;
@@ -237,12 +248,25 @@ $("ask-form").addEventListener("submit", async (ev) => {
   for (const b of document.querySelectorAll("#ask-turns .talk-choices")) b.remove();  // 古い選択肢は使わない
   addTurn("人", text, "human");
   const wait = thinking();
-  const r = await post({ session_id: ask.sessionId, text, source });
+  const t = await postTalk({ session_id: ask.sessionId, text, source });
   wait.remove();
   ask.busy = false;
-  if (r.ok) $("ask-input").value = "";
-  showReply(r);
-  showUsage(r);
+  if (t.ok) $("ask-input").value = "";
+  if (!t.ok) {
+    showReply(t);
+  } else {
+    if (t.ask) {
+      showReply(t.ask);
+      showUsage(t.ask);
+    }
+    if (t.hear && t.hear.message) {
+      // 指示の道の答え（範囲の確認・候補・止めた理由など）も、会話の流れに出す（文はサーバーのもの）
+      addTurn("アプリ", t.hear.message, "app");
+      scrollDown();
+    }
+    // 画面の状態（範囲の確認のボタン・候補・3D）は app.js が描く
+    window.dispatchEvent(new CustomEvent("vt:talk-result", { detail: t }));
+  }
   renderLock();
   window.dispatchEvent(new CustomEvent("vt:ask-done"));
 });

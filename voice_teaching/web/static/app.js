@@ -281,6 +281,7 @@ function currentStep() {
   const st = state.st;
   if (!state.sessionId || !st) return 1;
   if (st.candidate) return 4;
+  if (st.repeat_range) return 3;  // 範囲の確認の途中（会話の欄から来ても）：範囲のボタンを出す（Step F）
   const ds = dialogStep();
   if (ds === "pick" || state.pickAgain) return 2;  // 会話の途中でも、位置は人が選ぶ
   if (ds === "confirm_position" || ds === "ask_move") return 3;
@@ -586,6 +587,19 @@ $("text-form").addEventListener("submit", async (ev) => {
   $("voice-hint").hidden = true;
   $("text-input").value = "";
   await sendInstruction(text, source);
+});
+
+// Step F：会話の欄（1つの入口 /api/talk）の答えのうち、指示の道の結果（範囲の確認・候補・止めた理由）を、
+// いつもの指示の結果と同じように描く。状態はサーバーの state のまま。承認・出力はここから呼ばない
+window.addEventListener("vt:talk-result", (ev) => {
+  const t = ev.detail || {};
+  if (t.hear && t.hear.status) {
+    applyResult({ ...t.hear, state: t.state || t.hear.state }, false);
+    if (t.hear.candidate_made && state.st && state.st.candidate) startPlayback();
+  } else if (t.state) {
+    state.st = t.state;
+    renderState();
+  }
 });
 
 async function sendInstruction(text, source) {
