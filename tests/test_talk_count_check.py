@@ -240,3 +240,25 @@ def test_real_run_explanations_still_show(tmp_path, reply):
     sid = w.load(T.demo_bytes())["session_id"]
     f.add(T.answer(reply, BLOCK))
     assert w.ask(sid, "このロボット、何をしている？")["reply_by"] == "claude"
+
+
+# ---- 内部 Safety 再確認（7af2288：CONDITIONAL PASS）の P2-1・P2-2・P3 ----
+@pytest.mark.parametrize("reply", [
+    "3回にしますか？今は3回目まで動いています。",
+    "今は3回に分けて動いています。3回にしますか？",
+    "今の動きは3回へ向かう途中です。3回にしますか？",
+    "ボタンを押す動作を三たびにしますか？", "ボタンを押す動作を参回にしますか？", "ボタンを押す動作を壱回にしますか？",
+    "ボタンを押す動作をさんかいにしますか？", "ボタンを押す動作を three times にしますか？",
+])
+def test_reused_phrases_and_wordy_counts_are_not_shown(tmp_path, reply):
+    w, f, sid = wide_taught(tmp_path)
+    f.add(T.answer(reply, BLOCK, "change_request", {"kind": "repeat", "from_count": 2, "to_count": 3}))
+    r = w.ask(sid, "じゃあ、3回にして")
+    assert r["reply_by"] == "app" and reply not in r["reply"], reply
+
+
+def test_current_count_with_the_right_number_is_shown(tmp_path):
+    w, f, sid = wide_taught(tmp_path)
+    f.add(T.answer("今は2回くり返しています。3回にしますか？", BLOCK, "change_request",
+                   {"kind": "repeat", "from_count": 2, "to_count": 3}))
+    assert w.ask(sid, "じゃあ、3回にして")["reply_by"] == "claude"

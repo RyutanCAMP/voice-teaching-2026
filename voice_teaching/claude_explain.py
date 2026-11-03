@@ -825,8 +825,8 @@ class Explainer:
                 change_turn = record is not None and (intent == "change_request" or count is not None)
                 if change_turn and from_to is not None:
                     a, b = from_to
-                    phrases += [f"{a}回から{b}回", f"{a}回から、{b}回", f"{b}回に", f"{b}回へ", f"{b}回目",
-                                f"{a}回のまま"]
+                    phrases += [f"{a}回から{b}回", f"{a}回から、{b}回", f"{b}回に", f"{a}回のまま",
+                                f"{a}回くり返", f"{a}回繰り返"]
                     phrases += [f"{k}回{v}" for k in said_now for v in ("増や", "減ら", "足")]
                 elif change_turn:
                     phrases += []  # 今の回数が決まらない：回数の言い方は許さない（strict）
