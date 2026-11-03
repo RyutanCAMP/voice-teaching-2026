@@ -632,3 +632,6 @@ svg .dest-mark { pointer-events: none; }
   /* PC 版で左の列が狭くなる分、背の低い画面で動きの並びを出すときは図を少し小さくし、図の注意まで1画面に収める（注意は隠さない） */
   .stage:has(#play-seq:not([hidden])) .fig-3d svg, .stage:has(#play-seq:not([hidden])) .fig-main svg { max-height: calc(50vh - 130px); }
 }
+
+/* 状態の1行（プログラムの確定情報。CHECKER_033 P1-A）：右側のいちばん上。目立たせすぎず、いつも読める */
+.status-line { margin: 0 0 8px; padding: 6px 10px; border-left: 4px solid #5b6b82; background: #f3f5f8; font-size: 0.92rem; }

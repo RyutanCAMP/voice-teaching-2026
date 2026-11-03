@@ -83,7 +83,8 @@ def test_choices_never_primary_and_only_send_text():
     reply = js_part("function showReply(", "// ---- 3. 指示")
     assert "primary" not in reply
     assert "/api/approve" not in reply and "onApproveClick" not in reply
-    assert 'sendInstruction(c.text, "text")' in reply
+    # 選択肢は、その文を指示の道へ返すだけ（11/4：入口を1つにしたあとも、選択肢の答えは振り分けずに /api/hear へ）
+    assert "answerChoice(c.text)" in reply
 
 
 def test_sample_button_only_calls_sample_route():

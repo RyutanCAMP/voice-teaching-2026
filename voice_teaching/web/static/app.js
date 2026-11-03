@@ -1,6 +1,6 @@
 // ボイスティーチング（シミュレーションモード）の画面。4ステップ：読込 → 位置を選ぶ → 音声で指示 → 確かめて承認。
 // - JBI の解析・変更候補・承認・出力はサーバー側で行う。ここでは JBI を解析しない。
-// - 指示は文字入力の欄から /api/hear へ送る。音声（speech.js）は認識した文を入力欄に入れるだけで、自動では送らない。
+// - 指示は文字入力の欄（入口は1つ）から /api/talk へ送る。音声（speech.js）は認識した文を入力欄に入れるだけで、自動では送らない。
 // - 録音中は、取消と終了のほかの操作（読込・位置選択・指示を送る・承認・出力）を使えなくする。
 // - 承認は確認表示の承認ボタンからだけ /api/approve を呼ぶ。指示の経路からは呼ばない。
 // - 出力ボタンは承認した後だけ使える。失敗を成功と表示しない。
@@ -253,6 +253,9 @@ function renderUpdown(u) {
 function renderState() {
   const st = state.st;
   if (!st) return;
+  // 状態の1行（CHECKER_033 P1-A・唐川さんの方針①）：サーバーがプログラムの確定情報だけから作った文をそのまま出す
+  $("status-line").hidden = !st.status_line;
+  $("status-line").textContent = st.status_line || "";
   // 「Claude に聞く」の欄に、データ（候補・承認）が変わったかもしれないことを知らせる（欄がサーバーに確かめ直す）
   const c = st.candidate;
   window.dispatchEvent(new CustomEvent("vt:state", { detail: { sessionId: state.sessionId,
@@ -308,10 +311,12 @@ function renderSteps() {
     li.classList.toggle("current", i === step);
     if (i === step) li.setAttribute("aria-current", "step"); else li.removeAttribute("aria-current");
   }
-  // 右側には今のステップのカードだけを出す
+  // 右側には今のステップのカードを出す。入口（指示の欄）は1つなので、JOB を読み込んだらいつも出す（11/4 唐川さんの指示③）：
+  // 位置を選ぶ前の「何をしている？」も同じ欄から送る（振り分けはサーバー）。ステップ4（候補・承認）では今までどおり出さない
+  // （録音しながら承認・出力できないように）
   const cards = { 2: "select-panel", 3: "instruction-panel", 4: "candidate-panel" };
   for (const [n, id] of Object.entries(cards)) {
-    $(id).hidden = Number(n) !== step;
+    $(id).hidden = id === "instruction-panel" ? !(step === 2 || step === 3) : Number(n) !== step;
   }
   renderDialog();
   // 次に押すものを1つだけ目立たせる
@@ -562,7 +567,7 @@ function showReply(status, message, choices) {
         b.addEventListener("click", () => {
           if (recording()) return;
           for (const x of row.querySelectorAll("button")) x.disabled = true;  // 2回押しても1回だけ送る
-          sendInstruction(c.text, "text");
+          answerChoice(c.text);
         });
         row.append(b);
       }
@@ -575,7 +580,7 @@ function showReply(status, message, choices) {
   $("voice-status").textContent = "";
 }
 
-// ---- 3. 指示（音声または文字）。どちらも同じ /api/hear へ ----
+// ---- 3. 指示（音声または文字）。どちらも同じ1つの入口（/api/talk）へ ----
 $("text-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   if (recording()) return;
@@ -594,6 +599,11 @@ $("text-form").addEventListener("submit", async (ev) => {
 window.addEventListener("vt:talk-result", (ev) => {
   const t = ev.detail || {};
   if (t.hear && t.hear.status) {
+    // 読めなかった言葉・聞き取った文は、結果を描く前に入れる（見出しと聞き取った文の目立たせに使う）
+    const uw = t.hear.facts && t.hear.facts.unknown_words;
+    state.unknownWords = Array.isArray(uw) ? uw.filter((w) => typeof w === "string" && w) : [];
+    state.lastHeard = t.hear.heard !== undefined ? t.hear.heard : t.heard;
+    renderFacts(t.hear.facts);
     applyResult({ ...t.hear, state: t.state || t.hear.state }, false);
     if (t.hear.candidate_made && state.st && state.st.candidate) startPlayback();
   } else if (t.state) {
@@ -606,15 +616,28 @@ async function sendInstruction(text, source) {
   if (!state.sessionId) return;
   $("reply-message").hidden = true;  // 前の聞き返し（と選択肢）は消す。古い選択肢を後から押せないように
   $("reply-message").replaceChildren();
-  const res = await postJson("/api/hear", { session_id: state.sessionId, text: text, source: source });
+  // 入口は1つ（11/4 唐川さんの指示③）：/api/talk（explain.js の vtTalk）。結果は vt:talk-result で applyResult に渡る。
+  // 指示の欄から /api/hear を直接呼ばない（振り分けをしないと、ボタンだけの言葉や相づちで承認が取り消されるため）
+  const t = await window.vtTalk(text, source);
+  if (!t) return;
+  const res = t.hear || {};
   $("heard-text").textContent = res.heard !== undefined ? res.heard : text;
-  // 別のブランチで facts.unknown_words（読めなかった言葉）が足される。無ければ空のまま
+  keepHeadingInView();
+}
+
+// 指示の道が出した選択肢（［変更したい］［説明です］［2回の移動］など）への答え：プログラムが作った文なので、
+// 振り分けをせずに指示の道（/api/hear）へ返す（Claude には送らない）。自由な文・声は、いつも入口（/api/talk）から
+async function answerChoice(text) {
+  if (!state.sessionId) return;
+  $("reply-message").hidden = true;
+  $("reply-message").replaceChildren();
+  const res = await postJson("/api/hear", { session_id: state.sessionId, text: text, source: "text" });
+  $("heard-text").textContent = res.heard !== undefined ? res.heard : text;
   const uw = res.facts && res.facts.unknown_words;
   state.unknownWords = Array.isArray(uw) ? uw.filter((w) => typeof w === "string" && w) : [];
   state.lastHeard = res.heard !== undefined ? res.heard : text;
   renderFacts(res.facts);
   applyResult(res, false);
-  // 候補ができたら、まず図で変更前後の経路を再生して見せる（承認は確認表示のボタンだけ）
   if (res.candidate_made && state.st && state.st.candidate) startPlayback();
   keepHeadingInView();
 }
@@ -622,6 +645,9 @@ async function sendInstruction(text, source) {
 // 小さな画面：送ったあと、見出し（次にすること）が上の帯の下に隠れないようにする
 function keepHeadingInView() {
   if (window.innerWidth > 600) return;
+  // 範囲の確認の最中は、範囲の中身と［この範囲を繰り返す］が見えるほうを優先する（会話の流れが見出しとの間に入るため）
+  const box = $("reply-message");
+  if (!box.hidden && box.classList.contains("range-ask")) return;
   const top = $("next-action").getBoundingClientRect().top;
   const bar = document.querySelector(".top").getBoundingClientRect().bottom;
   if (top < bar + 4) $("next-action").scrollIntoView({ block: "start" });
@@ -1578,13 +1604,6 @@ const voice = new SpeechInput(Recognition, {
     if (!t || t.sessionId !== state.sessionId || t.selected !== (state.st ? state.st.selected : null)) {
       state.live = false;  // 使わなかったときも、1回の発話で OFF
       showVoiceError("話している間に位置が変わったので、使いませんでした。もう一度どうぞ");
-      renderMic();
-      return;
-    }
-    if ($("voice-to-ask") && $("voice-to-ask").checked && !$("ask-panel").hidden) {
-      $("ask-input").value = text;  // 「Claude に聞く」欄に入れるだけ。自動では送らない
-      window.dispatchEvent(new CustomEvent("vt:ask-voice", { detail: { text } }));  // 直さずに送れば source=voice
-      state.live = false;  // 1回の発話で OFF（次は人が 🎤 を押す）
       renderMic();
       return;
     }

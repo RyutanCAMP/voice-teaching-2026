@@ -87,9 +87,7 @@ function showUsage(r) {
 }
 
 function renderLock() {
-  const on = !!ask.sessionId && !ask.busy;  // キーが無くても送れる（プログラムの道。説明は Claude が要る）
-  $("ask-input").disabled = !ask.sessionId || ask.busy;
-  $("ask-send").disabled = !on;
+  // 入口は1つ（指示の欄。app.js が送るボタンを管理する）。送っている間は talkSend が二重に送らない
   $("ask-reset").disabled = !ask.sessionId || ask.busy;
   for (const b of document.querySelectorAll("#ask-turns .talk-choice")) b.disabled = ask.busy;
 }
@@ -206,7 +204,6 @@ function showReply(r) {
 
 window.addEventListener("vt:session", (ev) => {
   ask.sessionId = (ev.detail && ev.detail.sessionId) || null;
-  ask.voiceText = null;
   $("ask-turns").replaceChildren();
   $("ask-usage").textContent = "";
   $("ask-memory").replaceChildren();
@@ -234,24 +231,18 @@ window.addEventListener("vt:state", async (ev) => {
   }
 });
 
-// 🎤 で聞き取った文がこの欄に入った（app.js）：直さずに送れば source=voice として送る（同じ検査を通る）
-window.addEventListener("vt:ask-voice", (ev) => { ask.voiceText = ev.detail && ev.detail.text; });
-
-$("ask-form").addEventListener("submit", async (ev) => {
-  ev.preventDefault();
-  const text = $("ask-input").value.trim();
-  if (!text || !ask.sessionId || ask.busy) return;
-  const source = ask.voiceText !== null && text === ask.voiceText.trim() ? "voice" : "text";
-  ask.voiceText = null;
+// 入口は1つ（11/4 唐川さんの指示③）：指示の欄（app.js）から呼ぶ。説明・教える・回数・位置の振り分けはサーバーのプログラム
+async function talkSend(text, source) {
+  if (!text || !ask.sessionId || ask.busy) return null;
   ask.busy = true;
   renderLock();
   for (const b of document.querySelectorAll("#ask-turns .talk-choices")) b.remove();  // 古い選択肢は使わない
+  $("ask-panel").hidden = false;
   addTurn("人", text, "human");
   const wait = thinking();
   const t = await postTalk({ session_id: ask.sessionId, text, source });
   wait.remove();
   ask.busy = false;
-  if (t.ok) $("ask-input").value = "";
   if (!t.ok) {
     showReply(t);
   } else {
@@ -264,12 +255,14 @@ $("ask-form").addEventListener("submit", async (ev) => {
       addTurn("アプリ", t.hear.message, "app");
       scrollDown();
     }
-    // 画面の状態（範囲の確認のボタン・候補・3D）は app.js が描く
+    // 画面の状態（範囲の確認のボタン・候補・3D・状態の1行）は app.js が描く
     window.dispatchEvent(new CustomEvent("vt:talk-result", { detail: t }));
   }
   renderLock();
   window.dispatchEvent(new CustomEvent("vt:ask-done"));
-});
+  return t;
+}
+window.vtTalk = talkSend;
 
 $("ask-reset").addEventListener("click", async () => {
   if (!ask.sessionId || ask.busy) return;

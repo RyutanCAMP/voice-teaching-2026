@@ -848,7 +848,11 @@ class Explainer:
         change_turn = intent == "change_request" or count is not None or record is not None
         if shown is None and change_turn:
             why = "変更の会話のため、アプリの定型文にしました（Claude の文は表示しません）"
-            shown = talk.change_turn_text(record, change)
+            rec = dict(record) if record else None
+            reps = {r["count"] for r in (conv.facts or {}).get("repeats", [])}
+            if rec is not None and rec.get("program_from") is None and len(reps) == 1:
+                rec["program_from"] = next(iter(reps))  # 照らし合わせと同じ：くり返しの回数が1通りならその数（プログラムが数えた）
+            shown = talk.change_turn_text(rec, change)
         elif shown is None:
             p = talk.reply_mvp_problem(data["reply"])
             if p is not None:

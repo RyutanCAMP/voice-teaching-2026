@@ -832,8 +832,9 @@ class WebFlow:
             return "purpose_or_change" if (change and count is None) or count is not None else "ask"
         if not approved and (e.dialog.step is not None or s.repeat_range is not None):
             return "hear"  # 会話・範囲の確認の続き（「承認」と言ったときの2段階の案内も、今の道が出す）
-        if f.stop_reasons or _BUTTON_ONLY_WORDS.search(ut.normalize(text)):
+        if _BUTTON_ONLY_WORDS.search(ut.normalize(text)) or (approved and f.stop_reasons):
             return "button"  # 承認・出力・起動など：状態を変えず（承認も取り消さず）、ボタンで行うことを伝えるだけ
+        # 止める理由のある文（「前・後ろ」など）は、承認の前なら今までどおり指示の道へ（止める文・場所の言葉の会話は指示の道が出す）
         if approved and not change:
             if f.question or _QUESTION_WORDS.search(ut.normalize(text)):
                 return "ask"  # 承認のあとの質問：説明だけ（読み取りだけ。承認は取り消さない）
@@ -842,8 +843,8 @@ class WebFlow:
             return "hear"  # 承認・起動などは今の決まった文で止める／会話・範囲の確認の続きは今の道で
         if e.talk.pending is not None:
             return "ask"  # 「どの動きのことですか？」の途中（ボタンで確かめる）
-        if count is not None:
-            return "count"
+        if count is not None and not (f.repeat and f.repeat[1] == "ambiguous" and "move" in f.kinds):
+            return "count"  # 「2回移動させて」（回数の移動か往復か、あいまい）は、指示の道が2択で聞き返す
         if rc.is_repeat_request(text) or f.kinds or f.axes or f.positions or f.amounts or f.place_ref or f.shimasu_text:
             return "hear"  # プログラムが指示として読める（Claude を呼ばない）
         return "ask"
@@ -852,7 +853,9 @@ class WebFlow:
     def _several_changes(f, count, text: str) -> bool:
         """1つの文に、回数の変更と、位置・速度・元に戻す・比べる・選ぶ のどれかが一緒にあるか（P1-B）。"""
         repeat = count is not None or rc.is_repeat_request(text)
-        other = bool(set(f.kinds) & {"move", "speed", "undo", "compare"} or f.amounts or f.axes)
+        # 位置の移動は、量か軸があるときだけ別の変更と数える（「C00001からC00002を2回移動させて」は1つのあいまいな指示：
+        # 指示の道が［2回の移動］［2往復］で聞き返す）
+        other = bool(set(f.kinds) & {"speed", "undo", "compare"} or f.amounts or f.axes)
         return repeat and other
 
     def _repeat_canonical(self, e: _Entry, text: str) -> str | None:

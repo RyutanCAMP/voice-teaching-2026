@@ -218,13 +218,16 @@ def check_ux_polish(browser, url, check, shots: Path | None) -> None:
         req["text"] = "少し動かして"
         res = route.fetch(post_data=json.dumps(req))
         body = res.json()
-        if body.get("facts") is not None and not body["facts"].get("unknown_words"):
-            body["facts"]["unknown_words"] = ["バイオ"]
+        # 入口は1つ（/api/talk）：指示の道の答えは body["hear"] の中
+        h = body.get("hear") or {}
+        if h.get("facts") is not None and not h["facts"].get("unknown_words"):
+            h["facts"]["unknown_words"] = ["バイオ"]
+        h["heard"] = heard
         body["heard"] = heard
         route.fulfill(response=res, body=json.dumps(body, ensure_ascii=False),
                       headers={**res.headers, "content-type": "application/json; charset=utf-8"})
 
-    pg.route("**/api/hear", fake_unknown)
+    pg.route("**/api/talk", fake_unknown)
     pg.goto(url)
     pg.click("#sample-button")
     pg.wait_for_selector("#job-area:not([hidden])")
@@ -1542,8 +1545,9 @@ def check_talk(browser, check, shots: Path | None, errors: list, out: Path) -> N
                                   cache_read_input_tokens=0, cache_creation=None))
 
     block = [21, 22, 23, 24, 25, 26]
-    # 1ターン目は本物の Claude の答え（2026-11-03 シクロの通し）と同じ文・同じ根拠の行（20〜27。MOVJ の行を含む）
-    replies = [ans(1, "最初の位置に動いたあと、同じ3か所をめぐる動きを2回くり返し、最後に別の位置へ移ります。"
+    # 1ターン目は本物の Claude の答え（2026-11-03 シクロの通し）から数を除いた文（唐川さんの方針③ 11/4：MVP では Claude の
+    # 自由文に数を含めない）・同じ根拠の行（20〜27。MOVJ の行を含む）
+    replies = [ans(1, "最初の位置に動いたあと、同じ場所をめぐる動きをくり返し、最後に別の位置へ移ります。"
                       "作業の目的は分からないので、何の作業か教えてもらえますか？", list(range(20, 28))),
                ans(3, "ボタンを押す動きを、2回から3回にしますか？", block, "change_request",
                    {"kind": "repeat", "from_count": 2, "to_count": 3})]
@@ -1568,14 +1572,17 @@ def check_talk(browser, check, shots: Path | None, errors: list, out: Path) -> N
             pg.goto(url)
             pg.set_input_files("#file-input", str(REPO / "samples/dummy/DEMO_BUTTON_REPEAT.JBI"))
             pg.wait_for_selector("#ask-panel:not([hidden])")
-            until(pg, lambda: pg.is_enabled("#ask-send"))
+            # 入口は1つ（11/4 唐川さんの指示③）：会話も指示も、指示の欄（#text-input・#text-send）から
+            until(pg, lambda: pg.is_enabled("#text-send"))
+            check(pg.locator("#ask-input").count() == 0 and pg.locator("#voice-to-ask").count() == 0,
+                  "入口は1つ：「Claude に聞く」の入力欄と「🎤 の文をこの欄に入れる」は無い")
             if width == 390:
                 w = pg.evaluate("document.documentElement.scrollWidth")
                 check(w <= 390, f"会話 390px：「Claude に聞く」の欄があっても横にはみ出さない（{w}px）")
                 pg.close()
                 continue
-            pg.fill("#ask-input", "このロボット、何をしている？")
-            pg.click("#ask-send")
+            pg.fill("#text-input", "このロボット、何をしている？")
+            pg.click("#text-send")
             pg.wait_for_selector("#ask-turns .thinking", timeout=3000)
             check("考えています" in pg.inner_text("#ask-turns .thinking"), "会話：返事を待つ間「考えています…」が出る")
             pg.wait_for_selector("#ask-turns .bubble.claude:not(.thinking)")
@@ -1592,13 +1599,15 @@ def check_talk(browser, check, shots: Path | None, errors: list, out: Path) -> N
                   "会話：控えめに出しても MOVJ の区間は点線のまま（直線の通り道に見せない）")
             if shots is not None:
                 pg.screenshot(path=str(shots / "talk_1_highlight.png"))
-            check(pg.locator("#ask-turns .bubble.claude").count() == 1, "会話：本物と同じ文（3か所・2回）がそのまま表示される")
+            check(pg.locator("#ask-turns .bubble.claude").count() == 1, "会話：数を含まない Claude の文がそのまま表示される")
+            check(pg.is_visible("#status-line") and "承認 まだ" in pg.inner_text("#status-line"),
+                  f"状態の1行（プログラムの確定情報）が見える：{pg.inner_text('#status-line')}")
             check("21〜26行目：C00001→C00002→C00003（2回）" in pg.inner_text("#ask-turns .supplement"),
                   "会話：番号は補足として小さく出る")
             whos = pg.locator("#ask-turns .bubble .who").all_inner_texts()
             check(any(x.startswith("Claude") for x in whos) and "人" in whos, f"会話：話し手（人・Claude）が出る：{whos}")
-            pg.fill("#ask-input", "ボタンを押してるんだよ")
-            pg.click("#ask-send")
+            pg.fill("#text-input", "ボタンを押してるんだよ")
+            pg.click("#text-send")
             pg.wait_for_selector("#ask-turns .talk-choice")
             labels = pg.locator("#ask-turns .talk-choice").all_inner_texts()
             until(pg, lambda: pg.locator("#fig-3d line.ask-hl").count() == 5)
@@ -1609,20 +1618,21 @@ def check_talk(browser, check, shots: Path | None, errors: list, out: Path) -> N
             until(pg, lambda: pg.locator("#fig-3d g.taught-mark").count() == 1)
             check(pg.locator("#ask-turns .bubble.taught .mark-human").count() == 1
                   and pg.is_visible("#ask-memory-box") and "ボタンを押してる" in pg.inner_text("#ask-memory"),
-                  "会話：人が教えた意味が「人が教えた（この会話の中だけ）」の印で吹き出しと覚えていることの欄に出る")
+                  "会話：人が教えた意味が「ユーザー登録情報」の印で吹き出しと覚えていることの欄に出る")
             check("（人が教えた）" in (pg.text_content("#fig-3d g.taught-mark") or ""), "会話：3D にも「人が教えた」の印が出る")
-            pg.fill("#ask-input", "じゃあ、3回にして")
-            pg.click("#ask-send")
+            pg.fill("#text-input", "じゃあ、3回にして")
+            pg.click("#text-send")
             until(pg, lambda: "範囲を確かめてください" in pg.inner_text("#ask-turns"))
             txt = pg.inner_text("#ask-turns")
-            check("ボタンを押す動きを、2回から3回にしますか？" in txt and "範囲を確かめてください" in txt
+            check("ボタンを押す動きを、2回から3回にしますか？" not in txt and "2回から3回にするご希望として受け取りました" in txt
+                  and "範囲を確かめてください" in txt
                   and pg.is_disabled("#approve-button") and pg.is_hidden("#approval-status"),
-                  "会話：「3回にして」は確かめる文とアプリの決まった文だけ（候補・承認は作らない）")
+                  "会話：「3回にして」は Claude の文を出さず、アプリの定型文だけ（候補・承認は作らない。CHECKER_033 P1-A）")
             check(pg.locator("#ask-turns .who", has_text="アプリ").count() >= 2, "会話：アプリの文は「アプリ」と出る")
             # Step F：同じ入口から、プログラムが作った決まった文で範囲の確認のボタンへ（候補はボタンを押してから）
             pg.wait_for_selector("#range-yes", timeout=5000)
             check(pg.is_visible("#range-yes") and pg.get_attribute("#step-4", "aria-current") != "step"
-                  and "C00001から" not in pg.input_value("#ask-input"),
+                  and "C00001から" not in pg.input_value("#text-input"),
                   "Step F：会話の欄の「じゃあ、3回にして」から、範囲の確認のボタンが出る（まだ候補ではない）")
             if shots:
                 pg.screenshot(path=str(shots / "TALK_1280_scene3.png"), full_page=True)
@@ -2033,13 +2043,13 @@ def check_updown_unconfirmed(browser, check, shots: Path | None, errors: list) -
               f"上下の設定なし：「上下の向き：未確認（Z＋・Z−で指示）」と出す（{pg.inner_text('#updown-status')!r}）")
         det = pg.inner_text("#updown-detail") if pg.is_visible("#updown-detail") else ""
         check(det == "上下の向き：未確認（HC20DT）", f"S30-1：設定なしのサーバーでもロボット名（--robot）を出す（{det!r}）")
-        side = len("".join(pg.evaluate("""() => [...document.querySelectorAll('.side > :not(#ask-panel)')]
+        side = len("".join(pg.evaluate("""() => [...document.querySelectorAll('.side > :not(#ask-panel):not(#status-line)')]
             .filter((e) => e.offsetParent !== null).map((e) => e.innerText).join('')""").split()))  # 会話の欄（PC 版で右側）は数えない
         check(side <= 80, f"上下の設定なし：次にすることを足しても、音声のカードの右側の文字は80文字まで（{side}文字）")
         # 不一致・変更済みの表示の文に入れ替えても 80文字まで（表示の文だけを入れ替えて数える。サーバーの状態は変えない）
         for other in ("上下の向き：確認した座標系・ツールと違います", "上下の向き：設定が変わっています"):
             pg.evaluate("t => { document.querySelector('#updown-status').textContent = t; }", other)
-            side2 = len("".join(pg.evaluate("""() => [...document.querySelectorAll('.side > :not(#ask-panel)')]
+            side2 = len("".join(pg.evaluate("""() => [...document.querySelectorAll('.side > :not(#ask-panel):not(#status-line)')]
             .filter((e) => e.offsetParent !== null).map((e) => e.innerText).join('')""").split()))  # 会話の欄（PC 版で右側）は数えない
             check(side2 <= 80, f"上下の向き「{other}」の表示でも、音声のカードの右側の文字は80文字まで（{side2}文字）")
         pg.evaluate("t => { document.querySelector('#updown-status').textContent = t; }", "上下の向き：未確認（Z＋・Z−で指示）")
@@ -2184,7 +2194,8 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     check(pg.get_attribute('.view-tab[data-view="3d"]', "aria-selected") == "true" and pg.is_visible("#fig-3d svg"),
           "読み込むと、最初に 3D を大きく出す")
     check(pg.inner_text("#interp-badge") == "解釈：モック", f"解釈のしかたを上の帯で区別：{pg.inner_text('#interp-badge')}")
-    check(cards(pg) == ["select-panel"], f"右側は今のステップのカードだけ：{cards(pg)}")
+    # 入口は1つ（11/4 唐川さんの指示③）：ステップ2でも、指示の欄（会話の入口）を出す（「何をしている？」を位置を選ぶ前に聞ける）
+    check(cards(pg) == ["select-panel", "instruction-panel"], f"右側は今のステップのカードと、入口（指示の欄）：{cards(pg)}")
     check(all(pg.is_visible(s) for s in ["#figure-note", "#play-note", "#view3d-note"]),
           "図の注意・再生の限界・3D の限界（ロボット本体なし・保証しない）は、いつも見える")
 
@@ -2249,11 +2260,11 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     check(pg.inner_text("#mic-label") == "マイク OFF" and pg.get_attribute("#mic-button", "aria-pressed") == "false",
           "マイクは最初 OFF と出る")
     # 右側の文字の量は、操作のカード（会話の欄は PC 版の画面で右側に移したので数えない）
-    side = len("".join(pg.evaluate("""() => [...document.querySelectorAll('.side > :not(#ask-panel)')]
+    side = len("".join(pg.evaluate("""() => [...document.querySelectorAll('.side > :not(#ask-panel):not(#status-line)')]
         .filter((e) => e.offsetParent !== null).map((e) => e.innerText).join('')""").split()))
     check(all(pg.is_visible(s) for s in ["#voice-position", "#mic-button", "#text-input", "#text-send"])
-          and pg.inner_text("#text-send") == "次へ" and side <= 80,
-          f"音声のカードは「位置・マイク・入力欄・次へ」（右側の文字 {side}文字。80文字まで）")
+          and pg.inner_text("#text-send") == "送る" and side <= 80,
+          f"音声のカードは「位置・マイク・入力欄・送る」（右側の文字 {side}文字。80文字まで。状態の1行は数えない）")
     check(pg.is_hidden("#heard-text") and pg.is_hidden("#work-log") and pg.is_hidden("#voice-notice"),
           "聞き取った文字・ログ・音声の方式の説明は詳細表示の中")
     shot(pg, "3_selected.png")
@@ -2422,8 +2433,8 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     until(pg, lambda: pg.inner_text("#mic-label") == "マイク OFF")
     check(True, "「マイクをOFF」で OFF にできる")
     pg.click("#voice-position")
-    check(cards(pg) == ["select-panel"] and pg.get_attribute("#step-2", "aria-current") == "step",
-          "位置の「変える」で、位置のボタンに戻れる")
+    check(cards(pg) == ["select-panel", "instruction-panel"] and pg.get_attribute("#step-2", "aria-current") == "step",
+          "位置の「変える」で、位置のボタンに戻れる（入口の欄は出たまま）")
     pg.locator("#position-chips button", has_text="C00000").click()
     until(pg, lambda: pg.inner_text("#voice-position strong") == "C00000")
     pg.fill("#text-input", FAKE_TEXT)

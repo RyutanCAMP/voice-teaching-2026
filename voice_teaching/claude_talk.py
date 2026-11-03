@@ -965,11 +965,12 @@ def reply_mvp_problem(text: str) -> str | None:
 def change_turn_text(record: dict | None, change: dict | None) -> str:
     """変更の会話（回数・位置）で、Claude の文の代わりに出すプログラムの定型文。数はプログラムが数えたものだけ。"""
     if record is not None and record.get("kind") == "repeat":
-        a, b, target = record.get("program_from"), record.get("program_total"), record.get("target")
+        a, b, block = record.get("program_from"), record.get("program_total"), record.get("block") or {}
+        pos = block.get("positions") or []
         if record.get("program_keep"):
             return "回数はそのままにするご希望として受け取りました。動作データは変えていません"
         if a is not None and b is not None:
-            where = f"{target}の" if target else ""
+            where = f"{pos[0]}〜{pos[-1]}の" if len(pos) >= 2 else ""
             return (f"{where}くり返しを{a}回から{b}回にするご希望として受け取りました。"
                     "まだ動作データは変えていません。範囲と回数は、アプリの表示で確かめてください")
         return ("回数を変えるご希望として受け取りました。まだ動作データは変えていません。"
