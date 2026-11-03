@@ -91,7 +91,7 @@ def test_live_mic_toggle_in_voice_section():
     j = text("app.js")
     v = j[j.index("// ---- 音声入力（speech.js）"):]
     assert "state.live" in v
-    assert "function resumeLive()" in v
+    assert "function resumeLive()" not in v  # 11/3 夜の決定：1回の発話で OFF（tests/test_mic_single_shot.py）
     # 音声の部分は、今まで通り送信・承認・出力を呼ばない
     for w in ["/api/", "postJson", "fetch(", "onApproveClick", "sendInstruction", ".click()", "requestSubmit"]:
         assert w not in v, w
@@ -129,8 +129,9 @@ def test_confirm_shows_unplottable_note_3d_limit_and_affected_lines():
 
 
 def test_live_mic_turns_off_after_a_while():
+    # 11/3 夜の決定で「しばらく使わなければ OFF」は要らなくなった（1回の発話で必ず OFF）
     v = text("app.js")
-    assert "LIVE_MAX_MS" in v and "state.live = false" in v
+    assert "LIVE_MAX_MS" not in v and "state.live = false" in v
 
 
 # ---- 内部 Safety 再レビュー #1：「量を超えています」の見出しは、移動量の上限を超えたときだけ ----

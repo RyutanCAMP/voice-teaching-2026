@@ -236,7 +236,7 @@ def check_ux_polish(browser, url, check, shots: Path | None) -> None:
     until(pg, lambda: pg.is_enabled("#voice-stop"))
     pg.click("#voice-stop")
     until(pg, lambda: pg.input_value("#text-input") == "バイオ 3ミリ 下げて")
-    pg.click("#voice-cancel")
+    # 話し終わるとマイクは自動で OFF（「マイクをOFF」は押さなくてよい）
     pg.click("#text-send")
     until(pg, lambda: pg.is_visible("#reply-message"))
     marks = pg.locator("#reply-message mark.unknown").all_inner_texts()
@@ -682,8 +682,8 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             pg.fill("#text-input", "X マイナス方向に 5mm")
             check(pg.is_hidden("#voice-hint"), "文を直して向きを入れると、知らせは消える")
             pg.fill("#text-input", "")
-            pg.click("#voice-cancel")
-            until(pg, lambda: pg.inner_text("#mic-label") == "マイク OFF")
+            check(pg.inner_text("#mic-label") == "マイク OFF" and not pg.is_enabled("#voice-cancel"),
+                  "1回話し終わると、マイクは自動で OFF（「マイクをOFF」を押さなくてよい）")
             pg.evaluate("window.__fakeText = %r" % FAKE_TEXT)
 
             # 録音 → 終了 → 入力欄に入るだけ（自動では送らない）
@@ -1553,7 +1553,7 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
           "聞き取った文字・ログ・音声の方式の説明は詳細表示の中")
     shot(pg, "3_selected.png")
 
-    # 初めて 🎤：同意を聞いてから聞き始める。通信の失敗が1回だけなら、マイク ON のまま聞き直す
+    # 初めて 🎤：同意を聞いてから聞き始める。通信の失敗は聞き直さず、必ず OFF（11/3 夜の決定）
     pg.evaluate("window.__fails = ['network']")
     pg.click("#mic-button")
     check(pg.is_visible("#voice-consent") and primaries(pg) == 1
@@ -1561,27 +1561,23 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
           "初めて 🎤 を押すと同意を聞く（「使う」だけが目立つ）")
     shot(pg, "3_consent.png")
     pg.click("#consent-yes")
-    until(pg, lambda: pg.inner_text("#voice-partial") == "この位置を")
-    check(pg.is_hidden("#voice-error") and "聞いています" in pg.inner_text("#mic-label"),
-          "通信の失敗が1回なら、マイク ON のまま聞き直す")
-    pg.click("#voice-cancel")
-
-    # 続けて失敗（Chrome の network）：マイクを OFF にして、次にすることと文字の入力へ案内する
-    pg.evaluate("window.__fails = ['network', 'network']")
-    pg.click("#mic-button")
     until(pg, lambda: pg.is_visible("#voice-error"))
     err = pg.inner_text("#voice-error")
-    check(pg.inner_text("#mic-label") == "マイク OFF" and "接続" in err and "文字で入力" in err and pg.is_enabled("#text-input"),
-          f"通信の失敗が続くと OFF にして、次にすることと文字入力を案内：{' / '.join(err.splitlines())[:60]}")
+    pg.wait_for_timeout(1500)
+    check(pg.inner_text("#mic-label") == "マイク OFF" and not pg.is_enabled("#voice-stop")
+          and "接続" in err and "もう一度 🎤" in err and "文字で入力" in err and pg.is_enabled("#text-input"),
+          f"通信の失敗は聞き直さずに OFF にして、もう一度 🎤 と文字入力を案内：{' / '.join(err.splitlines())[:60]}")
     shot(pg, "3a_voice_error.png")
 
-    # 声が無いまま止まる（no-speech）：Web会議のように、マイク ON のまま聞き直す
+    # 声が無いまま止まる（no-speech）：聞き直さずに OFF。もう一度 🎤 を押すよう案内する
     pg.evaluate("window.__fails = ['no-speech', 'no-speech']")
     pg.click("#mic-button")
-    until(pg, lambda: pg.inner_text("#voice-partial") == "この位置を")
-    check(pg.is_hidden("#voice-error") and "聞いています" in pg.inner_text("#mic-label")
-          and pg.evaluate("window.__fails.length") == 0, "声が無いまま止まっても、マイク ON のまま聞き直す（2回）")
-    pg.click("#voice-cancel")
+    until(pg, lambda: pg.is_visible("#voice-error"))
+    pg.wait_for_timeout(1500)
+    check(pg.inner_text("#mic-label") == "マイク OFF" and not pg.is_enabled("#voice-stop")
+          and pg.evaluate("window.__fails.length") == 1 and "もう一度 🎤" in pg.inner_text("#voice-error"),
+          "声を聞き取れなかったときも、聞き直さずに OFF（失敗は1回分だけ使った）")
+    pg.evaluate("window.__fails = []")
 
     # マイクが許可されていない：どこで許可するかを出す
     pg.evaluate("window.__fails = ['not-allowed']")
@@ -1589,18 +1585,6 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     until(pg, lambda: pg.is_visible("#voice-error"))
     check("許可" in pg.inner_text("#voice-error") and pg.inner_text("#mic-label") == "マイク OFF",
           "マイクが許可されていないときは、許可の場所を案内して OFF")
-
-    # 入力欄に文があるまま失敗（network）→ 一時停止。あとで入力欄を消しても、勝手に聞き始めない（内部 QA P2-1）
-    pg.fill("#text-input", "手で書いた")
-    pg.evaluate("window.__fails = ['network']")
-    pg.click("#mic-button")
-    until(pg, lambda: pg.evaluate("window.__fails.length") == 0 and not pg.is_enabled("#voice-stop"))
-    pg.fill("#text-input", "")
-    pg.wait_for_timeout(1200)
-    check(not pg.is_enabled("#voice-stop") and "一時停止" in pg.inner_text("#mic-label"),
-          "入力欄に文があるまま失敗したあと、入力欄を消しても勝手に聞き始めない")
-    pg.click("#mic-button")  # 一時停止中に押すと OFF
-    until(pg, lambda: pg.inner_text("#mic-label") == "マイク OFF")
 
     # 「端末内のみ」（詳細表示で選ぶ・試験的）で日本語の音声データが無いとき：入れるボタンを出し、押したときだけ入れる
     pg.click("#engineer-toggle")
@@ -1631,9 +1615,10 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
           "声から入った文は「聞き取った文（直せます）」と大きく出す")
     pg.wait_for_timeout(400)  # ボタンの色の切り替え（0.15秒）が終わってから撮る
     shot(pg, "3d_heard.png")
-    check("一時停止" in pg.inner_text("#mic-label") and pg.is_enabled("#text-input")
+    check(pg.inner_text("#mic-label") == "マイク OFF" and pg.get_attribute("#mic-button", "aria-pressed") == "false"
+          and pg.is_enabled("#text-input")
           and "primary" in (pg.get_attribute("#text-send", "class") or "") and primaries(pg) == 1,
-          "話し終わると認識文が入力欄に入り、マイクは ON のまま一時停止（確かめて「次へ」）")
+          "話し終わると認識文が入力欄に入り、マイクは OFF（確かめて「次へ」）")
     pg.wait_for_timeout(800)
     check(pg.input_value("#text-input") == FAKE_TEXT and pg.is_hidden("#reply-message")
           and pg.get_attribute("#step-3", "aria-current") == "step", "自動では送らない（入力欄の文を直せる）")
@@ -1641,8 +1626,8 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     pg.fill("#text-input", "")
     pg.wait_for_timeout(1000)
     check(not pg.is_enabled("#voice-stop") and pg.is_enabled("#text-input"),
-          "一時停止中に入力欄を消しても、勝手に聞き始めない（文字で打ち直せる）")
-    # 入力欄の文を直して送る → 聞き返し → マイクが ON のまま、また聞き始める
+          "入力欄を消しても、勝手に聞き始めない（文字で打ち直せる）")
+    # 入力欄の文を直して送る → 聞き返し → マイクは OFF のまま（自動では聞かない）。次は人が 🎤 を押す
     pg.fill("#text-input", "少し動かして")
     pg.click("#text-send")
     until(pg, lambda: pg.is_visible("#reply-message"))
@@ -1652,8 +1637,12 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     check(pg.inner_text("#next-action") == "もう一度、言い直してください",
           f"選択肢の無い聞き返しの見出しは「もう一度、言い直してください」：{pg.inner_text('#next-action')}")
     shot(pg, "3b_ask.png")
-    until(pg, lambda: pg.is_enabled("#voice-stop"), timeout_ms=4000)
-    check("聞いています" in pg.inner_text("#mic-label"), "結果が出ると、マイク ON のまま続けて聞き始める（2回目の指示）")
+    pg.wait_for_timeout(1500)
+    check(not pg.is_enabled("#voice-stop") and pg.inner_text("#mic-label") == "マイク OFF",
+          "結果が出ても、マイクは自動では ON にならない（次は人が 🎤 を押す）")
+    pg.click("#mic-button")  # 2回目の指示：人が 🎤 を押す
+    until(pg, lambda: pg.is_enabled("#voice-stop"))
+    check("聞いています" in pg.inner_text("#mic-label"), "もう一度 🎤 を押すと、また聞く（2回目の指示）")
     pg.click("#voice-stop")
     until(pg, lambda: pg.input_value("#text-input") == FAKE_TEXT)
     pg.click("#text-send")
