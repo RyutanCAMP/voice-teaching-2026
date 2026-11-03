@@ -70,6 +70,7 @@ _KNOWN_INST_DIRECTIVES = {"DATE", "ATTR", "COMM"}
 # 斜線4本の意味は公開資料では未確認（ペンダントの表示では ROBOT 座標）。ほかの形は止める
 FRAME_ROBOT_LINE = "////FRAME ROBOT"
 _FRAME_PLACE = "扱えません：FRAME の行が、INST 部の指示行の並び（///ATTR の後、命令より前）にありません"
+_RJ_NO_FRAME = "相対ジョブ（RJ）ですが、座標系（FRAME）の行がありません"
 _FRAME_NO_RJ = "扱えません：///ATTR に RJ（相対ジョブ）がありません（///ATTR の行は1つだけを扱います）"
 # FRAME の行らしいもの（斜線の本数・大文字小文字・空白の違いも拾い、止める理由をはっきり出す）
 _FRAME_LIKE = re.compile(r"/{2,}\s*FRAME(?![A-Za-z0-9_])", re.IGNORECASE)
@@ -484,6 +485,7 @@ def parse(text: str, encoding: str = "utf-8") -> Job:
     ended = False
     # FRAME の行の判定に使う（ファイルの最後でまとめて判定する。_check_frame）
     attr_args: list[str] = []
+    attr_lines: list[tuple[int, str]] = []  # ///ATTR の行（行, 中身）。RJ があるのに FRAME が無いときの理由に使う
     frames: list[tuple[int, str, str | None]] = []  # (行, 行の中身, 場所の問題)
     inst_body_seen = False  # INST 部で、指示行でない行（命令・コメント）がもう出たか
 
@@ -608,6 +610,7 @@ def parse(text: str, encoding: str = "utf-8") -> Job:
             word, sep, arg = body[3:].partition(" ")
             if word == "ATTR":
                 attr_args.append(arg if sep == " " else "")
+                attr_lines.append((i, body))
             if word.startswith("GROUP"):
                 if body != "///GROUP1 RB1":
                     problem(i, body, "ロボット1台（GROUP1 RB1）以外の軸グループです")
@@ -645,18 +648,23 @@ def parse(text: str, encoding: str = "utf-8") -> Job:
     if not ended:
         # END の無いジョブは、途中で切れたファイルかもしれない。命令の終わりが確かめられないので止める
         job.problems.append("END の命令がありません（ファイルが途中で切れているかもしれません）")
-    job.relative_frame = _check_frame(job, frames, attr_args)
+    job.relative_frame = _check_frame(job, frames, attr_args, attr_lines)
     job.baseline = {name: p.values for name, p in job.positions.items()}
     return job
 
 
-def _check_frame(job: Job, frames: list[tuple[int, str, str | None]], attr_args: list[str]) -> str | None:
+def _check_frame(job: Job, frames: list[tuple[int, str, str | None]], attr_args: list[str],
+                 attr_lines: list[tuple[int, str]]) -> str | None:
     """「////FRAME ROBOT」の行を、決定の条件をすべて満たすときだけ認める（"ROBOT" を返す）。
 
     満たさなければ、FRAME の行ごとに理由を problems に入れて None を返す（止める側）。
     形の違う FRAME の行（"形"）は、読んだときに problems に入れてある。
     """
     if not frames:
+        # 相対ジョブ（///ATTR の RJ）なのに座標系の行が無いジョブは、座標系が分からないので止める（CHECKER_028 K3・F4）
+        for (i, body), arg in zip(attr_lines, attr_args):
+            if "RJ" in arg.split(","):
+                job.problems.append(f"{i + 1}行目「{body}」は扱えません：{_RJ_NO_FRAME}")
         return None
     if len(frames) >= 2:
         for i, body, where in frames:

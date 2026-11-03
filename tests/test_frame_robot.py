@@ -216,6 +216,8 @@ STOP_CASES = {
     "postype_user_and_user": (b"///TOOL 8" + NL + b"///POSTYPE ROBOT",
                               b"///TOOL 8" + NL + b"///USER 1" + NL + b"///POSTYPE USER"),
     "before_attr": (b"///ATTR SC,RW,RJ" + NL + FRAME, FRAME + b"///ATTR SC,RW,RJ" + NL),
+    "full_width": (FRAME, "////FRAME ＲＯＢＯＴ".encode("utf-8") + NL),
+    "no_frame_with_rj": (FRAME, b""),  # CHECKER_028 K3・F4：相対ジョブなのに座標系が分からない
 }
 
 
@@ -281,6 +283,7 @@ def test_frame_forms_outside_the_decision_are_stopped(case):
     ("with_user", "///USER"),
     ("after_nop", "命令より前"),
     ("before_attr", "///ATTR の後"),
+    ("no_frame_with_rj", "相対ジョブ（RJ）ですが、座標系（FRAME）の行がありません"),
     ("in_pos", "INST"),
 ])
 def test_stop_reason_names_the_condition(case, words):
@@ -290,38 +293,86 @@ def test_stop_reason_names_the_condition(case, words):
 
 
 # ======================================================================
-# 4. 上下の向きの照合（M2）：この形は ROBOT として照合できる。USER 1 の形は不一致
+# 4. CHECKER_028 frame_cases.py の17通り（F1〜F10）を、合成ジョブを書き換えて試す（実機の JOB の数値は使わない）
+#    OK の形は C00002〜C00004 だけが変更できる。ほかはすべて止まる
+# ======================================================================
+FR = FRAME
+
+
+def _r(a: bytes, b: bytes) -> bytes:
+    return DATA.replace(a, b)
+
+
+FRAME_CASES = [
+    ("OK", DATA, "ok"),
+    ("F1", _r(FR, b"////FRAME USER 1" + NL).replace(b"///POSTYPE ROBOT", b"///POSTYPE USER")
+     .replace(b"///TOOL 8", b"///USER 1" + NL + b"///TOOL 8"), "stop"),
+    ("F2", _r(FR, b"////FRAME BASE" + NL), "stop"),
+    ("F3", _r(b"SC,RW,RJ", b"SC,RW"), "stop"),
+    ("F4", _r(FR, b""), "stop"),
+    ("F5a", _r(FR, FR + FR), "stop"),
+    ("F5b", _r(FR, FR + b"////FRAME USER 1" + NL), "stop"),
+    ("F6a", _r(FR, b"////FRAME ROBOT X" + NL), "stop"),
+    ("F6b", _r(FR, b"////FRAME  ROBOT" + NL), "stop"),
+    ("F6c", _r(FR, b"////frame robot" + NL), "stop"),
+    ("F6d", _r(FR, b"///FRAME ROBOT" + NL), "stop"),
+    ("F6e", _r(FR, b"/////FRAME ROBOT" + NL), "stop"),
+    ("F6f", _r(FR, "////FRAME ＲＯＢＯＴ".encode("utf-8") + NL), "stop"),
+    ("F7", _r(b"///POSTYPE ROBOT", b"///POSTYPE PULSE"), "stop"),
+    ("F8", _r(b"///TOOL 8", b"///USER 1" + NL + b"///TOOL 8"), "stop"),
+    ("F9", _r(b"///RECTAN" + NL, b""), "stop"),
+    ("F10", _r(FR, b"").replace(b"///RECTAN" + NL, b"///RECTAN" + NL + FR), "stop"),
+]
+
+
+def test_frame_cases_are_seventeen_and_all_differ():
+    assert len(FRAME_CASES) == 17
+    assert len({d for _, d, _ in FRAME_CASES}) == 17
+
+
+@pytest.mark.parametrize("name,data,expected", FRAME_CASES, ids=[c[0] for c in FRAME_CASES])
+def test_checker028_frame_cases(name, data, expected):
+    job = jbi.parse_bytes(data)
+    changeable = []
+    for n in sorted(job.positions):
+        try:
+            job.plan_shift(n, "Z", 1.0)
+            changeable.append(n)
+        except jbi.JbiError:
+            pass
+    if expected == "ok":
+        assert job.problems == [] and changeable == list(EDITABLE)
+        assert job.relative_frame == "ROBOT"
+    else:
+        assert changeable == [], (name, changeable)
+        assert job.relative_frame is None
+        assert job.problems or not any(p.is_robot_coordinates() for p in job.positions.values()), name
+
+
+def test_f4_reason_is_short_and_on_the_attr_line():
+    job = jbi.parse_bytes(_r(FR, b""))
+    assert job.problems == ["18行目「///ATTR SC,RW,RJ」は扱えません：相対ジョブ（RJ）ですが、座標系（FRAME）の行がありません"]
+
+
+# ======================================================================
+# 5. 上下の向きの照合（M2・CHECKER_028 K4）：この形は ROBOT・RJ の座標系として照合できる。決めた形でない FRAME は不一致
 # ======================================================================
 def test_updown_config_can_be_made_and_matches_frame_robot_job(make_updown):
-    path = make_updown("DEMO_RJ_XYZ.JBI", ("C00003",))
+    path = make_updown("DEMO_RJ_XYZ.JBI")
     st = updown.check(jbi.parse_bytes(DATA), path)
     assert st.confirmed, st
 
 
-def _forced_config_for(make_updown, data: bytes):
-    """DEMO_RJ_XYZ の設定を作り、structure_hash だけを data のものに書き換えた設定（指紋も計算し直す）。
-
-    build_config は problems のあるジョブの設定を作らないので、照合の座標系の検査だけを試すために作る。
-    """
-    import json
-    path = make_updown("DEMO_RJ_XYZ.JBI", ("C00003",), name="forced.json")
-    obj = json.loads(Path(path).read_text(encoding="utf-8"))
-    obj["job"]["structure_hash"] = updown.structure_hash(jbi.parse_bytes(data), ["C00003"])
-    obj["fingerprint"] = updown.content_fingerprint(obj)
-    Path(path).write_bytes(updown.dump(obj))
-    return path
-
-
-@pytest.mark.parametrize("case", ["frame_user1", "frame_base", "three_slashes", "no_rj", "twice", "after_nop"])
+@pytest.mark.parametrize("case", ["frame_user1", "frame_base", "three_slashes", "no_rj", "twice", "after_nop",
+                                  "no_frame_with_rj"])
 def test_updown_mismatch_for_frame_forms_outside_the_decision(make_updown, case):
     data = _stop_data(case)
-    path = _forced_config_for(make_updown, data)
-    st = updown.check(jbi.parse_bytes(data), path)
+    st = updown.check(jbi.parse_bytes(data), make_updown("DEMO_RJ_XYZ.JBI"))
     assert st.status == updown.MISMATCH, (case, st)
-    assert "FRAME" in st.reason
+    assert "FRAME" in st.reason or "RJ" in st.reason or "読めない所" in st.reason, (case, st.reason)
 
 
 def test_updown_build_config_refuses_frame_user1_job():
     job = jbi.parse_bytes(_stop_data("frame_user1"))
     with pytest.raises(updown.UpdownError):
-        updown.build_config(job, ["C00003"], updown.DEFAULT_ROBOT, "テスト", "テスト用")
+        updown.build_config(job, updown.DEFAULT_ROBOT, "テスト", "テスト用")

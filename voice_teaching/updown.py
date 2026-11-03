@@ -1,20 +1,21 @@
-"""上下の向きの設定（CHECKER_026 M2・11章、唐川さんの決定 2026-11-03 13:28 A案）。
+"""上下の向きの設定（CHECKER_026 M2・11章、唐川さんの決定 2026-11-03 13:28 A案。CHECKER_028 K4 で照合を分けた）。
 
 専門家が設定ファイル（JSON）に「上＝Z＋、下＝Z−」を登録し、アプリは使うたびに照合する。
 照合に通ったとき（confirmed）だけ、自然言語の「上」「下」「上げ」「下げ」を Z± に変える。
 床置き・架台固定の情報だけでは決めない。照合に通らなければ、どの状態でも「上・下」を軸に変えず、
 「Zプラス・Zマイナス」のように軸と向きで言ってもらう（軸と符号を明示した指示は今どおり候補にしてよい）。
 
-照合（11-2章。すべてを満たすときだけ confirmed）:
-1. 設定ファイルがあり、形が正しい（知らない項目・空の根拠・符号の無い値・Z 以外・NaN・bool の取り違え → 読まない＝未確認）
+上下の向きは、ロボットの設置と座標系の性質で、JOB の中身の性質ではない（CHECKER_028 K4・唐川さんの指示）。
+そのため、JOB の中身（structure_hash・位置の値）では照合しない。照合するのは次の適用条件だけ：
+1. 設定ファイルがあり、形が正しい（知らない項目・空の根拠・符号の無い値・Z 以外・NaN・bool の取り違え・
+   時差の無い日時・未来の日時 → 読まない＝未確認）
 2. 設定の指紋（fingerprint）が中身と一致する（合わなければ「変更済み」）
-3. 読み込んだ JOB の structure_hash が設定の対象と一致する（FRAME v1.1 2章。アプリで位置だけ直した _SIM は一致してよい）
-   伏せる位置（positions）は一部だけ（唐川さんの判断③ 2026-11-03：全部の座標値を伏せる方式は採らない）。
-   上限 MAX_MASKED_POSITIONS（3つ）以内で、ジョブの位置の半分より少なく、どれも変更できる位置（plan_shift が通る位置）。
-   伏せない位置は X・Y・Z も含めてそのまま指紋に入る
-4. JOB の座標系が設定の対象と同じ（///POSTYPE ROBOT・///RECTAN があり、///USER が無く、ツール番号が同じ。
-   相対ジョブかどうか（///ATTR の RJ）と FRAME（jbi が認めた「////FRAME ROBOT」だけ）も同じ）
-5. 対象のロボットの名前が、アプリで使うロボットの設定（起動オプション。既定 HC20DT）と同じ（文字列を比べるだけ）
+3. JOB の座標系が設定と同じ：///POSTYPE ROBOT・///RECTAN、///USER なし、ツール番号、
+   FRAME（無し、または jbi が認めた RJ＋「////FRAME ROBOT」）、///ATTR の RJ の有無。読めない所（problems）のある JOB は不一致
+4. 対象のロボットの名前が、アプリで使うロボットの設定（起動オプション。既定 HC20DT）と同じ（文字列を比べるだけ）
+→ JOB の中身（位置の値・命令）だけが違うジョブは、上下の向きとしては確認済みになる（設計の変更点）。
+  どの JOB のどの位置を変えてよいか（変更の許可の範囲）は、別に JOB の指紋で照合する（voice_teaching/job_scope.py。
+  専門家の枠 FRAME v1.1 の役目で、枠そのものはまだ作っていない）。
 
 限界（正直に書く）：
 - 設定は「誰が・何を根拠に確認したか」の記録で、本人であることの証明（電子署名）ではない。JSON を書ける人は設定も書ける。
@@ -30,9 +31,9 @@ import json
 import re
 import sys
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Callable
 
 from . import jbi
 
@@ -47,28 +48,24 @@ VERSION = 1
 DIRECTIONS = {"上": "Z+", "下": "Z-"}
 DIRECTION_NAMES = {"Z": {"+": "上", "-": "下"}}  # 確認済みのときだけ使う方向の名前
 MAX_BYTES = 64 * 1024
-# 伏せる位置の数の上限（判断③）。伏せた位置の X・Y・Z は照合に入らないので、伏せる数が多いほど
-# 違うジョブを同じものとして扱いやすくなる。シミュレーションで直す位置（1回に1点）だけを伏せる使い方を想定し、
-# 3つまでとする。あわせて、ジョブの位置の半分より少ないこと（伏せない位置が多い方）を照合のたびに確かめる
-MAX_MASKED_POSITIONS = 3
 
-_TOP_KEYS = {"schema", "version", "directions", "confirmed_by", "confirmed_at", "evidence", "robot", "job",
+# 設定の項目。JOB の中身（job・structure_hash・positions）は持たない（K4）。前の形の設定は読まない（未確認）
+_TOP_KEYS = {"schema", "version", "directions", "confirmed_by", "confirmed_at", "evidence", "robot",
              "coordinate", "fingerprint"}
-_JOB_KEYS = {"name", "structure_hash", "positions"}
-_COORD_KEYS = {"postype", "rectan", "user", "tool", "frame", "relative_job"}
+_COORD_KEYS = {"postype", "rectan", "user", "tool", "frame", "rj"}
 _FRAMES = {None, "ROBOT"}  # 設定の frame に書ける値（jbi が認める相対ジョブの座標系は ROBOT だけ）
 _HEX64 = re.compile(r"[0-9a-f]{64}")
-_POS_NAME = re.compile(r"C[0-9]{5}")
-_MAX_TEXT = {"confirmed_by": 40, "robot": 40, "evidence": 500, "name": 40}
+_MAX_TEXT = {"confirmed_by": 40, "robot": 40, "evidence": 500}
 
 UNCONFIRMED = "unconfirmed"
 CONFIRMED = "confirmed"
 MISMATCH = "mismatch"
 CHANGED = "changed"
 
-# 案内の文（CHECKER_026 11-2章の表のまま。プログラムが出す）
+# 案内の文（CHECKER_026 11-2章の表をもとに。プログラムが出す）
 MSG_UNCONFIRMED = "上下の向きがまだ確認されていません。Zプラス・Zマイナスのように、軸と向きで言ってください"
-MSG_MISMATCH = "このジョブは、上下の向きを確認したジョブと違います。Zプラス・Zマイナスで言ってください"
+MSG_MISMATCH = ("このジョブの座標系・ツール番号・ロボットが、上下の向きを確認したときと違います。"
+                "Zプラス・Zマイナスで言ってください")
 MSG_CHANGED = "上下の向きの設定が、確認したあとで変わっています。Zプラス・Zマイナスで言ってください"
 MSG_CONFIRMED = "上下の向き：{by} さんが確認した設定（{at}）で、上＝Z＋・下＝Z−として読みます"
 
@@ -86,13 +83,10 @@ class UpdownConfig:
     confirmed_at: str
     evidence: str
     robot: str
-    job_name: str
-    structure_hash: str
-    positions: tuple[str, ...]
     tool: int
-    frame: str | None         # 相対ジョブの座標系（"ROBOT"）。ふつうのジョブは None
-    relative_job: bool        # ///ATTR に RJ があるジョブか
-    fingerprint: str          # ファイルに書かれた指紋
+    frame: str | None          # 相対ジョブの座標系（"ROBOT"）。ふつうのジョブは None
+    rj: bool                   # ///ATTR に RJ（相対ジョブ）があるジョブが対象か
+    fingerprint: str           # ファイルに書かれた指紋
     computed_fingerprint: str  # 中身から計算した指紋
 
 
@@ -139,35 +133,6 @@ NOT_CONFIGURED = unconfirmed("上下の向きの設定ファイルの場所が�
 
 
 # ---- 指紋 ----
-def structure_hash(job: jbi.Job, positions: Sequence[str]) -> str:
-    """FRAME v1.1 2章：normalized_hash と同じ正規化（//NAME・///DATE の行を除き、改行を \\n にそろえる）をして、
-    positions の位置の行の値の先頭3つ（X,Y,Z）を * に置き換え、全体の sha256 を取る。
-
-    位置がジョブに無い・位置の行が読めないときは UpdownError（照合では「不一致」）。
-    """
-    if isinstance(positions, str):
-        raise UpdownError("位置の一覧の形が正しくありません")
-    masked: dict[int, str] = {}
-    for name in positions:
-        pos = job.positions.get(name) if isinstance(name, str) else None
-        if pos is None:
-            raise UpdownError(f"位置 {name} がこのジョブにありません")
-        body = job.lines[pos.line_index].rstrip("\r\n")
-        head, sep, rest = body.partition("=")
-        values = rest.split(",")
-        if head != name or not sep or len(values) < 3:
-            raise UpdownError(f"位置 {name} の行が読めません")
-        masked[pos.line_index] = f"{name}=" + ",".join(["*", "*", "*"] + values[3:])
-    h = hashlib.sha256()
-    for i, line in enumerate(job.lines):
-        body = line.rstrip("\r\n")
-        if body.startswith("//NAME") or body.startswith("///DATE"):
-            continue
-        h.update(masked.get(i, body).encode("utf-8"))
-        h.update(b"\n")
-    return h.hexdigest()
-
-
 def content_fingerprint(obj: dict) -> str:
     """設定の指紋：fingerprint の項目を除いた中身を、項目の順と空白に左右されない形にした UTF-8 の sha256。"""
     body = {k: v for k, v in obj.items() if k != "fingerprint"}
@@ -202,8 +167,11 @@ def _int(v: object) -> bool:
     return isinstance(v, int) and not isinstance(v, bool)
 
 
-def parse_config(data: bytes) -> UpdownConfig:
-    """設定ファイルのバイト列を読む。形が正しくなければ UpdownError（照合では「未確認」と同じ）。"""
+def parse_config(data: bytes, now: datetime | None = None) -> UpdownConfig:
+    """設定ファイルのバイト列を読む。形が正しくなければ UpdownError（照合では「未確認」と同じ）。
+
+    now：未来の日時かを比べる今の時刻（テスト用。既定は今の時刻）。
+    """
     if not isinstance(data, (bytes, bytearray)) or len(data) > MAX_BYTES:
         raise UpdownError("設定ファイルが大きすぎます")
     try:
@@ -248,23 +216,10 @@ def parse_config(data: bytes) -> UpdownConfig:
         raise UpdownError("確認した日時（confirmed_at）が ISO 8601 の形ではありません") from None
     if when.tzinfo is None:
         raise UpdownError("確認した日時（confirmed_at）に時差（+09:00 など）がありません")
+    if when > (now or datetime.now(timezone.utc)):
+        raise UpdownError("確認した日時（confirmed_at）が未来の日時です")
     evidence = _text(obj, "evidence", _MAX_TEXT["evidence"])
     robot = _text(obj, "robot", _MAX_TEXT["robot"])
-
-    job = obj["job"]
-    if not isinstance(job, dict) or set(job) != _JOB_KEYS:
-        raise UpdownError("対象の JOB（job）の項目が正しくありません")
-    job_name = _text(job, "name", _MAX_TEXT["name"])
-    sh = job["structure_hash"]
-    if not isinstance(sh, str) or not _HEX64.fullmatch(sh):
-        raise UpdownError("対象の JOB の指紋（structure_hash）が64桁の16進ではありません")
-    positions = job["positions"]
-    if (not isinstance(positions, list) or not positions
-            or not all(isinstance(p, str) and _POS_NAME.fullmatch(p) for p in positions)
-            or len(set(positions)) != len(positions)):
-        raise UpdownError("値を伏せる位置の一覧（positions）が正しくありません")
-    if len(positions) > MAX_MASKED_POSITIONS:
-        raise UpdownError(f"伏せる位置が{len(positions)}つあり、上限の{MAX_MASKED_POSITIONS}つを超えています")
 
     c = obj["coordinate"]
     if not isinstance(c, dict) or set(c) != _COORD_KEYS:
@@ -278,25 +233,23 @@ def parse_config(data: bytes) -> UpdownConfig:
     tool = c["tool"]
     if not _int(tool) or tool < 0:
         raise UpdownError("ツール番号（tool）が0以上の整数ではありません")
-    frame, relative = c["frame"], c["relative_job"]
-    if not isinstance(relative, bool):
-        raise UpdownError("相対ジョブかどうか（relative_job）が true・false ではありません")
+    frame, rj = c["frame"], c["rj"]
+    if not isinstance(rj, bool):
+        raise UpdownError("相対ジョブかどうか（rj）が true・false ではありません")
     if not (frame is None or isinstance(frame, str)) or frame not in _FRAMES:
         raise UpdownError("FRAME（frame）は null か \"ROBOT\" だけです")
-    if (frame == "ROBOT") != relative:
-        raise UpdownError("FRAME ROBOT は相対ジョブ（relative_job: true）のときだけで、相対ジョブには FRAME ROBOT が要ります")
+    if (frame == "ROBOT") != rj:
+        raise UpdownError("FRAME ROBOT は相対ジョブ（rj: true）のときだけで、相対ジョブには FRAME ROBOT が要ります")
 
     fp = obj["fingerprint"]
     if not isinstance(fp, str) or not _HEX64.fullmatch(fp):
         raise UpdownError("設定の指紋（fingerprint）が64桁の16進ではありません")
-    return UpdownConfig(confirmed_by=by, confirmed_at=at, evidence=evidence, robot=robot, job_name=job_name,
-                        structure_hash=sh, positions=tuple(positions), tool=tool, frame=frame,
-                        relative_job=relative, fingerprint=fp,
-                        computed_fingerprint=content_fingerprint(obj))
+    return UpdownConfig(confirmed_by=by, confirmed_at=at, evidence=evidence, robot=robot, tool=tool, frame=frame,
+                        rj=rj, fingerprint=fp, computed_fingerprint=content_fingerprint(obj))
 
 
 # ---- 照合 ----
-def job_relative(job: jbi.Job) -> bool:
+def job_rj(job: jbi.Job) -> bool:
     """///ATTR に RJ（相対ジョブ）があるか（並びの1つとして）。"""
     for line in job.lines:
         body = line.rstrip("\r\n")
@@ -305,66 +258,49 @@ def job_relative(job: jbi.Job) -> bool:
     return False
 
 
-def _frame_problem(job: jbi.Job) -> str | None:
-    """FRAME の行と ATTR の RJ が、jbi の決定どおりの形（ふつうのジョブ、または RJ＋「////FRAME ROBOT」）でなければ理由。"""
-    has_frame_line = any(jbi.is_frame_line(line.rstrip("\r\n")) for line in job.lines)
-    if has_frame_line and job.relative_frame != "ROBOT":
-        return "ジョブの FRAME の行が、ROBOT の座標系として扱える形ではありません"
-    if job_relative(job) and job.relative_frame != "ROBOT":
-        return "相対ジョブ（///ATTR の RJ）ですが、FRAME の座標系（////FRAME ROBOT）が分かりません"
-    return None
-
-
-def _coordinate_problem(job: jbi.Job, tool: int) -> str | None:
-    """JOB の座標系が、設定の対象（ROBOT・RECTAN・USER なし・ツール番号・FRAME）と同じでなければ、その理由。"""
+def job_coordinate(job: jbi.Job) -> dict:
+    """ジョブの座標系（設定の coordinate と同じ形）を読む。照合に使えない形なら UpdownError（理由）。"""
     if not job.positions:
-        return "ジョブに位置がありません"
-    frame = _frame_problem(job)
-    if frame:
-        return frame
+        raise UpdownError("ジョブに位置がありません")
+    if any(jbi.is_frame_line(line.rstrip("\r\n")) for line in job.lines) and job.relative_frame != "ROBOT":
+        raise UpdownError("ジョブの FRAME の行が、ROBOT の座標系として扱える形ではありません")
+    if job_rj(job) and job.relative_frame != "ROBOT":
+        raise UpdownError("相対ジョブ（///ATTR の RJ）ですが、FRAME の座標系（////FRAME ROBOT）が分かりません")
     if any(line.rstrip("\r\n").startswith("///USER") for line in job.lines):
-        return "ジョブにユーザ座標（///USER）があります"
+        raise UpdownError("ジョブにユーザ座標（///USER）があります")
+    tools = set()
     for p in job.positions.values():
         if p.after_unknown_directive or p.postype != "ROBOT" or not p.rectan:
-            return f"位置 {p.name} が POSTYPE ROBOT・RECTAN ではありません"
+            raise UpdownError(f"位置 {p.name} が POSTYPE ROBOT・RECTAN ではありません")
         if p.user is not None:
-            return f"位置 {p.name} にユーザ座標があります"
-        if p.tool is None or not p.tool.isdigit() or int(p.tool) != tool:
-            return f"位置 {p.name} のツール番号が設定（{tool}）と違います"
+            raise UpdownError(f"位置 {p.name} にユーザ座標があります")
+        if p.tool is None or not p.tool.isdigit():
+            raise UpdownError(f"位置 {p.name} のツール番号が読めません")
+        tools.add(int(p.tool))
+    if len(tools) != 1:
+        raise UpdownError("ジョブのツール番号が1つに決まりません")
+    if job.problems:
+        raise UpdownError("ジョブに読めない所があるため、座標系を確かめられません")
+    return {"postype": "ROBOT", "rectan": True, "user": None, "tool": tools.pop(),
+            "frame": job.relative_frame, "rj": job_rj(job)}
+
+
+def _coordinate_mismatch(job: jbi.Job, cfg: UpdownConfig) -> str | None:
+    """ジョブの座標系が設定と同じでなければ、その理由。"""
+    try:
+        c = job_coordinate(job)
+    except UpdownError as e:
+        return str(e)
+    if c["tool"] != cfg.tool:
+        return f"ジョブのツール番号（{c['tool']}）が設定（{cfg.tool}）と違います"
+    if c["rj"] != cfg.rj or c["frame"] != cfg.frame:
+        return (f"ジョブの相対ジョブ・FRAME（RJ {'あり' if c['rj'] else 'なし'}・FRAME {c['frame']}）が"
+                f"設定（RJ {'あり' if cfg.rj else 'なし'}・FRAME {cfg.frame}）と違います")
     return None
-
-
-def _mask_problem(job: jbi.Job, positions: Sequence[str]) -> str | None:
-    """伏せる位置が、ジョブの位置の一部だけで、どれも変更できる位置か（判断③）。合わなければ理由。"""
-    names = list(positions)
-    if not names or len(set(names)) != len(names):
-        return "伏せる位置の一覧が正しくありません"
-    if len(names) > MAX_MASKED_POSITIONS:
-        return f"伏せる位置が{len(names)}つあり、上限の{MAX_MASKED_POSITIONS}つを超えています"
-    if len(names) * 2 >= len(job.positions):
-        return (f"伏せる位置が{len(names)}つで、ジョブの位置（{len(job.positions)}つ）の半分以上です。"
-                "伏せない位置の方が多くなるようにしてください")
-    for name in names:
-        if name not in job.positions:
-            return f"位置 {name} がこのジョブにありません"
-        if not _can_change(job, name):
-            return f"位置 {name} はこのアプリで変更できない位置のため、伏せる位置にできません"
-    return None
-
-
-def _can_change(job: jbi.Job, name: str) -> bool:
-    """plan_shift（実機用の検査）が通る位置か。ジョブは変えない（変更案を作って捨てるだけ）。"""
-    for delta in (1.0, -1.0):
-        try:
-            job.plan_shift(name, "Z", delta)
-            return True
-        except jbi.JbiError:
-            continue
-    return False
 
 
 def check(job: jbi.Job, path: str | Path | None, robot: str = DEFAULT_ROBOT) -> UpdownStatus:
-    """設定ファイルを読み直して、ジョブと照らし合わせる（11-2章の1〜5）。例外は出さない。"""
+    """設定ファイルを読み直して、ジョブの適用条件と照らし合わせる（上の1〜4）。例外は出さない。"""
     if path is None:
         return NOT_CONFIGURED
     try:
@@ -380,18 +316,7 @@ def check(job: jbi.Job, path: str | Path | None, robot: str = DEFAULT_ROBOT) -> 
         return unconfirmed(f"設定ファイルを読みませんでした：{e}", sha)
     if cfg.computed_fingerprint != cfg.fingerprint:
         return UpdownStatus(CHANGED, MSG_CHANGED, reason="設定の指紋が中身と合いません", file_sha256=sha)
-    try:
-        h = structure_hash(job, cfg.positions)
-    except UpdownError as e:
-        return UpdownStatus(MISMATCH, MSG_MISMATCH, reason=str(e), file_sha256=sha)
-    if h != cfg.structure_hash:
-        return UpdownStatus(MISMATCH, MSG_MISMATCH, reason="JOB の指紋（structure_hash）が違います", file_sha256=sha)
-    problem = _coordinate_problem(job, cfg.tool)
-    if problem is None and (job.relative_frame != cfg.frame or job_relative(job) != cfg.relative_job):
-        problem = (f"ジョブの相対ジョブ・FRAME（RJ {'あり' if job_relative(job) else 'なし'}・FRAME {job.relative_frame}）が"
-                   f"設定（RJ {'あり' if cfg.relative_job else 'なし'}・FRAME {cfg.frame}）と違います")
-    if problem is None:
-        problem = _mask_problem(job, cfg.positions)
+    problem = _coordinate_mismatch(job, cfg)
     if problem:
         return UpdownStatus(MISMATCH, MSG_MISMATCH, reason=problem, file_sha256=sha)
     if not isinstance(robot, str) or robot != cfg.robot:
@@ -408,31 +333,23 @@ def checker(path: str | Path | None, robot: str = DEFAULT_ROBOT) -> Callable[[jb
 
 
 # ---- 設定を作る（専門家が CLI で。人が内容を見て yes と入力したときだけ書く） ----
-def build_config(job: jbi.Job, positions: Sequence[str], robot: str, by: str, evidence: str,
-                 confirmed_at: str | None = None) -> dict:
-    """設定の中身を作る（書かない）。ジョブの座標系が ROBOT・RECTAN・USER なし・ツール番号が1つでなければ断る。"""
-    if job.problems:
-        raise UpdownError("このジョブには読めない所があるため、設定を作りません")
-    tools = {p.tool for p in job.positions.values()}
-    if len(tools) != 1 or next(iter(tools)) is None or not str(next(iter(tools))).isdigit():
-        raise UpdownError("ジョブのツール番号が1つに決まらないため、設定を作りません")
-    tool = int(next(iter(tools)))
-    problem = _coordinate_problem(job, tool)
-    if problem:
-        raise UpdownError(f"{problem}。設定を作りません")
-    positions = list(positions)
-    problem = _mask_problem(job, positions)
-    if problem:
-        raise UpdownError(f"{problem}。設定を作りません")
+def build_config(job: jbi.Job, robot: str, by: str, evidence: str, confirmed_at: str | None = None) -> dict:
+    """設定の中身を作る（書かない）。job は座標系を読むためだけに使い、JOB の中身は設定に入れない。
+
+    座標系が照合に使えない形（ROBOT・RECTAN でない、USER あり、ツール番号が1つでない、FRAME が決めた形でない、
+    読めない所がある）なら断る。
+    """
+    try:
+        coordinate = job_coordinate(job)
+    except UpdownError as e:
+        raise UpdownError(f"{e}。設定を作りません") from None
     at = confirmed_at or datetime.now().astimezone().isoformat(timespec="seconds")
     obj = {
         "schema": SCHEMA, "version": VERSION,
         "directions": dict(DIRECTIONS),
         "confirmed_by": by, "confirmed_at": at, "evidence": evidence,
         "robot": robot,
-        "job": {"name": job.name, "structure_hash": structure_hash(job, positions), "positions": positions},
-        "coordinate": {"postype": "ROBOT", "rectan": True, "user": None, "tool": tool,
-                       "frame": job.relative_frame, "relative_job": job_relative(job)},
+        "coordinate": coordinate,
     }
     obj["fingerprint"] = content_fingerprint(obj)
     parse_config(dump(obj))  # 書く前に、読む側と同じ検査を通す
@@ -454,17 +371,18 @@ def write_config(obj: dict, path: str | Path, overwrite: bool = False) -> Path:
 
 
 def _summary(obj: dict) -> list[str]:
+    c = obj["coordinate"]
     return [
         f"  向きの対応     ：上＝{obj['directions']['上']}、下＝{obj['directions']['下']}",
         f"  確認した人     ：{obj['confirmed_by']}",
         f"  確認した日時   ：{obj['confirmed_at']}",
         f"  根拠           ：{obj['evidence']}",
         f"  対象のロボット ：{obj['robot']}",
-        f"  対象の JOB     ：{obj['job']['name']}（structure_hash {obj['job']['structure_hash'][:16]}…、"
-        f"値を伏せる位置 {'・'.join(obj['job']['positions'])}）",
-        f"  座標系         ：POSTYPE ROBOT・RECTAN・USER なし・ツール番号 {obj['coordinate']['tool']}",
+        f"  座標系         ：POSTYPE ROBOT・RECTAN・USER なし・ツール番号 {c['tool']}",
         ("  相対ジョブ     ：あり（///ATTR の RJ・////FRAME ROBOT。行き先はツール番号の設定にも左右されます）"
-         if obj['coordinate']['relative_job'] else "  相対ジョブ     ：なし（FRAME の行なし）"),
+         if c["rj"] else "  相対ジョブ     ：なし（FRAME の行なし）"),
+        "  ※ この設定は、上の条件（ロボット・座標系・ツール番号）のジョブすべてに使います。"
+        "どのジョブのどの位置を変えてよいかは、この設定では決めません",
         f"  設定の指紋     ：{obj['fingerprint']}",
     ]
 
@@ -475,8 +393,7 @@ def main(argv: list[str] | None = None, input_fn: Callable[[str], str] = input,
                                  description="上下の向きの設定（専門家が確認して登録する。記録であり、本人確認ではありません）")
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("register", help="設定ファイルを書く（内容を見て yes と入力したときだけ）")
-    r.add_argument("--job", required=True)
-    r.add_argument("--positions", required=True, help="値を伏せる位置（例 C00005。複数は , で区切る）")
+    r.add_argument("--job", required=True, help="座標系（ツール番号・FRAME など）を読むジョブ")
     r.add_argument("--robot", default=DEFAULT_ROBOT)
     r.add_argument("--by", required=True, help="確認した人")
     r.add_argument("--evidence", required=True, help="確認の根拠（ペンダントで Z+ にジョグして真上へ動いた など）")
@@ -501,9 +418,8 @@ def main(argv: list[str] | None = None, input_fn: Callable[[str], str] = input,
             out(f"確認した人：{st.confirmed_by}（{st.confirmed_at}）")
             out(f"設定の指紋：{st.fingerprint}")
         return 0 if st.confirmed else 1
-    positions = [p.strip() for p in args.positions.split(",") if p.strip()]
     try:
-        obj = build_config(job, positions, args.robot, args.by, args.evidence)
+        obj = build_config(job, args.robot, args.by, args.evidence)
     except UpdownError as e:
         out(f"設定を作りません：{e}")
         return 2

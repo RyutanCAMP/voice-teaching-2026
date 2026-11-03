@@ -61,11 +61,14 @@ Object.defineProperty(window, "webkitSpeechRecognition", { value: undefined, con
 
 
 def write_test_updown(folder: Path) -> dict:
-    """一時フォルダに、上下の向きの仮の設定（DEMO_PLACE の C00004・DEMO_C_PLACE の C00005）を書く。名前 → 場所。"""
+    """一時フォルダに、上下の向きの仮の設定（DEMO_PLACE・DEMO_C_PLACE の座標系）を書く。名前 → 場所。
+
+    上下の向きの設定は JOB の中身を持たない（CHECKER_028 K4）。座標系（ツール番号など）を読むためにジョブを使う。
+    """
     from voice_teaching import jbi, updown
     out = {}
-    for name, pos in (("DEMO_PLACE.JBI", "C00004"), ("DEMO_C_PLACE.JBI", "C00005")):
-        obj = updown.build_config(jbi.load(REPO / "samples" / "dummy" / name), [pos], updown.DEFAULT_ROBOT,
+    for name in ("DEMO_PLACE.JBI", "DEMO_C_PLACE.JBI"):
+        obj = updown.build_config(jbi.load(REPO / "samples" / "dummy" / name), updown.DEFAULT_ROBOT,
                                   "e2e（一時フォルダの仮の設定）", "e2e 用の仮の設定。実機で確かめたものではない")
         out[name] = updown.write_config(obj, Path(folder) / f"updown_{name}.json", overwrite=True)
     return out

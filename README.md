@@ -57,14 +57,15 @@ python -m voice_teaching.web          # 表示された http://127.0.0.1:8765/ �
 
 ### 上下の向きの設定（CHECKER_026 M2。設定が無ければ「上・下」は使えません）
 - 「上に」「下げて」などを Z＋・Z− として読むのは、専門家が上下の向きを確かめて登録した設定（既定 `records/updown.json`。`records/` は git に入りません）の照合に通ったときだけです。床置き・架台固定の情報だけでは決めません。
-- 設定が無い・形が正しくない・確認のあとで変わった・別のジョブ（`///USER` 付き・ツール番号違いを含む）・別のロボットのときは、「上・下」を軸にせず、「Zプラス・Zマイナスのように、軸と向きで言ってください」と聞き返します。「Zマイナス3ミリ」「Z座標を3mm下げて」は設定が無くても使えます。
+- 設定が無い・形が正しくない・確認のあとで変わった・座標系の違うジョブ（`///USER` 付き・ツール番号違い・PULSE・相対ジョブかどうか（RJ・`////FRAME ROBOT`）の違い）・別のロボットのときは、「上・下」を軸にせず、「Zプラス・Zマイナスのように、軸と向きで言ってください」と聞き返します。「Zマイナス3ミリ」「Z座標を3mm下げて」は設定が無くても使えます。
 - 設定を書くのは、確かめた本人が次のコマンドで（内容を表示し、`yes` と入力したときだけ書きます。AI や画面からは書きません）：
   ```
-  python -m voice_teaching.updown register --job samples/dummy/DEMO_C_PLACE.JBI --positions C00005 --robot HC20DT --by （名前） --evidence （何で確かめたか）
+  python -m voice_teaching.updown register --job samples/dummy/DEMO_C_PLACE.JBI --robot HC20DT --by （名前） --evidence （何で確かめたか）
   python -m voice_teaching.updown check --job samples/dummy/DEMO_C_PLACE.JBI
   ```
 - サーバーは `python -m voice_teaching.web --updown-config records/updown.json --robot HC20DT`（どちらも既定値）。
-- 照合は、伏せた位置（`--positions`）の X・Y・Z 以外のすべて（ほかの位置の値・命令・`///ATTR` の RJ・`////FRAME ROBOT`・ツール番号・座標系・ロボット名）で行います（唐川さんの判断③）。伏せる位置は、変更できる位置だけを3つまで、ジョブの位置の半分より少なく。全部の位置や変更できない位置を伏せようとすると、register は断ります。
+- 上下の向きはロボットの設置と座標系の性質なので、照合するのは適用条件（ロボット名・`///POSTYPE ROBOT`・`///RECTAN`・`///USER` なし・ツール番号・FRAME と `///ATTR` の RJ の有無）だけです。ジョブの中身（位置の値・命令）は照合しません（CHECKER_028 K4）。`--job` のジョブは座標系を読むためだけに使います。座標系が同じなら、ほかのジョブでも上下の向きは確認済みになります。
+- どのジョブのどの位置を変えてよいか（変更の許可の範囲）は、この設定では決めません。専門家の枠（FRAME v1.1。まだ作っていません）で、ジョブの指紋（`voice_teaching/job_scope.py`）を使って別に照合します。
 - この設定は「誰が何を根拠に確かめたか」の記録で、本人確認（署名）でも、安全の保証でもありません。
 
 ### Claude API の設定（秘密の情報はリポジトリに入れない）
