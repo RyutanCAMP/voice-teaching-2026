@@ -87,6 +87,13 @@
         </div>
       </div>
     </div>
+    <!-- 動きの並び（回数の変更の候補があるときだけ）。区間の前後は位置の番号だけ（意味は決めつけない）。数はサーバーのまま -->
+    <div id="play-seq" class="play-seq" hidden>
+      <span id="seq-side" class="seq-side"></span>
+      <div id="seq-chips" class="seq-chips"></div>
+      <div id="seq-tally" class="seq-tally" aria-live="polite"></div>
+      <p id="seq-summary" class="seq-summary"></p>
+    </div>
     <div class="play-row">
       <button type="button" id="play-button" class="play" disabled aria-label="はじめから再生" title="はじめから再生">▶</button>
       <div class="play-text">

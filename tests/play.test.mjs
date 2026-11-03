@@ -131,3 +131,46 @@ test('player with no items ends at once', () => {
   p.play();
   assert.deepEqual(log, [['end']]);
 });
+
+// ---- 動きの並びのカード（台本 Ver.6.1 Scene 3-3）。サーバーの candidate.sequence のまま ----
+import { sequenceChips, tallyParts } from '../voice_teaching/web/static/highlight.js';
+const SEQ = {
+  target: 'C00001〜C00003', name: 'C00001〜C00003', added: [3], summary: '足した行：3行（直線移動だけ）。新しい位置はありません',
+  before: { cycles: [1, 2], entry: { position: 'C00000', line_no: 20, text: 'MOVJ C00000 VJ=25.00' },
+    exit: { position: 'C00004', line_no: 27, text: 'MOVJ C00004 VJ=25.00' } },
+  after: { cycles: [1, 2, 3], entry: { position: 'C00000', line_no: 20, text: 'MOVJ C00000 VJ=25.00' },
+    exit: { position: 'C00004', line_no: 30, text: 'MOVJ C00004 VJ=25.00' } },
+};
+
+test('sequence: after = entry → ① ② ③(added) → exit, words do not guess the meaning', () => {
+  const c = sequenceChips(SEQ, 'after');
+  assert.deepEqual(c.map((x) => x.kind), ['entry', 'arrow', 'name', 'cycle', 'cycle', 'cycle', 'arrow', 'exit']);
+  assert.equal(c[0].text, 'C00000（区間の前）');
+  assert.equal(c[0].title, '20行目 MOVJ C00000 VJ=25.00');
+  assert.equal(c[2].text, 'C00001〜C00003');
+  assert.deepEqual(c.filter((x) => x.kind === 'cycle').map((x) => [x.text, x.added]), [['①', false], ['②', false], ['③ 追加', true]]);
+  assert.equal(c[7].text, 'C00004（区間の後）');
+  assert.equal(c[7].title, '30行目 MOVJ C00004 VJ=25.00');
+  assert.ok(!JSON.stringify(c).includes('待機'));
+});
+
+test('sequence: before has only ① ②; a given name is used for the block', () => {
+  const c = sequenceChips(SEQ, 'before');
+  assert.deepEqual(c.filter((x) => x.kind === 'cycle').map((x) => x.text), ['①', '②']);
+  assert.ok(c.every((x) => !x.added));
+  const n = sequenceChips({ ...SEQ, name: 'ボタンを押す動き' }, 'after');
+  assert.equal(n.find((x) => x.kind === 'name').text, 'ボタンを押す動き');
+});
+
+test('sequence: missing entry/exit are left out, broken data gives nothing', () => {
+  const c = sequenceChips({ ...SEQ, after: { cycles: [1, 2, 3], entry: null, exit: null } }, 'after');
+  assert.deepEqual(c.map((x) => x.kind), ['name', 'cycle', 'cycle', 'cycle']);
+  for (const q of [null, {}, { ...SEQ, after: null }, { ...SEQ, after: { cycles: 'x' } }]) assert.deepEqual(sequenceChips(q, 'after'), []);
+});
+
+test('tally: 1・2 before, 1・2・3 after with the added number marked', () => {
+  assert.deepEqual(tallyParts(2, []), [{ text: '1', added: false }, { text: '2', added: false }]);
+  assert.deepEqual(tallyParts(3, [3]).map((x) => [x.text, x.added]), [['1', false], ['2', false], ['3', true]]);
+  assert.deepEqual(tallyParts(0, [3]), []);
+  assert.deepEqual(tallyParts('2', [3]), []);
+});

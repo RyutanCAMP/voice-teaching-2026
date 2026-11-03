@@ -13,7 +13,7 @@ import { SpeechInput } from "/static/speech.js";
 import { View3D } from "/static/view3d.js";
 import { Player } from "/static/player.js";
 import { splitUnknown, displayMinus, segmentLook, segmentTitle, confirmHeading, updownStatus, updownConfirmLine, speechExamples,
-  repeatCountLabel, cycleStatus, nowPlaying, nowText } from "/static/highlight.js";
+  repeatCountLabel, cycleStatus, nowPlaying, nowText, sequenceChips, tallyParts } from "/static/highlight.js";
 
 const state = {
   sessionId: null,  // サーバーのメモリにある画面の状態の番号
@@ -24,6 +24,7 @@ const state = {
   player: null,     // 今の再生（player.js。3D は view3d.player、2D は player2d）
   player2d: null,
   playWhich: "both",  // 再生しているもの（both：変更前 → 変更後・before・after）
+  tally: { run: "", max: 0 },  // 比較の再生で、今の再生が通った区間の回（「1・2・3」）
   pickAgain: false, // 位置を選び直している（図で重なった点も、位置のボタンで選べるように）
   voiceState: "idle",   // 録音の状態（starting / listening / stopping / idle）
   voiceToken: null,     // 録音を始めたときのジョブ（session）と位置。違えば認識文を使わない
@@ -1150,7 +1151,39 @@ function stopPlayback() {
   $("play-button").classList.remove("playing");
   view3d.stop();
   renderNow(null);
+  state.tally = { run: "", max: 0 };
+  renderSequence("after", null);
   renderPlayButtons();
+}
+
+// 動きの並びのカード（回数の変更の候補があるときだけ）。side：before・after。active：今の区間の回（無ければ null）
+function renderSequence(side, active, activeSide = "") {
+  const rep = repeatCompare();
+  const box = $("play-seq");
+  const seq = rep && rep.sequence;
+  const chips = seq ? sequenceChips(seq, side) : [];
+  if (!chips.length) { box.hidden = true; return; }
+  $("seq-side").textContent = side === "before" ? `変更前 ×${rep.repeat.before_count}` : `変更後 ×${rep.repeat.after_count}`;
+  $("seq-side").classList.toggle("after", side !== "before");
+  $("seq-chips").replaceChildren(...chips.map((c) => {
+    const cls = ["seq-chip", `seq-${c.kind}`];
+    if (c.added) cls.push("added");
+    if (c.kind === "cycle" && c.n === active) cls.push("now");
+    if ((c.kind === "entry" || c.kind === "exit") && c.kind === activeSide) cls.push("now");
+    const e = el("span", { class: cls.join(" ") }, c.text);
+    if (c.title) e.title = c.title;
+    return e;
+  }));
+  const t = state.tally;
+  const parts = t.run === side ? tallyParts(t.max, side === "after" ? seq.added : []) : [];
+  const tally = [];
+  parts.forEach((x, k) => {
+    if (k) tally.push(el("span", { class: "tally-dot" }, "・"));
+    tally.push(el("span", { class: "tally-n" + (x.added ? " added" : "") }, x.text));
+  });
+  $("seq-tally").replaceChildren(...tally);
+  $("seq-summary").textContent = seq.summary || "";
+  box.hidden = false;
 }
 
 // 回数の変更の候補（承認できるもの）があるか。比較の再生はこのときだけ出す
@@ -1179,10 +1212,22 @@ function onPlayStep(run, seg, i, n) {
   $("play-status").textContent = playStatus(run.name, i, n, segmentLook(seg.kind), seg);
   $("play-status").title = segmentTitle(seg);  // 命令の行は、マウスを重ねたときだけ
   renderNow(nowPlaying(seg, { run: run.name === "命令の順" ? "" : run.name, count: run.count, added: run.added }), run.color);
+  // 動きの並び：今の区間の回を光らせ、通った回を「1・2・3」と数える（サーバーの seg.cycle のまま）
+  if (run.key === "before" || run.key === "after") {
+    if (state.tally.run !== run.key) state.tally = { run: run.key, max: 0 };
+    const n = Number.isInteger(seg.cycle) ? seg.cycle : null;
+    if (n && n > state.tally.max) state.tally.max = n;
+    const seq = repeatCompare() && repeatCompare().sequence;
+    const side = seq && seq[run.key];
+    const at = n ? "" : side && side.exit && seg.to === side.exit.position && state.tally.max > 0 ? "exit"
+      : side && side.entry && seg.to === side.entry.position ? "entry" : "";
+    renderSequence(run.key, n, at);
+  }
 }
 
 function onPlayEnd() {
   $("play-status").textContent = "再生が終わりました";
+  if (state.tally.run) renderSequence(state.tally.run, null);  // 数えた「1・2・3」は残す（次の再生・止めるで消す）
   $("play-button").classList.remove("playing");
   renderNow(null);
   renderPlayButtons();

@@ -57,3 +57,42 @@ def test_server_serves_player_js():
     assert '"/static/player.js": ("player.js"' in src
     assert (ROOT / "voice_teaching" / "web" / "static" / "player.js").is_file()
     assert server is not None
+
+
+# ---- 動きの並びのカード・差分の要約（シクロの追加の指示・台本 Ver.6.1 Scene 3-3） ----
+def _repeat_candidate():
+    f = WebFlow(interpreter=ci.MockInterpreter())
+    sid = f.load(DEMO)["session_id"]
+    assert f.select(sid, "C00001")["status"] == "ok"
+    r = f.hear(sid, SAY)
+    r = f.repeat_choose(sid, "yes", r["state"]["repeat_range"]["turn"])
+    return r["state"]["candidate"]
+
+
+def test_sequence_is_built_from_the_jobs():
+    q = _repeat_candidate()["sequence"]
+    # 区間の名前は、あとで人が教えた意味の名前を差し込めるように、target と別に持つ（今は同じ）
+    assert q["target"] == "C00001〜C00003" and q["name"] == "C00001〜C00003"
+    assert q["before"]["cycles"] == [1, 2] and q["after"]["cycles"] == [1, 2, 3]
+    assert q["added"] == [3]
+    # 区間の前後の移動の行き先（ジョブの命令の行のまま。意味は決めつけない）
+    assert q["before"]["entry"] == {"position": "C00000", "line_no": 20, "text": "MOVJ C00000 VJ=25.00"}
+    assert q["before"]["exit"] == {"position": "C00004", "line_no": 27, "text": "MOVJ C00004 VJ=25.00"}
+    assert q["after"]["entry"] == {"position": "C00000", "line_no": 20, "text": "MOVJ C00000 VJ=25.00"}
+    assert q["after"]["exit"] == {"position": "C00004", "line_no": 30, "text": "MOVJ C00004 VJ=25.00"}
+
+
+def test_diff_summary_numbers_come_from_the_program():
+    q = _repeat_candidate()["sequence"]
+    assert q["summary"] == "足した行：3行（直線移動だけ）。新しい位置はありません"
+    for w in ("安全", "当たり", "干渉", "秒", "時間"):
+        assert w not in q["summary"]
+
+
+def test_shift_candidate_has_no_sequence():
+    f = WebFlow(interpreter=ci.MockInterpreter())
+    sid = f.load(DEMO_C)["session_id"]
+    assert f.select(sid, "C00005")["status"] == "ok"
+    r = f.hear(sid, "Zプラス方向に10mm")
+    c = r["state"]["candidate"]
+    assert c is not None and c["kind"] == "shift" and "sequence" not in c

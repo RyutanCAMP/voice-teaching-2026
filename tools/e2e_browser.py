@@ -708,8 +708,12 @@ def check_demo3d(browser, url, check, shots: Path | None, errors: list) -> None:
                        dest: document.querySelectorAll('.dest-mark').length,
                        glow: svg ? svg.querySelectorAll('line.seg-glow').length : 0,
                        after: svg ? svg.querySelectorAll('line.seg.after').length : 0,
-                       status: document.querySelector('#play-status').textContent }; }""")
-            if info["text"] and (not seen or seen[-1]["text"] != info["text"] or seen[-1]["marker"] != info["marker"]):
+                       status: document.querySelector('#play-status').textContent,
+                       tally: document.querySelector('#seq-tally').textContent,
+                       side: document.querySelector('#play-seq').hidden ? '' : document.querySelector('#seq-side').textContent,
+                       nowChip: [...document.querySelectorAll('#seq-chips .seq-chip.now')].map((e) => e.textContent).join(' ') }; }""")
+            if info["text"] and (not seen or seen[-1]["text"] != info["text"] or seen[-1]["marker"] != info["marker"]
+                                 or seen[-1]["tally"] != info["tally"]):
                 seen.append(info)
                 if on_text:
                     on_text(info)
@@ -751,7 +755,7 @@ def check_demo3d(browser, url, check, shots: Path | None, errors: list) -> None:
     pg.add_init_script(FAKE_RECOGNITION)
     pg.goto(url)
     load_repeat(pg)
-    check(pg.is_hidden("#play-compare") and pg.is_hidden("#play-now"),
+    check(pg.is_hidden("#play-compare") and pg.is_hidden("#play-now") and pg.is_hidden("#play-seq"),
           "再生の表示：候補が無いときは［変更前を再生］［変更後を再生］を出さない（「いま」の表示も再生の前は出さない）")
     check(pg.is_enabled("#play-step") and not pg.is_enabled("#play-pause") and not pg.is_enabled("#play-stop"),
           "再生の表示：再生の前は「1つ進む」だけ使える（一時停止・止めるは押せない）")
@@ -818,7 +822,8 @@ def check_demo3d(browser, url, check, shots: Path | None, errors: list) -> None:
     pg.click("#text-send")
     until(pg, lambda: pg.get_attribute("#step-4", "aria-current") == "step")
     pg.wait_for_timeout(300)
-    check(pg.is_hidden("#play-compare"), "再生の表示：位置の移動の候補では、回数の比較の再生を出さない")
+    check(pg.is_hidden("#play-compare") and pg.is_hidden("#play-seq"),
+          "再生の表示：位置の移動の候補では、回数の比較の再生と動きの並びを出さない")
     until(pg, lambda: "いま：" in now(pg), timeout_ms=5000)
     check("×" not in now(pg) and "回目" not in now(pg), f"再生の表示：位置の移動の候補の再生では、回数を出さない：{now(pg)[:60]}")
     pg.close()
@@ -832,8 +837,24 @@ def check_demo3d(browser, url, check, shots: Path | None, errors: list) -> None:
     to_repeat_candidate(pg)
     check(pg.is_visible("#play-compare") and pg.inner_text("#play-before") == "変更前を再生"
           and pg.inner_text("#play-after") == "変更後を再生", "比較の再生：回数の変更の候補では［変更前を再生］［変更後を再生］を出す")
+    pg.click("#play-stop")  # 候補ができたときの再生を止める（止まっているときの並びは変更後）
+    chips = pg.eval_on_selector_all("#seq-chips .seq-chip", "els => els.map(e => [e.textContent, e.className])")
+    texts_c = [c[0] for c in chips]
+    check(texts_c == ["C00000（区間の前）", "→", "C00001〜C00003", "①", "②", "③ 追加", "→", "C00004（区間の後）"]
+          and "added" in chips[5][1] and not any("added" in c[1] for c in chips[:5])
+          and pg.inner_text("#seq-side") == "変更後 ×3",
+          f"動きの並び：［C00000（区間の前）］→ 区間 ①②③（③は追加・変更後の色）→［C00004（区間の後）］：{texts_c}")
+    check(not any("待機" in t for t in texts_c), "動きの並び：位置の意味（待機など）を決めつけない")
+    tops = pg.eval_on_selector_all("#seq-chips .seq-chip", "els => els.map(e => Math.round(e.getBoundingClientRect().top))")
+    check(max(tops) - min(tops) < 12, f"動きの並び：1280px で1行に並ぶ（行の上の端 {sorted(set(tops))}）")
+    check(pg.inner_text("#seq-summary") == "足した行：3行（直線移動だけ）。新しい位置はありません",
+          f"動きの並び：差分の要約（数はプログラム）：{pg.inner_text('#seq-summary')}")
     pg.click("#play-before")
     before = collect(pg)
+    tb = [s["tally"] for s in before]
+    check(before[-1]["tally"] == "1・2" and not any("3" in t for t in tb) and all(s["side"] == "変更前 ×2" for s in before)
+          and any(s["nowChip"] == "②" for s in before),
+          f"比較の再生：変更前は区間を通るたびに「1・2」と数え、並びは ①② だけ：{list(dict.fromkeys(tb))}")
     bt = [s["text"] for s in before]
     check(bool(bt) and all(t.startswith("変更前") and "×2" in t for t in bt)
           and any("2回目" in t for t in bt) and not any("3回目" in t for t in bt) and not any("変更後" in t for t in bt),
@@ -845,8 +866,27 @@ def check_demo3d(browser, url, check, shots: Path | None, errors: list) -> None:
         if info["added"] and info["marker"] and not shot_done:
             shot(pg, "D3_1280_compare_after_3rd.png")
             shot_done.append(info)
+    def shot_3rd_seq(info):
+        shot_3rd(info)
+        if info["added"] and info["marker"] and info["nowChip"] == "③ 追加" and not shot_seq:
+            shot(pg, "D6_1280x720_seq_after_3rd.png")
+            fit = pg.evaluate("""() => { const f = document.querySelector('.foot').getBoundingClientRect().top;
+              const b = (s) => document.querySelector(s).getBoundingClientRect();
+              return [f, b('#fig-3d svg').top, b('#play-seq').bottom, b('#play-compare').bottom, b('#figure-note').bottom,
+                      window.scrollY]; }""")
+            shot_seq.append(fit)
+    shot_seq = []
+    pg.evaluate("window.scrollTo(0, 0)")
     pg.click("#play-after")
-    after = collect(pg, on_text=shot_3rd)
+    after = collect(pg, on_text=shot_3rd_seq)
+    ta = [s["tally"] for s in after]
+    check(after[-1]["tally"] == "1・2・3" and pg.inner_text("#seq-tally .tally-n.added") == "3"
+          and all(s["side"] == "変更後 ×3" for s in after),
+          f"比較の再生：変更後は「1・2・3」と数え、3 だけ変更後の色：{list(dict.fromkeys(ta))}")
+    fit = shot_seq[0] if shot_seq else None
+    check(fit is not None and fit[5] == 0 and fit[1] >= 0 and max(fit[2], fit[3], fit[4]) <= fit[0],
+          f"1280×720：スクロールせずに、3D・動きの並び・比較のボタン・図の注意が1画面に収まる（下の帯の上 {fit and round(fit[0])}px・"
+          f"並び {fit and round(fit[2])}px・比較 {fit and round(fit[3])}px・注意 {fit and round(fit[4])}px）")
     at = [s["text"] for s in after]
     third = [s for s in after if "3回目" in s["text"]]
     check(bool(at) and all(t.startswith("変更後") and "×3" in t for t in at) and not any("変更前" in t for t in at),

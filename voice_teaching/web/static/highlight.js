@@ -184,3 +184,38 @@ export function nowText(n) {
   const cyc = n.cycle ? (n.cycle.endsWith("）") ? `　${n.cycle}` : `（${n.cycle}）`) : "";
   return [head, n.line + cyc, n.note].filter((x) => x).join("　");
 }
+
+// ---- 動きの並びのカード（台本 Ver.6.1 Scene 3-3）：［C00000（区間の前）］→［名前］①②③ 追加 →［C00004（区間の後）］ ----
+// サーバーの candidate.sequence（変更前後のジョブと区間から作ったもの）のまま。位置の意味（待機など）は決めつけない。
+// seq.name は区間の名前（今は C00001〜C00003。人が教えた意味の名前を、あとで差し込める）
+function circled(n) {
+  return n >= 1 && n <= 20 ? String.fromCharCode(0x2460 + n - 1) : `(${n})`;
+}
+function sideChip(kind, m, word) {
+  if (!m || typeof m !== "object" || typeof m.position !== "string") return null;
+  return { kind, text: `${m.position}（${word}）`, title: Number.isInteger(m.line_no) ? `${m.line_no}行目 ${m.text ?? ""}` : "" };
+}
+export function sequenceChips(seq, side) {
+  if (!seq || typeof seq !== "object") return [];
+  const s = seq[side];
+  if (!s || typeof s !== "object" || !Array.isArray(s.cycles) || !s.cycles.every((n) => Number.isInteger(n) && n >= 1)) return [];
+  const added = Array.isArray(seq.added) ? seq.added : [];
+  const out = [];
+  const entry = sideChip("entry", s.entry, "区間の前");
+  if (entry) out.push(entry, { kind: "arrow", text: "→" });
+  out.push({ kind: "name", text: String(seq.name || seq.target || "") });
+  for (const n of s.cycles) {
+    const a = added.includes(n);
+    out.push({ kind: "cycle", n, text: circled(n) + (a ? " 追加" : ""), added: a });
+  }
+  const exit = sideChip("exit", s.exit, "区間の後");
+  if (exit) out.push({ kind: "arrow", text: "→" }, exit);
+  return out;
+}
+
+// 比較の再生で、区間を通った回を大きく数える（変更前「1・2」、変更後「1・2・3」）。足した回の番号は印を付ける
+export function tallyParts(max, added) {
+  if (!Number.isInteger(max) || max < 1) return [];
+  const a = Array.isArray(added) ? added : [];
+  return Array.from({ length: max }, (_, k) => ({ text: String(k + 1), added: a.includes(k + 1) }));
+}
