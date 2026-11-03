@@ -98,3 +98,58 @@ def test_comment_between_attr_and_frame_is_stopped():
     assert data is not None
     job = jbi.parse_bytes(data)
     assert job.relative_frame is None and any("直後" in p for p in job.problems)
+
+
+# ---- 3. ///ATTR の形（内部の Safety 再レビュー P1-1・P2-1・P2-3） ----
+ATTR = b"///ATTR SC,RW,RJ" + NL
+FRAME_LINE = b"////FRAME ROBOT" + NL
+
+
+@pytest.mark.parametrize("attr", [b"///ATTR SC,RW, RJ", b"///ATTR SC,RW,rj", "///ATTR SC,RW,ＲＪ".encode("utf-8"),
+                                  b"///ATTR SC;RW;RJ", b"///ATTR ,RJ,", b"///ATTR RJ", b"///ATTR SC,RW,RJ,", b"///ATTR",
+                                  b"///ATTR SC,RO,RJ", b"///ATTR RW,SC,RJ"])
+@pytest.mark.parametrize("with_frame", [True, False])
+def test_attr_in_other_forms_is_stopped(attr, with_frame):
+    data = RJ.replace(ATTR, attr + NL)
+    if not with_frame:
+        data = data.replace(FRAME_LINE, b"")
+    job = jbi.parse_bytes(data)
+    assert job.problems and job.relative_frame is None, attr
+    for name in ("C00002", "C00003", "C00004"):
+        with pytest.raises(jbi.JbiError):
+            job.plan_shift(name, "Z", -3)
+
+
+def test_two_attr_lines_are_stopped():
+    job = jbi.parse_bytes(RJ.replace(ATTR, ATTR + b"///ATTR SC,RW" + NL))
+    assert any("2つ以上" in p for p in job.problems)
+
+
+@pytest.mark.parametrize("sample", ["DEMO_C_PLACE.JBI", "DEMO_PLACE.JBI", "DEMO_RJ_XYZ.JBI"])
+def test_known_attr_forms_still_read(sample):
+    job = jbi.parse_bytes((ROOT / "samples" / "dummy" / sample).read_bytes())
+    assert job.problems == []
+
+
+def test_unknown_directive_after_last_position_is_stopped():
+    marker = b"//INST" + NL
+    assert DEMO_C.count(marker) == 1
+    job = jbi.parse_bytes(DEMO_C.replace(marker, b"///FOO 1" + NL + marker))
+    assert any("最後の位置より後ろ" in p for p in job.problems)
+    job = jbi.parse_bytes(RJ.replace(FRAME_LINE, b"").replace(ATTR, b"///ATTR SC,RW" + NL)
+                          .replace(b"//INST" + NL, b"///ATTR SC,RW,RJ" + NL + b"//INST" + NL))
+    assert job.problems
+
+
+# ---- 4. ツール番号の範囲（QA 再レビュー P2-5） ----
+@pytest.mark.parametrize("tool,ok", [(b"0", True), (b"8", True), (b"63", True), (b"64", False), (b"99999999999999999999", False),
+                                     (b"08", False), (b"-1", False)])
+def test_tool_number_range(tool, ok):
+    data = RJ.replace(b"///TOOL 8" + NL, b"///TOOL " + tool + NL)
+    job = jbi.parse_bytes(data)
+    if ok:
+        assert not job.problems
+        job.plan_shift("C00002", "Z", -3)
+    else:
+        with pytest.raises(jbi.JbiError):
+            job.plan_shift("C00002", "Z", -3)

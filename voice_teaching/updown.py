@@ -253,7 +253,7 @@ def job_rj(job: jbi.Job) -> bool:
     """///ATTR に RJ（相対ジョブ）があるか（並びの1つとして）。"""
     for line in job.lines:
         body = line.rstrip("\r\n")
-        if body.startswith("///ATTR ") and "RJ" in body[len("///ATTR "):].split(","):
+        if body.startswith("///ATTR ") and "RJ" in body[len("///ATTR "):].split(","):  # 形の違う ATTR は jbi が problems にする
             return True
     return False
 

@@ -69,6 +69,9 @@ _KNOWN_INST_DIRECTIVES = {"DATE", "ATTR", "COMM"}
 #   FRAME の行は1回だけで、///ATTR の直後の行にある（実機で確かめた形だけ。唐川さんの決定 2026-11-03。ほかの場所は止める）
 # 斜線4本の意味は公開資料では未確認（ペンダントの表示では ROBOT 座標）。ほかの形は止める
 FRAME_ROBOT_LINE = "////FRAME ROBOT"
+# ///ATTR の値は、実機で確かめた形だけを扱う（内部の Safety 再レビュー P1-1：「SC,RW, RJ」「rj」「SC;RW;RJ」などで
+# 相対ジョブの判定をすり抜けないように）。ほかの値・2つ以上の ///ATTR の行は止める
+ATTR_FORMS = ("SC,RW", "SC,RW,RJ")
 _FRAME_PLACE = "扱えません：FRAME の行が、INST 部の指示行の並び（///ATTR の後、命令より前）にありません"
 _FRAME_NOT_AFTER_ATTR = "扱えません：FRAME の行が ///ATTR の直後の行にありません（実機で確かめた形だけを扱います）"
 _RJ_NO_FRAME = "相対ジョブ（RJ）ですが、座標系（FRAME）の行がありません"
@@ -96,7 +99,8 @@ _LABEL_LINE = re.compile(r"\*[A-Za-z0-9_]+")
 _DIGIT_LIST = r"[0-9]+(?:,[0-9]+)*"
 # POS部の指示行と、その引数の形（None は引数なし）。形が違えば「分からない指示行」とする
 _POS_DIRECTIVE_ARGS = {
-    "NPOS": _DIGIT_LIST, "TOOL": r"[0-9]+", "POSTYPE": r"[A-Z]+", "RECTAN": None, "PULSE": None,
+    "NPOS": _DIGIT_LIST, "TOOL": r"(?:[0-9]|[1-5][0-9]|6[0-3])",  # ツール番号は 0〜63（資料）。範囲外は分からない指示行として止める
+    "POSTYPE": r"[A-Z]+", "RECTAN": None, "PULSE": None,
     "RCONF": _DIGIT_LIST, "USER": r"[0-9]+",
 }
 # 1行の中に入っていると行の区切りがあいまいになる文字（タブ以外の制御文字など）
@@ -488,6 +492,7 @@ def parse(text: str, encoding: str = "utf-8") -> Job:
     attr_args: list[str] = []
     attr_lines: list[tuple[int, str]] = []  # ///ATTR の行（行, 中身）。RJ があるのに FRAME が無いときの理由に使う
     frames: list[tuple[int, str, str | None]] = []  # (行, 行の中身, 場所の問題)
+    pos_unknown: list[tuple[int, str]] = []  # POS 部の知らない指示行（最後の位置より後ろにあるものは止める）
     inst_body_seen = False  # INST 部で、指示行でない行（命令・コメント）がもう出たか
 
     def problem(i: int, body: str, why: str) -> None:
@@ -542,6 +547,7 @@ def parse(text: str, encoding: str = "utf-8") -> Job:
                 word, sep, arg = body[3:].partition(" ")
                 if word not in _POS_DIRECTIVE_ARGS:
                     unknown = True  # 以降の位置は変更しない
+                    pos_unknown.append((i, body))
                     continue
                 pat = _POS_DIRECTIVE_ARGS[word]
                 ok = (sep == "") if pat is None else (sep == " " and re.fullmatch(pat, arg) is not None)
@@ -614,6 +620,10 @@ def parse(text: str, encoding: str = "utf-8") -> Job:
             if word == "ATTR":
                 attr_args.append(arg if sep == " " else "")
                 attr_lines.append((i, body))
+                if len(attr_lines) >= 2:
+                    problem(i, body, "扱えません：///ATTR の行が2つ以上あります")
+                elif not (sep == " " and arg in ATTR_FORMS):
+                    problem(i, body, "扱えません：///ATTR の形が、実機で確かめた「SC,RW」「SC,RW,RJ」ではありません")
             if word.startswith("GROUP"):
                 if body != "///GROUP1 RB1":
                     problem(i, body, "ロボット1台（GROUP1 RB1）以外の軸グループです")
@@ -651,6 +661,11 @@ def parse(text: str, encoding: str = "utf-8") -> Job:
     if not ended:
         # END の無いジョブは、途中で切れたファイルかもしれない。命令の終わりが確かめられないので止める
         job.problems.append("END の命令がありません（ファイルが途中で切れているかもしれません）")
+    # POS 部の最後の位置より後ろの知らない指示行は、どの位置の変更も止めないので、ジョブごと止める（Safety 再レビュー P2-3）
+    last_pos = max((p.line_index for p in job.positions.values()), default=-1)
+    for i, body in pos_unknown:
+        if i > last_pos:
+            problem(i, body, "扱えません：POS 部の最後の位置より後ろにある、知らない指示行です")
     job.relative_frame = _check_frame(job, frames, attr_args, attr_lines)
     job.baseline = {name: p.values for name, p in job.positions.items()}
     return job
@@ -691,7 +706,7 @@ def _check_frame(job: Job, frames: list[tuple[int, str, str | None]], attr_args:
 
 def _frame_condition_problem(job: Job, attr_args: list[str]) -> str | None:
     """FRAME の行のほかの条件（ATTR の RJ・POSTYPE ROBOT・RECTAN・USER なし）。合わなければ理由。"""
-    if len(attr_args) != 1 or "RJ" not in attr_args[0].split(","):
+    if len(attr_args) != 1 or attr_args[0] != "SC,RW,RJ":  # 実機で確かめた形だけ（ATTR_FORMS）
         return _FRAME_NO_RJ
     bodies = [_split_ending(line)[0] for line in job.lines]
     if any(b.startswith("///USER") for b in bodies):
