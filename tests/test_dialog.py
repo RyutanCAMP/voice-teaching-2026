@@ -306,14 +306,14 @@ def test_axis_without_sign_offers_only_that_axis():
     assert r["status"] == "ask" and choice_ids(r) == ["dir:Y+", "dir:Y-"] and r["state"]["candidate"] is None
 
 
-def test_said_sign_limits_buttons_and_conflict_is_asked():
+def test_sign_without_axis_is_asked_and_buttons_are_not_filtered():
+    # 内部 Safety レビュー（91285fe）P1-3 の直しで期待を変えた：軸の無い符号でボタンを絞らない（前は X−・Y−・Z− に絞っていた）
     w, sid = start()
     w.hear(sid, OPENING)
     w.hear(sid, "はい")
     r = w.hear(sid, "マイナス3mm")
-    assert choice_ids(r) == ["dir:X-", "dir:Y-", "dir:Z-"]
-    r = w.hear(sid, "Yのプラス")
-    assert r["status"] == "ask" and r["state"]["candidate"] is None
+    assert r["status"] == "ask" and r["message"] == dg.SIGN_NEEDS_AXIS and len(choice_ids(r)) == 6
+    assert dlg(r)["amount_mm"] is None and r["state"]["candidate"] is None
 
 
 def test_two_axes_in_answer_asks_with_buttons_d1():
@@ -816,7 +816,8 @@ def test_template_turns_are_never_labelled_claude(interp):
     r = w.hear(sid, "OK"); states.append(r["state"])           # 承認の言葉（止める）
     r = w.hear(sid, "そうじゃなくて"); states.append(r["state"])  # 打ち消し
     r = w.hear(sid, "えーと"); states.append(r["state"])        # その他
-    r = w.hear(sid, "そうそう"); states.append(r["state"])
+    r = w.hear(sid, "そうそう"); states.append(r["state"])  # ほかのやり取りのあとの肯定は使えない（P3a）→ ボタンで
+    r = w.choose(sid, "pos:C00005", r["state"]["dialog"]["turn"]); states.append(r["state"])
     r = w.hear(sid, "手前に3mm"); states.append(r["state"])
     r = w.hear(sid, "3mm"); states.append(r["state"])
     if interp == "mock":

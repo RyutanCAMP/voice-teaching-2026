@@ -116,6 +116,7 @@ class WebFlow:
                    else self._maybe_start_dialog(e, text, source, f0))
             if out is not None:
                 return out
+            e.dialog.estimated = None  # ふつうの指示：推定（未確定）の名前は使わない
             return self._instruction(e, text, source)
         return self._run(sid, run)
 
@@ -176,11 +177,28 @@ class WebFlow:
             return None
         ops = [k for k in f0.kinds if k in ut.OPS]
         if (f0.negations or f0.undo_negations or getattr(f0, "repeat", None) or getattr(f0, "question", False)
+                or getattr(f0, "place_as_destination", False)
                 or f0.positions or f0.bad_positions or len(ops) > 1 or f0.op in ("speed", "compare", "undo")
                 or any(r != ut.FRONT_BACK_MESSAGE for r in f0.stop_reasons)):
-            return None  # 今の流れのまま（打ち消しは止める・繰り返しは2択・承認の言葉は断る など）
-        d.start(word, dg.find_relative_dir(text, f0), dg.Slots())
+            return None  # 今の流れのまま（打ち消し・繰り返し・疑問の形・行き先の場所の言葉・承認の言葉 など）
+        rel = dg.find_relative_dir(text, f0)
+        if rel and (dg.has_neighbour_relative(text, word) or f0.axes or f0.vertical or dg.has_sign_word(text)):
+            # 向きの言葉と、軸・上げ下げ・符号が一緒（「置くところを奥へ3mm下げて」）、または「置くところの手前」：
+            # 向きの言葉を捨てて読まない。会話にせず、今の流れ（止める・聞き返す）のまま
+            return None
+        two = dg.count_place_words(text) >= 2
+        fs = None
+        if not two:
+            fs = ut.read_utterance(dg.substitute_opening(text, word))
+            if fs.place_ref or not dg.handled_by_dialogue(fs):
+                two = bool(fs.place_ref)
+                if not two:
+                    return None  # 会話が受け持たない理由で止まる・聞き返す文：今の流れの答えをそのまま返す
+        d.start(word, rel, dg.Slots())
         self._human(e, text, source)
+        if two:  # 場所の言葉が2つ：1つずつ（候補は頼まない）
+            d.end()
+            return self._dialog_out(e, text, source, f0, "ask", dg.TWO_PLACES)
         if s.candidate is not None:  # 承認待ちの候補がある：位置の候補も頼まない
             d.end()
             return self._dialog_out(e, text, source, f0, "stop", PENDING_MESSAGE, who="アプリ")
@@ -192,8 +210,10 @@ class WebFlow:
         slots = dg.read_slots(fs, opening=True)
         if slots.problem:
             d.end()
-            return self._dialog_out(e, text, source, f0, "ask", slots.problem, who="アプリ")
+            return self._dialog_out(e, text, source, f0, "stop" if slots.stop else "ask", slots.problem)
         d.amount, d.axis, d.sign = slots.amount, slots.axis, slots.sign
+        if rel:  # 向きの言葉だけ：方向は必ず6つのボタンで聞く（始めの発話からは決めない）
+            d.axis = d.sign = None
         d.turn += 1
         return self._locate(e, text, source, f0, word)
 
@@ -232,18 +252,33 @@ class WebFlow:
                else dg.ASK_MANY.format(word=word, n=len(d.candidates)))
         # Claude（モック）の位置の候補を示す文だけは、その話し手として出す。FRAME で決まったものは「アプリ」
         who = APP_SPEAKER if d.candidates[0].confirmed_by_frame else self._speaker()
-        return self._dialog_out(e, text, source, f0, "ask", msg, who=who)
+        out = self._dialog_out(e, text, source, f0, "ask", msg, who=who)
+        d.proposal_mark = len(d.turns)  # 声の肯定は、この直後だけ使える
+        return out
 
     def _dialog_turn(self, e: _Entry, text: str, source: str, f0) -> dict | None:
         """会話の途中の発話。None を返したら、会話をやめて、ふつうの指示として読む。"""
         d = e.dialog
         if d.step == "pick":
-            d.end()
-            return None
+            # 手で選ぶ段：位置番号だけの文なら、選んだことにする。それ以外は段を変えずに聞く（集めた量・方向は捨てない）
+            name = ut.normalize_position(text.strip().strip("。、.!！"))
+            self._human(e, text, source)
+            if name is not None:
+                r = e.session.select(name)
+                if r.status != "ok":
+                    return self._dialog_out(e, text, source, f0, "stop", r.message)
+                return self._dialog_pick(e)
+            v = ut.pre_check(f0)
+            if v.status == "stop":
+                return self._dialog_out(e, text, source, f0, "stop", v.message)
+            return self._dialog_out(e, text, source, f0, "ask", dg.PICK_PROMPT)
         v = ut.pre_check(f0)
         if d.step == "confirm_position":
+            fresh = len(d.turns) == d.proposal_mark  # 最後のやり取りが位置の候補の問いか
             self._human(e, text, source)
-            if dg.is_affirmative(text):  # 選択であって承認ではない（候補が1つのときだけ）
+            if dg.is_affirmative(text):  # 選択であって承認ではない（候補が1つ・問いの直後のときだけ）
+                if not fresh:
+                    return self._dialog_out(e, text, source, f0, "ask", dg.AFFIRM_BUTTON)
                 if len(d.candidates) == 1:
                     return self._confirm_position(e, text, source, f0, d.candidates[0].position)
                 return self._dialog_out(e, text, source, f0, "ask", dg.AFFIRM_MANY)
@@ -279,15 +314,23 @@ class WebFlow:
         if f0.unknown_words:  # B1
             return self._dialog_out(e, text, source, f0, "ask", ut.unknown_words_message(f0.unknown_words, "move"),
                                     who="アプリ")
+        if f0.place_ref:  # 答えの中の場所の言葉：会話をやめて、今の流れ（聞き返し）のまま
+            d.end()
+            return None
+        if f0.kinds and not dg.handled_by_dialogue(f0):
+            # 会話が受け持たない理由（2つの操作・D1 の2つの読み方 など）：今の pre_check の答えをそのまま返す
+            v = ut.pre_check(f0)
+            return self._dialog_out(e, text, source, f0, v.status, v.message, choices=v.choices)
         slots = dg.read_slots(f0)
         if slots.problem:
-            return self._dialog_out(e, text, source, f0, "ask", slots.problem, who="アプリ")
+            return self._dialog_out(e, text, source, f0, "stop" if slots.stop else "ask", slots.problem)
         if slots.amount is None and slots.axis is None and slots.sign is None:
             return self._dialog_out(e, text, source, f0, "ask", dg.NOTHING_READ + d.ask_move_message())
         return self._merge_slots(e, text, source, f0, slots.amount, slots.axis, slots.sign)
 
     def _merge_slots(self, e: _Entry, text, source, f0, amount, axis, sign) -> dict:
         d = e.dialog
+        d.confirm_go = False
         if amount is not None:
             d.amount = amount
         problem = None
@@ -327,9 +370,11 @@ class WebFlow:
         """集めたことを決まった文にして、ふつうの指示と同じ流れに通す（ガードはすべてそのまま）。"""
         d = e.dialog
         text = dg.canonical_text(d.position, d.axis, d.sign, d.amount)
+        est = d.estimated
         d.end()
         out = self._instruction(e, text, source)
         if out.get("candidate_made"):
+            d.estimated = est  # 会話で選んだ位置の候補にだけ「推定（未確定）」を残す（この画面の中だけ）
             d.say(APP_SPEAKER, dg.DONE, "ok")  # 決まった文（プログラム）
         else:
             d.say("アプリ", out.get("message") or "", out.get("status") or "stop")
@@ -352,6 +397,8 @@ class WebFlow:
             e.session.log.append(("選択", f"ボタン：{label}"))
             if choice.startswith("pos:"):
                 return self._confirm_position(e, label, "text", None, choice[4:])
+            if choice == "go":  # 手で選んだ位置で、方向と量がそろったことの確かめ
+                return self._run_canonical(e, "text")
             if choice == "other":
                 d.step, d.candidates = "pick", []
                 d.turn += 1
@@ -410,15 +457,22 @@ class WebFlow:
             if r.status == "ok":
                 d.estimated = None  # 人が選び直した：推定の名前は使わない
                 if d.step is not None:
-                    # 会話の途中で人が位置を選んだ（「ほかの位置」のあとなど）：その位置で、方向と量を聞く
                     d.say("人", f"{e.session.selected} を選びました", "human")
-                    d.position, d.candidates, d.step = e.session.selected, [], "ask_move"
-                    if d.complete():
-                        return self._run_canonical(e, "text")
-                    d.turn += 1
-                    return self._dialog_out(e, "", "text", None, "ask", d.ask_move_message())
+                    return self._dialog_pick(e)
             return {"ok": True, **self._reply(e, r)}
         return self._run(sid, run)
+
+    def _dialog_pick(self, e: _Entry) -> dict:
+        """会話の途中で人が位置を選んだ（「ほかの位置」のあとなど）：その位置で、方向と量を聞く。"""
+        d = e.dialog
+        d.estimated = None
+        d.position, d.candidates, d.step = e.session.selected, [], "ask_move"
+        d.turn += 1
+        if d.complete():
+            # 手で選んだだけでは候補にしない。ボタン1つで確かめる（声では進めない）
+            d.confirm_go = True
+            return self._dialog_out(e, "", "text", None, "ask", d.confirm_go_message())
+        return self._dialog_out(e, "", "text", None, "ask", d.ask_move_message())
 
     def compare(self, sid: object) -> dict:
         def run(e: _Entry) -> dict:
@@ -432,6 +486,7 @@ class WebFlow:
             self._cancel_approval(e, "元に戻したため")
             if e.dialog.step is not None:
                 e.dialog.end()
+            e.dialog.estimated = None
             r = e.session.undo()
             return {"ok": True, **self._reply(e, r)}
         return self._run(sid, run)

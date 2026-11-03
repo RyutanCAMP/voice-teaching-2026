@@ -28,6 +28,7 @@ const state = {
   unknownWords: [],     // 最後の指示で、プログラムが読めなかった言葉（facts.unknown_words。表示で目立たせるだけ）
   needChrome: false,    // Chrome 以外で声を文字にできなかった（アドレスのコピーを目立たせる）
   talkFirst: false,     // 位置を選ばずに話す（「置くところを…」から Claude との会話を始める）
+  dialogNotice: false,  // 最後の結果が会話の層の答え（会話が終わっても、止めた・聞き返した理由を会話のカードに残す）
 };
 const SAMPLE_NAME = "DEMO_C_PLACE.JBI";  // 「サンプルで試す」で読む架空のジョブ（サーバーが決まった1つを読む）
 
@@ -143,6 +144,7 @@ function applyLoad(res, fileName) {
   state.figView = res.view.positions.some((p) => p.xyz) ? "3d" : bestView(res.view.positions);
   state.pickAgain = false;
   state.talkFirst = false;
+  state.dialogNotice = false;
   $("heard-text").textContent = "（まだありません）";
   $("facts-view").textContent = "（まだありません）";
   $("reply-message").hidden = true;
@@ -283,7 +285,7 @@ function renderSteps() {
   } else if (step === 3) {
     // 聞き返しの間は、見出しも聞き返しに合わせる（選択肢があれば「どちらですか？」）
     const reply = $("reply-message");
-    const asking = !reply.hidden && reply.classList.contains("ask");
+    const asking = !reply.hidden && (reply.classList.contains("ask") || (state.dialogNotice && reply.classList.contains("stop")));
     const askText = asking && reply.querySelector("button.choice:not([disabled])") && !state.unknownWords.length
       ? "どちらですか？" : "もう一度、言い直してください";
     if (recording()) {
@@ -404,16 +406,20 @@ function renderChips() {
 function applyResult(res, showOk = true) {
   if (res.state) state.st = res.state;
   state.resumeArmed = true;  // 結果が出た：マイクが ON なら、また聞き始めてよい
-  if (res.dialog && res.ok !== false && !(res.choices && res.choices.length)) {
-    // 会話の1回分：文は会話のカード（吹き出し）に出す。下の返事の欄には重ねて出さない
+  state.dialogNotice = !!res.dialog;
+  const talking = !!(state.st && state.st.dialog && state.st.dialog.step);
+  if (res.dialog && res.ok !== false && !(res.choices && res.choices.length)
+      && ((talking && res.status !== "stop") || res.candidate_made)) {
+    // 会話の途中の問いかけ：文は会話のカード（吹き出し）に出す。下の返事の欄には重ねて出さない。
+    // 止めた理由・会話が終わったときの聞き返しは、返事の欄にも出す（見出しも「もう一度、言い直してください」）
     $("reply-message").hidden = true;
     $("reply-message").replaceChildren();
   } else if (res.ok === false) {
     showReply("stop", res.error || "理由が分かりません");
   } else if (res.status && res.status !== "ok") {
     showReply(res.status, res.message, res.choices);
-  } else if (res.message && showOk) {
-    showReply("ok", res.message);
+  } else if (res.message && (showOk || res.dialog)) {
+    showReply("ok", res.message);  // 会話が終わったとき（「やめて」など）も、返事の欄に出す
   }
   renderState();
 }
@@ -514,7 +520,7 @@ function renderDialog() {
   document.body.classList.toggle("in-dialog", !!(d && d.step) && step !== 4 && step !== 1);
   $("talk-first").hidden = !!(d && d.step);  // 会話の途中（手で選ぶ段など）は出さない
   // 会話の途中（ステップ2〜3）と、会話のあとに候補ができたとき（ステップ4）だけ出す
-  if (!d || !d.turns.length || step === 1 || (!d.step && step !== 4)) {
+  if (!d || !d.turns.length || step === 1 || (!d.step && step !== 4 && !state.dialogNotice)) {
     panel.hidden = true;
     return;
   }
@@ -552,6 +558,10 @@ function renderDialog() {
     return b;
   }));
   $("dialog-choices").hidden = !d.choices.length;
+  // 役割の注意。モックのときは、モックであることを書く
+  $("dialog-note").textContent = mock
+    ? "モック（テスト用）は、決まった規則で候補を出し、聞き返すだけです（本物の Claude ではありません）。座標の変更・検査・数字はプログラムが行い、承認は確認表示のボタンだけです。"
+    : "Claude は意味を読んで候補を出し、聞き返すだけです。座標の変更・検査・数字はプログラムが行い、承認は確認表示のボタンだけです。";
   $("dialog-note").hidden = !d.step;
 }
 
@@ -668,8 +678,8 @@ function openConfirm() {
   $("confirm-xyz").replaceChildren(
     el("p", { class: "cand-big" }, displayMinus(`${cc.target.split(" ")[0]}：${ax}方向に ${cc.delta}mm`) + dirName(ax, cc.delta)),
     changeLine(ax, cc),
-    cc.heard ? el("p", { class: "cand-heard" }, "指示：「", ...heardNodes(cc.heard), "」") : "",
-    cc.estimated ? estimatedLine(cc.estimated) : "",
+    cc.heard ? el("p", { class: "cand-heard" }, "指示：「", ...heardNodes(cc.heard), "」",
+      cc.estimated ? el("span", { class: "cand-est inline" }, `推定で選んだ位置（「${cc.estimated.word}」・${cc.estimated.label}）`) : null) : "",
     cc.before_xyz ? xyzView(cc) : "");
   if (state.view.positions.some((p) => p.xyz)) {
     confirm3d.reset();

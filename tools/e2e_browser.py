@@ -609,8 +609,10 @@ def check_dialog(browser, check, shots: Path | None, errors: list) -> None:
         shot(pg, "d4_candidate.png")
         pg.click("#open-confirm")
         pg.wait_for_selector("#confirm-overlay:not([hidden])")
-        check("推定で選んだ位置：C00005" in pg.inner_text("#confirm-xyz") and pg.is_visible("#approve-button"),
-              "会話：確認表示にも「推定で選んだ位置」を出す。承認は確認表示のボタンだけ")
+        ab = pg.locator("#approve-button").bounding_box()
+        check("推定で選んだ位置（「置くところ」・推定（未確定））" in pg.inner_text("#confirm-xyz") and pg.is_visible("#approve-button")
+              and ab is not None and ab["y"] + ab["height"] <= 720,
+              f"会話：確認表示にも「推定で選んだ位置」を出す。承認ボタンは 1280×720 でスクロールせずに見える（下の端 {ab and ab['y'] + ab['height']:.0f}px）")
         shot(pg, "d5_confirm.png")
         pg.fill("#approver-name", "テスト")
         pg.click("#approve-button")
@@ -657,6 +659,45 @@ def check_dialog(browser, check, shots: Path | None, errors: list) -> None:
         check(pg.get_attribute("#step-3", "aria-current") == "step" and len(labels(pg)) == 6,
               "会話：「右に3mm」は軸にしない（6つのボタンで聞き直す）")
         shot(pg, "d7_six_directions.png")
+        pg.close()
+
+        # ---- 2b. 会話の中で止めた・聞き返した理由は、いつも見える（内部 QA レビュー 91285fe P1-1） ----
+        pg = browser.new_page(viewport={"width": 1280, "height": 720})
+        watch(pg)
+        pg.add_init_script(FAKE_RECOGNITION)
+        pg.goto(url)
+        pg.click("#sample-button")
+        pg.wait_for_selector("#job-area:not([hidden])")
+        pg.click("#talk-first")
+        send(pg, "置くところをバイオ3ミリ下げて")
+        until(pg, lambda: pg.is_visible("#reply-message"))
+        check("バイオ" in pg.inner_text("#reply-message") and pg.inner_text("#next-action") == "もう一度、言い直してください",
+              f"会話の始めの知らない言葉（B1）の聞き返しが見える：{pg.inner_text('#reply-message')[:40]}")
+        shot(pg, "d10_b1_opening.png")
+        send(pg, "置くところを少し手前にして")
+        until(pg, lambda: labels(pg) == ["C00005 です", "ほかの位置"])
+        send(pg, "やめて")
+        until(pg, lambda: pg.is_visible("#reply-message") and "会話をやめました" in pg.inner_text("#reply-message"))
+        check(pg.is_visible("#dialog-panel") and last_said(pg).startswith("会話をやめました") and bubbles(pg)[-1][0] == "アプリ",
+              "「やめて」で会話を終えたことが、返事の欄と会話のカード（アプリ）の両方に見える")
+        shot(pg, "d11_undo_word.png")
+        send(pg, "置くところを少し手前にして")
+        until(pg, lambda: labels(pg) == ["C00005 です", "ほかの位置"])
+        send(pg, "はい")
+        until(pg, lambda: len(labels(pg)) == 6)
+        send(pg, "25mm")
+        until(pg, lambda: labels(pg) and labels(pg)[0] == "X＋ 25mm")
+        pg.locator("#dialog-choices button", has_text="Z−（下）25mm").click()
+        until(pg, lambda: pg.get_attribute("#step-4", "aria-current") == "step" or pg.is_visible("#reply-message"))
+        seen = pg.inner_text(".side")
+        check("20" in seen and ("上限" in seen or "超え" in seen),
+              "会話の最後の 25mm は 20mm の検査で止まり、その理由が見える")
+        if pg.get_attribute("#step-4", "aria-current") == "step":
+            pg.click("#open-confirm")
+            pg.wait_for_selector("#confirm-overlay:not([hidden])")
+            check(not pg.is_enabled("#approve-button"), "会話の最後の 25mm は承認できない")
+            pg.click("#confirm-close")
+        shot(pg, "d12_limit.png")
         pg.close()
 
         # ---- 3. くり返しの2択（「2回」）→ どちらでも、動きは足せないと伝える。候補なし・解釈の係も呼ばない ----

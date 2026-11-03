@@ -68,9 +68,20 @@ AXIS_CONFLICT = "軸が前の答えと違います。方向をボタンで選び
 NOTHING_READ = "方向か量が読めませんでした。"
 DONE = "変更前後を表示します。これでよろしいですか？（承認は確認表示のボタンで行います）"
 END_UNDO = "会話をやめました。もう一度、指示してください"
-STALE = "この選択肢は古くなったため、使いません。今の画面の選択肢を押してください"
+STALE = "この選択肢は古くなりました。もう一度話してください"
 PENDING = "承認待ちの変更候補があります。比べるか、元に戻してから指示してください"
 OTHER_LABEL = "ほかの位置"
+TWO_PLACES = "位置が2つあります。1つずつ指示してください"
+AFFIRM_BUTTON = "位置はボタンで選んでください（「はい」などは、位置の候補を聞いたすぐあとだけ使えます）"
+ZERO_AMOUNT = "移動量が0のため、変更しません"
+CONFIRM_GO = "{pos} を {dir} {amount}mm 動かしますか？"
+CONFIRM_GO_LABEL = "{pos} を {dir} {amount}mm 動かす"
+# ふつうの流れ（utterance._pre_check_core）と同じ文
+STRAY_SIGN = "プラス・マイナスがどこに付くか分かりません。「Xのマイナス5ミリ」のように、軸のすぐ後に言ってください"
+TWO_SIGNS = "向きの指定が2つあります。どちらの向きか、もう一度指示してください"
+SIGN_NEEDS_AXIS = "プラス・マイナスは、軸と一緒に言うか（例：Yのマイナス3ミリ）、ボタンで方向を選んでください"
+# 会話が受け持つ聞き返し（これ以外の pre_check の止める・聞き返す理由は、会話にせずそのまま返す）
+_HANDLED_ASKS = ("何mm動かしますか？", "どの方向（X・Y・Z、または上げる・下げる）に動かしますか？")
 
 
 # ---- 言葉を見つける ----
@@ -92,6 +103,38 @@ def find_relative_dir(text: str, facts: object = None) -> str | None:
         return found[0] if found else None
     m = _RELATIVE_RE.search(unicodedata.normalize("NFKC", text))
     return m.group(0) if m else None
+
+
+def count_place_words(text: str) -> int:
+    """場所の言葉の数（「置くところと取るところ」は2）。"""
+    return len(_PLACE_RE.findall(unicodedata.normalize("NFKC", text)))
+
+
+def has_neighbour_relative(text: str, word: str) -> bool:
+    """「置くところの手前」のように、場所の言葉＋「の」＋向きの言葉（となりの位置のことかもしれない）。"""
+    t = unicodedata.normalize("NFKC", text)
+    return re.search(re.escape(word) + r"\s?の\s?(?:" + _RELATIVE_RE.pattern + ")", t) is not None
+
+
+def has_sign_word(text: str) -> bool:
+    return _SIGN_TOKEN.search(unicodedata.normalize("NFKC", text).upper()) is not None
+
+
+def handled_by_dialogue(facts: ut.UtteranceFacts) -> bool:
+    """場所の言葉を置き換えた文の pre_check が、通るか、会話が受け持つ理由（量・方向が無い）で聞き返すときだけ真。"""
+    v = ut.pre_check(facts)
+    if v.status == "ok":
+        return True
+    if v.status != "ask":
+        return False
+    if v.message in _HANDLED_ASKS:
+        return True
+    # 「少し」など、はっきりした量が1つも無いあいまいな量（あとで何mmかを聞く）
+    if facts.unclear_amounts and not facts.amounts and v.message.startswith("量がはっきりしません"):
+        return True
+    # 軸だけで向きが無い（「Y方向に3mm」）：その軸の＋−のボタンで聞く
+    a = facts.axis
+    return a is not None and v.message.startswith(f"{a}方向のプラスですか、マイナスですか")
 
 
 def is_affirmative(text: str) -> bool:
@@ -252,6 +295,7 @@ class Slots:
     axis: str | None = None
     sign: int | None = None
     problem: str | None = None
+    stop: bool = False  # problem を「止めた」として返す（0mm）
 
 
 def read_slots(facts: ut.UtteranceFacts, opening: bool = False) -> Slots:
@@ -269,20 +313,17 @@ def read_slots(facts: ut.UtteranceFacts, opening: bool = False) -> Slots:
     if a_list and a_list[0].unit != "mm":
         return Slots(problem="移動の量は mm（ミリ）で言ってください")
     amount = a_list[0] if a_list else None
+    if amount is not None and amount.value == 0:
+        return Slots(problem=ZERO_AMOUNT, stop=True)  # 解釈の係を呼ぶ前に断る
     signs = ([amount.sign] if amount is not None and amount.sign is not None else []) + list(facts.axis_signs)
-    if facts.stray_signs > 1:
-        return Slots(problem="プラス・マイナスが2つ以上あります。1つだけ言ってください")
-    if facts.stray_signs == 1:
-        loose = [_SIGN[t] for t in _SIGN_TOKEN.findall(facts.text)]
-        if amount is not None and amount.sign is not None:
-            loose.remove(amount.sign)
-        if len(set(loose)) != 1:
-            return Slots(problem="プラス・マイナスがどこに付くか分かりません。ボタンで方向を選んでください")
-        signs.append(loose[0])
-    if len(set(signs)) > 1:
-        return Slots(problem="向きの指定が2つあります。ボタンで方向を選んでください")
+    if facts.stray_signs > 0:
+        return Slots(problem=STRAY_SIGN)  # はぐれた符号・重なった符号はふつうの流れと同じく聞き返す（ボタンを絞らない）
+    if len(signs) > 1:
+        return Slots(problem=TWO_SIGNS)  # 同じ向きの重なり（「Y-方向にマイナス3mm」）も聞き返す
     if len(facts.axes) > 1:
         return Slots(problem=f"方向が2つ以上あります（{'・'.join(facts.axes)}）。推測しません。ボタンで1つ選んでください")
+    if signs and not facts.axes:
+        return Slots(problem=SIGN_NEEDS_AXIS)  # 軸の無い符号（「マイナス3mm」）でボタンを絞らない
     return Slots(amount=amount.value if amount is not None else None,
                  axis=facts.axes[0] if facts.axes else None,
                  sign=signs[0] if signs else None)
@@ -302,6 +343,8 @@ class Dialog:
     sign: int | None = None
     estimated: dict | None = None    # {"position", "word", "label", "by"}。保存しない
     turns: list[dict] = field(default_factory=list)
+    proposal_mark: int = -1          # 位置の候補を聞いた直後の turns の数（声の肯定は、このときだけ使える）
+    confirm_go: bool = False         # 手で選んだ位置で、方向と量がそろった：ボタン1つで確かめる
 
     MAX_TURNS = 40
 
@@ -310,10 +353,14 @@ class Dialog:
         self.candidates, self.position = [], None
         self.amount, self.axis, self.sign = slots.amount, slots.axis, slots.sign
         self.turns = []
+        self.proposal_mark, self.confirm_go = -1, False
 
     def end(self) -> None:
+        """会話を終える。推定（未確定）の名前も消す（候補ができたときは、呼んだ側が残す）。"""
         self.step = None
         self.candidates = []
+        self.confirm_go = False
+        self.estimated = None
         self.turn += 1
 
     def say(self, who: str, text: str, kind: str = "say") -> None:
@@ -343,6 +390,10 @@ class Dialog:
         if self.step == "confirm_position":
             return ([{"id": f"pos:{c.position}", "label": f"{c.position} です"} for c in self.candidates]
                     + [{"id": "other", "label": OTHER_LABEL}])
+        if self.step == "ask_move" and self.confirm_go and self.complete():
+            return [{"id": "go", "label": CONFIRM_GO_LABEL.format(
+                pos=self.position, dir=f"{self.axis} {'＋' if self.sign > 0 else '−'}".split()[0],
+                amount=("＋" if self.sign > 0 else "−") + fmt_amount(self.amount))}]
         if self.step == "ask_move":
             amt = f"{fmt_amount(self.amount)}mm" if self.amount is not None else ""
             out = []
@@ -353,6 +404,10 @@ class Dialog:
                 out.append({"id": f"dir:{d}", "label": label})
             return out
         return []
+
+    def confirm_go_message(self) -> str:
+        return CONFIRM_GO.format(pos=self.position, dir=self.axis,
+                                 amount=("＋" if self.sign > 0 else "−") + fmt_amount(self.amount))
 
     def ask_move_message(self) -> str:
         amt = f"{fmt_amount(self.amount)}mm" if self.amount is not None else None

@@ -93,6 +93,19 @@
       <button type="button" id="talk-first" class="link small">位置を選ばずに話す（例：「置くところを…」）</button>
     </section>
 
+    <!-- Claude との会話（人／Claude の吹き出し・位置の候補の根拠・選択肢）。文はすべてテキストのノードで作る -->
+    <section id="dialog-panel" class="card dialog" aria-label="Claude との会話" hidden>
+      <div class="dlg-head">
+        <span class="dlg-title">会話</span>
+        <span id="dialog-engine" class="dlg-engine"></span>
+      </div>
+      <ol id="dialog-turns" class="bubbles" aria-live="polite"></ol>
+      <div id="dialog-evidence" class="evidence"></div>
+      <p id="dialog-estimated" class="dlg-est" hidden></p>
+      <div id="dialog-choices" class="choices dlg-choices"></div>
+      <p id="dialog-note" class="fine">Claude は意味を読んで候補を出し、聞き返すだけです。座標の変更・検査・数字はプログラムが行い、承認は確認表示のボタンだけです。</p>
+    </section>
+
     <section id="instruction-panel" class="card" aria-label="音声で指示">
       <div id="instruction-slot">
         <button type="button" id="voice-position" class="position-pill" title="位置を選び直す"></button>
@@ -131,19 +144,6 @@
         <p class="fine">1回に動かせる量：<span id="max-shift-label"></span></p>
         <div id="reply-message" class="reply" aria-live="polite" hidden></div>
       </div>
-    </section>
-
-    <!-- Claude との会話（人／Claude の吹き出し・位置の候補の根拠・選択肢）。文はすべてテキストのノードで作る -->
-    <section id="dialog-panel" class="card dialog" aria-label="Claude との会話" hidden>
-      <div class="dlg-head">
-        <span class="dlg-title">会話</span>
-        <span id="dialog-engine" class="dlg-engine"></span>
-      </div>
-      <ol id="dialog-turns" class="bubbles" aria-live="polite"></ol>
-      <div id="dialog-evidence" class="evidence"></div>
-      <p id="dialog-estimated" class="dlg-est" hidden></p>
-      <div id="dialog-choices" class="choices dlg-choices"></div>
-      <p id="dialog-note" class="fine">Claude は意味を読んで候補を出し、聞き返すだけです。座標の変更・検査・数字はプログラムが行い、承認は確認表示のボタンだけです。</p>
     </section>
 
     <section id="candidate-panel" class="card" aria-label="確かめて承認">
