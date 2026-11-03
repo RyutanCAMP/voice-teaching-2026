@@ -114,7 +114,7 @@ def test_failure_never_switches_method():
     assert ".checked" not in err and "localStorage" not in err
 
 
-# ---- 3. Web会議のように：声が無ければ聞き直す、通信の失敗は1回だけ、Chrome 以外は Chrome へ ----
+# ---- 3. 失敗のあとは聞き直さずに OFF（11/3 夜の決定）、Chrome 以外は Chrome へ ----
 def test_quiet_and_network_retries_are_bounded():
     # 11/3 夜の決定：聞き取れなかった・通信の失敗でも聞き直さない（必ず OFF。次は人が 🎤 を押す）
     v = voice()

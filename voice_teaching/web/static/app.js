@@ -166,7 +166,7 @@ function applyLoad(res, fileName) {
 function announceSession() {
   window.dispatchEvent(new CustomEvent("vt:session", { detail: { sessionId: state.sessionId } }));
 }
-// 根拠の行を押したとき：その位置を図で光らせる（選択ではない）。聞き終わったら、マイク ON ならまた聞く
+// 根拠の行を押したとき：その位置を図で光らせる（選択ではない）
 window.addEventListener("vt:highlight", () => { if (state.view) renderFigures(); });
 
 $("file-input").addEventListener("change", (ev) => loadFile(ev.target.files[0]));
@@ -1259,7 +1259,9 @@ const voice = new SpeechInput(Recognition, {
     state.voiceToken = null;
     // 録音を始めたときとジョブ・位置が違えば使わない
     if (!t || t.sessionId !== state.sessionId || t.selected !== (state.st ? state.st.selected : null)) {
+      state.live = false;  // 使わなかったときも、1回の発話で OFF
       showVoiceError("話している間に位置が変わったので、使いませんでした。もう一度どうぞ");
+      renderMic();
       return;
     }
     if ($("voice-to-ask") && $("voice-to-ask").checked && !$("ask-panel").hidden) {
@@ -1331,7 +1333,7 @@ function showVoiceError(message) {
   $("voice-error").hidden = false;
 }
 
-// マイクの ON／OFF を一目で分かるように（OFF・聞いています・一時停止）
+// マイクの ON／OFF を一目で分かるように（OFF・聞いています）
 function renderMic() {
   const rec = recording();
   const on = state.live || rec;
