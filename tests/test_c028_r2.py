@@ -46,8 +46,9 @@ def cfg_of(mode, make_updown, tmp_path):
 # QA P1-A
 # ======================================================================
 SHIMASU_SHORT = [("動かします", "none"), ("動かします", "confirmed"), ("下に動かします", "confirmed"),
-                 ("3mmずらします", "none"), ("3mmずらします", "confirmed"), ("Zに動かします", "none"),
-                 ("Yのマイナスに移動します", "confirmed"), ("少し下げて動かします", "confirmed")]
+                 ("3mmずらします", "none"), ("3mmずらします", "confirmed"), ("Zに動かします", "none")]
+# 「Yのマイナスに移動します」（はぐれた符号）・「少し下げて動かします」（はっきりしない量）は、差分の再レビュー QA P2-3 で
+# 具体的な理由をそのまま返すことにした（tests/test_c028_r3.py の test_p2_3_specific_reasons_are_kept）
 
 
 @pytest.mark.parametrize("source", SOURCES)
@@ -129,11 +130,13 @@ def test_p2_dialog_button_after_approval_says_so(make_updown):
 
 @pytest.mark.parametrize("pos", ["C00005", "C00004"])
 def test_p2_reselect_after_approval_says_so(pos, make_updown):
+    # 差分の再レビュー QA P1-2・P2-1・P2-2：選び直しの文ではなく、候補が残ったか（同じ位置）・捨てたか（別の位置）で決める
+    from voice_teaching.web import flow as flow_mod
     w, sid = approved(make_updown)
     r = w.select(sid, pos)
     assert r["state"]["approval"] is None
-    assert r["message"].startswith(RESELECT + "承認も取り消しました。"), r["message"]
-    assert r["message"].count(RESELECT) == 1
+    head = CANCELLED if pos == "C00005" else flow_mod.APPROVAL_AND_CANDIDATE_CANCELLED
+    assert r["message"].startswith(head) and RESELECT not in r["message"], r["message"]
 
 
 def test_p2_no_text_when_not_approved(make_updown):

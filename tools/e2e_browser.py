@@ -1250,6 +1250,20 @@ def check_updown_unconfirmed(browser, check, shots: Path | None, errors: list) -
         cv = pg.inner_text("#candidate-view")
         check("Z方向に −3.000mm" in cv and "197.000" in cv,
               f"上下の設定なし：軸と符号を明示した「Zマイナス3ミリ」は候補にする：{cv[:60]}")
+        # 承認のあとに「元に戻して」と言う：承認と候補を両方取り消した決まった文を出し、画面からも候補が消える（唐川さんの決定）
+        pg.click("#open-confirm")
+        pg.wait_for_selector("#confirm-overlay:not([hidden])")
+        pg.fill("#approver-name", "テスト")
+        pg.click("#approve-button")
+        until(pg, lambda: pg.is_visible("#approval-status"))
+        # 承認のあとの画面では入力欄を出さないので、画面と同じ API（/api/hear）で送る
+        sid = list(srv.flow._entries)[-1]
+        res = pg.request.post(url + "api/hear", data={"session_id": sid, "text": "元に戻して", "source": "voice"}).json()
+        rm = res.get("message") or ""
+        st = res.get("state") or {}
+        check(rm.startswith("前の承認と変更候補を取り消しました。元のJOBは変更されていません。")
+              and "変更候補は残しています" not in rm and st.get("candidate") is None and st.get("approval") is None,
+              f"承認のあとの「元に戻して」：承認と候補を取り消した文を出し、状態からも候補と承認が消える：{rm[:60]!r}")
         ctx.close()
 
         ctx = browser.new_context(viewport={"width": 1280, "height": 720})

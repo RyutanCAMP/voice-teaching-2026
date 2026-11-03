@@ -44,7 +44,11 @@ UPDOWN_CHANGED_APPROVE = ("変更候補を作ったあとで、上下の向き�
 UPDOWN_CHANGED_EXPORT = ("承認のあとで、上下の向きの設定（または照合の結果）が変わったため、出力しません。"
                          "承認を取り消しました")
 UPDOWN_CHANGED_WHY = "上下の向きの設定（または照合の結果）が変わったため"
-RESELECT_APPROVAL = "承認も取り消しました。"  # 位置の選び直しで承認を取り消したときに、選び直しの決まった文のあとに足す
+# 承認のあとの新しい指示で、承認と一緒に変更候補も捨てたときの文（元に戻して・キャンセル・別の位置の選択）。
+# 決まった文（APPROVED_PENDING_MESSAGE）は候補が残るときだけ使う。この文も唐川さんの決定の文（一字一句このまま）
+APPROVAL_AND_CANDIDATE_CANCELLED = "前の承認と変更候補を取り消しました。元のJOBは変更されていません。"
+# 候補を捨てたことを言う Session の返事の文（APPROVAL_AND_CANDIDATE_CANCELLED を付けるときは、重ねないよう外す）
+_DROPPED_PHRASES = ("変更候補を捨てました。元のジョブは変わっていません", "。別の位置の変更候補は捨てました（元のジョブは変わっていません）")
 # 上下の向きの設定ファイルの場所の既定。None ＝ 設定なし（未確認。上・下を Z にしない）。
 # サーバーは起動オプション（--updown-config。既定 records/updown.json）の場所を渡す。テストでは一時フォルダの設定に置き換える
 DEFAULT_UPDOWN_CONFIG: "str | Path | None" = None
@@ -142,7 +146,7 @@ class WebFlow:
             cancelled = self._begin_instruction(e)
             out = self._hear_body(e, text, source)
             # 新しい指示（どんな発話でも）で承認を実際に取り消したときは、返事の頭に決まった文（唐川さんの決定②）
-            return self._say_cancelled(e, out, APPROVED_PENDING_MESSAGE) if cancelled else out
+            return self._say_cancelled(e, out) if cancelled else out
         return self._run(sid, run)
 
     def _hear_body(self, e: _Entry, text: str, source: str) -> dict:
@@ -480,7 +484,7 @@ class WebFlow:
             else:
                 direction = choice[4:]
                 out = self._merge_slots(e, label, "text", None, None, direction[0], 1 if direction[1] == "+" else -1)
-            return self._say_cancelled(e, out, APPROVED_PENDING_MESSAGE) if cancelled else out
+            return self._say_cancelled(e, out) if cancelled else out
         return self._run(sid, run)
 
     def _dispatch(self, e: _Entry, heard: Reply, calls: list[dict]) -> Reply:
@@ -527,15 +531,15 @@ class WebFlow:
     # ---- 画面の操作 ----
     def select(self, sid: object, position: object) -> dict:
         def run(e: _Entry) -> dict:
+            s = e.session
+            name = ut.normalize_position(position) if isinstance(position, str) else None
+            if name is None or name not in s.original.positions:
+                # 形の違う位置・ジョブに無い位置：何も変えない（承認も取り消さない。選び直しの文も出さない）
+                return {"ok": True, **self._reply(e, s.select(position if isinstance(position, str) else ""))}
             cancelled = self._cancel_approval(e, "位置を選び直したため")
-            out = self._select_body(e, position)
-            # 位置の選び直しで承認を実際に取り消した：選び直しの決まった文と「承認も取り消しました。」を頭に付ける
-            if not cancelled:
-                return out
-            msg = out.get("message") or ""
-            if msg.startswith(dg.ENDED_RESELECT):  # 会話をやめた選び直しの文は、1回だけにする
-                out["message"] = msg[len(dg.ENDED_RESELECT):]
-            return self._say_cancelled(e, out, dg.ENDED_RESELECT + RESELECT_APPROVAL)
+            out = self._select_body(e, name)
+            # 承認を実際に取り消したときは、候補が残ったか（同じ位置）・捨てたか（別の位置）で文を決める。声の「C00004を選択して」と同じ
+            return self._say_cancelled(e, out) if cancelled else out
         return self._run(sid, run)
 
     def _select_body(self, e: _Entry, position: object) -> dict:
@@ -680,16 +684,24 @@ class WebFlow:
         e.session.pending_message = APPROVED_PENDING_MESSAGE if self._approved(e) else PENDING_MESSAGE
         return self._cancel_approval(e, "新しい指示があったため")
 
-    def _say_cancelled(self, e: _Entry, out: dict, head: str) -> dict:
-        """承認を実際に取り消した返事の頭に、決まった文を付ける（唐川さんの決定②。承認していなければ呼ばない）。
+    def _say_cancelled(self, e: _Entry, out: dict) -> dict:
+        """承認を実際に取り消した返事の頭に、文を付ける（唐川さんの決定②。承認していなければ呼ばない）。
+        変更候補が残っていれば決まった文（APPROVED_PENDING_MESSAGE）、候補も捨てていれば APPROVAL_AND_CANDIDATE_CANCELLED。
+        候補を捨てたときは、同じことを言う返事の文（「変更候補を捨てました。元のジョブは変わっていません」など）を重ねない。
         会話の欄の最後の文が同じ返事なら、そちらにも付ける。"""
+        kept = e.session.candidate is not None
+        head = APPROVED_PENDING_MESSAGE if kept else APPROVAL_AND_CANDIDATE_CANCELLED
         msg = out.get("message") or ""
         if msg.startswith(head):
             return out
-        out["message"] = head + msg
+        new = msg
+        if not kept:
+            for phrase in _DROPPED_PHRASES:
+                new = new.replace(phrase, "")
+        out["message"] = head + new
         turns = e.dialog.turns
         if out.get("dialog") and turns and turns[-1].get("text") == msg and turns[-1].get("who") != "人":
-            turns[-1] = {**turns[-1], "text": head + msg}
+            turns[-1] = {**turns[-1], "text": head + new}
         return out
 
     def _cancel_approval(self, e: _Entry, why: str) -> bool:

@@ -557,7 +557,12 @@ def parse(text: str, encoding: str = "utf-8") -> Job:
                     else:
                         npos_count = int(arg.split(",")[0])
                 elif not ok:
-                    unknown = True  # 想定外の引数が付いた指示行は「分からない指示行」
+                    unknown = True  # 想定外の引数が付いた指示行は「分からない指示行」（以降の位置は変更しない）
+                    if word == "TOOL":
+                        # ツール番号の範囲外・形の違い：どこにあってもジョブごと止める（理由が分かるように。QA P2-5）
+                        problem(i, body, "扱えません：ツール番号（///TOOL）は 0〜63 の数字だけを扱います")
+                    else:
+                        pos_unknown.append((i, body))  # 最後の位置より後ろなら、ジョブごと止める（Safety P2-a）
                 elif word == "TOOL":
                     tool = arg
                 elif word == "POSTYPE":
