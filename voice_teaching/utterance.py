@@ -51,7 +51,7 @@ def normalize(text: str) -> str:
 def normalize_position(text: str) -> str | None:
     """'c00005'・'Ｃ００００５' などを 'C00005' にする。形が違えば None。"""
     t = normalize(text).strip()
-    m = re.fullmatch(r"C\s?(\d{5})", t)
+    m = re.fullmatch(r"C\s?([0-9]{5})", t)
     return f"C{m.group(1)}" if m else None
 
 
@@ -84,6 +84,8 @@ class UtteranceFacts:
     # 読み取りで使わなかった言葉（つなぎの言葉の一覧 FILLER_WORDS にも無いもの）。
     # 移動・速度の指示で1つでもあれば聞き返す（「バイオ 3ミリ 下げて」を Z −3 にしない。docs/UNKNOWN_WORDS_PLAN.md）
     unknown_words: tuple[str, ...] = ()
+    # 打ち消し・取り消し・言い直しの言葉（「下げないで」「駄目」「じゃなくて」）。移動・速度の指示にあれば止める（CHECKER_023A B6・B7）
+    negations: tuple[str, ...] = ()
 
     @property
     def position(self) -> str | None:
@@ -124,16 +126,17 @@ class UtteranceFacts:
         return len(own) + len(self.speed_signs if self.op == "speed" else self.axis_signs)
 
 
-_POS_RE = re.compile(r"(?<![A-Z0-9])C\s?(\d+)(?![\d.])")
-_NUM_RE = re.compile(r"(\d+(?:\.\d+)?)")
+# 数字は半角の 0〜9 だけを読む（NFKC のあとも残る ٣ などの数字は、知らない言葉として聞き返す）
+_POS_RE = re.compile(r"(?<![A-Z0-9])C\s?([0-9]+)(?![0-9.])")
+_NUM_RE = re.compile(r"([0-9]+(?:\.[0-9]+)?)")
 _SIGN_BEFORE = re.compile(r"(マイナス|プラス|[+\-])\s?$")
 _UNIT_AFTER = re.compile(r"^\s?(MM|ミリ|%)")
 _OTHER_UNIT_AFTER = re.compile(r"^\s?(センチ|CM|M(?![A-Z])|メートル|パーセント|割|度|倍)")
 _KANJI_AMOUNT = re.compile(r"[〇零一二三四五六七八九十百千万]+\s?(ミリ|MM|センチ|CM|%|パーセント|割)")
-_VAGUE = re.compile(r"半分|少し|すこし|ちょっと|ちょい|わずか|僅か|倍|もう少し|適当")
+_VAGUE = re.compile(r"そこそこ|半分|少し|すこし|ちょっと|ちょい|わずか|僅か|倍|もう少し|適当")
 _AXIS_RE = re.compile(r"(?<![A-Z])([XYZ])\s?(マイナス|プラス|[+\-])?\s?(方向|軸|に|へ)")
 # 「Xマイナス5ミリ」「Y +3 mm」「X の -5ミリ」：軸のすぐ後（「の」をはさんでもよい）に符号と数字。符号は量の側（_SIGN_BEFORE）で読むので、ここでは軸だけ
-_AXIS_SIGNED_NUM = re.compile(r"(?<![A-Z])([XYZ])\s?(?:の\s?)?(?=(?:マイナス|プラス|[+\-])\s?\d)")
+_AXIS_SIGNED_NUM = re.compile(r"(?<![A-Z])([XYZ])\s?(?:の\s?)?(?=(?:マイナス|プラス|[+\-])\s?[0-9])")
 # 単独の X・Y・Z（「Yを」「Yの」も、軸を言ったものとして読む。CHECKER_021 D1）
 _AXIS_WORD = re.compile(r"(?<![A-Z])([XYZ]{1,3})(?![A-Z])")
 # 座標の値の上げ下げ（「Y座標を3mm下げて」「Yの値を3mm減らして」）：その軸の値の増減として読む（2026-11-03 本人の判断）
@@ -176,34 +179,76 @@ def _spoken(text: str) -> str:
 
 
 # ---- 読み取りで使わなかった言葉（知らない言葉）----
-# 読み取りで使った部分を取り除いたあとに残ってよい、つなぎの言葉の一覧（これだけ。短く保つ）。
-# 助詞・言い終わり・言い始めのつなぎの言葉。ここに無いもの（カタカナ・漢字・英字・この一覧に無いひらがな）は
-# 「知らない言葉」として、移動・速度の指示では聞き返す。迷う言葉は入れない（入れなければ聞き返しになるだけ）。
-# 聞き違いを軸に読み替える一覧（「バイオ」→ Y など）は作らない（推測になるため）。
-FILLER_WORDS = (
-    # 助詞
-    "を", "に", "へ", "の", "で", "は", "が", "と", "も",
-    # 言い終わり
-    "して", "してください", "ください", "て", "ね", "よ", "お願いします", "おねがいします",
-    # 言い始めのつなぎの言葉
-    "えーと", "ええと", "えっと", "あの", "あのー", "じゃあ", "では", "それでは", "まず",
-)
-_FILLER_ALT = "|".join(re.escape(w) for w in sorted(FILLER_WORDS, key=len, reverse=True))
-_FILLER_SEQ_RE = re.compile(f"(?:{_FILLER_ALT})+")  # ひらがなのひと続きが、一覧の言葉だけでできているか
-_FILLER_MIXED_RE = re.compile("|".join(re.escape(w) for w in FILLER_WORDS
-                                       if not all("ぁ" <= c <= "ゖ" for c in w)))  # 「お願いします」「あのー」
+# 読み取りで使った部分を取り除いたあとに残ってよい、つなぎの言葉（これだけ。短く保つ）。
+# 残ってよいのは、決まった場所に、決まった形で1つずつ（下の _run_is_allowed）。同じ言葉を並べた「もも」「でも」は通さない。
+# ここに無いもの（カタカナ・漢字・英字・この一覧に無いひらがな）は「知らない言葉」として、移動・速度の指示では聞き返す。
+# 迷う言葉は入れない（入れなければ聞き返しになるだけ）。聞き違いを軸に読み替える一覧（「バイオ」→ Y など）は作らない。
+# 打ち消しの言葉（NEGATION_WORDS）は、どの一覧にも入れない（tests/test_unknown_words.py で確かめる）。
+PARTICLES = ("を", "に", "へ", "の", "で", "は", "が", "と", "も")          # 読んだ言葉のすぐ後に1つだけ
+TE_FORMS = ("して", "て")                                                   # 動きの言葉のすぐ後だけ（下げて・移動して）
+REQUESTS = ("ください", "お願いします", "おねがいします")                    # 読んだ言葉・助詞・て の後
+POLITE_AFTER_TE = ("下さい",)                                               # 「下げて下さい」：て のすぐ後だけ（下（Z）とは読まない）
+FINALS = ("ね", "よ")                                                       # 文の終わりだけ。助詞の後はだめ（「はね」）
+HESITATIONS = ("えーと", "ええと", "えっと", "あのー", "あの")               # 1つだけで区切られていれば、どこでも
+OPENERS = ("それでは", "じゃあ", "では", "まず")                             # 文の初め（読んだ言葉より前）に1つだけで
+FILLER_WORDS = PARTICLES + TE_FORMS + REQUESTS + POLITE_AFTER_TE + FINALS + HESITATIONS + OPENERS
+# 読み取りで使った動きの言葉のすぐ後の言い終わり（「下げる」「下げます」「ずらす」「移動させて」）。2026-11-03 シクロの判断
+VERB_ENDINGS = ("させて", "させ", "ます", "です", "る", "す")
+# 量のすぐ前の「あと」「もう」（「あと3mm下げて」。CHECKER_023A）。「もう少し」はあいまいな量として聞き返す
+AMOUNT_PREFIXES = ("あと", "もう")
+
+# 打ち消し・取り消し・言い直しの言葉。移動・速度の指示にあれば、知らない言葉より先に止める（CHECKER_023A B6・B7）
+NEGATION_WORDS = ("じゃなく", "じゃない", "ではなく", "でなく", "たくない", "なかっ", "ないで", "なくて", "ない", "なく",
+                  "駄目", "だめ", "ダメ", "やめ", "禁止", "違う", "ちがう", "取り消し")
+NEGATION_MESSAGE = "{word}などの打ち消しの言葉があるため、変更しません。してほしいことだけを言ってください"
+
+
+def _alt(words) -> str:
+    return "|".join(re.escape(w) for w in sorted(words, key=len, reverse=True))
+
+
+_NEGATION_RE = re.compile(
+    f"(?:{_alt(NEGATION_WORDS)})"
+    r"|(?<=[るすく])な(?=[\s、。,.!！?？]*$)")  # 文の終わりの「下げるな」「動かすな」
+_P, _TE, _REQ, _FIN = _alt(PARTICLES), _alt(TE_FORMS), _alt(REQUESTS), _alt(FINALS)
+# 読んだ言葉の後の1つのひと続き（文の終わりでないとき／文の終わりのとき）
+_TAIL_MID = re.compile(f"(?:{_P})|(?:{_P})?(?:{_REQ})|(?:{_TE})(?:{_REQ}|{_alt(POLITE_AFTER_TE)})?")
+_TAIL_END = re.compile(f"{_TAIL_MID.pattern}|(?:(?:{_TE})(?:{_REQ}|{_alt(POLITE_AFTER_TE)})?|(?:{_REQ}))?(?:{_FIN})")
+_LEAD_STRIP = re.compile(f"{_P}|{_alt(HESITATIONS)}|{_alt(OPENERS)}")
+_TAIL_STRIP = re.compile(f"(?:{_P})?(?:{_REQ})?")  # 示すときに後ろから外す助詞など（「バイオを」→「バイオ」）
+_ANY_FILLER_SEQ = re.compile(f"(?:{_alt(FILLER_WORDS)})+")
+_HESITATION_RE = re.compile(_alt(HESITATIONS))
+_OPENER_RE = re.compile(_alt(OPENERS))
+# て・して が付いてよい、読んだ動きの言葉の最後の字（下げ・動か・増や・ずら・寄せ・遅く・移動、元に戻・取り消・比べ）
+_VERB_END_CHARS = "げかやらせく動戻消べ"
 # 言葉の区切り（空白・句読点など）。読み取りで使った部分も空白にしてから区切る
 _WORD_SEP = re.compile(r"[\s、。,，.．!！?？・／/「」『』（）()…~〜]+")
-# 「Yのマイナス方向」「Y軸」：軸のあとの「方向」「軸」（軸を言っていない「方向」「軸」は、知らない言葉として残す）
-_AXIS_DIRECTION_WORD = re.compile(r"(?<![A-Z])[XYZ]\s?(?:の\s?)?(?:(?:マイナス|プラス|[+\-])\s?)?(?:方向|軸)")
+_WORD = re.compile(r"[^\s、。,，.．!！?？・／/「」『』（）()…~〜]+")
+# 「Yのマイナス方向」「Y軸」「X軸方向」：軸のあとの「方向」「軸」（軸を言っていない「方向」「軸」は、知らない言葉として残す）
+_AXIS_DIRECTION_WORD = re.compile(r"(?<![A-Z])[XYZ]\s?(?:の\s?)?(?:(?:マイナス|プラス|[+\-])\s?)?(?:軸方向|方向|軸)")
 # 「Y座標」「Yの値」「Y座標値」：座標の値の言葉（_COORD_VALUE で読んだときだけ取り除く）
 _COORD_VALUE_WORD = re.compile(r"(?<![A-Z])[XYZ]\s?(?:の\s?)?(?:座標値|座標|値)")
 _CONNECTOR = re.compile(r"そして|それから")  # 2つの変更の区切り（_SPLIT_MOVES）
-# 読み取りで使った動きの言葉のすぐ後の言い終わり（「下げる」「下げます」「ずらす」「移動させて」）。
-# 動きの言葉の後のときだけ取り除く（ひとつだけの「る」「す」などは、知らない言葉として残す）。2026-11-03 シクロの判断
-_VERB_TAIL = re.compile(r"(?<=上げ|下げ|増や|減ら|動か|ずら|寄せ|移動)(?:させて|させ|ます|です|る|す)")
+_VERB_TAIL = re.compile(f"(?<=上げ|下げ|増や|減ら|動か|ずら|寄せ|移動)(?:{_alt(VERB_ENDINGS)})")
+_AMOUNT_PREFIX = re.compile(f"(?:{_alt(AMOUNT_PREFIXES)})" + r"(?=\s?[0-9]+(?:\.[0-9]+)?\s?(?:MM|ミリ|%))")
 # 位置番号のすぐ後の「位置」（「C00005の位置を下に3mm」）。「この位置」「その位置」は _THIS で読む
 _POSITION_WORD = re.compile(r"^\s?(?:の\s?)?位置")
+# 「ここここ」「そこそこ」：同じ指す言葉の繰り返しは、指す言葉として読まない（そこそこ は、あいまいな量として読む）
+_THIS_REPEAT = re.compile(r"(?:この位置|この点|この命令|ここ|その位置|その点|そこ){2,}")
+
+
+def _negation_words(text: str) -> tuple[str, ...]:
+    """打ち消しの言葉を、前の動きの言葉ごと取り出す（「下げないで」「駄目」）。取り除くことはしない。"""
+    out: list[str] = []
+    for m in _NEGATION_RE.finditer(text):
+        start = m.start()
+        while start > 0 and m.start() - start < 4 and ("ぁ" <= text[start - 1] <= "ゖ" or _script(text[start - 1]) == "kanji") \
+                and text[start - 1] not in PARTICLES:
+            start -= 1
+        word = text[start:m.end()]
+        if word not in out:
+            out.append(word)
+    return tuple(out)
 
 
 def _script(ch: str) -> str:
@@ -213,37 +258,60 @@ def _script(ch: str) -> str:
         return "kata"
     if "A" <= ch <= "Z" or "a" <= ch <= "z":
         return "latin"
-    if ch.isdigit():
+    if "0" <= ch <= "9":
         return "digit"
     if "一" <= ch <= "鿿" or "㐀" <= ch <= "䶿" or ch in "々〆":
         return "kanji"
     return "other"
 
 
-def _unknown_words(residual: str) -> tuple[str, ...]:
-    """読み取りで使った部分を空白にした文から、つなぎの言葉の一覧に無い言葉を取り出す。
+_INVISIBLE = ("Cc", "Cf", "Co", "Cn", "Cs", "Zl", "Zp", "Mn", "Me")
 
-    文を同じ文字の種類（ひらがな・カタカナ・漢字・英字…）のひと続きに分け、ひらがなのひと続きは、
-    一覧の言葉を並べたものにちょうどなるときだけ使ってよい。ほかの種類は全部、知らない言葉にする。
-    ひらがなだけでない一覧の言葉（「お願いします」）は、先に取り除く。
+
+def _show(word: str) -> str:
+    """知らない言葉を、画面で読める形にする。見えない文字（ゼロ幅・制御文字など）だけなら「（見えない文字）」。"""
+    visible = "".join(c for c in word if unicodedata.category(c) not in _INVISIBLE)
+    return visible if visible.strip() else "（見えない文字）"
+
+
+def _run_is_allowed(run: str, used_before: bool, used_after: bool, prev_char: str) -> bool:
+    """読み取りで使わなかった1つのひと続きが、決まった場所の、決まったつなぎの言葉か。"""
+    if _HESITATION_RE.fullmatch(run):
+        return True
+    if not used_before:  # 読んだ言葉より前（文の初め）
+        return bool(_OPENER_RE.fullmatch(run))
+    tail = _TAIL_MID if used_after else _TAIL_END
+    m = tail.fullmatch(run)
+    if not m:
+        return False
+    if run.startswith(TE_FORMS) and prev_char not in _VERB_END_CHARS:
+        return False  # て・して は動きの言葉のすぐ後だけ
+    return True
+
+
+def _unknown_words(residual: str, used_mask: Sequence[bool], source: str) -> tuple[str, ...]:
+    """読み取りで使った部分を空白にした文から、知らない言葉を取り出す。
+
+    residual：読み取りで使った部分を空白にした文。used_mask：その字を読み取りで使ったか。source：空白にする前の文。
+    区切りと使った部分で分けたひと続きごとに、決まった場所のつなぎの言葉（_run_is_allowed）でなければ知らない言葉にする。
     """
-    residual = _FILLER_MIXED_RE.sub(" ", residual)
     out: list[str] = []
-    for run in _WORD_SEP.split(residual):
-        i = 0
-        while i < len(run):
-            kind, j = _script(run[i]), i + 1
-            while j < len(run) and _script(run[j]) == kind:
-                j += 1
-            word = run[i:j]
-            i = j
-            if kind == "hira":
-                if _FILLER_SEQ_RE.fullmatch(word):
-                    continue
-                # 示すときは、後ろの助詞などを外す（「ざひょうを」→「ざひょう」）。知らない言葉であることは変わらない
-                word = next((word[:k] for k in range(1, len(word)) if _FILLER_SEQ_RE.fullmatch(word[k:])), word)
-            if word not in out:
-                out.append(word)
+    for m in _WORD.finditer(residual):
+        run = m.group(0)
+        before = any(used_mask[: m.start()])
+        after = any(used_mask[m.end():])
+        prev = source[m.start() - 1] if m.start() > 0 else ""
+        if _run_is_allowed(run, before, after, prev):
+            continue
+        # 示すときは、後ろの助詞などを外す（「バイオを」→「バイオ」）。外すと何も残らないときは、そのまま示す
+        # 前の助詞・つなぎの言葉も外す（「をバイオ」→「バイオ」。ひらがなの言葉の途中では分けない）
+        word = next((run[:k] for k in range(1, len(run)) if _TAIL_STRIP.fullmatch(run[k:])
+                     and not _ANY_FILLER_SEQ.fullmatch(run[:k])), run)
+        word = next((word[k:] for k in range(1, len(word)) if _LEAD_STRIP.fullmatch(word[:k])
+                     and _script(word[k]) != "hira" and not _ANY_FILLER_SEQ.fullmatch(word[k:])), word)
+        word = _show(word)
+        if word not in out:
+            out.append(word)
     return tuple(out)
 
 
@@ -271,7 +339,7 @@ def read_utterance(raw: str) -> UtteranceFacts:
     for m in _NUM_RE.finditer(rest):
         before = rest[: m.start()]
         after = rest[m.end():]
-        if before.endswith((".", ",")) or (before and before[-1].isdigit()) or after.startswith((",", ".")):
+        if before.endswith((".", ",")) or (before and "0" <= before[-1] <= "9") or after.startswith((",", ".")):
             unclear.append(f"「{m.group(0)}」（区切りのある数字）")
             continue
         unit = _UNIT_AFTER.match(after)
@@ -373,8 +441,13 @@ def read_utterance(raw: str) -> UtteranceFacts:
         end = m.end()
         unit = _UNIT_AFTER.match(rest[end:]) or _OTHER_UNIT_AFTER.match(rest[end:])
         blank(m.start(), end + (unit.end() if unit else 0))
+    # 「ここここ」のような繰り返しでない「この位置」「ここ」だけを、指す言葉として取り除く
+    repeats = [m.span() for m in _THIS_REPEAT.finditer(rest)]
+    for m in _THIS.finditer(rest):
+        if not any(a <= m.start() < b for a, b in repeats):
+            blank(m.start(), m.end())
     used_patterns = [_SIGN_TOKEN, _KANJI_AMOUNT, _VAGUE, _UP, _DOWN, _SIDE, _FRONT_BACK, _SELECT, _MOVE,
-                     _COMPARE, _UNDO, _APPROVE, _START, _THIS, _CONNECTOR]
+                     _COMPARE, _UNDO, _APPROVE, _START, _CONNECTOR, _AMOUNT_PREFIX]
     if is_speed:
         used_patterns += [_SPEED]
     else:
@@ -393,7 +466,8 @@ def read_utterance(raw: str) -> UtteranceFacts:
             w = _POSITION_WORD.match(text[m.end():])
             if w:
                 blank(m.end(), m.end() + w.end())
-    unknown = _unknown_words("".join(used))
+    used_mask = [used[i] == " " and not text[i].isspace() for i in range(len(text))]
+    unknown = _unknown_words("".join(used), used_mask, text)
 
     return UtteranceFacts(
         raw=raw, text=text,
@@ -407,6 +481,7 @@ def read_utterance(raw: str) -> UtteranceFacts:
         vertical=vertical,
         stop_reasons=tuple(stops),
         unknown_words=unknown,
+        negations=_negation_words(text),
     )
 
 
@@ -416,7 +491,8 @@ def combine_axes(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceF
                    axes=tuple(dict.fromkeys(previous.axes + answer.axes)),
                    positions=answer.positions or previous.positions,
                    refers_to_selection=previous.refers_to_selection or answer.refers_to_selection,
-                   unknown_words=tuple(dict.fromkeys(previous.unknown_words + answer.unknown_words)))
+                   unknown_words=tuple(dict.fromkeys(previous.unknown_words + answer.unknown_words)),
+                   negations=tuple(dict.fromkeys(previous.negations + answer.negations)))
 
 
 def merge_answer(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceFacts:
@@ -445,6 +521,7 @@ def merge_answer(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceF
         stop_reasons=tuple(dict.fromkeys(previous.stop_reasons + answer.stop_reasons)),
         # 答えの中の知らない言葉も、前の発話の知らない言葉も捨てない（どちらかにあれば聞き返す）
         unknown_words=tuple(dict.fromkeys(previous.unknown_words + answer.unknown_words)),
+        negations=tuple(dict.fromkeys(previous.negations + answer.negations)),
     )
 
 
@@ -497,9 +574,14 @@ def unknown_words_message(words: Sequence[str], op: str) -> str:
 
 def pre_check(facts: UtteranceFacts) -> Verdict:
     """Claude に頼らず、発話だけで止める・聞き返すことが決まるかを調べる。"""
+    if facts.negations and ("move" in facts.kinds or "speed" in facts.kinds):
+        # 打ち消しの言葉を捨てて、言ったことと逆の変更にしない。いちばん先に止める（選択肢も出さない）
+        return _stop(NEGATION_MESSAGE.format(word="".join(f"「{w}」" for w in facts.negations)))
     if facts.stop_reasons:
         return _stop("。".join(facts.stop_reasons))
     if not facts.kinds:
+        if facts.unknown_words:
+            return _ask(f"{''.join(f'「{w}」' for w in facts.unknown_words)}が分かりませんでした。何をするか、もう一度指示してください")
         return _ask("何をするか分かりませんでした。もう一度指示してください")
     ops = [k for k in facts.kinds if k in OPS]
     if len(ops) > 1:

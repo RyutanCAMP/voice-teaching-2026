@@ -264,3 +264,122 @@ def test_kept_asks(text, word):
     r = hear(text)
     assert r["status"] == "ask" and cand(r) is None and r["choices"] == [], (text, r.get("message"))
     assert f"「{word}」" in r["message"]
+
+
+# ---- CHECKER_023A B6・B7：打ち消し・取り消し・言い直しの言葉は、知らない言葉より先に止める ----
+NEGATED = [
+    ("Y座標を3mm下げないで", "下げないで"), ("Yマイナス3mmにしないで", "しないで"),
+    ("Xのマイナス5ミリじゃなくて", "じゃなく"), ("Y座標を3mm下げるな", "下げるな"),
+    ("Yマイナス3mmは駄目", "駄目"), ("Y座標を3mm下げたくない", "下げたくない"),
+    ("3mm下げないで", "下げないで"), ("下げないで3mm", "下げないで"), ("3mm下げなくていい", "下げなくて"),
+    ("3mm下げたら駄目", "下げたら駄目"), ("3mmは下げない", "下げない"), ("3mm下げたらだめ", "下げたらだめ"), ("3mm下げたらダメ", "下げたらダメ"),
+    ("C00004じゃなくて3mm下げて", "じゃなく"), ("C00004ではなく3mm下げて", "ではなく"),
+    ("Xのマイナス5ミリはやめて", "やめ"), ("Y座標を3mm下げるのは禁止", "禁止"), ("Y座標を3mm下げるのは違う", "違う"),
+    ("下に3mmはちがう", "ちがう"), ("下に3mmを取り消し", "取り消し"), ("下に3mm動かさなかった", "動かさなかっ"),
+    ("Yを3mmでなく下に3mm", "でなく"), ("じゃないY座標を3mm下げて", "じゃない"), ("速度を10%上げないで", "上げないで"),
+    ("下に3mm動かすな", "動かすな"),
+]
+
+
+@pytest.mark.parametrize("text,word", NEGATED)
+@pytest.mark.parametrize("source", ["voice", "text"])
+def test_negation_stops_without_candidate(text, word, source):
+    r = hear(text, source=source)
+    assert r["status"] == "stop" and cand(r) is None and r["choices"] == [], (text, r.get("message"))
+    assert f"「{word}」" in r["message"] and "変更しません" in r["message"]
+
+
+def test_negation_is_checked_before_unknown_words_and_in_answers():
+    # 知らない言葉があっても、打ち消しを先に示して止める
+    r = hear("バイオを3mm下げないで")
+    assert r["status"] == "stop" and "「下げないで」" in r["message"]
+    # 聞き返しへの答えの打ち消し（merge_answer）・上げ下げの答えの打ち消し（combine_axes）も止める
+    r1, r2 = hear_all("Y方向に3mm", "マイナスじゃない")
+    assert r2["status"] == "stop" and cand(r2) is None
+    r1, r2 = hear_all("Y座標を下げて", "3mm下げないで")
+    assert r2["status"] == "stop" and cand(r2) is None
+    prev = ut.read_utterance("Y座標を下げて")
+    assert ut.merge_answer(prev, ut.read_utterance("3ミリじゃない")).negations
+    assert ut.combine_axes(prev, ut.read_utterance("3mm下げないで")).negations
+
+
+def test_negation_in_check_proposal():
+    facts = ut.read_utterance("C00005をY座標で3mm下げないで")
+    p = ut.ProposedChange(kind="shift", position="C00005", axis="Y", delta_mm=-3.0)
+    assert ut.check_proposal(facts, p, "C00005").status == "stop"
+
+
+@pytest.mark.parametrize("text", ["やめて", "元に戻して", "取り消して", "キャンセル"])
+def test_undo_without_move_keeps_its_behaviour(text):
+    # 移動・速度の無い「やめて」「元に戻して」は、今までどおり元に戻す（打ち消しで止めない）
+    f = ut.read_utterance(text)
+    assert f.op == "undo" and ut.pre_check(f).status == "ok"
+    r = hear(text)
+    assert r["status"] == "ok"
+
+
+def test_negation_words_are_never_allowed_words():
+    allowed = (ut.FILLER_WORDS + ut.VERB_ENDINGS + ut.AMOUNT_PREFIXES + ut.PARTICLES + ut.TE_FORMS + ut.REQUESTS
+               + ut.POLITE_AFTER_TE + ut.FINALS + ut.HESITATIONS + ut.OPENERS)
+    for n in ut.NEGATION_WORDS + ("な",):
+        for w in allowed:
+            assert n not in w, (n, w)
+    for n in ut.NEGATION_WORDS:
+        assert ut.read_utterance(f"下に3mm{n}").negations, n
+
+
+# ---- CHECKER_023A の SHOULD・内部レビューの指摘 ----
+@pytest.mark.parametrize("text,want", [
+    ("あと3mm下げて", ("Z", "-3.000")), ("もう3mm下げて", ("Z", "-3.000")),
+    ("Y座標を3ミリ下げて下さい", ("Y", "-3.000")),                 # QA P2-1：「下さい」を下（Z）と読まない
+    ("X軸方向にマイナス5ミリ", ("X", "-5.000")), ("Z軸方向にマイナス3ミリ", ("Z", "-3.000")),  # QA P2-2
+    ("下に3ミリでお願いします", ("Z", "-3.000")), ("じゃあ下に3mmで", ("Z", "-3.000")), ("下に3ミリね", ("Z", "-3.000")),
+    ("3mm下げてください", ("Z", "-3.000")), ("えーと、3mm下げて", ("Z", "-3.000")), ("3mm下げてお願いします", ("Z", "-3.000")),
+    ("じゃあ3mm下げて", ("Z", "-3.000")), ("3mm下へ", ("Z", "-3.000")),
+])
+def test_natural_forms_make_candidates(text, want):
+    r = hear(text)
+    assert r["status"] == "ok" and cand(r) == want, (text, r.get("message"))
+
+
+@pytest.mark.parametrize("text,word", [
+    ("下さい3mm", "下さい"),          # て の後でない「下さい」
+    ("もう少し下げて", None),          # あいまいな量
+    # Safety P3-1：短いつなぎの言葉を並べたものは通さない
+    ("もも3mm下げて", "もも"), ("でも3mm下げて", "でも"), ("とも3mm下げて", "とも"), ("よ 3mm下げて", "よ"),
+    ("ね3mm下げて", "ね"), ("のに3mm下げて", "のに"), ("えっとを3mm下げて", "えっとを"), ("3mm下げては", "ては"),
+    ("3mm下げても", "ても"), ("下に3mmはね", "はね"),
+    # Safety P3-2
+    ("そこそこ下に3mm", None), ("ここここ下に3mm", "ここここ"),
+    # Safety P3-4：半角の 0〜9 のほかの数字
+    ("٣mm下げて", "٣"),
+    # SHOULD_NO_CANDIDATE・B9
+    ("ツールを3mm下げて", "ツール"), ("手首を3mm下げて", "手首"), ("アームを3mm下げて", "アーム"),
+    ("ロボットを3mm下げて", "ロボット"), ("斜め下に3mm", "斜め"),
+])
+def test_asks_without_candidate(text, word):
+    r = hear(text)
+    assert r["status"] == "ask" and cand(r) is None and r["choices"] == [], (text, r.get("message"))
+    if word:
+        assert f"「{word}" in r["message"], r["message"]
+
+
+def test_qa_p3_1_after_unknown_word_ask_down_is_read_fresh():
+    # session の _awaiting_answer=None を消すと、「下に3ミリ」が前の発話と合わさって聞き返しになる（その変異を見つける）
+    r1, r2 = hear_all("バイオ下げて", "下に3ミリ")
+    assert r1["status"] == "ask" and r2["status"] == "ok" and cand(r2) == ("Z", "-3.000")
+
+
+def test_safety_p3_3_only_unknown_words():
+    r = hear("バイオ")
+    assert r["status"] == "ask" and r["message"].startswith("「バイオ」が分かりませんでした")
+
+
+@pytest.mark.parametrize("text,shown", [
+    ("下に3mm\u200b", "（見えない文字）"), ("下に3mm\u0007", "（見えない文字）"), ("\ufeff下に3mm", "（見えない文字）"),
+    ("下に3mm👍", "👍"),
+])
+def test_qa_p3_5_invisible_and_emoji(text, shown):
+    r = hear(text)
+    assert r["status"] == "ask" and cand(r) is None and f"「{shown}」" in r["message"]
+    assert "「\u200b」" not in r["message"] and "「」" not in r["message"]
