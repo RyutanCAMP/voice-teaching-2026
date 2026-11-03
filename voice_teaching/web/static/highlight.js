@@ -152,3 +152,35 @@ export function speechExamples(u) {
     help: ["「Y座標を3ミリ下げて」", "「Yのマイナス3ミリ」", "「Zプラス方向に10ミリ」"],
   };
 }
+
+// ---- 再生の「いま」の表示（feat/demo-3d）：「いま：24行目 MOVL C00001 V=150.0（2回目）」 ----
+// サーバーの区間の線（line_no・text・kind・cycle）の文字のまま。数は計算しない。時間・関節の通り道は出さない。
+// opts.run：「変更前」「変更後」など。opts.count：その再生の回数（×2 など。回数の変更のときだけ）。
+// opts.added：足した回の番号（変更後の再生の 3 など）。その回の線だけ「（足した分）」と出す
+export const NOW_MOVJ_NOTE = "関節移動：通り道は表示していません";
+export const NOW_OTHER_NOTE = "直線とは限らない区間：印は終点へ移ります";
+export function nowPlaying(seg, opts = {}) {
+  if (!seg || typeof seg !== "object" || !Number.isInteger(seg.line_no) || seg.line_no < 1
+    || typeof seg.text !== "string") return null;
+  const o = opts || {};
+  const n = seg.cycle;
+  const ok = Number.isInteger(n) && n >= 1;
+  const added = ok && Number.isInteger(o.added) && n === o.added;
+  const kind = segmentLook(seg.kind).kind;
+  return {
+    run: typeof o.run === "string" ? o.run : "",
+    count: o.count != null && o.count !== "" ? `×${o.count}` : "",
+    line: `いま：${seg.line_no}行目 ${seg.text}`,
+    cycle: ok ? `${n}回目${added ? "（足した分）" : ""}` : "",
+    added,
+    note: kind === "movj" ? NOW_MOVJ_NOTE : kind === "other" ? NOW_OTHER_NOTE : "",
+  };
+}
+
+// 読み上げ・title 用の1行（画面は nowPlaying の部品を分けて大きさを変えて出す）
+export function nowText(n) {
+  if (!n) return "";
+  const head = [n.run, n.count].filter((x) => x).join(" ");
+  const cyc = n.cycle ? (n.cycle.endsWith("）") ? `　${n.cycle}` : `（${n.cycle}）`) : "";
+  return [head, n.line + cyc, n.note].filter((x) => x).join("　");
+}

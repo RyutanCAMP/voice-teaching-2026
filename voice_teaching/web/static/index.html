@@ -59,6 +59,8 @@
   <section id="figure-panel" class="stage" aria-label="位置の図">
     <div class="stage-head">
       <span id="file-name" class="file-name"></span>
+      <!-- 再生中の「いま：24行目 MOVL C00001 V=150.0（2回目）」。サーバーの区間の線の文字だけ。図の点に重ねない（図の上の帯に出す） -->
+      <div id="play-now" class="play-now" aria-live="polite" hidden></div>
       <button type="button" id="view-reset" class="link small" hidden>視点を戻す</button>
       <div class="view-tabs" role="tablist" aria-label="図の向き">
         <button type="button" class="view-tab" data-view="3d" role="tab" title="ドラッグで回す・ホイールで拡大縮小">3D</button>
@@ -68,10 +70,25 @@
       </div>
     </div>
     <p id="figure-message" class="warn" hidden></p>
-    <div id="fig-3d" class="fig fig-main fig-3d"></div>
-    <div id="fig-main" class="fig fig-main"></div>
+    <div class="fig-wrap">
+      <div id="fig-3d" class="fig fig-main fig-3d"></div>
+      <div id="fig-main" class="fig fig-main"></div>
+      <!-- 再生の操作（図の右下。狭い画面では図の下）。比べる再生は、回数の変更の候補があるときだけ -->
+      <div class="play-overlay">
+        <div class="play-controls" role="group" aria-label="再生の操作">
+          <button type="button" id="play-pause" class="small" disabled>一時停止</button>
+          <button type="button" id="play-step" class="small" disabled title="今の区間を終わりまで進めて止める">1つ進む</button>
+          <button type="button" id="play-stop" class="small" disabled>止める</button>
+        </div>
+        <!-- 回数の変更の候補があるときだけ出す（候補が無ければ出さない） -->
+        <div id="play-compare" class="play-compare" role="group" aria-label="変更前と変更後を比べる" hidden>
+          <button type="button" id="play-before" class="small" aria-pressed="false">変更前を再生</button>
+          <button type="button" id="play-after" class="small" aria-pressed="false">変更後を再生</button>
+        </div>
+      </div>
+    </div>
     <div class="play-row">
-      <button type="button" id="play-button" class="play" disabled aria-label="経路を再生">▶</button>
+      <button type="button" id="play-button" class="play" disabled aria-label="はじめから再生" title="はじめから再生">▶</button>
       <div class="play-text">
         <!-- 区間の種類（CHECKER_026 S-MOVJ）。MOVJ・目安の区間は、そのジョブにあるときだけ出す -->
         <div id="legend-kinds" class="legend kinds" hidden>
