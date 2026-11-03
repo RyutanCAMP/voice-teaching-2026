@@ -23,7 +23,8 @@ from . import jbi, sim
 
 REDACTED = "（伏せています）"
 SAMPLE_JOB = sim.SAMPLES_DIR / "DEMO_PLACE.JBI"
-SAMPLE_UTTERANCE = "この位置を上に10mm移動して"
+# 上下の向きの設定が無くても届くよう、軸と符号を明示した指示にする（CHECKER_026 M2：未確認なら「上に」は Claude に送る前に聞き返す）
+SAMPLE_UTTERANCE = "この位置をZのプラス10mm移動して"
 SAMPLE_SELECTED = "C00004"
 COST_WARNING = ("注意：--call は本物の Claude API に1回送ります（混雑・接続失敗のときは SDK が最大1回やり直します）。"
                 "料金がかかります（キーの持ち主の請求になります）。送るのは上の「送る内容」と同じものです")

@@ -205,6 +205,8 @@ def test_p3c_zero_amount_in_answer_is_refused(text):
     assert dlg(r)["amount_mm"] is None
 
 
+# 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
+@pytest.mark.usefixtures("updown_demo_c")
 def test_p3c_zero_amount_in_opening_is_refused():
     c = Counting()
     w, sid = start(interp=c)
@@ -216,6 +218,8 @@ def test_p3c_zero_amount_in_opening_is_refused():
 # 内部 QA レビュー（91285fe）FAIL の直し
 # ======================================================================
 # P1-1：会話の中の止めた・聞き返しの理由を、いつも返す（画面は「アプリ」の吹き出しと返事の欄に出す。e2e で確かめる）
+# 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
+@pytest.mark.usefixtures("updown_demo_c")
 @pytest.mark.parametrize("text,status", [("置くところをバイオ3ミリ下げて", "ask"), ("置くところを0mm下げて", "stop"),
                                          ("置くところと取るところを3mm下げて", "ask")])
 def test_qa_p1_1_opening_refusals_carry_message_and_app_turn(text, status):
@@ -243,6 +247,8 @@ def test_qa_p1_1_undo_word_message_is_returned():
     assert r["message"] == dg.END_UNDO and dlg(r)["turns"][-1]["who"] == "アプリ"
 
 
+# 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
+@pytest.mark.usefixtures("updown_demo_c")
 # P2-1：推定（未確定）は、元に戻す・ふつうの指示・会話の終わり（候補なし）・新しいジョブで消す
 def test_qa_p2_1_estimate_cleared_on_undo_and_normal_instruction():
     w, sid = start()
@@ -323,6 +329,8 @@ def test_qa_p2a_go_step_needs_the_button(text, source):
         assert r["message"] == dg.GO_BUTTON
 
 
+# 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
+@pytest.mark.usefixtures("updown_demo_c")
 @pytest.mark.parametrize("source", SOURCES)
 def test_qa_p2a_complete_new_instruction_ends_dialogue_and_says_so(source):
     w, sid, r = go_step()
@@ -351,6 +359,8 @@ def test_qa_p2b_gate_place_word_alone_starts_dialogue_and_asks_both():
     assert dlg(r)["step"] == "ask_move" and r["message"] == dg.ASK_MOVE and len(dlg(r)["choices"]) == 6
 
 
+# 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
+@pytest.mark.usefixtures("updown_demo_c")
 def test_qa_p2b_gate_d1_gives_two_readings_message():
     c = Counting()
     w, sid = start(select="C00001", interp=c)
@@ -361,6 +371,8 @@ def test_qa_p2b_gate_d1_gives_two_readings_message():
     assert r["state"]["selected"] == "C00001"
 
 
+# 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
+@pytest.mark.usefixtures("updown_demo_c")
 # QA P3-A：推定（未確定）は、断られた・聞き返された発話では消さない
 @pytest.mark.parametrize("text", ["バイオ", "承認して", "そうじゃなくて", "置くところと取るところを3mm下げて"])
 def test_qa_p3a_estimate_survives_refused_utterances(text):

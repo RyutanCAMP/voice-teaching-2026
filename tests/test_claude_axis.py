@@ -47,6 +47,8 @@ def test_tool_accepts_axis_directions():
     assert enum[4:] == AXIS_DIRS
 
 
+# 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
+@pytest.mark.usefixtures("updown_demo_c")
 @pytest.mark.parametrize("text,direction,amount,target,delta", [
     ("Yプラスに3mm", "Y+", 3, "C00005 Y", "+3.000"),
     ("Xマイナスに5mm", "X-", 5, "C00005 X", "-5.000"),

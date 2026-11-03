@@ -10,6 +10,11 @@
 - simulate を渡したときだけ、断られた提案でもプレビュー用の候補を作れる（後で voice_teaching/sim.py が作る）。
   その候補には blocked_reason が付いたままになり、比較の注意書きにも出る。
 - 発話との照らし合わせ（量・位置・軸の食い違い、左右、2つ以上の変更など）で断られたものは、simulate でも候補にしない。
+
+上下の向き（CHECKER_026 M2）:
+- updown_check（ジョブ → updown.UpdownStatus）を、指示（hear）と提案（propose）のたびに呼んで設定を読み直す。
+  渡さなければ「未確認」として扱う（上・下を Z にしない）。
+- 候補を作ったときの照合の結果を candidate_updown に残す（承認・出力のときに、今の結果と比べる。web/flow.py）。
 """
 from __future__ import annotations
 
@@ -20,6 +25,7 @@ from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
 from . import jbi
+from . import updown as ud
 from . import utterance as ut
 
 # simulate(元のジョブ, 提案, 実機用の検査に断られた理由) → プレビュー用の候補（作れなければ None）
@@ -61,8 +67,12 @@ class Reply:
 class Session:
     def __init__(self, job: jbi.Job, *, max_shift_mm: float = jbi.DEFAULT_MAX_SHIFT_MM,
                  max_speed_change_percent: float | None = None,
-                 simulate: Simulator | None = None):
+                 simulate: Simulator | None = None,
+                 updown_check: "Callable[[jbi.Job], ud.UpdownStatus] | None" = None):
         self._job = job
+        self._updown_check = updown_check
+        self.updown: ud.UpdownStatus = ud.NOT_CONFIGURED  # 最後に読んだ上下の向きの照合の結果
+        self.candidate_updown: ud.UpdownStatus | None = None  # 候補を作ったときの照合の結果
         self._original_bytes = job.render_bytes()
         self.max_shift_mm = max_shift_mm
         # 速度の1回の変更量の上限（元の速度に対する%）。専門家の枠の値。無ければ速度は変えない
@@ -91,6 +101,19 @@ class Session:
     def original_bytes(self) -> bytes:
         return self._original_bytes
 
+    # ---- 上下の向き ----
+    def updown_status(self) -> ud.UpdownStatus:
+        """上下の向きの設定を読み直して、このジョブと照らし合わせる（呼ぶたびに読む）。照合で例外が出ても未確認にする。"""
+        st = ud.NOT_CONFIGURED
+        if self._updown_check is not None:
+            try:
+                got = self._updown_check(self._job)
+            except Exception:  # noqa: BLE001  分からないときは止める側（未確認）
+                got = ud.unconfirmed("上下の向きの照合ができませんでした")
+            st = got if isinstance(got, ud.UpdownStatus) else ud.unconfirmed("上下の向きの照合の結果が読めません")
+        self.updown = st
+        return st
+
     # ---- 発話 ----
     def hear(self, text: str, source: str = "text") -> Reply:
         """新しい発話。source（voice / text）は記録だけに使い、結果は変えない。"""
@@ -105,7 +128,7 @@ class Session:
         self.facts = facts
         self._locked = False
         self._log("発話", f"{'音声' if source == 'voice' else '文字'}：{text}")
-        v = ut.pre_check(facts, self.selected)
+        v = ut.pre_check(facts, self.selected, self.updown_status())
         if v.status == "ask" and facts.question and v.choices and facts.op in ("move", "speed"):
             v = self._check_question(facts, v)  # 疑問の形の確かめ（2026-11-03 夜）
         if v.status != "ok":
@@ -174,7 +197,7 @@ class Session:
             return self._refuse("stop", f"{e}。この提案は使いません")
         if self.candidate is not None:
             return self._refuse("stop", PENDING_MESSAGE)
-        v = ut.check_proposal(self.facts, changes, self.selected)
+        v = ut.check_proposal(self.facts, changes, self.selected, self.updown_status())
         if v.status != "ok":
             return self._refuse(v.status, v.message)
         p = changes[0]
@@ -244,6 +267,7 @@ class Session:
         self.candidate = change
         self.candidate_utterance = self.facts.raw if self.facts is not None else None
         self.candidate_blocked_reason = blocked
+        self.candidate_updown = self.updown  # この候補を作ったときの上下の向きの照合（propose で読み直したもの）
         self._candidate_position = p.position
         self.selected = p.position
         self._locked = True  # 1つの発話で作る候補は1つだけ
@@ -259,6 +283,7 @@ class Session:
         self.candidate = None
         self.candidate_utterance = None
         self.candidate_blocked_reason = None
+        self.candidate_updown = None
         self._candidate_position = None
 
     def _comparison(self) -> Comparison:

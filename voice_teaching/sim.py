@@ -81,6 +81,10 @@ class Approval:
     new_sha256: str
     approved_by: str
     approved_at: str  # ISO 8601（UTC）
+    # 上下の向きの設定（CHECKER_026 M2）：承認したときの照合の状態、使った設定の指紋、確認した人（確認済みのときだけ）
+    updown_status: str | None = None
+    updown_fingerprint: str | None = None
+    updown_confirmed_by: str | None = None
 
 
 # ---- 1. 変更候補 ----
@@ -175,7 +179,8 @@ def _simulate_blocked(job, original, position, axis, delta_mm, reason, users) ->
 
 
 # ---- 2. 承認（ボタンから呼ぶ。音声の文字からは呼ばない） ----
-def approve(proposal: SimProposal, approved_by: str) -> Approval:
+def approve(proposal: SimProposal, approved_by: str, updown=None) -> Approval:
+    """updown：承認したときの上下の向きの照合の結果（updown.UpdownStatus）。記録に残すだけで、判定は呼ぶ側（web/flow.py）。"""
     if not isinstance(proposal, SimProposal) or proposal.mode != "sim":
         raise SimError("シミュレーションの候補ではないため、承認できません")
     if not isinstance(approved_by, str) or not approved_by.strip():
@@ -187,7 +192,10 @@ def approve(proposal: SimProposal, approved_by: str) -> Approval:
         original_sha256=_sha(proposal.original_bytes),
         new_sha256=_sha(proposal.new_bytes),
         approved_by=approved_by.strip(),
-        approved_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+        approved_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        updown_status=getattr(updown, "status", None),
+        updown_fingerprint=getattr(updown, "fingerprint", None),
+        updown_confirmed_by=getattr(updown, "confirmed_by", None))
 
 
 # ---- 3. シミュレーション用の出力 ----

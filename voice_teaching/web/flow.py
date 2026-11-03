@@ -12,6 +12,10 @@
   解釈の係に頼み（合成ジョブだけ）、プログラムが照合して、人がボタン（か短い肯定）で選ぶ。方向は6つのボタン、
   量は人の言葉。集めたことは決まった文（「C00005をYのマイナス3ミリ」）にして、ふつうの指示と同じ流れに通す。
   会話の選択肢は choose（/api/dialog）で受け取り、今の選択肢の番号（turn）と合わなければ使わない。
+- 上下の向き（CHECKER_026 M2・11章）：毎回の指示・承認・出力・状態の表示のときに、上下の向きの設定（updown_config）を
+  読み直してジョブと照合する。照合に通ったときだけ「上・下」を Z± にし、方向のボタンに「（上）」「（下）」を付ける。
+  候補を作ったときの照合の結果と、承認・出力のときの結果が違えば（設定が1バイトでも変われば）、承認を消して断る。
+  承認の記録と作業ログに、使った設定の指紋と確認した人を残す。設定は読むだけ（画面・API・声からは書かない）。
 """
 from __future__ import annotations
 
@@ -23,6 +27,7 @@ from pathlib import Path
 
 from .. import claude_interpreter, jbi, mock_claude, sim
 from .. import dialog as dg
+from .. import updown as ud
 from .. import utterance as ut
 from ..session import PENDING_MESSAGE, Comparison, Reply, Session
 from . import api
@@ -35,6 +40,16 @@ NO_POSITION = "位置が決まっていないため、変更の提案をして�
 NOT_DECIDED = "指示から変更の内容を決められませんでした。位置番号・方向・量（mm）を、もう一度指示してください"
 APP_SPEAKER = "アプリ"  # プログラムの決まった文の話し手（Claude の文ではない）
 NOT_APPROVED = "承認されていないため、出力しません（承認は確認表示の承認ボタンで行います）"
+UPDOWN_CHANGED_APPROVE = ("変更候補を作ったあとで、上下の向きの設定（または照合の結果）が変わったため、承認できません。"
+                          "元に戻して、もう一度指示してください")
+UPDOWN_CHANGED_EXPORT = ("承認のあとで、上下の向きの設定（または照合の結果）が変わったため、出力しません。"
+                         "承認を取り消しました")
+UPDOWN_CHANGED_WHY = "上下の向きの設定（または照合の結果）が変わったため"
+# 上下の向きの設定ファイルの場所の既定。None ＝ 設定なし（未確認。上・下を Z にしない）。
+# サーバーは起動オプション（--updown-config。既定 records/updown.json）の場所を渡す。テストでは一時フォルダの設定に置き換える
+DEFAULT_UPDOWN_CONFIG: "str | Path | None" = None
+USE_DEFAULT = object()  # updown_config を渡さなかった印（DEFAULT_UPDOWN_CONFIG を使う）
+_UPDOWN_STATUS_NAMES = {"unconfirmed": "未確認", "mismatch": "不一致", "changed": "変更済み"}
 
 
 @dataclass
@@ -45,6 +60,7 @@ class _Entry:
     sim_proposal: sim.SimProposal | None = None
     approval: sim.Approval | None = None
     approved_candidate: object | None = None      # 承認したときの候補（同じものか確かめる）
+    approval_updown: ud.UpdownStatus | None = None  # 承認したときの上下の向きの照合の結果
     exported: str | None = None
     dialog: dg.Dialog = field(default_factory=dg.Dialog)  # Claude との会話の状態（メモリの中だけ。保存しない）
     frame: object | None = None                   # 案B：FRAME（まだ無い。あれば label・aliases で位置を決める）
@@ -72,10 +88,14 @@ class _Entry:
 
 
 class WebFlow:
-    def __init__(self, max_sessions: int = MAX_SESSIONS, interpreter=None):
+    def __init__(self, max_sessions: int = MAX_SESSIONS, interpreter=None,
+                 updown_config: "str | Path | None | object" = USE_DEFAULT, robot: str = ud.DEFAULT_ROBOT):
         # 解釈の係：本物の Claude（ANTHROPIC_API_KEY があるとき）か、偽のClaude（モック）
         self.interpreter = interpreter if interpreter is not None else claude_interpreter.from_env()
         self.max_sessions = max_sessions
+        # 上下の向きの設定ファイルの場所（None なら設定なし＝未確認）と、アプリで使うロボットの名前（照合で比べるだけ）
+        self.updown_config = DEFAULT_UPDOWN_CONFIG if updown_config is USE_DEFAULT else updown_config
+        self.robot = robot
         self._entries: OrderedDict[str, _Entry] = OrderedDict()
         self._lock = threading.Lock()
 
@@ -88,7 +108,8 @@ class WebFlow:
         if not job.name:
             return {"ok": False, "error": "ジョブ名の行（//NAME）が読めないため、読み込みません"}
         entry = _Entry(session=None)  # type: ignore[arg-type]
-        entry.session = Session(job, simulate=entry.simulate)
+        entry.session = Session(job, simulate=entry.simulate,
+                                updown_check=ud.checker(self.updown_config, self.robot))
         entry.session.log.append((self._who(), self.interpreter.notice))
         sid = secrets.token_urlsafe(16)
         with self._lock:
@@ -205,10 +226,10 @@ class WebFlow:
                 fs = ut.read_utterance(sub + "移動")
             if fs.place_ref:
                 two = True
-            elif not dg.handled_by_dialogue(fs):
+            elif not dg.handled_by_dialogue(fs, s.updown):
                 # 会話が受け持たない理由（D1 の2つの読み方・知らない言葉・符号 など）：その答えをそのまま返す。
                 # 選択肢の文には場所の言葉が無く、別の位置に当たるおそれがあるので、選択肢は出さない
-                refused = ut.pre_check(fs)
+                refused = ut.pre_check(fs, None, s.updown)
         est = d.estimated
         d.start(word, rel, dg.Slots())
         d.estimated = est
@@ -227,7 +248,7 @@ class WebFlow:
             d.end(clear_estimate=False)
             return self._dialog_out(e, text, source, f0, "ask", ut.unknown_words_message(fs.unknown_words, "move"),
                                     who="アプリ")
-        slots = dg.read_slots(fs, opening=True)
+        slots = dg.read_slots(fs, opening=True, updown=s.updown)
         if slots.problem:
             d.end(clear_estimate=False)
             return self._dialog_out(e, text, source, f0, "stop" if slots.stop else "ask", slots.problem)
@@ -289,11 +310,11 @@ class WebFlow:
                 if r.status != "ok":
                     return self._dialog_out(e, text, source, f0, "stop", r.message)
                 return self._dialog_pick(e)
-            v = ut.pre_check(f0)
+            v = ut.pre_check(f0, None, e.session.updown)
             if v.status == "stop":
                 return self._dialog_out(e, text, source, f0, "stop", v.message)
             return self._dialog_out(e, text, source, f0, "ask", dg.PICK_PROMPT)
-        v = ut.pre_check(f0)
+        v = ut.pre_check(f0, None, e.session.updown)
         if d.step == "confirm_position":
             fresh = len(d.turns) == d.proposal_mark  # 最後のやり取りが位置の候補の問いか
             self._human(e, text, source)
@@ -341,11 +362,11 @@ class WebFlow:
         if f0.place_ref:  # 答えの中の場所の言葉：会話をやめて、今の流れ（聞き返し）のまま
             d.end()
             return None
-        if f0.kinds and not dg.handled_by_dialogue(f0):
-            # 会話が受け持たない理由（2つの操作・D1 の2つの読み方 など）：今の pre_check の答えをそのまま返す
-            v = ut.pre_check(f0)
+        if f0.kinds and not dg.handled_by_dialogue(f0, e.session.updown):
+            # 会話が受け持たない理由（2つの操作・D1 の2つの読み方・上下の向きが未確認 など）：今の pre_check の答えをそのまま返す
+            v = ut.pre_check(f0, None, e.session.updown)
             return self._dialog_out(e, text, source, f0, v.status, v.message, choices=v.choices)
-        slots = dg.read_slots(f0)
+        slots = dg.read_slots(f0, updown=e.session.updown)
         if slots.problem:
             return self._dialog_out(e, text, source, f0, "stop" if slots.stop else "ask", slots.problem)
         if slots.amount is None and slots.axis is None and slots.sign is None:
@@ -536,13 +557,17 @@ class WebFlow:
                 return self._fail(e, f"承認できません：{ex}")
             if sp.original_bytes != s.original_bytes or sp.new_bytes != ch.new_job.render_bytes():
                 return self._fail(e, "変更候補と、出力する中身が合わないため、承認できません")
+            st = s.updown_status()  # 設定を読み直す。候補を作ったときと違えば断る
+            if s.candidate_updown is None or s.candidate_updown.token != st.token:
+                return self._fail(e, UPDOWN_CHANGED_APPROVE)
             try:
-                ap = sim.approve(sp, approver)
+                ap = sim.approve(sp, approver, updown=st)
             except sim.SimError as ex:
                 return self._fail(e, str(ex))
             e.sim_proposal, e.approval, e.approved_candidate = sp, ap, ch
+            e.approval_updown = st
             e.exported = None
-            s.log.append(("承認", f"{ap.approved_by} さんが承認ボタンで承認しました（{ap.approved_at}）"))
+            s.log.append(("承認", f"{ap.approved_by} さんが承認ボタンで承認しました（{ap.approved_at}）。{_updown_note(st)}"))
             return {"ok": True, "state": None}
         return self._run(sid, run)
 
@@ -551,13 +576,17 @@ class WebFlow:
         def run(e: _Entry) -> dict:
             if not self._approved(e):
                 return self._fail(e, NOT_APPROVED)
+            if not self._updown_unchanged(e):  # 設定を読み直す。変わっていれば承認を消して断る
+                self._cancel_approval(e, UPDOWN_CHANGED_WHY)
+                return self._fail(e, UPDOWN_CHANGED_EXPORT)
             try:
                 path = sim.export_sim(e.sim_proposal, e.approval)
             except sim.SimError as ex:
                 return self._fail(e, f"出力しませんでした：{ex}")
             full = str(Path(path).resolve())
             e.exported = full
-            e.session.log.append(("出力", f"シミュレーション用のジョブを出力しました：{full}（実機には入れないでください）"))
+            e.session.log.append(("出力", f"シミュレーション用のジョブを出力しました：{full}（実機には入れないでください）。"
+                                          f"{_updown_note(e.approval_updown)}"))
             return {"ok": True, "path": full, "file_name": Path(path).name}
         return self._run(sid, run)
 
@@ -570,6 +599,8 @@ class WebFlow:
         if e is None:
             return {"ok": False, "error": NO_SESSION}
         with e.lock:
+            st = e.session.updown_status()  # 要求のたびに、上下の向きの設定を読み直す
+            e.dialog.direction_names = st.direction_names
             out = fn(e)
             self._sync(e)
             out["state"] = self._state(sid, e)
@@ -587,14 +618,20 @@ class WebFlow:
         return (e.approval is not None and e.sim_proposal is not None
                 and e.session.candidate is not None and e.approved_candidate is e.session.candidate)
 
+    def _updown_unchanged(self, e: _Entry) -> bool:
+        """承認したときの上下の向きの照合の結果と、今（読み直した）結果が同じか。"""
+        return e.approval_updown is not None and e.approval_updown.token == e.session.updown_status().token
+
     def _cancel_approval(self, e: _Entry, why: str) -> None:
         if e.approval is not None:
-            e.approval = e.sim_proposal = e.approved_candidate = None
+            e.approval = e.sim_proposal = e.approved_candidate = e.approval_updown = None
             e.session.log.append(("承認", f"{why}、承認を取り消しました。もう一度確かめて、承認ボタンで承認してください"))
 
     def _sync(self, e: _Entry) -> None:
         if e.approval is not None and not self._approved(e):
             self._cancel_approval(e, "変更候補が変わったため")
+        if e.approval is not None and not self._updown_unchanged(e):
+            self._cancel_approval(e, UPDOWN_CHANGED_WHY)
 
     def _reply(self, e: _Entry, r: Reply) -> dict:
         return {"status": r.status, "message": r.message, "blocked_reason": r.blocked_reason,
@@ -613,21 +650,29 @@ class WebFlow:
                 est = e.dialog.estimated
                 cand["estimated"] = est if est and est.get("position") == cand["target"].split()[0] else None
         approved = self._approved(e)
+        st = s.updown_status()
+        e.dialog.direction_names = st.direction_names
+        same_updown = s.candidate_updown is not None and s.candidate_updown.token == st.token
         return {
             "session_id": sid,
             "mode": api.MODE,
             "job_name": s.original.name,
             "selected": s.selected,
             "facts": _facts(s.facts),
-            # 確認済みの方向の名前だけ（未確認の 右・前 などは入れない）
-            "direction_names": ut.DIRECTION_NAMES, "direction_names_source": ut.DIRECTION_NAMES_SOURCE,
+            # 確認済みの方向の名前だけ（上下の向きの照合に通ったときだけ Z の 上・下。右・前 などは入れない）
+            "direction_names": st.direction_names, "direction_names_source": st.direction_names_source,
+            # 上下の向きの照合の結果（CHECKER_026 M2）。画面の表示は別の担当
+            "updown": st.as_state(),
             "candidate": cand,
             "confirmation_text": s.confirmation_text(),
             "blocked_reason": s.candidate_blocked_reason if ch is not None else None,
-            "approval": ({"approved_by": e.approval.approved_by, "approved_at": e.approval.approved_at}
+            "approval": ({"approved_by": e.approval.approved_by, "approved_at": e.approval.approved_at,
+                          "updown_status": e.approval.updown_status,
+                          "updown_fingerprint": e.approval.updown_fingerprint,
+                          "updown_confirmed_by": e.approval.updown_confirmed_by}
                          if approved else None),
             "can_approve": (ch is not None and ch.kind == "shift" and not approved
-                            and not s.candidate_blocked_reason),
+                            and not s.candidate_blocked_reason and same_updown),
             "can_export": approved,
             "exported": e.exported if approved else None,
             "out_dir": str(Path(sim.DEFAULT_OUT_DIR).resolve()),
@@ -656,6 +701,15 @@ class WebFlow:
                         "label": getattr(self.interpreter, "locator_label", None) or self._speaker()},
             "turns": list(d.turns),
         }
+
+
+def _updown_note(st: "ud.UpdownStatus | None") -> str:
+    """承認・出力の作業ログに残す、上下の向きの設定の事実（状態・確認した人・指紋）。"""
+    if st is None:
+        return "上下の向きの設定：記録なし"
+    if st.confirmed:
+        return f"上下の向きの設定：確認済み（確認した人 {st.confirmed_by}・{st.confirmed_at}・指紋 {st.fingerprint}）"
+    return f"上下の向きの設定：{_UPDOWN_STATUS_NAMES.get(st.status, st.status)}（上・下は Z として読んでいません）"
 
 
 def _xyz(job: jbi.Job, name: str) -> list[str] | None:

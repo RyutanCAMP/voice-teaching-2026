@@ -138,8 +138,12 @@ def test_http_api_refuses_blocked_candidate(running, name, position, tmp_path):
     ("DEMO_PLACE.JBI", "C00004",
      b"C00004=450.000,190.000,120.000,180.00,0.00,0.00", b"C00004=450.000,190.000,130.000,180.00,0.00,0.00"),
 ])
-def test_http_api_approves_and_exports_passing_change(running, name, position, before, after, tmp_path):
+def test_http_api_approves_and_exports_passing_change(running, name, position, before, after, tmp_path,
+                                                      make_updown, monkeypatch):
     data = (DUMMY / name).read_bytes()
+    # 上下の向き（CHECKER_026 M2）：「上に10mm」を Z+10 と読むには、確認済みの設定が要る。
+    # このテストのジョブの、一時フォルダの設定をサーバーに当てる（読み込みの前に。テストの後で元に戻る）
+    monkeypatch.setattr(running.flow, "updown_config", make_updown(name, (position,)))
     sid = _post(running, "/api/load", data)["session_id"]
     assert _post(running, "/api/select", {"session_id": sid, "position": position})["ok"] is True
     h = _post(running, "/api/hear", {"session_id": sid, "text": "この位置を上に10mm", "source": "text"})

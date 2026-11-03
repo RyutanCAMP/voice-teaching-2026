@@ -174,6 +174,8 @@ def flow_with(c, tmp_path):
     return w, sid
 
 
+# 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
+@pytest.mark.usefixtures("updown_demo_place")
 def test_flow_with_claude_makes_candidate_after_check(tmp_path):
     w, sid = flow_with(client(up10()), tmp_path)
     r = w.hear(sid, "この位置を上に10mm移動して", source="voice")
@@ -191,6 +193,8 @@ def test_flow_claude_result_still_checked_against_utterance(tmp_path):
     assert r["status"] == "ask" and r["state"]["candidate"] is None
 
 
+# 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
+@pytest.mark.usefixtures("updown_demo_place")
 def test_flow_failure_does_not_switch_to_mock_and_hides_key(tmp_path):
     c = client(exc=RuntimeError(f"401 invalid x-api-key {KEY}"))
     w, sid = flow_with(c, tmp_path)

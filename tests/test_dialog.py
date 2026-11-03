@@ -97,6 +97,8 @@ def choose(w, sid, r, cid):
 # ======================================================================
 # 1. 唐川さんの会話（モック）：置くところ → そうそう → 3mm → 方向のボタン → 確認表示 → ボタンの承認
 # ======================================================================
+# 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
+@pytest.mark.usefixtures("updown_demo_c")
 def test_owner_dialogue_end_to_end_with_mock(counting, tmp_path, monkeypatch):
     monkeypatch.setattr(sim, "DEFAULT_OUT_DIR", tmp_path / "sim")
     w, sid = start(counting, select="C00001")
@@ -158,6 +160,8 @@ def test_owner_dialogue_end_to_end_with_mock(counting, tmp_path, monkeypatch):
     assert len(diff) == 2  # //NAME と C00005 の行だけ
 
 
+# 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
+@pytest.mark.usefixtures("updown_demo_c")
 def test_full_instruction_after_confirmation_makes_candidate_immediately():
     w, sid = start()
     r = w.hear(sid, "置くところを3mm下げて")
@@ -168,6 +172,8 @@ def test_full_instruction_after_confirmation_makes_candidate_immediately():
     assert st["candidate"]["heard"] == "C00005をZのマイナス3ミリ"
 
 
+# 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
+@pytest.mark.usefixtures("updown_demo_c")
 def test_pick_place_word_uses_dout_on_rule_in_mock():
     w, sid = start()
     r = w.hear(sid, "取るところを上に2mm")
@@ -366,6 +372,8 @@ def test_undo_word_ends_dialogue():
     assert dlg(r)["step"] is None and r["state"]["selected"] == "C00001" and r["state"]["candidate"] is None
 
 
+# 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
+@pytest.mark.usefixtures("updown_demo_c")
 def test_new_instruction_with_position_ends_dialogue_and_runs_normally():
     w, sid = start()
     w.hear(sid, OPENING)
@@ -391,6 +399,8 @@ def test_unknown_word_in_opening_asks_without_locate(counting):
     assert r["status"] == "ask" and "バイオ" in r["message"] and counting.locates == 0
 
 
+# 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
+@pytest.mark.usefixtures("updown_demo_c")
 def test_pending_candidate_blocks_dialogue_without_locate(counting):
     w, sid = start(counting, select="C00004")
     assert w.hear(sid, "この位置を上に2mm")["candidate_made"]
@@ -503,6 +513,8 @@ def test_repeat_inside_dialogue_is_not_used_as_amount():
 # ======================================================================
 # 6. 承認待ちの候補がある間は、新しい移動の指示を解釈の係に送らない（呼ぶ前に止める）
 # ======================================================================
+# 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
+@pytest.mark.usefixtures("updown_demo_c")
 def test_pending_candidate_stops_new_move_before_interpreter(counting):
     w, sid = start(counting, select="C00004")
     assert w.hear(sid, "この位置を上に2mm")["candidate_made"]
@@ -512,6 +524,8 @@ def test_pending_candidate_stops_new_move_before_interpreter(counting):
     assert counting.decides == 1 and r["tool_calls"] == []
 
 
+# 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
+@pytest.mark.usefixtures("updown_demo_c")
 def test_pending_candidate_with_real_claude_sends_nothing():
     c = NS(messages=NS(calls=[], create=lambda **kw: (_ for _ in ()).throw(AssertionError("送った"))))
     w, sid = start(ci.ClaudeInterpreter(KEY, client=c), select="C00004")
@@ -523,6 +537,8 @@ def test_pending_candidate_with_real_claude_sends_nothing():
     assert r["status"] == "stop" and r["message"].startswith("承認待ち")
 
 
+# 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
+@pytest.mark.usefixtures("updown_demo_c")
 def test_undo_and_compare_still_work_with_pending_candidate(counting):
     w, sid = start(counting, select="C00004")
     w.hear(sid, "この位置を上に2mm")

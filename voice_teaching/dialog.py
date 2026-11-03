@@ -15,6 +15,8 @@
 - 手前・奥・前・後ろ・右・左は軸に当てはめない（FRAME の向きの表が無い）。方向は X・Y・Z の＋−の6つの選択肢から人が選ぶ。
 - 量は人の言葉だけから読む（算用数字＋mm／ミリ）。量の選択肢は出さない。
 - 案B（FRAME の label・aliases）のつなぎ口は frame_lookup。FRAME はまだ無いので、今は使われない。
+- 上下の向き（CHECKER_026 M2）：方向のボタンの「（上）」「（下）」と、会話の「上に・下げて」を Z にすることは、
+  上下の向きの照合に通ったとき（updown.UpdownStatus.confirmed）だけ。照合の結果は呼ぶ側（web/flow.py）が毎回渡す。
 """
 from __future__ import annotations
 
@@ -25,6 +27,7 @@ from decimal import Decimal
 from typing import Mapping, Sequence
 
 from . import jbi
+from . import updown as ud
 from . import utterance as ut
 
 # 場所の言葉（feat/nl-polish の utterance.PLACE_WORDS と同じ一覧。facts.place_ref が無いときだけ、ここで探す）
@@ -122,9 +125,10 @@ def has_sign_word(text: str) -> bool:
     return _SIGN_TOKEN.search(unicodedata.normalize("NFKC", text).upper()) is not None
 
 
-def handled_by_dialogue(facts: ut.UtteranceFacts) -> bool:
-    """場所の言葉を置き換えた文の pre_check が、通るか、会話が受け持つ理由（量・方向が無い）で聞き返すときだけ真。"""
-    v = ut.pre_check(facts)
+def handled_by_dialogue(facts: ut.UtteranceFacts, updown: "ud.UpdownStatus | None" = None) -> bool:
+    """場所の言葉を置き換えた文の pre_check が、通るか、会話が受け持つ理由（量・方向が無い）で聞き返すときだけ真。
+    上下の向きが確認できていない「上に・下げて」は、pre_check が状態ごとの案内で聞き返す（会話は受け持たない）。"""
+    v = ut.pre_check(facts, None, updown)
     if v.status == "ok":
         return True
     if v.status != "ask":
@@ -269,10 +273,13 @@ def frame_candidate(job: jbi.Job, position: str) -> Candidate | None:
 
 
 # ---- 方向と量 ----
-def direction_label(d: str) -> str:
-    """X+ → 「X＋」、Z+ → 「Z＋（上）」（確認済みの向きの名前 utterance.DIRECTION_NAMES だけを添える）。"""
+def direction_label(d: str, names: Mapping | None = None) -> str:
+    """X+ → 「X＋」、Z+ → 「Z＋（上）」。names：確認済みの方向の名前（updown.UpdownStatus.direction_names）。
+    渡さなければ名前を添えない（上下の向きが確認できていないときは「（上）」「（下）」を付けない）。"""
     axis, sign = d[0], d[1]
-    name = ut.DIRECTION_NAMES.get(axis, {}).get(sign)
+    names = names if isinstance(names, Mapping) else {}
+    group = names.get(axis)
+    name = group.get(sign) if isinstance(group, Mapping) else None
     return f"{axis}{'＋' if sign == '+' else '−'}" + (f"（{name}）" if name else "")
 
 
@@ -300,11 +307,15 @@ class Slots:
     stop: bool = False  # problem を「止めた」として返す（0mm）
 
 
-def read_slots(facts: ut.UtteranceFacts, opening: bool = False) -> Slots:
+def read_slots(facts: ut.UtteranceFacts, opening: bool = False, updown: "ud.UpdownStatus | None" = None) -> Slots:
     """発話から、量（mm）・軸・向きを、はっきり言ったものだけ取り出す。あいまいなら problem（聞き返す文）。
 
     opening（始めの発話）のときは、あいまいな量（「少し」）は量なしとして扱う（あとで聞く）。
+    上下の向きが確認できていない「上に・下げて」（facts.vertical）は、Z にせず状態ごとの案内を返す。
     """
+    st = updown if isinstance(updown, ud.UpdownStatus) else ud.NOT_CONFIGURED
+    if facts.vertical and not st.confirmed:
+        return Slots(problem=st.message)
     a_list = facts.amounts
     if facts.unclear_amounts:
         if not opening:
@@ -347,6 +358,8 @@ class Dialog:
     turns: list[dict] = field(default_factory=list)
     proposal_mark: int = -1          # 位置の候補を聞いた直後の turns の数（声の肯定は、このときだけ使える）
     confirm_go: bool = False         # 手で選んだ位置で、方向と量がそろった：ボタン1つで確かめる
+    # 確認済みの方向の名前（上下の向きの照合に通ったときだけ Z の 上・下）。web/flow.py が要求のたびに入れ直す
+    direction_names: dict = field(default_factory=dict)
 
     MAX_TURNS = 40
 
@@ -401,7 +414,7 @@ class Dialog:
             amt = f"{fmt_amount(self.amount)}mm" if self.amount is not None else ""
             out = []
             for d in self.direction_choices():
-                label = direction_label(d)
+                label = direction_label(d, self.direction_names)
                 if amt:
                     label += amt if label.endswith("）") else f" {amt}"
                 out.append({"id": f"dir:{d}", "label": label})
@@ -415,7 +428,7 @@ class Dialog:
     def ask_move_message(self) -> str:
         amt = f"{fmt_amount(self.amount)}mm" if self.amount is not None else None
         if self.direction is not None:
-            return ASK_AMOUNT.format(dir=direction_label(self.direction))
+            return ASK_AMOUNT.format(dir=direction_label(self.direction, self.direction_names))
         if amt is None and self.axis is None and self.sign is None:
             msg = ASK_MOVE
         elif self.axis is not None:

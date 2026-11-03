@@ -7,6 +7,10 @@ SpeechRecognition が無いブラウザーでの表示を確かめる。
 
 使い方:  python tools/e2e_browser.py        （playwright が無ければ何もせず終わる）
 出力は一時フォルダに書く（output/ は使わない）。
+
+上下の向き（CHECKER_026 M2）：「上に10mm」を Z+10 と読むのは、上下の向きの設定の照合に通ったときだけ。
+この確認では、一時フォルダに仮の設定（実機で確かめたものではない）を書いてサーバーに渡す。records/ には書かない。
+設定が無いときの動き（案内で聞き返す・方向のボタンに「（上）」「（下）」を付けない）は check_updown_unconfirmed で確かめる。
 """
 from __future__ import annotations
 
@@ -54,6 +58,17 @@ NO_RECOGNITION = """
 Object.defineProperty(window, "SpeechRecognition", { value: undefined, configurable: true });
 Object.defineProperty(window, "webkitSpeechRecognition", { value: undefined, configurable: true });
 """
+
+
+def write_test_updown(folder: Path) -> dict:
+    """一時フォルダに、上下の向きの仮の設定（DEMO_PLACE の C00004・DEMO_C_PLACE の C00005）を書く。名前 → 場所。"""
+    from voice_teaching import jbi, updown
+    out = {}
+    for name, pos in (("DEMO_PLACE.JBI", "C00004"), ("DEMO_C_PLACE.JBI", "C00005")):
+        obj = updown.build_config(jbi.load(REPO / "samples" / "dummy" / name), [pos], updown.DEFAULT_ROBOT,
+                                  "e2e（一時フォルダの仮の設定）", "e2e 用の仮の設定。実機で確かめたものではない")
+        out[name] = updown.write_config(obj, Path(folder) / f"updown_{name}.json", overwrite=True)
+    return out
 
 
 def label_overlaps_page(page, host="#fig-3d"):
@@ -253,7 +268,9 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
     # 出力先は sim.DEFAULT_OUT_DIR に固定（呼び出し側からは選べない）。この確認の間だけ一時フォルダに差し替え、最後に戻す
     saved_out_dir = sim.DEFAULT_OUT_DIR
     sim.DEFAULT_OUT_DIR = out / "sim"
-    srv = server.make_server(port=0, interpreter=MockInterpreter())
+    updown_cfg = write_test_updown(out / "updown")
+    # はじめの通し確認は DEMO_PLACE（C00004 を「上に10mm」）。DEMO_C_PLACE の確認の前に設定を差し替える（読込のときに決まる）
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=updown_cfg["DEMO_PLACE.JBI"])
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{srv.server_address[1]}/"
     fails: list[str] = []
@@ -362,6 +379,8 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             log_text = pg.inner_text("#work-log")
             check("音声：" + FAKE_TEXT in log_text, "作業ログに音声として記録（source=voice）")
 
+            # ここからは DEMO_C_PLACE の確認が中心：上下の向きの仮の設定を DEMO_C_PLACE のものにする
+            srv.flow.updown_config = updown_cfg["DEMO_C_PLACE.JBI"]
             # 4ステップの画面（DEMO_C_PLACE をドラッグ＆ドロップ）
             check_four_steps(b, url, check, shots)
 
@@ -464,7 +483,8 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             pg4.close()
 
             check_ux_polish(b, url, check, shots)
-            check_dialog(b, check, shots, errors)
+            check_dialog(b, check, shots, errors, updown_cfg["DEMO_C_PLACE.JBI"])
+            check_updown_unconfirmed(b, check, shots, errors)
 
             # SpeechRecognition が無いブラウザー
             pg2 = b.new_page()
@@ -503,7 +523,7 @@ class CountingInterpreter:
         return self.inner.locate(*a, **k)
 
 
-def check_dialog(browser, check, shots: Path | None, errors: list) -> None:
+def check_dialog(browser, check, shots: Path | None, errors: list, updown_config=None) -> None:
     """Claude との会話（モック）：唐川さんの会話・くり返しの2択・6つの方向・承認待ちの候補・途中の打ち消し・合成でないジョブ。
 
     この確認だけ、呼ばれた回数を数える解釈の係でサーバーを別に立てる（本物の Claude は呼ばない）。
@@ -513,7 +533,7 @@ def check_dialog(browser, check, shots: Path | None, errors: list) -> None:
     from voice_teaching.web import server
 
     interp = CountingInterpreter()
-    srv = server.make_server(port=0, interpreter=interp)
+    srv = server.make_server(port=0, interpreter=interp, updown_config=updown_config)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{srv.server_address[1]}/"
 
@@ -800,6 +820,78 @@ DROP_FILE = """
   return dt;
 }
 """
+
+
+def check_updown_unconfirmed(browser, check, shots: Path | None, errors: list) -> None:
+    """上下の向きの設定が無いサーバー（CHECKER_026 M2）：「3ミリ下げて」は案内で聞き返し、「Zマイナス3ミリ」は候補。
+    会話の方向のボタンに「（上）」「（下）」を付けず、会話の「下に3ミリ」も同じ案内で聞き返す。"""
+    from voice_teaching import updown
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import server
+
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+
+    def labels(page):
+        return [t.strip() for t in page.locator("#dialog-choices button").all_inner_texts()]
+
+    def last_said(page):
+        said = page.eval_on_selector_all("#dialog-turns li .said", "els => els.map(e => e.textContent)")
+        return said[-1] if said else ""
+
+    try:
+        ctx = browser.new_context(viewport={"width": 1280, "height": 720})
+        pg = ctx.new_page()
+        pg.on("pageerror", lambda e: errors.append(f"pageerror（上下の設定なし）: {e}"))
+        pg.add_init_script(FAKE_RECOGNITION)
+        pg.goto(url)
+        pg.click("#sample-button")
+        pg.wait_for_selector("#job-area:not([hidden])")
+        pg.locator("#position-chips button", has_text="C00005").first.click()
+        until(pg, lambda: pg.inner_text("#voice-position strong") == "C00005")
+        pg.fill("#text-input", "3ミリ下げて")
+        pg.click("#text-send")
+        until(pg, lambda: pg.is_visible("#reply-message") and updown.MSG_UNCONFIRMED in pg.inner_text("#reply-message"))
+        check(pg.locator("#reply-message button.choice").count() == 0 and not pg.is_enabled("#open-confirm")
+              and pg.get_attribute("#step-4", "aria-current") != "step",
+              "上下の設定なし：「3ミリ下げて」は候補にせず、案内で聞き返す（選択肢も出さない）")
+        if shots is not None:
+            pg.screenshot(path=str(shots / "m2_unconfirmed.png"))
+        pg.fill("#text-input", "Zマイナス3ミリ")
+        pg.click("#text-send")
+        until(pg, lambda: pg.is_enabled("#open-confirm"))
+        cv = pg.inner_text("#candidate-view")
+        check("Z方向に −3.000mm" in cv and "197.000" in cv,
+              f"上下の設定なし：軸と符号を明示した「Zマイナス3ミリ」は候補にする：{cv[:60]}")
+        ctx.close()
+
+        ctx = browser.new_context(viewport={"width": 1280, "height": 720})
+        pg = ctx.new_page()
+        pg.on("pageerror", lambda e: errors.append(f"pageerror（上下の設定なし・会話）: {e}"))
+        pg.add_init_script(FAKE_RECOGNITION)
+        pg.goto(url)
+        pg.click("#sample-button")
+        pg.wait_for_selector("#job-area:not([hidden])")
+        pg.click("#talk-first")
+        until(pg, lambda: pg.get_attribute("#step-3", "aria-current") == "step")
+        pg.fill("#text-input", "置くところ")
+        pg.click("#text-send")
+        until(pg, lambda: labels(pg) == ["C00005 です", "ほかの位置"])
+        pg.fill("#text-input", "そうそう")
+        pg.click("#text-send")
+        until(pg, lambda: pg.inner_text("#voice-position strong") == "C00005")
+        check(labels(pg) == ["X＋", "X−", "Y＋", "Y−", "Z＋", "Z−"],
+              f"上下の設定なし：会話の方向のボタンに「（上）」「（下）」を付けない：{labels(pg)}")
+        pg.fill("#text-input", "下に3ミリ")
+        pg.click("#text-send")
+        until(pg, lambda: last_said(pg) == updown.MSG_UNCONFIRMED)
+        check(not pg.is_enabled("#open-confirm") and not any("（下）" in x for x in labels(pg)),
+              "上下の設定なし：会話の「下に3ミリ」も同じ案内で聞き返す（候補にしない）")
+        ctx.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
 
 
 def check_four_steps(browser, url, check, shots: Path | None) -> None:

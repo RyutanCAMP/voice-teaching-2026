@@ -99,6 +99,8 @@ def test_user_content_is_only_utterance_selected_and_position_names():
         assert job_text not in whole
 
 
+# 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
+@pytest.mark.usefixtures("updown_demo_place")
 def test_flow_sends_no_job_text_or_coordinates():
     c = client(resp(tool_use("propose_position", prop())))
     w = WebFlow(interpreter=ci.ClaudeInterpreter(KEY, client=c))
@@ -202,6 +204,8 @@ def test_refusal_gives_no_candidate_even_with_tool_use(blocks):
     assert str(e.value) == ci.REFUSED
 
 
+# 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
+@pytest.mark.usefixtures("updown_demo_place")
 @pytest.mark.parametrize("name", ["max_tokens with tool_use", "pause_turn", "text only end_turn", "unknown tool"])
 def test_bad_responses_in_flow_stop_without_candidate(name):
     c = client(BAD[name])
@@ -213,6 +217,8 @@ def test_bad_responses_in_flow_stop_without_candidate(name):
     assert r["state"]["candidate"] is None and r["tool_calls"] == []
 
 
+# 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
+@pytest.mark.usefixtures("updown_demo_c")
 @pytest.mark.parametrize("text,claude", [
     ("Yプラスに3mm", prop("C00005", "Z+", 3)),      # 発話は Y、Claude は Z
     ("Yプラスに3mm", prop("C00005", "Y-", 3)),      # 向きが逆
@@ -302,6 +308,8 @@ def test_errors_without_sdk_classes_map_by_class_name_and_status():
     assert ci.error_message(ValueError("Streaming is required")) == ci.FAILED
 
 
+# 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
+@pytest.mark.usefixtures("updown_demo_place")
 @pytest.mark.parametrize("expected,make", [
     ("AUTH", lambda: _status_error(401, "authentication_error")),
     ("BUSY", lambda: _status_error(529, "overloaded_error")),
@@ -488,6 +496,8 @@ def test_response_attribute_errors_give_fixed_message_only():
     assert str(e.value) == ci.FAILED and KEY not in str(e.value)
 
 
+# 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
+@pytest.mark.usefixtures("updown_demo_place")
 def test_huge_amount_in_flow_stops_without_candidate():
     c = client(resp(tool_use("propose_position", prop(amount=10 ** 400))))
     w = WebFlow(interpreter=ci.ClaudeInterpreter(KEY, client=c))

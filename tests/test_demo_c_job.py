@@ -40,6 +40,8 @@ def test_place_point_is_used_by_one_movl_entered_and_left_by_movl():
     assert moves[k - 1].position == "C00004" and moves[k + 1].position == "C00006"  # 真上から下りて、真上へ上がる
 
 
+# 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
+@pytest.mark.usefixtures("updown_demo_c")
 def test_full_simulation_flow_changes_only_the_place_point(tmp_path):
     """読込 → 位置選択 → 指示 → 変更候補 → 比較 → 承認 → シミュレーション用の出力"""
     data = DEMO.read_bytes()

@@ -53,7 +53,18 @@ python -m pip install -r requirements.txt
 python -m pytest -q                   # すべて通ることを確かめる
 python -m voice_teaching.web          # 表示された http://127.0.0.1:8765/ を Chrome で開く
 ```
-画面で `samples/dummy/DEMO_PLACE.JBI` を選び、位置 C00004 を選んで「この位置を上に10mm」と入力すると、確認表示 → 承認 → シミュレーション用の出力（`output/sim/` に `.JBI.txt` で書きます。実機には入れません）まで進みます。止めるときは Ctrl+C。
+画面で `samples/dummy/DEMO_PLACE.JBI` を選び、位置 C00004 を選んで「この位置をZのプラス10mm」と入力すると（「上に10mm」は、下の「上下の向きの設定」が無ければ聞き返しになります）、確認表示 → 承認 → シミュレーション用の出力（`output/sim/` に `.JBI.txt` で書きます。実機には入れません）まで進みます。止めるときは Ctrl+C。
+
+### 上下の向きの設定（CHECKER_026 M2。設定が無ければ「上・下」は使えません）
+- 「上に」「下げて」などを Z＋・Z− として読むのは、専門家が上下の向きを確かめて登録した設定（既定 `records/updown.json`。`records/` は git に入りません）の照合に通ったときだけです。床置き・架台固定の情報だけでは決めません。
+- 設定が無い・形が正しくない・確認のあとで変わった・別のジョブ（`///USER` 付き・ツール番号違いを含む）・別のロボットのときは、「上・下」を軸にせず、「Zプラス・Zマイナスのように、軸と向きで言ってください」と聞き返します。「Zマイナス3ミリ」「Z座標を3mm下げて」は設定が無くても使えます。
+- 設定を書くのは、確かめた本人が次のコマンドで（内容を表示し、`yes` と入力したときだけ書きます。AI や画面からは書きません）：
+  ```
+  python -m voice_teaching.updown register --job samples/dummy/DEMO_C_PLACE.JBI --positions C00005 --robot HC20DT --by （名前） --evidence （何で確かめたか）
+  python -m voice_teaching.updown check --job samples/dummy/DEMO_C_PLACE.JBI
+  ```
+- サーバーは `python -m voice_teaching.web --updown-config records/updown.json --robot HC20DT`（どちらも既定値）。
+- この設定は「誰が何を根拠に確かめたか」の記録で、本人確認（署名）でも、安全の保証でもありません。
 
 ### Claude API の設定（秘密の情報はリポジトリに入れない）
 - APIキーが無いときは、偽の Claude（モック）で動きます（画面と作業ログに「モック」と出ます）。

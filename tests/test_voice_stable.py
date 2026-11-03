@@ -42,6 +42,8 @@ def engineer(h):
 
 
 # ---- 1. Chrome が返す形のまま、軸と符号つきの量を読む ----
+# 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
+@pytest.mark.usefixtures("updown_demo_c")
 @pytest.mark.parametrize("text,target,delta", [
     ("Xマイナス5ミリ", "C00005 X", "-5.000"),     # 唐川さんの確認の文（「に」なし）
     ("Yプラス3ミリ", "C00005 Y", "+3.000"),

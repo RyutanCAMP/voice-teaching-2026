@@ -18,7 +18,8 @@ from pathlib import Path
 
 from .. import __version__
 from . import api
-from .flow import WebFlow
+from ..updown import DEFAULT_ROBOT
+from .flow import USE_DEFAULT, WebFlow
 
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
@@ -196,11 +197,15 @@ class Handler(BaseHTTPRequestHandler):
                 self._error(404, "ありません")
 
 
-def make_server(host: str = HOST, port: int = DEFAULT_PORT, interpreter=None) -> ThreadingHTTPServer:
-    """シミュレーション用の出力先は sim.DEFAULT_OUT_DIR（output/sim/）に固定。呼び出し側からは選べない。"""
+def make_server(host: str = HOST, port: int = DEFAULT_PORT, interpreter=None,
+                updown_config=USE_DEFAULT, robot: str = DEFAULT_ROBOT) -> ThreadingHTTPServer:
+    """シミュレーション用の出力先は sim.DEFAULT_OUT_DIR（output/sim/）に固定。呼び出し側からは選べない。
+
+    updown_config：上下の向きの設定ファイル（None なら設定なし＝未確認。渡さなければ flow.DEFAULT_UPDOWN_CONFIG）。robot：アプリで使うロボットの名前（照合で比べるだけ）。
+    """
     if host != HOST:
         raise ValueError("127.0.0.1 以外では待ち受けません")
     srv = ThreadingHTTPServer((HOST, port), Handler)
     srv.daemon_threads = True
-    srv.flow = WebFlow(interpreter=interpreter)
+    srv.flow = WebFlow(interpreter=interpreter, updown_config=updown_config, robot=robot)
     return srv

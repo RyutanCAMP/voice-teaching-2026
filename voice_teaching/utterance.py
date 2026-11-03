@@ -15,6 +15,8 @@ import unicodedata
 from dataclasses import dataclass, replace
 from typing import Mapping, Sequence
 
+from . import updown as ud
+
 # 画面にも文章にも出さない、安全や距離を断定する言葉（CLAUDE.md・受入テスト18）
 FORBIDDEN_WORDS = (
     "安全です", "安全な", "安全に", "安全でした",
@@ -702,16 +704,22 @@ class Verdict:
     choices: tuple[tuple[str, str], ...] = ()  # 聞き返しの短い選択肢（見せる文, 指示の文）。押すと、その文を指示として送る
 
 
-# 「上・下 ＝ Z±」を設定済みとみなすか（CHECKER_021 10章の未決A。本人に確認中）。
-# 今は FRAME v1.1 6章（枠が無いときは今どおり Z±）に従って True。False にすると、上・下を Z として読まず
-# 「上下の設定を確認してください」と聞き返し、聞き返しの選択肢にも［下方向へ …］を出さない
-UPDOWN_IS_Z = True
-UPDOWN_UNSET_MESSAGE = "上・下が X・Y・Z のどれに当たるかが設定されていません。上下の設定を確認してください"
+# 「上・下 ＝ Z±」は、上下の向きの設定（voice_teaching/updown.py）の照合に通ったときだけ使う（CHECKER_026 M2・11章）。
+# 照合の結果（updown.UpdownStatus）は呼ぶ側（Session）が毎回渡す。渡さなければ「未確認」として扱う（止める側）。
+# 未確認・不一致・変更済みのときは、上・下を Z として読まず、状態ごとの案内で聞き返す。選択肢にも［下方向へ …］を出さない。
+# 軸と符号を明示した指示（「Zマイナス3ミリ」）と、軸の座標の値の増減（「Z座標を3mm下げて」＝値を減らす）は、
+# 上下の向きに依存しないので、どの状態でも今どおり読む。
+UPDOWN_UNSET_MESSAGE = ud.MSG_UNCONFIRMED
 
-# 確認済みの方向の名前（軸 → 向き → 名前）。
-# 右・左（実機の確認まで未定）、前・後（止める）は未確認なので入れない（推測で足さない）
-DIRECTION_NAMES = {"Z": {"+": "上", "-": "下"}} if UPDOWN_IS_Z else {}
-DIRECTION_NAMES_SOURCE = "FRAME v1.1 6章（枠が無いときは 上・下 ＝ Z±）" if UPDOWN_IS_Z else "確認済みの方向の名前はありません"
+
+def _updown(updown: "ud.UpdownStatus | None") -> "ud.UpdownStatus":
+    return updown if isinstance(updown, ud.UpdownStatus) else ud.NOT_CONFIGURED
+
+
+def direction_names(updown: "ud.UpdownStatus | None" = None) -> dict:
+    """確認済みの方向の名前（軸 → 向き → 名前）。上下の向きの照合に通ったときだけ Z の 上・下。
+    右・左（実機の確認まで未定）、前・後（止める）は入れない（推測で足さない）。"""
+    return _updown(updown).direction_names
 
 
 OK = Verdict("ok")
@@ -744,9 +752,11 @@ def unknown_words_message(words: Sequence[str], op: str) -> str:
 QUESTION_RESTATE_MESSAGE = "質問の形の指示では変更しません。してほしいことを、もう一度言ってください"
 
 
-def pre_check(facts: UtteranceFacts, selected: str | None = None) -> Verdict:
-    """Claude に頼らず、発話だけで止める・聞き返すことが決まるかを調べる。selected：画面で選んでいる位置（文の案内だけに使う）。"""
-    v = _pre_check(facts, selected)
+def pre_check(facts: UtteranceFacts, selected: str | None = None,
+              updown: "ud.UpdownStatus | None" = None) -> Verdict:
+    """Claude に頼らず、発話だけで止める・聞き返すことが決まるかを調べる。selected：画面で選んでいる位置（文の案内だけに使う）。
+    updown：上下の向きの照合の結果（渡さなければ未確認として扱う）。"""
+    v = _pre_check(facts, selected, updown)
     if v.status != "ok" or not facts.question:
         return v
     # 疑問の形（「3mm下げて？」）：候補にせず、？を外した同じ指示でよいかを確かめる。選択肢はその文の1つだけ。
@@ -790,11 +800,14 @@ def _place_check(facts: UtteranceFacts, selected: str | None) -> Verdict:
     return _ask(f"「{p}」がどの位置か決まっていません。位置を選んでください")
 
 
-def _pre_check(facts: UtteranceFacts, selected: str | None = None) -> Verdict:
-    return _pre_check_core(facts, selected)
+def _pre_check(facts: UtteranceFacts, selected: str | None = None,
+               updown: "ud.UpdownStatus | None" = None) -> Verdict:
+    return _pre_check_core(facts, selected, updown)
 
 
-def _pre_check_core(facts: UtteranceFacts, selected: str | None = None) -> Verdict:
+def _pre_check_core(facts: UtteranceFacts, selected: str | None = None,
+                    updown: "ud.UpdownStatus | None" = None) -> Verdict:
+    st = _updown(updown)
     found = facts.negations + facts.undo_negations
     if found:
         # 打ち消しの言葉を捨てて、言ったことと逆の操作にしない。選択・比較・元に戻すも含めて、いちばん先に止める（選択肢も出さない）。
@@ -850,15 +863,16 @@ def _pre_check_core(facts: UtteranceFacts, selected: str | None = None) -> Verdi
                 sign, v, w = facts.axis_signs[0], _num(a.value), _where(facts)
                 up = sign > 0
                 choices = ((f"{other}座標を {'+' if up else '−'}{v}mm", f"{w}{other}座標を{v}mm{'上げて' if up else '下げて'}"),)
-                if UPDOWN_IS_Z:
+                if st.confirmed:
                     choices += ((f"{'上' if up else '下'}方向へ {v}mm", f"{w}{'上' if up else '下'}に{v}mm"),)
-            if not UPDOWN_IS_Z:
-                return _ask(f"{other} の値を変えるなら「{other}座標を…上げて／下げて」と言ってください。" + UPDOWN_UNSET_MESSAGE, choices)
+            if not st.confirmed:
+                return _ask(f"{other} の値を変えるなら「{other}座標を…上げて／下げて」と言ってください。" + st.message, choices)
             return _ask(f"{other} と、上げ・下げ（上下＝Z）の2つの読み方があります。"
                         f"{other} の値なら「{other}座標を…上げて／下げて」、上下なら「上に…／下に…」のように言ってください",
                         choices)
-        if facts.vertical and not UPDOWN_IS_Z:
-            return _ask(UPDOWN_UNSET_MESSAGE)
+        if facts.vertical and not st.confirmed:
+            # 上下の向きが確認できていない：上・下を Z にしない。状態ごとの案内（未確認・不一致・変更済み）。選択肢は出さない
+            return _ask(st.message)
         v = _amount_check(facts, "mm", "何mm動かしますか？")
         if v is not OK:
             return v
@@ -979,9 +993,10 @@ def _fmt(x: float) -> str:
 
 
 def check_proposal(facts: UtteranceFacts, proposals: "ProposedChange | Sequence[ProposedChange]",
-                   selected: str | None = None) -> Verdict:
-    """提案を、発話から取り出した事実と照らし合わせる（受入テスト5・7・11・16）。"""
-    v = pre_check(facts, selected)
+                   selected: str | None = None, updown: "ud.UpdownStatus | None" = None) -> Verdict:
+    """提案を、発話から取り出した事実と照らし合わせる（受入テスト5・7・11・16）。
+    上下の向きが確認済みでなければ、上・下から Z を作った発話（facts.vertical）の提案は pre_check で通さない。"""
+    v = pre_check(facts, selected, updown)
     if v.status != "ok":
         return v
     plist = [proposals] if isinstance(proposals, ProposedChange) else list(proposals)

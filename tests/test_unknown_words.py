@@ -18,6 +18,11 @@ from voice_teaching.web.flow import WebFlow
 
 DEMO_C = (Path(__file__).resolve().parent.parent / "samples" / "dummy" / "DEMO_C_PLACE.JBI").read_bytes()
 
+# 上下の向き（CHECKER_026 M2）：このファイルは、発話の読み取り（「上・下・上げ・下げ」を Z± として読むことを含む）を
+# 確かめるテスト。上・下を Z にするのは上下の向きの照合に通ったときだけなので、ファイルの全テストに
+# 一時フォルダの確認済みの設定（DEMO_C_PLACE。conftest.updown_demo_c）を当てる。設定が無いときの動きは tests/test_updown.py
+pytestmark = pytest.mark.usefixtures("updown_demo_c")
+
 
 def hear(text, source="voice"):
     w = WebFlow()

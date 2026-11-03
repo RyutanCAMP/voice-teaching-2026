@@ -9,10 +9,17 @@ from pathlib import Path
 
 import pytest
 
+from voice_teaching import updown as ud
 from voice_teaching import utterance as ut
+from voice_teaching.web import flow as flow_mod
 from voice_teaching.web.flow import WebFlow
 
 DEMO_C = (Path(__file__).resolve().parent.parent / "samples" / "dummy" / "DEMO_C_PLACE.JBI").read_bytes()
+
+# 上下の向き（CHECKER_026 M2）：このファイルは、発話の読み取り（「上・下・上げ・下げ」を Z± として読むことを含む）を
+# 確かめるテスト。上・下を Z にするのは上下の向きの照合に通ったときだけなので、ファイルの全テストに
+# 一時フォルダの確認済みの設定（DEMO_C_PLACE。conftest.updown_demo_c）を当てる。設定が無いときの動きは tests/test_updown.py
+pytestmark = pytest.mark.usefixtures("updown_demo_c")
 
 
 def flow():
@@ -155,23 +162,29 @@ def test_no_choices_when_amount_is_unclear():
 
 
 def test_undecided_a_switch_removes_updown(monkeypatch):
-    # 未決A：上・下＝Z± を「未設定」とした場合、上下を確定させず、［下方向へ］を出さない
-    monkeypatch.setattr(ut, "UPDOWN_IS_Z", False)
+    # 未決A → CHECKER_026 M2 で決定（A案）：上下の向きの設定が無いときは、上下を確定させず、［下方向へ］を出さない。
+    # 旧：utterance.UPDOWN_IS_Z = False に切り替えて確かめた。今は全体の固定値が無く、設定ファイルの照合で決まる。
+    # 期待を「聞き返し」に直した（案内の文は updown.MSG_UNCONFIRMED。旧文「上下の設定を確認してください」は使わない）
+    monkeypatch.setattr(flow_mod, "DEFAULT_UPDOWN_CONFIG", None)  # このテストだけ、設定なし
     r = hear("Yを3mm下げて")
     assert r["status"] == "ask" and [c["label"] for c in r["choices"]] == ["Y座標を −3mm"]
-    assert "上下の設定を確認してください" in r["message"]
+    assert ud.MSG_UNCONFIRMED in r["message"]
     r = hear("下に3mm")
-    assert r["status"] == "ask" and cand(r) is None and "上下の設定を確認してください" in r["message"]
+    assert r["status"] == "ask" and cand(r) is None and r["message"] == ud.MSG_UNCONFIRMED
     assert cand(hear("Y座標を3mm下げて")) == ("Y", "-3.000")  # 座標の値の増減は上下の設定に関係しない
 
 
-def test_direction_names_are_only_the_confirmed_ones():
+def test_direction_names_are_only_the_confirmed_ones(monkeypatch):
     w, sid = flow()
     st = w.hear(sid, "上に2mm", source="voice")["state"]
-    assert st["direction_names"] == {"Z": {"+": "上", "-": "下"}}  # 右・前 などは無い
+    assert st["direction_names"] == {"Z": {"+": "上", "-": "下"}}  # 右・前 などは無い（確認済みの設定のとき）
     c = st["candidate"]
     assert c["heard"] == "上に2mm" and c["before_xyz"] == ["400.000", "150.000", "200.000"]
     assert c["after_xyz"] == ["400.000", "150.000", "202.000"]
+    # CHECKER_026 M2：設定が無ければ方向の名前は1つも無い（期待を足した）
+    monkeypatch.setattr(flow_mod, "DEFAULT_UPDOWN_CONFIG", None)
+    w, sid = flow()
+    assert w.state(sid)["state"]["direction_names"] == {}
 
 
 # ---- 内部 Safety レビュー（955f47c）の P1・P2 ----

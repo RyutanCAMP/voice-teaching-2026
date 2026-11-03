@@ -16,7 +16,9 @@
 - 道具は propose_position と ask_user の2つ（strict）。tool_choice は auto（今のモデルでは any / tool は使えない）。
   応答は stop_reason を先に確かめ、tool_use がちょうど1件・名前が2つのどちらかのときだけ使う。自由文は使わない。
 - 結果は道具の呼び出し（mock_claude と同じ形）に変換し、Session.propose → utterance.check_proposal に必ず通す。
-  上→Z+、下→Z−（FRAME v1.1 6章：枠が無いときの今の決まり）。右・左は軸が決まっていないので聞き返す。
+  上→Z+、下→Z− に変えるのはプログラム（_AXIS_DIR）。ただし上下の向きの設定（voice_teaching/updown.py）の照合に
+  通っていないときは、上・下から Z を作った発話は check_proposal（pre_check）が通さない（CHECKER_026 M2）。
+  そもそも未確認のときは、その発話を Claude に送る前に聞き返す。右・左は軸が決まっていないので聞き返す。
   発話に軸と向きがあれば（「Yプラスに3mm」など）、方向は X+・X-・Y+・Y-・Z+・Z- で返させる。
 """
 from __future__ import annotations

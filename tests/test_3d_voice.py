@@ -47,6 +47,8 @@ def test_u1_open_confirm_lists_every_candidate_warning():
     assert ".slice(" not in body and ".filter(" not in body  # 一部だけにしない
 
 
+# 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
+@pytest.mark.usefixtures("updown_demo_c")
 def test_u1_candidate_has_warnings_to_show():
     wf = WebFlow(interpreter=MockInterpreter())
     sid = wf.load(DEMO_C.read_bytes())["session_id"]
@@ -132,6 +134,8 @@ def test_live_mic_turns_off_after_a_while():
 
 
 # ---- 内部 Safety 再レビュー #1：「量を超えています」の見出しは、移動量の上限を超えたときだけ ----
+# 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
+@pytest.mark.usefixtures("updown_demo_c")
 def test_limit_heading_only_for_amount_limit():
     j = text("app.js")
     m = re.search(r'else if \(/(.+?)/\.test\(message \|\| ""\)\) box\.replaceChildren\(friendly\("limit"', j)
