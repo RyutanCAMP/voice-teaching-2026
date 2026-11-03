@@ -101,7 +101,7 @@ test('updownStatus: four states', () => {
   assert.deepEqual(updownStatus({ status: 'unconfirmed' }), { text: '上下の向き：未確認（Z＋・Z−で指示）', tone: 'unconfirmed', title: '' });
   assert.deepEqual(updownStatus({ status: 'confirmed', confirmed_by: '唐川', confirmed_at: '2026-11-03T14:00:00+09:00', message: 'FRAME の設定で確認' }),
     { text: '上下の向き：確認済み', tone: 'confirmed', title: '確認：唐川・11/3 14:00。FRAME の設定で確認' });
-  assert.equal(updownStatus({ status: 'mismatch' }).text, '上下の向き：確認したジョブと違います');
+  assert.equal(updownStatus({ status: 'mismatch' }).text, '上下の向き：確認した座標系・ツールと違います');
   assert.equal(updownStatus({ status: 'mismatch' }).tone, 'warn');
   assert.equal(updownStatus({ status: 'changed' }).text, '上下の向き：設定が変わっています');
   assert.equal(updownStatus({ status: 'changed' }).tone, 'warn');

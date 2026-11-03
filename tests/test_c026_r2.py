@@ -34,6 +34,12 @@ DEMO_C = DEMO_C_PATH.read_bytes()
 DEMO = (ROOT / "samples" / "dummy" / "DEMO_PLACE.JBI").read_bytes()
 NL = b"\r\n" if b"\r\n" in DEMO_C else b"\n"
 WITH_USER = DEMO_C.replace(b"///TOOL 0" + NL, b"///TOOL 0" + NL + b"///USER 1" + NL)
+TOOL_1 = DEMO_C.replace(b"///TOOL 0" + NL, b"///TOOL 1" + NL)
+# 相対ジョブ（RJ・FRAME ROBOT）にした DEMO_C（ツール番号は DEMO_RJ_XYZ と同じ 8）。FRAME USER 1 にしたもの
+RJ_ROBOT = (DEMO_C.replace(b"///TOOL 0" + NL, b"///TOOL 8" + NL)
+            .replace(b"///ATTR SC,RW" + NL, b"///ATTR SC,RW,RJ" + NL + b"////FRAME ROBOT" + NL))
+FRAME_USER1 = DEMO_C.replace(b"///ATTR SC,RW" + NL, b"///ATTR SC,RW,RJ" + NL + b"////FRAME USER 1" + NL)
+assert TOOL_1 != DEMO_C and RJ_ROBOT.count(b"////FRAME ROBOT") == 1 and FRAME_USER1 != DEMO_C
 SOURCES = ["voice", "text"]
 LABELS = ["変更したい", "説明です"]
 TAIL = "それとも操作の説明でしょうか？"
@@ -59,8 +65,15 @@ def _config(kind, make_updown, tmp_path):
         return path, DEMO_C, updown.DEFAULT_ROBOT, updown.MSG_CHANGED
     if kind == "mismatch":  # 不一致（///USER 付き）
         return path, WITH_USER, updown.DEFAULT_ROBOT, updown.MSG_MISMATCH
-    if kind == "mismatch_job":  # 不一致（別のジョブ）
-        return path, DEMO, updown.DEFAULT_ROBOT, updown.MSG_MISMATCH
+    if kind == "other_job_same_coordinate":  # 別のジョブでも座標系が同じなら、上下の向きは確認済み（CHECKER_028 K4）
+        return path, DEMO, updown.DEFAULT_ROBOT, None
+    if kind == "mismatch_tool":  # 不一致（ツール番号が違う）
+        return path, TOOL_1, updown.DEFAULT_ROBOT, updown.MSG_MISMATCH
+    if kind == "mismatch_frame_user":  # 不一致（FRAME USER 1）
+        return path, FRAME_USER1, updown.DEFAULT_ROBOT, updown.MSG_MISMATCH
+    if kind == "mismatch_rj":  # 不一致（RJ の有無だけが違う：相対ジョブの設定で、相対でないジョブ）
+        rj_path = make_updown(job=RJ_ROBOT, name="updown_rj.json")
+        return rj_path, DEMO_C.replace(b"///TOOL 0" + NL, b"///TOOL 8" + NL), updown.DEFAULT_ROBOT, updown.MSG_MISMATCH
     if kind == "mismatch_robot":  # 不一致（ロボット名が違う）
         return path, DEMO_C, "GP25", updown.MSG_MISMATCH
     if kind == "confirmed":
@@ -324,10 +337,13 @@ def test_p0_dialog_confirmed_up_still_works(make_updown, tmp_path):
     assert cand(r) == ("C00005 Z", "+3.000"), r["message"]
 
 
-@pytest.mark.parametrize("kind", ["mismatch_job", "mismatch_robot"])
+# QA P2 で足した「別のジョブ」は、CHECKER_028 K4（上下の向きはジョブの中身で照合しない）で不一致ではなくなった。
+# 不一致の例は、ロボット名違い・ツール番号違い・///USER 付き（mismatch）・FRAME USER 1・RJ の有無の違いに置き換えた。
+# 「別のジョブで座標系が同じ」は確認済みになることを test_other_job_same_coordinate_is_confirmed で確かめる
+@pytest.mark.parametrize("kind", ["mismatch_robot", "mismatch_tool", "mismatch", "mismatch_frame_user", "mismatch_rj"])
 @pytest.mark.parametrize("answer", ["上に3ミリ", "3ミリ下げて"])
 def test_dialog_mismatch_other_job_and_robot(kind, answer, make_updown, tmp_path):
-    # QA P2：会話の不一致に「別のジョブ」「ロボット名違い」を足す
+    # QA P2：会話の不一致（ロボット名違いと、座標系・ツールの違い）
     w, sid, msg = start(kind, make_updown, tmp_path, select="C00001")
     r = w.hear(sid, "置くところ")
     if r["state"]["dialog"]["step"] == "confirm_position":
@@ -635,3 +651,12 @@ def test_value_change_and_up_down_combinations(texts, unconf, conf, kind, source
     if want is None:
         assert r["status"] != "ok" and r["state"]["can_approve"] is False
         assert w.approve(sid, "テスト太郎")["ok"] is False and w.export(sid)["ok"] is False
+
+
+@pytest.mark.parametrize("answer,want", [("上に3ミリ", ("C00004 Z", "+3.000")), ("3ミリ下げて", ("C00004 Z", "-3.000"))])
+def test_other_job_same_coordinate_is_confirmed(answer, want, make_updown, tmp_path):
+    # CHECKER_028 K4：別のジョブ（DEMO_PLACE）でも、ロボット名・座標系・ツール番号が同じなら上下の向きは確認済み
+    w, sid, msg = start("other_job_same_coordinate", make_updown, tmp_path, select="C00004")
+    assert msg is None and w.state(sid)["state"]["updown"]["status"] == "confirmed"
+    r = w.hear(sid, answer)
+    assert cand(r) == want, r["message"]

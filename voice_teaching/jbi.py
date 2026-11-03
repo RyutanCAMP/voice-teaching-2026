@@ -63,6 +63,17 @@ _ANY_MOVE = re.compile(r"(?<![A-Z0-9_])(MOV[LJCS]|SMOV[LJCS]|IMOV)(?![A-Z0-9_])"
 _FLOW = re.compile(r"(?<![A-Z0-9_])(JUMP|CALL|RET)(?![A-Z0-9_])", re.IGNORECASE)
 
 _KNOWN_INST_DIRECTIVES = {"DATE", "ATTR", "COMM"}
+# 相対ジョブの FRAME の行（CHECKER_027 X2。唐川さんの決定 2026-11-03）。認める形はこの1つだけ（斜線4本・値 ROBOT）。
+# 次のすべてを満たすときだけ「知らない指示行」にしない（_check_frame）：
+#   ///POSTYPE ROBOT と ///RECTAN がある、///ATTR に RJ がある、///USER が無い、
+#   FRAME の行は1回だけで、INST 部の指示行の並び（///ATTR の後、命令より前）にある
+# 斜線4本の意味は公開資料では未確認（ペンダントの表示では ROBOT 座標）。ほかの形は止める
+FRAME_ROBOT_LINE = "////FRAME ROBOT"
+_FRAME_PLACE = "扱えません：FRAME の行が、INST 部の指示行の並び（///ATTR の後、命令より前）にありません"
+_RJ_NO_FRAME = "相対ジョブ（RJ）ですが、座標系（FRAME）の行がありません"
+_FRAME_NO_RJ = "扱えません：///ATTR に RJ（相対ジョブ）がありません（///ATTR の行は1つだけを扱います）"
+# FRAME の行らしいもの（斜線の本数・大文字小文字・空白の違いも拾い、止める理由をはっきり出す）
+_FRAME_LIKE = re.compile(r"/{2,}\s*FRAME(?![A-Za-z0-9_])", re.IGNORECASE)
 # INST部の命令の許可リスト（仮。今のコード・ダミー・仕様に出てくるものだけ。実機サンプルで本人と確定する）
 KNOWN_INST_COMMANDS = frozenset({
     "NOP", "END", "MOVL", "MOVJ", "MOVC", "MOVS", "DOUT", "TIMER", "JUMP", "CALL", "RET",
@@ -166,6 +177,9 @@ class Job:
     encoding: str = "utf-8"
     # 累積の検査の基準：最初に読み込んだ元のジョブの位置の値。変更後の Job に引き継ぐ
     baseline: dict[str, tuple[float, ...]] = field(default_factory=dict)
+    # 相対ジョブの座標系。「////FRAME ROBOT」を決定の条件どおりに認めたときだけ "ROBOT"。それ以外は None
+    # （problems ではない情報。相対ジョブは行き先がツールの設定にも左右されるので、ツール番号の注意は今どおり出す）
+    relative_frame: str | None = None
 
     # ---- 書き出し・情報 ----
     def render(self) -> str:
@@ -469,12 +483,18 @@ def parse(text: str, encoding: str = "utf-8") -> Job:
     npos_count = None
     c_lines = 0
     ended = False
+    # FRAME の行の判定に使う（ファイルの最後でまとめて判定する。_check_frame）
+    attr_args: list[str] = []
+    attr_lines: list[tuple[int, str]] = []  # ///ATTR の行（行, 中身）。RJ があるのに FRAME が無いときの理由に使う
+    frames: list[tuple[int, str, str | None]] = []  # (行, 行の中身, 場所の問題)
+    inst_body_seen = False  # INST 部で、指示行でない行（命令・コメント）がもう出たか
 
     def problem(i: int, body: str, why: str) -> None:
         job.problems.append(f"{i + 1}行目「{body}」は{why}")
 
     for i, line in enumerate(lines):
         body, _ = _split_ending(line)
+        raw_body = body
         if _BAD_CHARS.search(body):
             problem(i, body.encode("unicode_escape").decode("ascii"), "行の中に読めない文字があります")
             continue
@@ -513,6 +533,10 @@ def parse(text: str, encoding: str = "utf-8") -> Job:
             continue
 
         if section == "POS":
+            if _FRAME_LIKE.match(body):
+                problem(i, body, "扱えません：FRAME の行は INST 部の指示行の並びにだけ置けます（POS 部にあります）")
+                unknown = True  # 以降の位置は変更しない
+                continue
             if body.startswith("///"):
                 word, sep, arg = body[3:].partition(" ")
                 if word not in _POS_DIRECTIVE_ARGS:
@@ -569,8 +593,24 @@ def parse(text: str, encoding: str = "utf-8") -> Job:
             continue
 
         # INST部
+        if _FRAME_LIKE.match(body):
+            if body != FRAME_ROBOT_LINE:
+                problem(i, body, f"扱えません：FRAME の行は、ちょうど「{FRAME_ROBOT_LINE}」の形だけを扱います")
+                frames.append((i, body, "形"))
+            elif raw_body != body:
+                frames.append((i, body, "形"))  # 前後の空白は、上で problems に入れてある
+            elif inst_body_seen:
+                frames.append((i, body, _FRAME_PLACE))
+            elif not attr_args:
+                frames.append((i, body, "ATTR前"))
+            else:
+                frames.append((i, body, None))
+            continue
         if body.startswith("///"):
             word, sep, arg = body[3:].partition(" ")
+            if word == "ATTR":
+                attr_args.append(arg if sep == " " else "")
+                attr_lines.append((i, body))
             if word.startswith("GROUP"):
                 if body != "///GROUP1 RB1":
                     problem(i, body, "ロボット1台（GROUP1 RB1）以外の軸グループです")
@@ -580,6 +620,7 @@ def parse(text: str, encoding: str = "utf-8") -> Job:
             elif word not in _KNOWN_INST_DIRECTIVES:
                 problem(i, body, "知らない指示行です")
             continue
+        inst_body_seen = True
         if body.startswith("'"):
             continue  # コメント行は命令として扱わない
         words = body.split()
@@ -607,8 +648,62 @@ def parse(text: str, encoding: str = "utf-8") -> Job:
     if not ended:
         # END の無いジョブは、途中で切れたファイルかもしれない。命令の終わりが確かめられないので止める
         job.problems.append("END の命令がありません（ファイルが途中で切れているかもしれません）")
+    job.relative_frame = _check_frame(job, frames, attr_args, attr_lines)
     job.baseline = {name: p.values for name, p in job.positions.items()}
     return job
+
+
+def _check_frame(job: Job, frames: list[tuple[int, str, str | None]], attr_args: list[str],
+                 attr_lines: list[tuple[int, str]]) -> str | None:
+    """「////FRAME ROBOT」の行を、決定の条件をすべて満たすときだけ認める（"ROBOT" を返す）。
+
+    満たさなければ、FRAME の行ごとに理由を problems に入れて None を返す（止める側）。
+    形の違う FRAME の行（"形"）は、読んだときに problems に入れてある。
+    """
+    if not frames:
+        # 相対ジョブ（///ATTR の RJ）なのに座標系の行が無いジョブは、座標系が分からないので止める（CHECKER_028 K3・F4）
+        for (i, body), arg in zip(attr_lines, attr_args):
+            if "RJ" in arg.split(","):
+                job.problems.append(f"{i + 1}行目「{body}」は扱えません：{_RJ_NO_FRAME}")
+        return None
+    if len(frames) >= 2:
+        for i, body, where in frames:
+            if where != "形":
+                job.problems.append(f"{i + 1}行目「{body}」は扱えません：FRAME の行が2回以上あります")
+        return None
+    i, body, where = frames[0]
+    if where == "形":
+        return None
+    if where == "ATTR前":  # ///ATTR が無ければ RJ の条件、後ろにあれば場所の条件で止める
+        why = _FRAME_PLACE + "（///ATTR より前にあります）" if attr_args else _FRAME_NO_RJ
+    else:
+        why = where
+    if why is None:
+        why = _frame_condition_problem(job, attr_args)
+    if why is not None:
+        job.problems.append(f"{i + 1}行目「{body}」は{why}")
+        return None
+    return "ROBOT"
+
+
+def _frame_condition_problem(job: Job, attr_args: list[str]) -> str | None:
+    """FRAME の行のほかの条件（ATTR の RJ・POSTYPE ROBOT・RECTAN・USER なし）。合わなければ理由。"""
+    if len(attr_args) != 1 or "RJ" not in attr_args[0].split(","):
+        return _FRAME_NO_RJ
+    bodies = [_split_ending(line)[0] for line in job.lines]
+    if any(b.startswith("///USER") for b in bodies):
+        return "扱えません：///USER の指定があるジョブです"
+    postypes = [b for b in bodies if b.startswith("///POSTYPE")]
+    if (not postypes or any(b != "///POSTYPE ROBOT" for b in postypes) or "///RECTAN" not in bodies
+            or "///PULSE" in bodies or not job.positions
+            or any(p.postype != "ROBOT" or not p.rectan or p.user is not None for p in job.positions.values())):
+        return "扱えません：///POSTYPE ROBOT と ///RECTAN の位置だけのジョブではありません"
+    return None
+
+
+def is_frame_line(body: str) -> bool:
+    """FRAME の行らしいもの（形が違うものも含む）か。照合（updown）で使う。"""
+    return _FRAME_LIKE.match(body) is not None
 
 
 def _parse_instruction(index: int, text: str) -> Instruction:

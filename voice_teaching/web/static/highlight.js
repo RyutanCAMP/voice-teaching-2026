@@ -104,7 +104,7 @@ export function updownStatus(u) {
     const by = who.length ? `確認：${who.join("・")}` : "";
     return { text: "上下の向き：確認済み", tone: "confirmed", title: [by, title].filter((x) => x).join("。") };
   }
-  if (u.status === "mismatch") return { text: "上下の向き：確認したジョブと違います", tone: "warn", title };
+  if (u.status === "mismatch") return { text: "上下の向き：確認した座標系・ツールと違います", tone: "warn", title };
   if (u.status === "changed") return { text: "上下の向き：設定が変わっています", tone: "warn", title };
   return { text: "上下の向き：未確認（Z＋・Z−で指示）", tone: "unconfirmed", title: u.status === "unconfirmed" ? title : "" };
 }

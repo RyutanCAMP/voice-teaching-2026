@@ -15,7 +15,7 @@ import pytest
 
 from voice_teaching import claude_interpreter as ci
 from voice_teaching import dialog as dg
-from voice_teaching import jbi, sim, updown
+from voice_teaching import jbi, job_scope, sim, updown
 from voice_teaching import utterance as ut
 from voice_teaching.session import Session
 from voice_teaching.web import flow as flow_mod
@@ -68,11 +68,11 @@ def refingerprint(path):
 
 
 # ======================================================================
-# 0. structure_hash（FRAME v1.1 2章）と設定の指紋
+# 0. structure_hash（FRAME v1.1 2章。CHECKER_028 K4 で上下の照合から外し、job_scope の部品にした）と設定の指紋
 # ======================================================================
 def test_structure_hash_masks_xyz_of_listed_positions_only():
     job = jbi.parse_bytes(DEMO_C)
-    h = updown.structure_hash(job, ["C00005"])
+    h = job_scope.structure_hash(job, ["C00005"])
     # 手で同じ計算：//NAME・///DATE を除き、C00005 の X,Y,Z を * にして、改行を \n にそろえる
     lines = []
     for line in DEMO_C.decode("ascii").splitlines():
@@ -86,18 +86,18 @@ def test_structure_hash_masks_xyz_of_listed_positions_only():
     other = jbi.parse_bytes(DEMO_C.replace(b"//NAME DEMO_C_PLACE", b"//NAME DEMO_C_PLACE_SIM")
                             .replace(b"///DATE 2026/11/02 18:30", b"///DATE 2026/11/04 09:00")
                             .replace(b"C00005=400.000,150.000,200.000", b"C00005=401.000,149.000,197.000"))
-    assert updown.structure_hash(other, ["C00005"]) == h
+    assert job_scope.structure_hash(other, ["C00005"]) == h
     rx = jbi.parse_bytes(DEMO_C.replace(b"C00005=400.000,150.000,200.000,180.00", b"C00005=400.000,150.000,200.000,179.00"))
-    assert updown.structure_hash(rx, ["C00005"]) != h  # Rx 以降は伏せない
+    assert job_scope.structure_hash(rx, ["C00005"]) != h  # Rx 以降は伏せない
     c4 = jbi.parse_bytes(DEMO_C.replace(b"C00004=400.000,150.000,300.000", b"C00004=400.000,150.000,301.000"))
-    assert updown.structure_hash(c4, ["C00005"]) != h
-    assert updown.structure_hash(job, ["C00004", "C00005"]) != h
-    with pytest.raises(updown.UpdownError):
-        updown.structure_hash(job, ["C00099"])
+    assert job_scope.structure_hash(c4, ["C00005"]) != h
+    assert job_scope.structure_hash(job, ["C00004", "C00005"]) != h
+    with pytest.raises(job_scope.ScopeError):
+        job_scope.structure_hash(job, ["C00099"])
     # 改行を CRLF・LF のどちらにしても同じ（改行を \n にそろえる）
     lf = DEMO_C.replace(b"\r\n", b"\n")
-    assert updown.structure_hash(jbi.parse_bytes(lf), ["C00005"]) == h
-    assert updown.structure_hash(jbi.parse_bytes(lf.replace(b"\n", b"\r\n")), ["C00005"]) == h
+    assert job_scope.structure_hash(jbi.parse_bytes(lf), ["C00005"]) == h
+    assert job_scope.structure_hash(jbi.parse_bytes(lf.replace(b"\n", b"\r\n")), ["C00005"]) == h
 
 
 def test_fingerprint_ignores_order_and_spaces_but_not_values(make_updown):
@@ -116,8 +116,9 @@ def test_config_has_the_items_of_11_1(make_updown):
     assert obj["directions"] == {"上": "Z+", "下": "Z-"}
     assert obj["confirmed_by"] and obj["confirmed_at"] and obj["evidence"]
     assert obj["robot"] == "HC20DT"
-    assert obj["job"]["positions"] == ["C00005"] and len(obj["job"]["structure_hash"]) == 64
-    assert obj["coordinate"] == {"postype": "ROBOT", "rectan": True, "user": None, "tool": 0}
+    assert "job" not in obj  # CHECKER_028 K4：上下の向きの設定は JOB の中身（structure_hash・positions）を持たない
+    assert obj["coordinate"] == {"postype": "ROBOT", "rectan": True, "user": None, "tool": 0,
+                                 "frame": None, "rj": False}  # FRAME・ATTR の RJ も照合する
     assert obj["fingerprint"] == updown.content_fingerprint(obj)
 
 
@@ -265,8 +266,7 @@ def test_direction_label_needs_names():
     lambda o: o.__setitem__("evidence", o["evidence"] + "。"),
     lambda o: o.__setitem__("confirmed_by", o["confirmed_by"] + "x"),
     lambda o: o.__setitem__("robot", "HC20DU"),
-    lambda o: o["job"].__setitem__("structure_hash", ("0" if o["job"]["structure_hash"][0] != "0" else "1")
-                                   + o["job"]["structure_hash"][1:]),
+    lambda o: o["coordinate"].__setitem__("tool", 1),  # K4：structure_hash の項目は無い。座標系の値を変える
     lambda o: o.__setitem__("fingerprint", ("0" if o["fingerprint"][0] != "0" else "1") + o["fingerprint"][1:]),
 ])
 def test_3_changed_config_gives_changed_message(change, make_updown):
@@ -292,10 +292,19 @@ def test_3_one_byte_edit_in_file_text(make_updown):
 # ======================================================================
 # 4. 別の JOB／///USER 付き／ツール番号違い（／ロボット違い） → 不一致の案内
 # ======================================================================
-@pytest.mark.parametrize("data", [DEMO, WITH_USER, TOOL_1], ids=["other_job", "user", "tool"])
-def test_4_other_job_user_or_tool_gives_mismatch(data, make_updown):
+def test_4_other_job_with_same_coordinate_is_confirmed(make_updown):
+    # CHECKER_028 K4（唐川さんの指示）：上下の向きはロボットの設置と座標系の性質。JOB の中身（位置・命令）だけが
+    # 違うジョブは、上下の向きとしては確認済みになる（前は「別の JOB」で不一致だった。設計の変更）
+    w, sid = start(make_updown(), data=DEMO, select="C00004")
+    r = w.hear(sid, "3ミリ下げて")
+    assert r["state"]["updown"]["status"] == "confirmed"
+    assert cand(r) == ("C00004 Z", "-3.000")
+
+
+@pytest.mark.parametrize("data", [WITH_USER, TOOL_1], ids=["user", "tool"])
+def test_4_user_or_tool_gives_mismatch(data, make_updown):
     w, sid = start(make_updown(), data=data, select=None)
-    pos = "C00005" if data is not DEMO else "C00004"
+    pos = "C00005"
     w.select(sid, pos)
     for text in ("3ミリ下げて", "置くところを3ミリ上げて"):
         r = w.hear(sid, text)
@@ -309,14 +318,9 @@ def test_4_other_job_user_or_tool_gives_mismatch(data, make_updown):
 def test_4_user_job_registered_by_hand_still_mismatches_on_coordinate(make_updown):
     # ///USER 付きのジョブの指紋で設定を書いても（register は断る）、座標系の照合で不一致
     with pytest.raises(updown.UpdownError):
-        updown.build_config(jbi.parse_bytes(WITH_USER), ["C00005"], "HC20DT", "x", "y")
+        updown.build_config(jbi.parse_bytes(WITH_USER), "HC20DT", "x", "y")
     path = make_updown()
     job = jbi.parse_bytes(WITH_USER)
-
-    def to_user_job(o):
-        o["job"]["structure_hash"] = updown.structure_hash(job, ["C00005"])
-    rewrite(path, to_user_job)
-    refingerprint(path)
     st = updown.check(job, path)
     assert st.status == "mismatch" and "USER" in st.reason
 
@@ -339,7 +343,7 @@ def test_4_robot_name_must_match(make_updown):
 def test_4_pulse_job_mismatches():
     data = (ROOT / "samples" / "dummy" / "PAT_POSTYPE_PULSE.JBI").read_bytes()
     with pytest.raises(updown.UpdownError):
-        updown.build_config(jbi.parse_bytes(data), ["C00000"], "HC20DT", "x", "y")
+        updown.build_config(jbi.parse_bytes(data), "HC20DT", "x", "y")
 
 
 # ======================================================================
@@ -358,9 +362,13 @@ def test_5_reloaded_sim_output_stays_confirmed(make_updown):
     assert w2.state(sid2)["state"]["updown"]["status"] == "confirmed"
     r = w2.hear(sid2, "2ミリ下げて")
     assert r["status"] == "ok" and cand(r) == ("C00005 Z", "-2.000")
-    # C00005 以外を直した ジョブ は当たらない
+    # CHECKER_028 K4：C00005 以外を直したジョブも、座標系が同じなら上下の向きとしては確認済み（前は不一致）。
+    # どの位置を変えてよいかは job_scope（FRAME v1.1）で別に照合する
     other = DEMO_C.replace(b"C00004=400.000,150.000,300.000", b"C00004=400.000,150.000,297.000")
-    assert updown.check(jbi.parse_bytes(other), path).status == "mismatch"
+    assert updown.check(jbi.parse_bytes(other), path).status == "confirmed"
+    h = job_scope.structure_hash(jbi.parse_bytes(DEMO_C), ["C00005"])
+    assert job_scope.matches(jbi.parse_bytes(data), h, ["C00005"]) is True
+    assert job_scope.matches(jbi.parse_bytes(other), h, ["C00005"]) is False
 
 
 # ======================================================================
@@ -374,7 +382,8 @@ BROKEN = {
     "up_Z_minus": lambda o: o["directions"].__setitem__("上", "Z-"),
     "unknown_item": lambda o: o.__setitem__("note", "x"),
     "unknown_direction": lambda o: o["directions"].__setitem__("右", "Y+"),
-    "unknown_job_item": lambda o: o["job"].__setitem__("extra", 1),
+    "old_job_item": lambda o: o.__setitem__("job", {"name": "DEMO_C_PLACE", "structure_hash": "0" * 64,
+                                                    "positions": ["C00005"]}),  # 前の形（K4 で外した）
     "missing_item": lambda o: o.pop("confirmed_by"),
     "bool_tool": lambda o: o["coordinate"].__setitem__("tool", False),
     "float_tool": lambda o: o["coordinate"].__setitem__("tool", 0.0),
@@ -384,9 +393,13 @@ BROKEN = {
     "bool_version": lambda o: o.__setitem__("version", True),
     "no_timezone": lambda o: o.__setitem__("confirmed_at", "2026-11-03T14:00:00"),
     "bad_date": lambda o: o.__setitem__("confirmed_at", "きのう"),
-    "no_positions": lambda o: o["job"].__setitem__("positions", []),
-    "bad_position": lambda o: o["job"].__setitem__("positions", ["C5"]),
-    "short_hash": lambda o: o["job"].__setitem__("structure_hash", "abc"),
+    "future_date": lambda o: o.__setitem__("confirmed_at", "2999-01-01T00:00:00+09:00"),
+    "frame_user": lambda o: o["coordinate"].__setitem__("frame", "USER 1"),
+    "frame_robot_without_rj": lambda o: o["coordinate"].__setitem__("frame", "ROBOT"),
+    "rj_without_frame": lambda o: o["coordinate"].__setitem__("rj", True),
+    "rj_not_bool": lambda o: o["coordinate"].__setitem__("rj", 0),
+    "no_rj": lambda o: o["coordinate"].pop("rj"),
+    "no_frame": lambda o: o["coordinate"].pop("frame"),
     "schema": lambda o: o.__setitem__("schema", "voice-teaching/frame"),
 }
 
@@ -615,7 +628,7 @@ def run_cli(argv, answer="yes"):
 
 def test_cli_register_needs_yes_and_writes_config(tmp_path):
     cfg = tmp_path / "records" / "updown.json"
-    base = ["register", "--job", str(DEMO_C_PATH), "--positions", "C00005", "--robot", "HC20DT",
+    base = ["register", "--job", str(DEMO_C_PATH), "--robot", "HC20DT",
             "--by", "テスト", "--evidence", "テストの根拠", "--config", str(cfg)]
     code, out = run_cli(base, answer="no")
     assert code == 3 and not cfg.exists() and "書きませんでした" in out
@@ -628,7 +641,10 @@ def test_cli_register_needs_yes_and_writes_config(tmp_path):
     assert code == 2 and "既にある" in out  # 上書きしない
     code, out = run_cli(["check", "--job", str(DEMO_C_PATH), "--config", str(cfg)])
     assert code == 0 and "confirmed" in out
+    # K4：座標系が同じ別のジョブ（DEMO_PLACE）は確認済み。ツール番号が違うジョブ（PAT_POSTYPE_ROBOT は TOOL 1）は不一致
     code, out = run_cli(["check", "--job", str(ROOT / "samples" / "dummy" / "DEMO_PLACE.JBI"), "--config", str(cfg)])
+    assert code == 0 and "confirmed" in out
+    code, out = run_cli(["check", "--job", str(ROOT / "samples" / "dummy" / "PAT_POSTYPE_ROBOT.JBI"), "--config", str(cfg)])
     assert code == 1 and "mismatch" in out and MISMATCH in out
 
 
@@ -638,17 +654,19 @@ def test_cli_register_refuses_eof_and_bad_jobs(tmp_path):
     def eof(_p):
         raise EOFError
     lines = []
-    code = updown.main(["register", "--job", str(DEMO_C_PATH), "--positions", "C00005", "--by", "a",
+    code = updown.main(["register", "--job", str(DEMO_C_PATH), "--by", "a",
                         "--evidence", "b", "--config", str(cfg)], input_fn=eof, out=lines.append)
     assert code == 3 and not cfg.exists()
     pulse = ROOT / "samples" / "dummy" / "PAT_POSTYPE_PULSE.JBI"
-    code, out = run_cli(["register", "--job", str(pulse), "--positions", "C00000", "--by", "a",
+    code, out = run_cli(["register", "--job", str(pulse), "--by", "a",
                          "--evidence", "b", "--config", str(cfg)])
     assert code == 2 and not cfg.exists()
-    code, out = run_cli(["register", "--job", str(DEMO_C_PATH), "--positions", "C00099", "--by", "a",
-                         "--evidence", "b", "--config", str(cfg)])
-    assert code == 2 and not cfg.exists()
-    code, out = run_cli(["register", "--job", str(DEMO_C_PATH), "--positions", "C00005", "--by", "a",
+    # K4：伏せる位置の指定（--positions）は無くなった。渡すと引数の誤りで止まり、何も書かない
+    with pytest.raises(SystemExit):
+        run_cli(["register", "--job", str(DEMO_C_PATH), "--positions", "C00005", "--by", "a",
+                 "--evidence", "b", "--config", str(cfg)])
+    assert not cfg.exists()
+    code, out = run_cli(["register", "--job", str(DEMO_C_PATH), "--by", "a",
                          "--evidence", " ", "--config", str(cfg)])
     assert code == 2 and not cfg.exists()
 

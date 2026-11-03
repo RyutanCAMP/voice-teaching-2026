@@ -61,6 +61,16 @@
 
 これらは本人が作る実機のサンプルで確かめます（docs/JBI_FORMAT_NOTES.md・docs/REAL_MACHINE_CHECK.md）。実機のサンプルはリポジトリに入れません。
 
+## 相対ジョブ（ROBOT 座標）の形の合成ジョブ（DEMO_RJ_XYZ.JBI）
+実機の相対ジョブ（`///ATTR SC,RW,RJ`・`////FRAME ROBOT`）と**構成だけ同じ**にした、架空のジョブ（CHECKER_027 X2・J7）。
+数値・名前・速度はこのリポジトリで新しく作ったもので、実機のジョブの値から作っていない。改行は CRLF、文字コードは ASCII。
+`tools/make_dummy_patterns.py` の対象ではない（手で作ったファイル。直すときはテスト `tests/test_frame_robot.py` の期待値も直す）。
+
+- 構成：`///TOOL 8`、`///POSTYPE ROBOT`・`///RECTAN`、`///RCONF` の値24個、`///ATTR SC,RW,RJ` の直後に `////FRAME ROBOT`、MOVJ → MOVL×5 → MOVJ
+- 期待結果：problems 0件。C00002・C00003・C00004 は変更できる（注意に「ツール番号 8」）。C00000・C00006 は MOVJ の行き先、C00001 は入る区間の始まりが MOVJ、C00005 は出る移動が MOVJ で止まる
+- シミュレーションの出力では、`//NAME` と承認した位置の行だけが変わり、FRAME・ATTR・RCONF・TOOL の行は元のバイト列のまま
+- 止める形（FRAME USER 1・斜線の本数の違い・RJ なしなど）は、このファイルをテストの中で書き換えて試す（ファイルにはしない）
+
 ## C変数だけのデモ JOB（DEMO_C_PLACE.JBI）
 実機では P変数の使用枠が上限に達しているため、デモは C変数（ジョブの中の位置）方式で行う（唐川さん、2026-11-02）。
 このジョブは **P変数を一切使わない**。合成（架空）の値で、実機のジョブではない。改行は CRLF、文字コードは ASCII。

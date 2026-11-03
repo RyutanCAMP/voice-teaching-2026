@@ -385,7 +385,7 @@ def test_c_unconfirmed_candidate_has_no_physical_direction_names(tmp_path):
 # ======================================================================
 @pytest.mark.parametrize("kind,head", [("missing", "上下の向きが確認されていないため"),
                                        ("changed", "上下の向きの設定が、確認したあとで変わっているため"),
-                                       ("mismatch", "このジョブは上下の向きを確認したジョブと違うため")])
+                                       ("mismatch", "このジョブの座標系・ツール番号・ロボットが、上下の向きを確認したときと違うため")])
 @pytest.mark.parametrize("first,word", [("下げて", "下げて"), ("上に", "上に"), ("さげて", "下げて")])
 def test_d_followup_after_updown_ask(kind, head, first, word, make_updown, tmp_path):
     import json

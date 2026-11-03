@@ -833,7 +833,7 @@ def unknown_words_message(words: Sequence[str], op: str, updown: "ud.UpdownStatu
 
 
 _UPDOWN_WORD = re.compile(r"上げ|下げ|上に|下に|上へ|下へ|上方向|下方向")
-_FOLLOWUP_HEAD = {ud.MISMATCH: "このジョブは上下の向きを確認したジョブと違うため",
+_FOLLOWUP_HEAD = {ud.MISMATCH: "このジョブの座標系・ツール番号・ロボットが、上下の向きを確認したときと違うため",
                   ud.CHANGED: "上下の向きの設定が、確認したあとで変わっているため"}
 
 

@@ -61,11 +61,14 @@ Object.defineProperty(window, "webkitSpeechRecognition", { value: undefined, con
 
 
 def write_test_updown(folder: Path) -> dict:
-    """一時フォルダに、上下の向きの仮の設定（DEMO_PLACE の C00004・DEMO_C_PLACE の C00005）を書く。名前 → 場所。"""
+    """一時フォルダに、上下の向きの仮の設定（DEMO_PLACE・DEMO_C_PLACE の座標系）を書く。名前 → 場所。
+
+    上下の向きの設定は JOB の中身を持たない（CHECKER_028 K4）。座標系（ツール番号など）を読むためにジョブを使う。
+    """
     from voice_teaching import jbi, updown
     out = {}
-    for name, pos in (("DEMO_PLACE.JBI", "C00004"), ("DEMO_C_PLACE.JBI", "C00005")):
-        obj = updown.build_config(jbi.load(REPO / "samples" / "dummy" / name), [pos], updown.DEFAULT_ROBOT,
+    for name in ("DEMO_PLACE.JBI", "DEMO_C_PLACE.JBI"):
+        obj = updown.build_config(jbi.load(REPO / "samples" / "dummy" / name), updown.DEFAULT_ROBOT,
                                   "e2e（一時フォルダの仮の設定）", "e2e 用の仮の設定。実機で確かめたものではない")
         out[name] = updown.write_config(obj, Path(folder) / f"updown_{name}.json", overwrite=True)
     return out
@@ -488,7 +491,7 @@ def check_c026(browser, url, check, shots: Path | None) -> None:
         ({"status": "unconfirmed", "message": "このジョブの上下の向きは確認されていません"}, "上下の向き：未確認（Z＋・Z−で指示）"),
         ({"status": "confirmed", "confirmed_by": "唐川", "confirmed_at": "2026-11-03T14:00:00+09:00", "message": "", "fingerprint": "x"},
          "上下の向き：確認済み"),
-        ({"status": "mismatch", "message": ""}, "上下の向き：確認したジョブと違います"),
+        ({"status": "mismatch", "message": ""}, "上下の向き：確認した座標系・ツールと違います"),
         ({"status": "changed", "message": ""}, "上下の向き：設定が変わっています"),
     ]
     pg.close()
@@ -1163,6 +1166,12 @@ def check_updown_unconfirmed(browser, check, shots: Path | None, errors: list) -
               f"上下の設定なし：「上下の向き：未確認（Z＋・Z−で指示）」と出す（{pg.inner_text('#updown-status')!r}）")
         side = len("".join(pg.inner_text(".side").split()))
         check(side <= 80, f"上下の設定なし：次にすることを足しても、音声のカードの右側の文字は80文字まで（{side}文字）")
+        # 不一致・変更済みの表示の文に入れ替えても 80文字まで（表示の文だけを入れ替えて数える。サーバーの状態は変えない）
+        for other in ("上下の向き：確認した座標系・ツールと違います", "上下の向き：設定が変わっています"):
+            pg.evaluate("t => { document.querySelector('#updown-status').textContent = t; }", other)
+            side2 = len("".join(pg.inner_text(".side").split()))
+            check(side2 <= 80, f"上下の向き「{other}」の表示でも、音声のカードの右側の文字は80文字まで（{side2}文字）")
+        pg.evaluate("t => { document.querySelector('#updown-status').textContent = t; }", "上下の向き：未確認（Z＋・Z−で指示）")
         pg.fill("#text-input", ph)
         pg.click("#text-send")
         until(pg, lambda: pg.is_enabled("#open-confirm"))

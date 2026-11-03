@@ -39,14 +39,18 @@ TEST_CONFIRMED_AT = "2026-11-03T14:00:00+09:00"
 
 @pytest.fixture
 def make_updown(tmp_path):
-    """一時フォルダに、上下の向きの設定ファイルを作る（updown.build_config と write_config を使う。中身は本物と同じ形）。"""
+    """一時フォルダに、上下の向きの設定ファイルを作る（updown.build_config と write_config を使う。中身は本物と同じ形）。
+
+    job は座標系（ツール番号・FRAME・RJ）を読むためだけに使う。上下の向きの設定は JOB の中身を持たない（CHECKER_028 K4）。
+    positions は前の形（JOB の指紋で照合していたころ）の呼び方との互換のために受け取るだけで、使わない。
+    """
     from pathlib import Path
 
     from voice_teaching import jbi, sim, updown
 
-    def make(job="DEMO_C_PLACE.JBI", positions=("C00005",), robot=updown.DEFAULT_ROBOT, name="updown.json"):
+    def make(job="DEMO_C_PLACE.JBI", positions=None, robot=updown.DEFAULT_ROBOT, name="updown.json"):
         data = job if isinstance(job, (bytes, bytearray)) else (Path(sim.SAMPLES_DIR) / job).read_bytes()
-        obj = updown.build_config(jbi.parse_bytes(bytes(data)), list(positions), robot, TEST_CONFIRMED_BY,
+        obj = updown.build_config(jbi.parse_bytes(bytes(data)), robot, TEST_CONFIRMED_BY,
                                   TEST_EVIDENCE, confirmed_at=TEST_CONFIRMED_AT)
         return updown.write_config(obj, tmp_path / "updown" / name, overwrite=True)
     return make
@@ -57,7 +61,7 @@ def use_updown(make_updown, monkeypatch):
     """WebFlow の既定の上下の向きの設定を、一時フォルダの確認済みの設定にする（上・下を Z± として読むテスト用）。"""
     from voice_teaching.web import flow
 
-    def use(job="DEMO_C_PLACE.JBI", positions=("C00005",), **kw):
+    def use(job="DEMO_C_PLACE.JBI", positions=None, **kw):
         path = make_updown(job, positions, **kw)
         monkeypatch.setattr(flow, "DEFAULT_UPDOWN_CONFIG", path)
         return path
