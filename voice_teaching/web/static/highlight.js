@@ -110,7 +110,8 @@ export function confirmHeading(c, dir = "") {
   const amount = `${pos} を ${axis} ${displayMinus(trimDecimal(c.delta))}mm${dir || ""}`;
   // 止まった候補は「動かします」と言わない（承認も出力もできない）
   const sp = dir ? "" : " ";  // 「（上へ）」のあとは空けない
-  return c.blocked_reason ? `${amount}${sp}動かす候補（承認できません）` : `${amount}${sp}動かします`;
+  // 止まった候補の見出しも「参考の表示だけ・変更しません」から始める（CHECKER_032 P1-2・内部 Safety P3）
+  return c.blocked_reason ? `参考の表示だけ・変更しません：${amount}${sp}動かした場合（承認できません）` : `${amount}${sp}動かします`;
 }
 
 // ---- 回数の変更の印（docs/REPEAT_COUNT_DESIGN.md 5章）。数はサーバーの文字のまま ----

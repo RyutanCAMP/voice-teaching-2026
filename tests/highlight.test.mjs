@@ -83,7 +83,7 @@ test('confirmHeading: one line, position, axis and amount', () => {
 test('confirmHeading: a stopped candidate does not say it will move', () => {
   const c = { kind: 'shift', target: 'C00000 Z', delta: '+10.000', blocked_reason: '入る命令が MOVJ' };
   const h = confirmHeading(c);
-  assert.equal(h, 'C00000 を Z +10mm 動かす候補（承認できません）');
+  assert.equal(h, '参考の表示だけ・変更しません：C00000 を Z +10mm 動かした場合（承認できません）');
   assert.ok(!h.endsWith('動かします'));
 });
 test('confirmHeading: speed and missing data', () => {

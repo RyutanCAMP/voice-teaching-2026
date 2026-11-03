@@ -546,7 +546,7 @@ def check_c026(browser, url, check, shots: Path | None) -> None:
     pg.click("#open-confirm")
     pg.wait_for_selector("#confirm-overlay:not([hidden])")
     head = pg.inner_text("#confirm-title")
-    check(head.startswith("C00000 を Z +10mm") and head.endswith("動かす候補（承認できません）") and not pg.is_enabled("#approve-button"),
+    check(head.startswith("参考の表示だけ・変更しません：C00000 を Z +10mm") and head.endswith("（承認できません）") and not pg.is_enabled("#approve-button"),
           f"S5：止まった候補の見出しは「動かします」と言わない（{head!r}）")
     pg.close()
 
