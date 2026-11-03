@@ -182,3 +182,9 @@ def test_position_not_in_the_job_is_not_shown(tmp_path):
     f.add(T.answer("C00009 でボタンを押しています。何の作業ですか？", BLOCK))
     r = w.ask(sid, "このロボット、何をしている？")
     assert r["reply_by"] == "app" and "C00009" not in r["reply"]
+
+
+# ---- CHECKER_032 P2（K04）：目的の言葉「ボタン」「押す」は、人が教えるまで「AI の推定」の印を付ける ----
+def test_button_words_are_marked_as_ai_guess_until_taught():
+    assert talk.ai_guesses("C00004 でボタンを押しています。") == ["C00004 でボタンを押しています。"]
+    assert talk.ai_guesses("ボタンを押す動作を2回から3回に変更しますか？", ["ボタンを押してる"]) == []
