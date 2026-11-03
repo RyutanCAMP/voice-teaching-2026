@@ -274,6 +274,10 @@ MOVJ_LABEL = "関節移動（MOVJ）：実際の通り道は直線ではあり�
 
 REVIEW_ONLY = "変更案の確認のみ。実機用JOBは出力できません"
 UNDO_HINT = "もう一度直すときは［元に戻す］を押してください"  # CHECKER_030 S30-3（唐川さんの決定 2026-11-03 17:14）
+# 承認のあとの3つの状態（台本 Ver.6.1 Scene 3-3・チャッピーの修正③）
+AFTER_ROWS = ["元の動作データ：変わっていません", "変更候補：人が承認しました（シミュレーション用）", "ロボットへの送信：していません"]
+AFTER_ROWS_JS = """() => [...document.querySelectorAll('#approval-states .state-row')]
+  .map(r => r.querySelector('dt').textContent + '：' + r.querySelector('dd').textContent)"""
 
 
 def check_review_only(browser, url, check, shots: Path | None) -> None:
@@ -301,6 +305,7 @@ def check_review_only(browser, url, check, shots: Path | None) -> None:
                 band = pg.is_visible("#confirm-review-only")
                 check(band == (not synthetic) and (synthetic or pg.inner_text("#confirm-review-only") == REVIEW_ONLY),
                       f"{name}（{width}px）：確認表示の「確認のみ」の帯は、合成ジョブでないときだけ出る（{band}）")
+                check(pg.is_hidden("#approval-states"), f"3つの状態 {name}（{width}px）：承認の前は出さない")
                 pg.fill("#approver-name", "e2e")
                 pg.click("#approve-button")
                 until(pg, lambda: pg.is_visible("#approval-status") or pg.is_hidden("#confirm-overlay"))
@@ -311,6 +316,17 @@ def check_review_only(browser, url, check, shots: Path | None) -> None:
                 exp_btn = pg.is_visible("#export-button")
                 band2 = pg.is_visible("#export-review-only")
                 hint = pg.inner_text("#next-hint") if pg.is_visible("#next-hint") else ""
+                rows = pg.evaluate(AFTER_ROWS_JS) if pg.is_visible("#approval-states") else []
+                o3 = pg.evaluate(OVERFLOW_JS, 8)
+                check(rows == AFTER_ROWS and (synthetic or pg.is_visible("#export-review-only"))
+                      and o3["scroll"] <= o3["vw"] and not o3["out"],
+                      f"3つの状態 {name}（{width}px）：承認のあとに3行を出す（{rows}）。実機の JOB は「確認のみ」の帯と一緒（{o3['out']}）")
+                if synthetic and width == 1280:
+                    pg.click("#export-button")
+                    until(pg, lambda: pg.is_visible("#export-result"))
+                    line = pg.inner_text("#approval-exported") if pg.is_visible("#approval-exported") else ""
+                    check(line.startswith("シミュレーション用に出力しました（") and line.endswith("。実機には入れないでください）")
+                          and ".JBI.txt" in line, f"3つの状態：出力のあとに出力した行を足す（{line!r}）")
                 if synthetic:
                     check(hint == "", f"S30-3 {name}（{width}px）：合成ジョブの承認のあとは、元に戻す案内を出さない（{hint!r}）")
                 else:
@@ -333,6 +349,7 @@ def check_review_only(browser, url, check, shots: Path | None) -> None:
                     pg.click("#undo-button")
                     until(pg, lambda: pg.get_attribute("#step-4", "aria-current") != "step")
                     check(pg.is_hidden("#next-hint"), f"S30-3 {name}（{width}px）：元に戻したあとは案内を出さない")
+                    check(pg.is_hidden("#approval-states"), f"3つの状態 {name}（{width}px）：元に戻して承認が消えたら出さない")
                 pg.close()
 
 

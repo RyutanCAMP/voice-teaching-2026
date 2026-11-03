@@ -163,6 +163,10 @@
       <button type="button" id="open-confirm" class="wide" disabled>確認して承認へ</button>
       <div id="approval-panel" aria-label="承認と出力">
         <p id="approval-status" class="approved" hidden></p>
+        <!-- 承認のあとの3つの状態（台本 Ver.6.1 Scene 3-3）。文はサーバーの決まった文（state.after_approval）だけ -->
+        <dl id="approval-states" class="approval-states" hidden></dl>
+        <p id="approval-note" class="fine" hidden></p>
+        <p id="approval-exported" class="fine approval-exported" hidden></p>
         <p id="export-review-only" class="review-only" hidden>変更案の確認のみ。実機用JOBは出力できません</p>
         <button type="button" id="export-button" class="wide" disabled>シミュレーション用に出力（合成ジョブだけ・実機に入れない）</button>
         <p id="export-note" class="fine" hidden>出力先：<code id="out-dir"></code>（.JBI.txt）。実機での取り違えを完全に防ぐものではありません。実機には入れないでください。</p>

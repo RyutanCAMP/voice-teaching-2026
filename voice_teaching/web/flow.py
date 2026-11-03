@@ -19,6 +19,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import secrets
 import threading
 from collections import OrderedDict
@@ -53,6 +54,12 @@ _DROPPED_PHRASES = ("変更候補を捨てました。元のジョブは変わ�
 # サーバーは起動オプション（--updown-config。既定 records/updown.json）の場所を渡す。テストでは一時フォルダの設定に置き換える
 DEFAULT_UPDOWN_CONFIG: "str | Path | None" = None
 USE_DEFAULT = object()  # updown_config を渡さなかった印（DEFAULT_UPDOWN_CONFIG を使う）
+# 承認のあとの3つの状態の決まった文（台本 Ver.6.1 Scene 3-3・チャッピーの修正③）。「変更できた」とは言わない
+ORIGINAL_UNCHANGED = "変わっていません"
+CANDIDATE_APPROVED = "人が承認しました（シミュレーション用）"
+NOT_SENT = "していません"  # このアプリにはロボットへ送る・転送する処理が無い
+ORIGINAL_UNKNOWN_NOTE = "元の動作データが読み込んだときと同じか確かめられないため、「元の動作データ」の行は出しません"
+EXPORTED_LINE = "シミュレーション用に出力しました（{name}。実機には入れないでください）"
 _UPDOWN_STATUS_NAMES = {"unconfirmed": "未確認", "mismatch": "不一致", "changed": "変更済み"}
 
 
@@ -69,6 +76,7 @@ class _Entry:
     # 承認したとき・ほかの理由で承認を消したとき・新しい指示・選び直し・元に戻すで False に戻す
     updown_cancelled: bool = False
     exported: str | None = None
+    loaded_sha256: str | None = None              # 読み込んだときのバイト列の sha256（承認のあとの「元の動作データ：変わっていません」に使う）
     dialog: dg.Dialog = field(default_factory=dg.Dialog)  # Claude との会話の状態（メモリの中だけ。保存しない）
     frame: object | None = None                   # 案B：FRAME（まだ無い。あれば label・aliases で位置を決める）
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -114,7 +122,7 @@ class WebFlow:
         job = jbi.parse_bytes(data)
         if not job.name:
             return {"ok": False, "error": "ジョブ名の行（//NAME）が読めないため、読み込みません"}
-        entry = _Entry(session=None)  # type: ignore[arg-type]
+        entry = _Entry(session=None, loaded_sha256=hashlib.sha256(data).hexdigest())  # type: ignore[arg-type]
         entry.session = Session(job, simulate=entry.simulate,
                                 updown_check=ud.checker(self.updown_config, self.robot))
         entry.session.log.append((self._who(), self.interpreter.notice))
@@ -674,6 +682,21 @@ class WebFlow:
         if r.comparison is not None and e.session.candidate is not None:
             e.comparison = (e.session.candidate, r.comparison)
 
+    def _after_approval(self, e: _Entry) -> dict:
+        """承認のあとに並べて出す状態（プログラムの決まった文だけ。表示だけで、承認・出力の条件は変えない）。
+
+        「元の動作データ：変わっていません」は、元のジョブを書き戻したバイト列と、Session が最初に取った写しが、
+        どちらも読み込んだときのバイト列（の sha256）と同じときだけ出す。確かめられなければ行を出さずに理由（note）を出す。
+        """
+        s = e.session
+        same = (e.loaded_sha256 is not None
+                and hashlib.sha256(s.original.render_bytes()).hexdigest() == e.loaded_sha256
+                and hashlib.sha256(s.original_bytes).hexdigest() == e.loaded_sha256)
+        rows = ([{"label": "元の動作データ", "value": ORIGINAL_UNCHANGED}] if same else []) + [
+            {"label": "変更候補", "value": CANDIDATE_APPROVED}, {"label": "ロボットへの送信", "value": NOT_SENT}]
+        exported = EXPORTED_LINE.format(name=Path(e.exported).name) if e.exported else None
+        return {"rows": rows, "note": None if same else ORIGINAL_UNKNOWN_NOTE, "exported": exported}
+
     def _approved(self, e: _Entry) -> bool:
         return (e.approval is not None and e.sim_proposal is not None
                 and e.session.candidate is not None and e.approved_candidate is e.session.candidate)
@@ -777,6 +800,8 @@ class WebFlow:
             "exportable": sim._is_synthetic(s.original_bytes),
             "can_export": approved and sim._is_synthetic(s.original_bytes),
             "exported": e.exported if approved else None,
+            # 承認のあとの3つの状態（台本 Ver.6.1 Scene 3-3）。表示だけ。承認していなければ None
+            "after_approval": self._after_approval(e) if approved else None,
             "out_dir": str(Path(sim.DEFAULT_OUT_DIR).resolve()),
             "mock_notice": self.interpreter.notice,
             "interpreter": {"kind": self.interpreter.kind, "model": self.interpreter.model,

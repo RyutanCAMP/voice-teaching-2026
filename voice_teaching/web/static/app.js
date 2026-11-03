@@ -786,6 +786,21 @@ async function onApproveClick() {
 }
 $("approve-button").addEventListener("click", onApproveClick);
 
+// 承認のあとの3つの状態（元の動作データ・変更候補・ロボットへの送信）と、出力したあとの1行。
+// 文はサーバーの決まった文をそのまま出す（ここでは作らない）。承認していなければ何も出さない
+function renderAfterApproval(aa) {
+  const ok = !!aa && typeof aa === "object" && Array.isArray(aa.rows);
+  const rows = ok ? aa.rows.filter((r) => r && typeof r.label === "string" && typeof r.value === "string") : [];
+  $("approval-states").replaceChildren(...rows.map((r) => el("div", { class: "state-row" }, el("dt", {}, r.label), el("dd", {}, r.value))));
+  $("approval-states").hidden = rows.length === 0;
+  const note = ok && typeof aa.note === "string" ? aa.note : "";
+  $("approval-note").textContent = note;
+  $("approval-note").hidden = !note;
+  const exported = ok && typeof aa.exported === "string" ? aa.exported : "";
+  $("approval-exported").textContent = exported;
+  $("approval-exported").hidden = !exported;
+}
+
 function renderApproval() {
   const st = state.st;
   const a = st.approval;
@@ -796,6 +811,7 @@ function renderApproval() {
   $("export-button").hidden = !a || reviewOnly;
   $("export-note").hidden = !a || reviewOnly;
   $("export-review-only").hidden = !a || !reviewOnly;
+  renderAfterApproval(a ? st.after_approval : null);
   $("export-button").disabled = !st.can_export || recording();
   $("approve-button").disabled = !st.can_approve || recording();
   if (!a && !$("export-result").hidden && $("export-result").dataset.ok === "true") {

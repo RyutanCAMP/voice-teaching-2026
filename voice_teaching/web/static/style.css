@@ -185,6 +185,12 @@ body.recording .mic-big { background: var(--red); color: #fff; animation: pulse 
 .cand-values { font-family: "SF Mono", Consolas, monospace; font-size: 16px; color: var(--sub); margin: 0; }
 .cand-warn { margin: 14px 0 0; padding: 12px 14px 12px 30px; background: #fff8e6; border-radius: 12px; font-size: 13px; line-height: 1.6; }
 .approved { font-size: 15px; font-weight: 600; color: #1f7a35; margin: 16px 0 0; }
+/* 承認のあとの3つの状態（台本 Ver.6.1 Scene 3-3）。狭い画面では項目と値を折り返す */
+.approval-states { margin: 8px 0 12px; padding: 0; font-size: 13px; }
+.approval-states .state-row { display: flex; flex-wrap: wrap; gap: 0 10px; padding: 4px 0; border-bottom: 1px solid #eef0f3; }
+.approval-states dt { color: var(--sub); min-width: 8.5em; }
+.approval-states dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.approval-exported { overflow-wrap: anywhere; }
 .result { margin-top: 14px; font-size: 14px; }
 .result.done strong { color: #1f7a35; }
 .result .reason { margin: 4px 0 0; color: var(--sub); word-break: break-all; }
