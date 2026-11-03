@@ -139,7 +139,7 @@ class Session:
             # 範囲の確認を待っている間の「この範囲を繰り返す」「はい」など（QA P1-A）：確定はせず、範囲の確認は残して案内する
             self._log("発話", f"{'音声' if source == 'voice' else '文字'}：{text}")
             self._locked = True
-            return self._reply("ask", rc.RANGE_BUTTON_ONLY)
+            return self._reply("ask", rc.RANGE_APPROVE_GUIDE if rc.is_approve_word(text) else rc.RANGE_BUTTON_ONLY)
         self.forget_range()  # 新しい指示（打ち消し・別の指示・別の回数）：範囲の確認は捨てる（声の「はい」でも確定しない）
         if ut.is_explain_choice(text):
             return self.explain_only(text, source)
@@ -260,11 +260,16 @@ class Session:
                 return stop_job(str(e))
         else:
             # 範囲を言わない：ジョブに数えられる区間が1つだけなら、その区間を示して確かめる（QA P1-1）
+            if req.position is not None and req.position not in self._job.positions:
+                return stop(f"位置 {req.position} はこのジョブにありません")  # Safety P2-6
             blocks = self._job.find_repeat_blocks()
             if req.position is not None:  # 「C00001を3回」：その位置を含む区間だけ
                 blocks = [b for b in blocks if req.position in b.positions]
-            if not blocks:  # 数えられる区間が無い（区間の中に DOUT があるときなど）：対象外のことも添える
-                return self._reply("ask", f"{rc.RANGE_NEEDED}。{jbi.REPEAT_SCOPE_NOTE}", facts=facts)
+            if not blocks:
+                # 数えられる区間が無い：理由に合う文にする（Safety P2-2）。DOUT・TIMER があるジョブのときだけ対象外の文を添える
+                has_signal = any(i.command in ("DOUT", "TIMER", "WAIT") for i in self._job.instructions)
+                tail = f"。{jbi.REPEAT_SCOPE_NOTE}" if has_signal else ""
+                return self._reply("ask", f"{rc.NO_BLOCK}。{rc.RANGE_NEEDED}{tail}", facts=facts)
             if len(blocks) != 1:
                 return self._reply("ask", rc.RANGE_NEEDED, facts=facts)
             block = blocks[0]
@@ -309,7 +314,7 @@ class Session:
             "block_line_nos": list(range(first, block.end_line + 1)),
             "cycles": _cycles(block),  # 各回の (最初の行, 最後の行)。1 から
             "yes_label": rc.RANGE_YES_LABEL, "no_label": rc.RANGE_NO_LABEL, "note": jbi.REPEAT_SCOPE_NOTE,
-            "side_note": side_note, "heading": rc.RANGE_HEADING,
+            "side_note": side_note, "heading": rc.RANGE_HEADING, "button_note": rc.RANGE_BUTTON_NOTE,
         }
         msg = rc.range_message(_cycles(block), texts, total)
         return self._reply("ask", f"{msg}。{side_note}" if side_note else msg, facts=facts)

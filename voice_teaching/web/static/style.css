@@ -311,12 +311,19 @@ body.recording .mic-big[disabled] { opacity: 1; }
 
 /* 聞き返しの短い選択肢 */
 .choices { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
-/* 選択肢はどれも同じ重さ（目立たせる primary は付けない）。押すと文を送るだけ */
+/* 選択肢はどれも同じ重さ（目立たせる primary は付けない）。押すと文を送るだけ。
+   例外（唐川さんの決定 2026-11-03 夜）：回数の変更の範囲の確認だけ、［この範囲を繰り返す］を目立たせる（.range-go）。
+   承認ボタン（オレンジの primary）と見分けられるよう、色は青・文字は「範囲を繰り返す」・下に「承認は次の確認表示」の注記。
+   ［違う］（.quiet）は控えめでも、押せる見た目（枠・文字）を残す */
 .choice {
   flex: 1 1 45%; min-width: 45%; border: 1.5px solid var(--line); background: #fff; border-radius: 14px;
   padding: 14px 22px; font-size: 17px; font-weight: 600; color: var(--text); cursor: pointer; white-space: nowrap;
 }
 .choice:hover:not([disabled]) { border-color: var(--blue); background: #f5f9ff; }
+.choice.range-go:not([disabled]) { background: var(--blue); border-color: var(--blue); color: #fff; }
+.choice.range-go:hover:not([disabled]) { background: #0071e3; }
+.choice.quiet { background: #fff; border: 1.5px solid #c7c7cc; color: #3a3a3c; font-weight: 500; }
+.range-button-note { font-size: 12px; color: #6e6e73; margin: 6px 0 0; }
 /* 認識した文字・変更前後の X・Y・Z */
 .cand-heard { font-size: 13px; color: var(--sub); margin: 4px 0; }
 .xyz table { border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 13px; margin: 6px 0 2px; }

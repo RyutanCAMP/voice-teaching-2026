@@ -26,6 +26,11 @@ DECIMAL_MESSAGE = "回数は整数で言ってください。小数の回数は�
 NEGATIVE_MESSAGE = "回数は1以上の整数で言ってください。マイナスの回数は扱いません"
 # 範囲の確認を待っている間に、声・文字で範囲を決めようとしたとき（QA P1-A）。確定はせず、範囲の確認は残す
 RANGE_BUTTON_ONLY = "範囲は［この範囲を繰り返す］のボタンで決めてください（声や文字では決めません）"
+RANGE_APPROVE_GUIDE = "範囲を決めるのは［この範囲を繰り返す］のボタンです。承認は、そのあとの確認表示の承認ボタンで行います"
+RANGE_BUTTON_NOTE = "範囲を決めるだけです。承認は次の確認表示で行います"
+NO_BLOCK = "このジョブには、続けて2回以上書かれた移動の区間（1回分は2〜10行）が見つかりません"
+_CONFIRM_HINT = re.compile(r"繰り?返|くりかえ|はい|そう|うん|OK|オーケー|おけ|お願い|おねがい|範囲|確定|決定|承認|いい|大丈夫|合って|それで")
+_CONFIRM_BAD = re.compile(r"[0-9]|C[0-9]|ない|違|ちが|やめ|止め|戻|消|取り消|キャンセル|しないで|変更|比較|比べ|移動|速度|ミリ|MM|%")
 _CONFIRM_LIKE = frozenset({
     "この範囲を繰り返す", "この範囲を繰り返して", "この範囲で", "この範囲でお願いします", "繰り返す", "繰り返して",
     "くりかえす", "くりかえして", "繰り返してください", "はい", "はいはい", "そう", "そうそう", "そうです", "うん", "OK",
@@ -101,7 +106,19 @@ def is_range_confirm_word(text: object) -> bool:
     if not isinstance(text, str):
         return False
     t = re.sub(r"[。．.!！?？、,\s　]+", "", ut.normalize(text))
-    return t in {ut.normalize(w) for w in _CONFIRM_LIKE}
+    if t in {ut.normalize(w) for w in _CONFIRM_LIKE}:
+        return True
+    # 一覧から少しずれた言い方（「この範囲をくりかえす」「はいそうです」「はい繰り返して」）も、範囲を決めようとする短い文として扱う
+    # （Safety P2-3）。打ち消し・別の指示・数・位置を含む文は扱わない（今どおり新しい指示として読む）。確定はしない
+    if not t or len(t) > 20 or not _CONFIRM_HINT.search(t) or _CONFIRM_BAD.search(t):
+        return False
+    f = ut.read_utterance(text)
+    return not (f.negations or f.undo_negations or f.amounts or f.positions or f.bad_positions
+                or set(f.kinds) - {"approve"} or f.axes or f.place_ref)
+
+
+def is_approve_word(text: str) -> bool:
+    return "承認" in ut.normalize(text)
 
 
 def _pos(digits: str | None) -> str | None:

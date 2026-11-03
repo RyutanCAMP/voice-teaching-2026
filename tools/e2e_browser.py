@@ -576,7 +576,13 @@ def check_repeat(browser, url, check, shots: Path | None, out: Path, errors: lis
     check("繰り返すのは移動の行だけです" in reply, "回数の変更：範囲の確認に、対象外の固定文")
     check(pg.inner_text("#range-yes") == "この範囲を繰り返す" and pg.inner_text("#range-no") == "違う",
           "回数の変更：［この範囲を繰り返す］［違う］のボタン")
-    check("primary" in (pg.get_attribute("#range-yes", "class") or "") and pg.inner_text("#next-action") == "この範囲を繰り返しますか？"
+    cls = pg.get_attribute("#range-yes", "class") or ""
+    bg = pg.evaluate("() => [getComputedStyle(document.querySelector('#range-yes')).backgroundColor,"
+                     " getComputedStyle(document.querySelector('#range-no')).borderTopStyle]")
+    check("range-go" in cls and "primary" not in cls and bg[0] == "rgb(10, 132, 255)" and bg[1] == "solid"
+          and "承認は次の確認表示で行います" in pg.inner_text("#reply-message"),
+          f"回数の変更：［この範囲を繰り返す］は青（承認のオレンジとは別）、［違う］は枠のある控えめなボタン、承認ではない注記：{bg}")
+    check(pg.inner_text("#next-action") == "この範囲を繰り返しますか？"
           and "もう少し教えてください" not in pg.inner_text("#reply-message") and pg.is_hidden("#max-shift-label"),
           "回数の変更：［この範囲を繰り返す］が目立つボタン、見出しは1回だけ、「1回に動かせる量」は隠す")
     # 声・文字で「はい」：確定せず、範囲の確認を残して、ボタンで決めるよう案内する（QA P1-A）

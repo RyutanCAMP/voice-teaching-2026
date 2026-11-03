@@ -344,7 +344,9 @@ function renderSteps() {
     text = "出力しました";
   }
   if (step === 3 && st && st.repeat_range && !recording() && !dialogStep()) {
-    text = st.repeat_range.heading;  // 回数の変更の範囲の確認：ボタン2つは同じ重さ（目立たせるボタンを作らない）
+    // 回数の変更の範囲の確認：画面の上の目立たせるボタンは作らない。範囲の欄の中だけ、［この範囲を繰り返す］を
+    // 目立たせる（唐川さんの決定 2026-11-03 夜の例外。承認ボタンとは色・文字・注記で見分ける。style.css の .range-go）
+    text = st.repeat_range.heading;
     primary = null;
   }
   $("next-action").textContent = text;
@@ -474,8 +476,8 @@ function renderRepeatRange(notice = "") {
     if (res.candidate_made && state.st && state.st.candidate) startPlayback();
     keepHeadingInView();
   };
-  // ［この範囲を繰り返す］を目立たせ、［違う］は控えめに
-  const yes = el("button", { type: "button", class: "choice primary", id: "range-yes" }, rr.yes_label);
+  // ［この範囲を繰り返す］を目立たせ（青。承認のオレンジとは別）、［違う］は控えめに（唐川さんの決定 2026-11-03 夜）
+  const yes = el("button", { type: "button", class: "choice range-go", id: "range-yes" }, rr.yes_label);
   const no = el("button", { type: "button", class: "choice quiet", id: "range-no" }, rr.no_label);
   yes.addEventListener("click", () => send("yes"));
   no.addEventListener("click", () => send("no"));
@@ -496,7 +498,8 @@ function renderRepeatRange(notice = "") {
     big(el("p", { class: "range-count" }, `今は${rr.count}回続けて書かれています。合計${rr.total}回にします`), 15),
   ];
   if (rr.side_note) parts.push(el("p", { class: "range-side" }, rr.side_note));
-  parts.push(el("p", { class: "fine range-note" }, rr.note), row);
+  parts.push(el("p", { class: "fine range-note" }, rr.note), row,
+    el("p", { class: "range-button-note" }, rr.button_note));  // 範囲を決めるだけ。承認は次の確認表示
   box.className = "reply ask range-ask";
   box.replaceChildren(...parts);
   box.hidden = false;

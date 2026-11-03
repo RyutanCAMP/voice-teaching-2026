@@ -388,7 +388,8 @@ def test_voice_does_not_confirm_the_range_but_keeps_it(word, source, counting):
     w, sid = start(counting)
     turn = rng(w.hear(sid, SAY))["turn"]
     r2 = w.hear(sid, word, source=source)
-    assert r2["status"] == "ask" and r2["message"] == rc.RANGE_BUTTON_ONLY and r2["choices"] == []
+    guide = rc.RANGE_APPROVE_GUIDE if "承認" in word else rc.RANGE_BUTTON_ONLY
+    assert r2["status"] == "ask" and r2["message"] == guide and r2["choices"] == []
     assert cand(r2) is None and rng(r2) is not None and rng(r2)["turn"] == turn
     assert r2["state"]["approval"] is None and counting.decides == 0
     r3 = w.repeat_choose(sid, "yes", turn)  # ボタンなら決まる
@@ -515,7 +516,9 @@ def test_range_less_sentence_without_a_block_asks_for_the_range():
     w, sid = start(data=DEMO_C)
     r = w.hear(sid, "3回にして")
     # 区間が0件：範囲を言うよう案内し、対象外の文も添える（QA）
-    assert r["status"] == "ask" and r["message"] == f"{rc.RANGE_NEEDED}。{SCOPE}" and rng(r) is None and cand(r) is None
+    # DEMO_C_PLACE には DOUT・TIMER があるので、対象外の文も添える（Safety P2-2）
+    assert r["status"] == "ask" and r["message"] == f"{rc.NO_BLOCK}。{rc.RANGE_NEEDED}。{SCOPE}"
+    assert rng(r) is None and cand(r) is None
 
 
 def test_range_less_sentence_with_two_blocks_asks_for_the_range():
@@ -991,3 +994,51 @@ def test_find_repeat_blocks_is_light_on_a_big_job():
     t0 = time.perf_counter()
     assert job.find_repeat_blocks() == []
     assert time.perf_counter() - t0 < 1.0
+
+
+# ---- Safety P2-3・P2-4（f7f871f のあと）：一覧から少しずれた言い方・承認の言葉 ----
+@pytest.mark.parametrize("word", ["この範囲をくりかえす", "この範囲を繰り返します", "はい、この範囲を繰り返す", "はいそうです",
+                                  "はい繰り返して", "うん、それで", "OKです", "それでお願い"])
+def test_near_confirm_words_keep_the_range(word):
+    w, sid = start()
+    turn = rng(w.hear(sid, SAY))["turn"]
+    r = w.hear(sid, word, source="voice")
+    assert r["status"] == "ask" and r["message"] == rc.RANGE_BUTTON_ONLY, (word, r["message"])
+    assert rng(r) is not None and rng(r)["turn"] == turn and cand(r) is None
+
+
+@pytest.mark.parametrize("word", ["はい、違う", "そうじゃない", "はい3回", "はいC00002を選択して", "はい比較して", "はいZプラス3mm",
+                                  "繰り返さないで", "いいえ"])
+def test_confirm_like_but_with_other_content_is_a_new_instruction(word):
+    w, sid = start()
+    turn = rng(w.hear(sid, SAY))["turn"]
+    r = w.hear(sid, word)
+    assert r["message"] not in (rc.RANGE_BUTTON_ONLY, rc.RANGE_APPROVE_GUIDE), (word, r["message"])
+    assert cand(r) is None
+    assert w.repeat_choose(sid, "yes", turn)["status"] == "stop"
+
+
+@pytest.mark.parametrize("word", ["承認", "承認して", "承認します"])
+def test_approve_words_during_the_range_explain_the_two_steps(word):
+    w, sid = start()
+    turn = rng(w.hear(sid, SAY))["turn"]
+    r = w.hear(sid, word)
+    assert r["message"] == rc.RANGE_APPROVE_GUIDE and rng(r)["turn"] == turn and r["state"]["approval"] is None
+
+
+def test_range_state_has_the_not_approval_note():
+    w, sid = start()
+    assert rng(w.hear(sid, SAY))["button_note"] == "範囲を決めるだけです。承認は次の確認表示で行います"
+
+
+# ---- Safety P2-2・P2-6：区間が見つからない理由・ジョブに無い位置 ----
+def test_no_block_without_signals_does_not_mention_dout():
+    w, sid = start(data=one_cycle())  # 区間は1回だけ。DOUT・TIMER は無い
+    r = w.hear(sid, "3回にして")
+    assert r["status"] == "ask" and r["message"] == f"{rc.NO_BLOCK}。{rc.RANGE_NEEDED}" and SCOPE not in r["message"]
+
+
+def test_position_not_in_the_job_is_named():
+    w, sid = start()
+    r = w.hear(sid, "C00099を3回")
+    assert r["status"] == "stop" and r["message"] == "位置 C00099 はこのジョブにありません" and rng(r) is None
