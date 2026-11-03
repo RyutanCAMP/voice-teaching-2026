@@ -257,7 +257,7 @@ def test_allowed_endings_and_position_word(text):
     ("下に3ミリな", "な"),
     ("はい下に3mm", "はい"),        # 承認の言葉
     ("る 3mm下げて", "る"),         # 動きの言葉の後でない言い終わりは使わない
-    ("下に3ミリです", "です"),
+    # 「下に3ミリです」は 2026-11-03 夜の決定で読むことにした（tests/test_nl_polish.py）
     ("位置を下に3mm", "位置"),       # 位置番号・この・その の後でない「位置」
 ])
 def test_kept_asks(text, word):
@@ -510,9 +510,10 @@ def test_negation_shown_word_is_not_cut():
     assert r["status"] == "stop" and "「言わない」" in r["message"]
 
 
-def test_question_mark_is_unchanged_for_now():
-    # 「？」の扱いは唐川さんの判断待ち。今は今までどおり候補になる（変えていないことの記録）
-    assert cand(hear("3mm下げて？")) == ("Z", "-3.000")
+def test_question_mark_makes_no_candidate():
+    # 「？」は 2026-11-03 夜の決定で、候補にせず確かめる（tests/test_nl_polish.py）
+    r = hear("3mm下げて？")
+    assert cand(r) is None and r["status"] == "ask"
 
 
 # ---- 232bbb8 の差分の Safety レビュー（P2-1・P3-1〜P3-3）----

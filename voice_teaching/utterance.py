@@ -89,6 +89,12 @@ class UtteranceFacts:
     # 元に戻す言葉そのもの（「やめて」「取り消して」）の打ち消し。「やめて」だけの元に戻す指示（_plain_undo）のときは空。
     # 空でなければ、どの指示でも止める（「キャンセルはやめて」「C00004を選ぶのはやめて」）
     undo_negations: tuple[str, ...] = ()
+    # 2026-11-03 夜の決定（docs/UNKNOWN_WORDS_PLAN.md 7章）。対話の機能・画面から使う
+    question: bool = False                 # 疑問の形（文の終わりの ？・?・ですか など）。候補にせず、確かめる
+    question_text: str | None = None       # ？・か を外した同じ指示（確かめる選択肢の文）。答えと合わせたときは None
+    repeat: tuple[int | None, str] | None = None  # 繰り返し・往復 (回数, "ambiguous"／"times"／"round_trip")。候補にしない
+    place_ref: str | None = None           # 「置くところ」などの場所の言葉（どの位置かはプログラムが決めない）
+    relative_dir: tuple[str, ...] = ()     # 手前・奥・前・後ろ・右・左（軸には当てない。止める・聞き返す）
 
     @property
     def position(self) -> str | None:
@@ -196,7 +202,9 @@ HESITATIONS = ("えーと", "ええと", "えっと", "あのー", "あの")    
 OPENERS = ("それでは", "じゃあ", "では", "まず")                             # 文の初め（読んだ言葉より前）に1つだけで
 FILLER_WORDS = PARTICLES + TE_FORMS + REQUESTS + POLITE_AFTER_TE + FINALS + HESITATIONS + OPENERS
 # 読み取りで使った動きの言葉のすぐ後の言い終わり（「下げる」「下げます」「ずらす」「移動させて」）。2026-11-03 シクロの判断
-VERB_ENDINGS = ("させて", "させ", "ます", "です", "る", "す")
+VERB_ENDINGS = ("させて", "させ", "します", "ます", "です", "る", "す")  # 「動かします」「移動します」も（2026-11-03 夜）
+# 読んだ指示の後の、文の終わりの「です」（「下に3ミリです」「Xのマイナス5ミリです」。2026-11-03 夜）。文の途中・初めでは使わない
+SENTENCE_END_COPULA = ("です",)
 # 量のすぐ前の「あと」「もう」（「あと3mm下げて」。CHECKER_023A）。「もう少し」はあいまいな量として聞き返す
 AMOUNT_PREFIXES = ("あと", "もう")
 
@@ -229,7 +237,8 @@ _NEGATION_RE = re.compile(
 _P, _TE, _REQ, _FIN = _alt(PARTICLES), _alt(TE_FORMS), _alt(REQUESTS), _alt(FINALS)
 # 読んだ言葉の後の1つのひと続き（文の終わりでないとき／文の終わりのとき）
 _TAIL_MID = re.compile(f"(?:{_P})|(?:{_P})?(?:{_REQ})|(?:{_TE})(?:{_REQ}|{_alt(POLITE_AFTER_TE)})?")
-_TAIL_END = re.compile(f"{_TAIL_MID.pattern}|(?:(?:{_TE})(?:{_REQ}|{_alt(POLITE_AFTER_TE)})?|(?:{_REQ}))?(?:{_FIN})")
+_TAIL_END = re.compile(f"{_TAIL_MID.pattern}|(?:(?:{_TE})(?:{_REQ}|{_alt(POLITE_AFTER_TE)})?|(?:{_REQ}))?(?:{_FIN})"
+                       f"|{_alt(SENTENCE_END_COPULA)}")
 _LEAD_STRIP = re.compile(f"{_P}|{_alt(HESITATIONS)}|{_alt(OPENERS)}")
 _TAIL_STRIP = re.compile(f"(?:{_P})?(?:{_REQ})?")  # 示すときに後ろから外す助詞など（「バイオを」→「バイオ」）
 _ANY_FILLER_SEQ = re.compile(f"(?:{_alt(FILLER_WORDS)})+")
@@ -363,8 +372,42 @@ def _unknown_words(residual: str, used_mask: Sequence[bool], source: str) -> tup
     return tuple(out)
 
 
+# ひらがなの「さげ」「あげ」は「下げ」「上げ」と同じ動きの言葉として読む（向きは言葉だけから。軸は足さない）。
+# 前がひらがなのときは、助詞のあとだけ（「ささげて」を読まない）
+_HIRA_VERB = re.compile(r"(?:(?<![ぁ-ゖ])|(?<=[をにへのではがとも]))(さげ|あげ)")
+# 疑問の形：文の終わりの ？・?、ひらがなのすぐ後の「か」（「下げますか」「3mmですか」）
+_QUESTION_END = re.compile(r"(?:(?<=[ぁ-ゖ])か)?[?？]*[\s　。．.!！]*$")
+# 繰り返し・往復（2026-11-03 夜）。「2往復」「2回の移動」ははっきりしたもの。「2回」「行き来」「繰り返し」はどちらか分からない
+_ROUND_TRIP = re.compile(r"(?:([0-9]+)\s?)?往復")
+_REPEAT_TIMES = re.compile(r"([0-9]+)\s?回の移動|繰り返しの移動")
+_REPEAT_AMBIGUOUS = re.compile(r"([0-9]+)\s?回|行き来|繰り返し|繰り返|くりかえし|くりかえ")
+REPEAT_STOP_MESSAGE = "このアプリでは、動きの追加・繰り返しはできません。位置の修正だけです"
+# 場所の言葉（2026-11-03 夜）。どの位置かは決めない
+PLACE_WORDS = ("置くところ", "置き場所", "置く位置", "取るところ", "つかむところ", "離すところ")
+_PLACE = re.compile(_alt(PLACE_WORDS))
+# 向きの言葉（軸には当てない。手前・前・後ろ・奥は止め、右・左は聞き返す）
+_RELATIVE_DIR = re.compile(r"手前|後ろ|奥|(?<!変更)(?<!以)(?<!名)前|右|左")
+
+
+def _repeat(text: str) -> tuple[tuple[int | None, str] | None, list[tuple[int, int]]]:
+    """繰り返し・往復の言葉を読む。(回数, 種類) と、読んだ部分の位置。"""
+    for pat, kind in ((_ROUND_TRIP, "round_trip"), (_REPEAT_TIMES, "times"), (_REPEAT_AMBIGUOUS, "ambiguous")):
+        found = list(pat.finditer(text))
+        if found:
+            n = next((int(m.group(1)) for m in found if m.group(1)), None)
+            spans = [m.span() for p2 in (_ROUND_TRIP, _REPEAT_TIMES, _REPEAT_AMBIGUOUS) for m in p2.finditer(text)]
+            return (n, kind), spans
+    return None, []
+
+
 def read_utterance(raw: str) -> UtteranceFacts:
-    text = _spoken(normalize(raw))
+    q = _QUESTION_END.search(raw)
+    if q is not None and ("か" in q.group(0) or "?" in q.group(0) or "？" in q.group(0)):
+        # 疑問の形：？・か を外した文を読み、確かめるために印を付ける（候補にはしない。pre_check が確かめる）
+        plain = raw[: q.start()].rstrip()
+        f = read_utterance(plain)
+        return replace(f, raw=raw, question=True, question_text=plain if plain and not f.question else None)
+    text = _HIRA_VERB.sub(lambda m: {"さげ": "下げ", "あげ": "上げ"}[m.group(1)], _spoken(normalize(raw)))
     # 位置番号（数字を量と読まないように、先に取り除く）
     positions: list[str] = []
     bad_positions: list[str] = []
@@ -514,6 +557,12 @@ def read_utterance(raw: str) -> UtteranceFacts:
             w = _POSITION_WORD.match(text[m.end():])
             if w:
                 blank(m.end(), m.end() + w.end())
+    repeat, repeat_spans = _repeat(rest)
+    for a, b in repeat_spans:
+        blank(a, b)
+    place = _PLACE.search(rest)
+    for m in _PLACE.finditer(rest):
+        blank(m.start(), m.end())
     negations, undo_negations = _negation_words(text)
     if undo_negations and _plain_undo(text, kinds):
         undo_negations = ()  # 元に戻す指示の言葉そのもの（「やめて」「取り消して」）は打ち消しにしない
@@ -533,6 +582,19 @@ def read_utterance(raw: str) -> UtteranceFacts:
         stop_reasons=tuple(stops),
         unknown_words=unknown,
         negations=negations, undo_negations=undo_negations,
+        repeat=repeat, place_ref=place.group(0) if place else None,
+        relative_dir=tuple(dict.fromkeys(m.group(0) for m in _RELATIVE_DIR.finditer(rest))),
+    )
+
+
+def _merged_extras(previous: UtteranceFacts, answer: UtteranceFacts) -> dict:
+    """答えと合わせるときの、疑問・繰り返し・場所・向きの欄。どちらかにあれば残す。
+    疑問の形が混ざったときは、確かめる選択肢の文（question_text）を作らない（言い直してもらう）。"""
+    return dict(
+        question=previous.question or answer.question, question_text=None,
+        repeat=answer.repeat or previous.repeat,
+        place_ref=answer.place_ref or previous.place_ref,
+        relative_dir=tuple(dict.fromkeys(previous.relative_dir + answer.relative_dir)),
     )
 
 
@@ -544,7 +606,8 @@ def combine_axes(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceF
                    refers_to_selection=previous.refers_to_selection or answer.refers_to_selection,
                    unknown_words=tuple(dict.fromkeys(previous.unknown_words + answer.unknown_words)),
                    negations=tuple(dict.fromkeys(previous.negations + answer.negations)),
-                   undo_negations=tuple(dict.fromkeys(previous.undo_negations + answer.undo_negations)))
+                   undo_negations=tuple(dict.fromkeys(previous.undo_negations + answer.undo_negations)),
+                   **_merged_extras(previous, answer))
 
 
 def merge_answer(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceFacts:
@@ -575,6 +638,7 @@ def merge_answer(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceF
         unknown_words=tuple(dict.fromkeys(previous.unknown_words + answer.unknown_words)),
         negations=tuple(dict.fromkeys(previous.negations + answer.negations)),
         undo_negations=tuple(dict.fromkeys(previous.undo_negations + answer.undo_negations)),
+        **_merged_extras(previous, answer),
     )
 
 
@@ -625,13 +689,39 @@ def unknown_words_message(words: Sequence[str], op: str) -> str:
             "（例：Y座標を3ミリ下げて／下に3ミリ）")
 
 
+QUESTION_RESTATE_MESSAGE = "質問の形の指示では変更しません。してほしいことを、もう一度言ってください"
+
+
 def pre_check(facts: UtteranceFacts) -> Verdict:
     """Claude に頼らず、発話だけで止める・聞き返すことが決まるかを調べる。"""
+    v = _pre_check(facts)
+    if v.status != "ok" or not facts.question:
+        return v
+    # 疑問の形（「3mm下げて？」）：候補にせず、？を外した同じ指示でよいかを確かめる。選択肢はその文の1つだけ。
+    # 知らない言葉・打ち消しがあれば選択肢を出さない（打ち消しは _pre_check で止まっている）
+    if facts.unknown_words:
+        return _ask(f"{''.join(f'「{w}」' for w in facts.unknown_words)}が分かりませんでした。もう一度指示してください")
+    t = facts.question_text
+    if not t:
+        return _ask(QUESTION_RESTATE_MESSAGE)
+    return _ask(f"「{t}」でよいですか？", ((t, t),))
+
+
+def _pre_check(facts: UtteranceFacts) -> Verdict:
     found = facts.negations + facts.undo_negations
     if found:
         # 打ち消しの言葉を捨てて、言ったことと逆の操作にしない。選択・比較・元に戻すも含めて、いちばん先に止める（選択肢も出さない）。
         # 「やめて」「元に戻して」「取り消して」「キャンセル」だけの指示は、元に戻す指示として使う（undo_negations が空）
         return _stop(NEGATION_MESSAGE.format(word="".join(f"「{w}」" for w in found)))
+    if facts.repeat is not None:
+        # 繰り返し・往復：候補にしない。「2回」「行き来」はどちらの意味かを、プログラムが作る2つの選択肢で聞く。
+        # どちらを選んでも、最後は止める（動きの追加・繰り返しはしない）
+        n, kind = facts.repeat
+        if kind != "ambiguous":
+            return _stop(REPEAT_STOP_MESSAGE)
+        if n is None:
+            return _ask("繰り返しの移動ですか、往復ですか？", (("繰り返しの移動", "繰り返しの移動"), ("往復", "往復")))
+        return _ask(f"{n}回の移動ですか、{n}往復ですか？", ((f"{n}回の移動", f"{n}回の移動"), (f"{n}往復", f"{n}往復")))
     if facts.stop_reasons:
         return _stop("。".join(facts.stop_reasons))
     if not facts.kinds:
@@ -650,6 +740,9 @@ def pre_check(facts: UtteranceFacts) -> Verdict:
     if op in ("move", "speed") and facts.unknown_words:
         # 知らない言葉を捨てて、残りの言葉だけで候補にしない。選択肢も出さない（どれを出しても推測か、言葉を捨てることになる）
         return _ask(unknown_words_message(facts.unknown_words, op))
+    if op in ("move", "speed") and facts.place_ref and not facts.positions and not facts.sides:  # 右・左は下の SIDE_MESSAGE
+        # 「置くところ」がどの位置かは、プログラムも Claude も決めない（対話の機能が来るまで、聞き返すだけ）
+        return _ask(f"「{facts.place_ref}」がどの位置か決まっていません。位置を選んでください")
     if op in ("move", "speed") and facts.stray_signs > 0:
         return _ask("プラス・マイナスがどこに付くか分かりません。「Xのマイナス5ミリ」のように、軸のすぐ後に言ってください")
     if op == "move":
