@@ -57,7 +57,7 @@ def answer(reply, lines=(), intent="explain", change=None, tool_id="toolu_01", s
     return SimpleNamespace(stop_reason=stop, content=content, usage=u or usage())
 
 
-def text_only(reply="Z方向の往復が2回あります。"):
+def text_only(reply="Z方向の往復をくり返しています。"):
     return SimpleNamespace(stop_reason="end_turn", content=[SimpleNamespace(type="text", text=reply)], usage=usage())
 
 
@@ -132,7 +132,7 @@ def test_facts_have_instructions_moves_repeats_but_no_coordinates_name_or_commen
 
 
 def test_preview_and_requests_never_contain_the_key(tmp_path):
-    fake = FakeClient(answer("Z方向の往復が2回あります。", [21]))
+    fake = FakeClient(answer("Z方向の往復をくり返しています。", [21]))
     ex = explainer(tmp_path, fake)
     c = conv()
     out = io.StringIO()
@@ -144,7 +144,7 @@ def test_preview_and_requests_never_contain_the_key(tmp_path):
 
 
 def test_request_shape_follows_sonnet_5_5_rules(tmp_path):
-    fake = FakeClient(answer("Z方向の往復が2回あります。", [21]))
+    fake = FakeClient(answer("Z方向の往復をくり返しています。", [21]))
     explainer(tmp_path, fake).ask(conv(), "何をしている？")
     req = fake.requests[0]
     assert req["model"] == MODEL
@@ -191,10 +191,10 @@ def ask_one(tmp_path, resp, updown=None, text="このロボット、何をして
 
 
 def test_good_answer_is_shown_with_evidence_lines_and_their_text(tmp_path):
-    r, c = ask_one(tmp_path, answer("Z方向の往復動作が2回あります。ボタンを押す動作として設定されていますか？",
+    r, c = ask_one(tmp_path, answer("Z方向の往復動作をくり返しています。ボタンを押す動作として設定されていますか？",
                                     [21, 22, 23, 99, 19, 21, True]))
     assert r["ok"] and r["reply_by"] == "claude" and r["checked"] is None
-    assert r["reply"].startswith("Z方向の往復動作が2回")
+    assert r["reply"].startswith("Z方向の往復動作を")
     # 99（無い行）・19（コメントの行。命令の範囲に無い）・重複・bool は捨てる
     assert [e["line"] for e in r["evidence"]] == [21, 22, 23]
     assert r["evidence"][0] == {"line": 21, "text": "MOVL C00001 V=150.0", "note": "C00001 へ直線で動く",
@@ -225,7 +225,7 @@ def test_bad_reply_is_replaced_with_fixed_text(tmp_path, reply, fixed):
 
 
 def test_updown_words_allowed_only_when_confirmed(tmp_path):
-    r, _ = ask_one(tmp_path, answer("上下の往復動作が2回あります。", [21]), updown=confirmed())
+    r, _ = ask_one(tmp_path, answer("上下の往復動作をくり返しています。", [21]), updown=confirmed())
     assert r["reply_by"] == "claude"
     # 「以下」「下さい」などは上下の言葉として数えない
     r, _ = ask_one(tmp_path, answer("以下の行を見て下さい。", [21]))
@@ -234,7 +234,7 @@ def test_updown_words_allowed_only_when_confirmed(tmp_path):
 
 def test_numbers_from_facts_and_user_are_allowed(tmp_path):
     # 位置番号は最初の説明では使わない（CHECKER_031 E1。tests/test_claude_talk.py）。2回目の答えで数の検査を確かめる
-    fake = FakeClient(answer("同じ動きを2回くり返しています。", [21]),
+    fake = FakeClient(answer("同じ動きをくり返しています。", [21]),
                       answer("C00001〜C00003 の動きが、21〜26行目に2回あります。Zのマイナス45mm動きます。", [21],
                              tool_id="toolu_02"))
     ex, c = explainer(tmp_path, fake), conv()
@@ -244,7 +244,8 @@ def test_numbers_from_facts_and_user_are_allowed(tmp_path):
     assert r["reply_by"] == "app" and r["reply"] == cx.FIXED_AMOUNT, r["reply"]
     r, _ = ask_one(tmp_path, answer("この動作を3回に変更しますか？", [21], "change_request",
                                     {"kind": "repeat", "from_count": 2, "to_count": 3}), text="そう。じゃあ3回にして")
-    assert r["reply_by"] == "claude"
+    # CHECKER_033 P1-A（唐川さんの方針② 11/4）：変更の会話では Claude の文を出さず、プログラムの定型文（数はプログラムが数えたもの）
+    assert r["reply_by"] == "app" and "ご希望として受け取りました" in r["reply"] and "まだ動作データは変えていません" in r["reply"]
 
 
 @pytest.mark.parametrize("resp, msg", [
@@ -281,7 +282,7 @@ def test_change_request_shows_read_only_note(tmp_path):
     assert r["change_request"] == {"kind": "repeat", "from_count": 2, "to_count": 3}
     assert r["notes"] == [cx.READ_ONLY_NOTE]
     # intent が change_request でなければ、change_request は捨てる
-    r, _ = ask_one(tmp_path, answer("Z方向の往復が2回あります。", [21], "explain", {"kind": "shift"}))
+    r, _ = ask_one(tmp_path, answer("Z方向の往復をくり返しています。", [21], "explain", {"kind": "shift"}))
     assert r["change_request"] is None and r["notes"] == []
 
 
@@ -294,7 +295,7 @@ def web_flow(tmp_path, *responses):
 
 def test_change_request_changes_no_job_candidate_approval_or_log(tmp_path):
     w, fake = web_flow(tmp_path,
-                       answer("Z方向の往復動作が2回あります。ボタンを押す動作として設定されていますか？", [21, 24]),
+                       answer("Z方向の往復動作をくり返しています。ボタンを押す動作として設定されていますか？", [21, 24]),
                        answer("この動作を3回に変更しますか？", [21, 24], "change_request",
                               {"kind": "repeat", "from_count": 2, "to_count": 3}, tool_id="toolu_02"))
     sid = w.load(demo_bytes())["session_id"]
@@ -326,7 +327,7 @@ def test_ask_while_candidate_pending_does_not_touch_candidate(tmp_path):
 
 # ---- 4. 会話の文脈（書き換えずに次へ） ----
 def test_history_is_replayed_unchanged_and_tool_result_comes_first(tmp_path):
-    r1 = answer("Z方向の往復動作が2回あります。ボタンを押す動作として設定されていますか？", [21])
+    r1 = answer("Z方向の往復動作をくり返しています。ボタンを押す動作として設定されていますか？", [21])
     r2 = answer("この動作を3回に変更しますか？", [21], "change_request",
                 {"kind": "repeat", "from_count": 2, "to_count": 3}, tool_id="toolu_02")
     fake = FakeClient(r1, r2)
@@ -349,7 +350,7 @@ def test_history_is_replayed_unchanged_and_tool_result_comes_first(tmp_path):
 
 
 def test_failed_turn_keeps_pending_tool_result_for_next_try(tmp_path):
-    fake = FakeClient(answer("Z方向の往復が2回あります。", [21]), text_only(),
+    fake = FakeClient(answer("Z方向の往復をくり返しています。", [21]), text_only(),
                       answer("この動作を3回に変更しますか？", [21], "change_request",
                              {"kind": "repeat", "from_count": 2, "to_count": 3}, tool_id="toolu_03"))
     ex = explainer(tmp_path, fake)
@@ -363,7 +364,7 @@ def test_failed_turn_keeps_pending_tool_result_for_next_try(tmp_path):
 
 
 def test_turn_limit_stops_without_calling(tmp_path):
-    fake = FakeClient(*[answer("Z方向の往復が2回あります。", [21], tool_id=f"t{i}") for i in range(cx.MAX_TURNS)])
+    fake = FakeClient(*[answer("Z方向の往復をくり返しています。", [21], tool_id=f"t{i}") for i in range(cx.MAX_TURNS)])
     ex = explainer(tmp_path, fake)
     c = conv()
     for _ in range(cx.MAX_TURNS):
@@ -373,7 +374,7 @@ def test_turn_limit_stops_without_calling(tmp_path):
 
 
 def test_web_reset_and_new_job_start_new_conversation(tmp_path):
-    w, fake = web_flow(tmp_path, answer("Z方向の往復が2回あります。", [21]), answer("Z方向の往復が2回あります。", [21]))
+    w, fake = web_flow(tmp_path, answer("Z方向の往復をくり返しています。", [21]), answer("Z方向の往復をくり返しています。", [21]))
     sid = w.load(demo_bytes())["session_id"]
     w.ask(sid, "何をしている？")
     assert w._entries[sid].explain.turns == 1
@@ -398,7 +399,7 @@ def test_cost_table_and_calculation():
 
 
 def test_usage_jsonl_has_counts_only_and_accumulates(tmp_path):
-    fake = FakeClient(answer("Z方向の往復が2回あります。", [21], u=usage(1000, 200)),
+    fake = FakeClient(answer("Z方向の往復をくり返しています。", [21], u=usage(1000, 200)),
                       answer("この動作を3回に変更しますか？", [21], "change_request",
                              {"kind": "repeat", "from_count": 2, "to_count": 3}, tool_id="t2", u=usage(1500, 100, cr=800)))
     ex = explainer(tmp_path, fake)
@@ -443,7 +444,7 @@ def test_invalid_budget_unknown_price_or_unreadable_log_do_not_call(tmp_path):
 
 
 def test_missing_usage_is_recorded_as_worst_case(tmp_path):
-    resp = answer("Z方向の往復が2回あります。", [21])
+    resp = answer("Z方向の往復をくり返しています。", [21])
     resp.usage = None
     r, _ = ask_one(tmp_path, resp)
     assert r["estimated_worst_case"] is True and r["cost_usd"] > 0
@@ -452,7 +453,7 @@ def test_missing_usage_is_recorded_as_worst_case(tmp_path):
 
 
 def test_unwritable_usage_log_stops_further_calls(tmp_path):
-    fake = FakeClient(answer("Z方向の往復が2回あります。", [21]))
+    fake = FakeClient(answer("Z方向の往復をくり返しています。", [21]))
     class Unwritable(cx.UsageLog):
         def append(self, *a, **k):
             raise cx.ExplainError(cx.USAGE_UNWRITABLE)
@@ -561,13 +562,13 @@ def test_cli_call_needs_yes(tmp_path):
 
 
 def test_cli_call_with_yes_runs_the_conversation(tmp_path):
-    fake = FakeClient(answer("Z方向の往復動作が2回あります。ボタンを押す動作として設定されていますか？", [21, 22, 23]),
+    fake = FakeClient(answer("Z方向の往復動作をくり返しています。ボタンを押す動作として設定されていますか？", [21, 22, 23]),
                       answer("この動作を3回に変更しますか？", [21, 24], "change_request",
                              {"kind": "repeat", "from_count": 2, "to_count": 3}, tool_id="t2"))
     code, text, asked = cli(tmp_path, ["--say", "このロボット、何をしている？", "--say", "そう。じゃあ3回にして", "--call"],
                             answer_text="yes", client=fake)
     assert code == 0 and len(fake.requests) == 2
-    assert "Claude（claude-sonnet-5-5）「Z方向の往復動作が2回あります。" in text
+    assert "Claude（claude-sonnet-5-5）「Z方向の往復動作をくり返しています。" in text
     assert "根拠 21行目：MOVL C00001 V=150.0（C00001 へ直線で動く）" in text
     assert cx.READ_ONLY_NOTE in text and '"to_count": 3' in text
     assert "推定料金 $0.0040" in text and "累計 $0.0080" in text
@@ -597,7 +598,7 @@ def test_cli_reads_env_file(tmp_path):
 @pytest.fixture
 def running(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    fake = FakeClient(answer("Z方向の往復が2回あります。", [21]))
+    fake = FakeClient(answer("Z方向の往復をくり返しています。", [21]))
     srv = server.make_server(port=0, explainer=explainer(tmp_path, fake))
     t = threading.Thread(target=srv.serve_forever, daemon=True)
     t.start()
@@ -626,7 +627,7 @@ def test_web_ask_route(running):
     assert info["ok"] and info["has_key"] is True and KEY.encode() not in data and "TESTKEY" not in data.decode()
     st, data = post(srv, "/api/ask", {"session_id": sid, "text": "このロボット、何をしている？"})
     r = json.loads(data)
-    assert r["ok"] and r["reply"] == "Z方向の往復が2回あります。" and r["evidence"][0]["line"] == 21
+    assert r["ok"] and r["reply"] == "Z方向の往復をくり返しています。" and r["evidence"][0]["line"] == 21
     assert "session_usage" in r and "total_cost_usd" in r and KEY not in data.decode()
     st, data = post(srv, "/api/ask", {"session_id": "nope", "text": "x"})
     assert json.loads(data)["ok"] is False

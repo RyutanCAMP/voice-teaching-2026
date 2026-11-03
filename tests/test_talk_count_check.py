@@ -41,12 +41,14 @@ def test_wrong_count_in_change_confirmation_is_a_verification_error(tmp_path, re
     assert st.candidate is None  # 候補・承認は作らない
 
 
-def test_matching_counts_are_shown(tmp_path):
+def test_matching_counts_use_the_program_template(tmp_path):
     w, f, sid = taught(tmp_path)
     f.add(T.answer("ボタンを押す動作を2回から3回に変更しますか？", BLOCK, "change_request",
                    {"kind": "repeat", "from_count": 2, "to_count": 3}))
     r = w.ask(sid, "じゃあ、3回にして")
-    assert r["reply_by"] == "claude" and r["reply"] == "ボタンを押す動作を2回から3回に変更しますか？"
+    # CHECKER_033 P1-A（唐川さんの方針②③ 11/4）：変更の会話は Claude の文を出さず、プログラムの定型文（数はプログラムが数えたもの）
+    assert r["reply_by"] == "app" and "ボタンを押す動作を" not in r["reply"]
+    assert "2回から3回" in r["reply"] and "まだ動作データは変えていません" in r["reply"]
     assert r["change_record"]["mismatch"] is False and w._entries[sid].session.candidate is None
 
 
@@ -63,12 +65,16 @@ def test_unverified_counts_in_explanations_are_not_shown(tmp_path, reply):
     assert r["ok"] and r["reply_by"] == "app" and reply not in r["reply"]
 
 
-def test_verified_counts_in_explanations_are_shown(tmp_path):
+def test_counts_in_explanations_are_not_shown_even_if_verified_mvp(tmp_path):
+    # 唐川さんの方針③（11/4）：MVP では Claude の自由文に数を含めない。合っている数でも出さない（数はアプリの補足が出す）
     w, f = T.flow(tmp_path)
     sid = w.load(T.demo_bytes())["session_id"]
     f.add(T.answer("3か所を通る同じ動きを2回くり返しています。何の作業ですか？", BLOCK))
     r = w.ask(sid, "このロボット、何をしている？")
-    assert r["reply_by"] == "claude"
+    assert r["reply_by"] == "app" and r["reply"] == talk.FIXED_NO_NUMBER
+    f.add(T.answer("同じ動きをくり返しています。何の作業ですか？", BLOCK))
+    r = w.ask(sid, "このロボット、何をしている？")
+    assert r["reply_by"] == "claude" and r["supplement"]  # 数はアプリの補足（根拠の行から）
 
 
 @pytest.mark.parametrize("text,ok", [
@@ -102,12 +108,13 @@ def test_count_check_holds_when_the_block_is_not_pinned(tmp_path, first, reply):
 
 
 @pytest.mark.parametrize("first", [WIDE, BLOCK])
-def test_correct_confirmation_still_shows_when_the_block_is_not_pinned(tmp_path, first):
+def test_correct_confirmation_uses_the_template_when_the_block_is_not_pinned(tmp_path, first):
     w, f, sid = wide_taught(tmp_path, first)
     f.add(T.answer("ボタンを押す動作を2回から3回に変更しますか？", BLOCK, "change_request",
                    {"kind": "repeat", "from_count": 2, "to_count": 3}))
     r = w.ask(sid, "じゃあ、3回にして")
-    assert r["reply_by"] == "claude" and r["change_record"]["mismatch"] is False
+    # CHECKER_033 P1-A（唐川さんの方針②③ 11/4）：変更の会話は Claude の文を出さず、プログラムの定型文（数はプログラムが数えたもの）
+    assert r["reply_by"] == "app" and "受け取りました" in r["reply"] and r["change_record"]["mismatch"] is False
 
 
 def test_earlier_user_counts_do_not_pass_a_change_confirmation(tmp_path):
@@ -210,11 +217,12 @@ def test_change_confirmation_allows_only_program_count_phrases(tmp_path, reply):
     "ボタンを押す動作を2回から3回に変更しますか？", "ボタンを押す動作を二回から三回に変更しますか？",
     "ボタンを押す動作を3回にしますか？", "ボタンを押す動作を、2回から3回にしますか？",
 ])
-def test_correct_change_confirmations_still_show(tmp_path, reply):
+def test_correct_change_confirmations_are_replaced_by_the_template(tmp_path, reply):
     w, f, sid = wide_taught(tmp_path)
     f.add(T.answer(reply, BLOCK, "change_request", {"kind": "repeat", "from_count": 2, "to_count": 3}))
     r = w.ask(sid, "じゃあ、3回にして")
-    assert r["reply_by"] == "claude", (reply, r["reply"])
+    # CHECKER_033 P1-A（唐川さんの方針②③ 11/4）：変更の会話は Claude の文を出さず、プログラムの定型文（数はプログラムが数えたもの）
+    assert r["reply_by"] == "app" and reply not in r["reply"] and "受け取りました" in r["reply"], (reply, r["reply"])
 
 
 @pytest.mark.parametrize("reply", [
@@ -235,11 +243,15 @@ def test_unverified_numbers_units_and_positions_are_not_shown(tmp_path, reply):
     "3か所を通る同じ動きを2回くり返しています。何の作業ですか？",
     "同じ3か所を通る動きを2回くり返しています。途中で下がってまた上がる動きがあります。何の作業か、教えてもらえますか？",
 ])
-def test_real_run_explanations_still_show(tmp_path, reply):
+def test_real_run_explanations_with_numbers_are_not_shown_mvp(tmp_path, reply):
+    # 本物の通しで Claude が返した文（数を含む）。方針③で、数を含む文は出さない。数を除いた同じ言い方は出す
     w, f = T.flow(tmp_path, updown_config=T.confirmed_config(tmp_path))  # 本物の通しと同じく上下は確認済みの仮の設定
     sid = w.load(T.demo_bytes())["session_id"]
     f.add(T.answer(reply, BLOCK))
-    assert w.ask(sid, "このロボット、何をしている？")["reply_by"] == "claude"
+    assert w.ask(sid, "このロボット、何をしている？")["reply"] == talk.FIXED_NO_NUMBER
+    plain = reply.replace("3か所を通る", "").replace("同じ3か所を通る", "同じ").replace("を2回", "を")
+    f.add(T.answer(plain, BLOCK))
+    assert w.ask(sid, "このロボット、何をしている？")["reply_by"] == "claude", plain
 
 
 # ---- 内部 Safety 再確認（7af2288：CONDITIONAL PASS）の P2-1・P2-2・P3 ----
@@ -257,8 +269,10 @@ def test_reused_phrases_and_wordy_counts_are_not_shown(tmp_path, reply):
     assert r["reply_by"] == "app" and reply not in r["reply"], reply
 
 
-def test_current_count_with_the_right_number_is_shown(tmp_path):
+def test_current_count_with_the_right_number_uses_the_template(tmp_path):
     w, f, sid = wide_taught(tmp_path)
     f.add(T.answer("今は2回くり返しています。3回にしますか？", BLOCK, "change_request",
                    {"kind": "repeat", "from_count": 2, "to_count": 3}))
-    assert w.ask(sid, "じゃあ、3回にして")["reply_by"] == "claude"
+    r = w.ask(sid, "じゃあ、3回にして")
+    # CHECKER_033 P1-A（唐川さんの方針②③ 11/4）：変更の会話は Claude の文を出さず、プログラムの定型文（数はプログラムが数えたもの）
+    assert r["reply_by"] == "app" and "今は2回くり返しています" not in r["reply"]

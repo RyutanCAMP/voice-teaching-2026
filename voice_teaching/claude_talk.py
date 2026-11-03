@@ -25,7 +25,7 @@ from . import dialog as dg
 from . import jbi
 from . import utterance as ut
 
-HUMAN_MARK = "人が教えた（この会話の中だけ）"
+HUMAN_MARK = "ユーザー登録情報（人が教えた・この会話の中だけ）"  # 唐川さんの決定 11/4：AI の推定と分けて示す
 AI_MARK = "AI の推定（未確定）"
 DATA_CHANGED = "データが変わったので、ここからは新しい内容で答えます"
 INVALIDATED = "さきほど教えてもらった意味（{text}）を確認できなくなりました。もう一度教えてください"
@@ -312,7 +312,11 @@ _GUESS = ("ようです", "ような", "ように見え", "らしい", "かも�
 ROLE_WORDS = ("待機", "作業の場所", "作業場所", "作業位置", "作業の位置", "ホーム", "原点", "退避", "置く場所", "置き場",
               "取る場所", "取り出し", "部品", "ワーク",
               # 目的の言葉（CHECKER_032 K04）：人が教えるまでは推定。「押」は 押す・押して・押し の共通の部分
-              "ボタン", "押")
+              "ボタン", "押",
+              # 唐川さんの決定（11/4）：スイッチ・溶接・ねじ締め・検査など、Claude が推測した目的は「AI の推定」
+              "スイッチ", "溶接", "ねじ", "ネジ", "締め", "検査", "点検", "塗装", "塗布", "組立", "組み立", "搬送", "運ぶ", "運ん",
+              "ピック", "つかむ", "つかん", "掴", "把持", "置く", "置い", "載せ", "乗せ", "研磨", "磨", "切断", "接着", "吸着",
+              "取り付け", "取付", "はめ", "差し込", "挿入", "測定", "計測", "撮影", "仕分け", "梱包", "箱詰め", "製品", "部品")
 
 
 def ai_guesses(reply: str, taught: list[str] | None = None) -> list[str]:
@@ -911,3 +915,66 @@ def _meaning_problem(text: str) -> str | None:
     if len(text) > MAX_MEANING:
         return TOO_LONG_MEANING.format(n=MAX_MEANING)
     return None
+
+
+
+# ---- CHECKER_033 P1-A と唐川さんの方針（11/4）：状態・数はプログラムが出す。Claude の自由文は、作業目的の推定と自然な説明だけ ----
+# ① 変更・承認・出力などの状態は、プログラムが確定情報から表示する（WebFlow の status_line）
+# ② 位置・回数の変更の操作案内は、プログラムの定型文（change_turn_text）。Claude は意図と文脈を読むだけ
+# ③ MVP では、Claude の自由文に数を含めない（位置番号・回数・行・移動量・速度は、プログラムが表示する）
+# ⑤ 禁止表現の検査は残すが、それだけに頼らない：変更の会話では Claude の文を出さない・数は一切出さない・状態は別に出す
+FIXED_NO_NUMBER = ("Claude の答えに数（位置番号・回数・量など）が入っていたため、表示しません"
+                   "（数はアプリが動作データから表示します）")
+FIXED_STATE = ("Claude の答えに、変更・承認・出力などの状態を言う言い方が入っていたため、表示しません"
+               "（いまの状態は、アプリの表示が確かな情報です）")
+FIXED_EVALUATION = ("Claude の答えに、安全・距離・動かしてよいかを決めつける言い方が入っていたため、表示しません"
+                    "（このアプリでは判断しません。人が確かめてください）")
+
+_ANY_KANJI_NUMBER = re.compile(rf"[〇一二三四五六七八九十百千万壱弐参]+\s*(?:{_UNITS}|たび|番)")
+_ROMAN_OR_WORD = re.compile(r"(?<![A-Za-z])(?:once|twice|thrice|times?|I{1,3}|IV|VI{0,3}|IX|X)(?![A-Za-z])")
+# 状態（変えた・承認した・出力した・送った・できあがった など）。説明の文には要らない言葉なので、形を問わず止める
+_STATE_WORDS = re.compile(
+    r"変更|変え|変わ|書き換|修正|直し|直っ|直り|直す|反映|適用|更新|承認|出力|書き出|保存|転送|送信|送り|送っ|送れ|送る|"
+    r"実行|起動|登録|確定|完了|済|終わり|終わっ|終了|できあが|出来上が|整い|整っ|準備ができ|記録|覚え|記憶|設定し|"
+    r"アップロード|ダウンロード|エクスポート|書き込")
+# 過去・完了の形（「下がりました」「3回になりました」「移動しました」）：いまの動作データの説明には要らない
+_PAST = re.compile(r"ました|でした|しまった|ちゃった|てある|ておいた|ておき")
+_COURTESY = ("ありがとうございました", "わかりました", "分かりました", "承知しました")
+# 安全・距離・動かしてよいかの評価（言い換えを含めて広く止める）
+_EVALUATION = re.compile(
+    r"問題な|問題あり|問題は|問題が|大丈夫|心配|リスク|余裕|確保|クリアランス|離れ|安心|危な|無事|支障|差し支え|"
+    r"動かせ|動かしても|動かすだけ|実行でき|使えます|平気|障害|周り|周囲|壁|すき間|隙間|距離|近づ|ぎりぎり|ギリギリ|"
+    r"保証|確実|間違いな|必ず|絶対|OK|オーケー|オッケー|許容|範囲内|安定")
+
+
+def reply_mvp_problem(text: str) -> str | None:
+    """Claude の自由文を表示してよいか（MVP の決まり）。だめなら決まった文。数・状態・評価のどれかがあれば表示しない。"""
+    t = _nfkc(text)
+    if re.search(r"[0-9]", t) or _ANY_KANJI_NUMBER.search(t) or _WORDY_COUNT.search(t) or _ROMAN_OR_WORD.search(t):
+        return FIXED_NO_NUMBER
+    if _EVALUATION.search(t):
+        return FIXED_EVALUATION
+    plain = t
+    for w in _COURTESY:
+        plain = plain.replace(w, "")
+    if _STATE_WORDS.search(plain) or _PAST.search(plain):
+        return FIXED_STATE
+    return None
+
+
+def change_turn_text(record: dict | None, change: dict | None) -> str:
+    """変更の会話（回数・位置）で、Claude の文の代わりに出すプログラムの定型文。数はプログラムが数えたものだけ。"""
+    if record is not None and record.get("kind") == "repeat":
+        a, b, target = record.get("program_from"), record.get("program_total"), record.get("target")
+        if record.get("program_keep"):
+            return "回数はそのままにするご希望として受け取りました。動作データは変えていません"
+        if a is not None and b is not None:
+            where = f"{target}の" if target else ""
+            return (f"{where}くり返しを{a}回から{b}回にするご希望として受け取りました。"
+                    "まだ動作データは変えていません。範囲と回数は、アプリの表示で確かめてください")
+        return ("回数を変えるご希望として受け取りました。まだ動作データは変えていません。"
+                "何回にするかを、数で言ってください（例：3回にして）")
+    if change is not None and change.get("kind") == "shift":
+        return ("位置を変えるご希望として受け取りました。まだ動作データは変えていません。"
+                "3D で位置を選んで、軸と向きと量で指示してください（例：Zマイナス3ミリ）")
+    return "変更のご希望として受け取りました。まだ動作データは変えていません。してほしい変更を、1つずつ指示してください"

@@ -109,7 +109,7 @@ def repeat_to_three(w, sid):
     return w.repeat_choose(sid, "yes", h["state"]["repeat_range"]["turn"])
 
 
-def first_turn(w, fake, data=None, lines=(21, 22, 23, 24, 25, 26), reply="同じ動きを2回くり返しています。" + ASKED):
+def first_turn(w, fake, data=None, lines=(21, 22, 23, 24, 25, 26), reply="同じ動きをくり返しています。" + ASKED):
     """「このロボット、何をしている？」→ Claude が問いを返す、まで。"""
     sid = w.load(demo_bytes() if data is None else data)["session_id"]
     fake.add(answer(reply, lines))
@@ -145,8 +145,8 @@ def taught_button(w, fake, sid, said="そう、ボタンを押しているんだ
 @pytest.mark.parametrize("reply", [
     "C00001〜C00003 の直線移動を2回くり返しています。",
     "MOVL で2回くり返しています。",
-    "このジョブは同じ動きを2回くり返しています。",
-    "この JOB は同じ動きを2回くり返します。",
+    "このジョブは同じ動きをくり返しています。",
+    "この JOB は同じ動きをくり返します。",
     "C00004 へ関節移動で戻ります。",
 ])
 def test_e1_first_reply_with_numbers_or_commands_becomes_plain_fixed_text(tmp_path, reply):
@@ -154,7 +154,7 @@ def test_e1_first_reply_with_numbers_or_commands_becomes_plain_fixed_text(tmp_pa
     sid = w.load(demo_bytes())["session_id"]
     r = w.ask(sid, "このロボット、何をしている？")
     assert r["ok"] and r["reply_by"] == "app" and r["first_turn"] is True
-    assert r["reply"] == talk.PLAIN_ONE.format(count=2) == "同じ動きを2回くり返しています。何をする動きか、教えてもらえますか？"
+    assert r["reply"] == talk.PLAIN_ONE.format(count=2) == "同じ動きを2回くり返しています。何をする動きか、教えてもらえますか？"  # アプリの文（数はプログラムが数えた）
     # 作り直しは頼まない（1回だけ呼ぶ）。番号と命令は、プログラムが根拠の行から補足として出す
     assert len(fake.requests) == 1
     assert r["supplement"] == ["21〜26行目：C00001→C00002→C00003（2回）"]
@@ -169,7 +169,7 @@ def test_e1_plain_first_reply_is_shown_and_fixed_text_has_no_numbers_commands_or
 
 
 def test_e1_plain_first_reply_from_claude_is_used(tmp_path):
-    w, fake = flow(tmp_path, answer("待機の位置から動いて、同じ動きを2回くり返しています。何をする動きですか？", [21]))
+    w, fake = flow(tmp_path, answer("待機の位置から動いて、同じ動きをくり返しています。何をする動きですか？", [21]))
     sid = w.load(demo_bytes())["session_id"]
     r = w.ask(sid, "このロボット、何をしている？")
     assert r["reply_by"] == "claude" and r["reply"].startswith("待機の位置から")
@@ -192,12 +192,13 @@ def test_e1_job_word_is_not_used_later_but_positions_are_allowed_after_first(tmp
     sid = first_turn(w, fake)
     fake.add(answer("このジョブは2回くり返します。", [21]))
     assert w.ask(sid, "くわしく")["reply"] == talk.FIXED_JOB_WORD
-    fake.add(answer("C00001〜C00003 の動きを2回くり返しています。", [21]))
-    assert w.ask(sid, "番号で言うと？")["reply_by"] == "claude"
+    fake.add(answer("C00001〜C00003 の動きをくり返しています。", [21]))
+    # 唐川さんの方針③（11/4）：MVP では、最初の説明のあとも Claude の自由文に位置番号を含めない（番号はアプリの補足が出す）
+    assert w.ask(sid, "番号で言うと？")["reply"] == talk.FIXED_NO_NUMBER
 
 
 def test_e1_updown_unconfirmed_plain_words_with_down_are_not_used(tmp_path):
-    w, fake = flow(tmp_path, answer("待機の位置から下りて戻る動きを2回くり返しています。", [21]))
+    w, fake = flow(tmp_path, answer("待機の位置から下りて戻る動きをくり返しています。", [21]))
     sid = w.load(demo_bytes())["session_id"]
     assert w.ask(sid, "何をしている？")["reply"] == cx.FIXED_UPDOWN
 
@@ -251,7 +252,8 @@ def test_e2_meaning_is_used_in_the_next_answer(tmp_path):
     fake.add(answer("ボタンを押す動作を2回から3回に変更しますか？", [21, 24], "change_request",
                     {"kind": "repeat", "from_count": 2, "to_count": 3}))
     r = w.ask(sid, "じゃあ3回にして")
-    assert r["reply_by"] == "claude" and r["reply"] == "ボタンを押す動作を2回から3回に変更しますか？"
+    # CHECKER_033 P1-A（唐川さんの方針② 11/4）：変更の会話はプログラムの定型文（Claude の文は出さない）
+    assert r["reply_by"] == "app" and "2回から3回" in r["reply"] and "受け取りました" in r["reply"]
     assert r["notes"] == [cx.READ_ONLY_NOTE]
     rec = r["change_record"]
     assert rec["program_total"] == 3 and rec["claude_total"] == 3 and rec["mismatch"] is False
@@ -459,7 +461,7 @@ def post(srv, path, obj, headers=None):
 def test_e2_1_e2_2_reload_and_sample_over_http(running):
     srv, fake = running
     sid = post(srv, "/api/load", demo_bytes())["session_id"]
-    fake.add(answer("同じ動きを2回くり返しています。" + ASKED, [21]))
+    fake.add(answer("同じ動きをくり返しています。" + ASKED, [21]))
     post(srv, "/api/ask", {"session_id": sid, "text": "このロボット、何をしている？"})
     r = post(srv, "/api/ask", {"session_id": sid, "text": "そう、ボタンを押しているんだよ", "source": "voice"})
     assert r["status"] == "ask_which" and r["source"] == "voice"
@@ -508,7 +510,7 @@ def test_e2_3_candidate_that_breaks_the_block_invalidates_meaning_and_says_so(tm
     assert w.ask(sid, sync=True)["talk"]["notices"] == []  # 知らせは1回だけ
     # 次の要求には、無効にした意味を入れない
     e.session.candidate = None
-    fake.add(answer("同じ動きを2回くり返しています。", [21]))
+    fake.add(answer("同じ動きをくり返しています。", [21]))
     w.ask(sid, "何をしている？")
     assert "taught_by_human" not in dump(fake.requests[-1]["messages"])
 
@@ -578,7 +580,7 @@ def test_e2_6_meaning_is_not_written_anywhere(tmp_path, monkeypatch):
 
 # ======== E4 3D で自動で光らせる ========
 def test_e4_highlight_is_decided_from_line_numbers(tmp_path):
-    w, fake = flow(tmp_path, answer("同じ動きを2回くり返しています。", [22]))
+    w, fake = flow(tmp_path, answer("同じ動きをくり返しています。", [22]))
     sid = w.load(demo_bytes())["session_id"]
     r = w.ask(sid, "何をしている？")
     assert r["highlight"] == {"lines": [21, 22, 23, 24, 25, 26], "positions": ["C00001", "C00002", "C00003"], "context_lines": [], "entry_lines": [21]}
@@ -655,7 +657,7 @@ def test_e5_data_change_separates_conversation(tmp_path):
     sid = first_turn(w, fake)
     assert repeat_to_three(w, sid)["candidate_made"]
     assert w.ask(sid, sync=True)["talk"]["notices"] == [talk.DATA_CHANGED]
-    fake.add(answer("同じ動きを2回くり返しています。", [21]))
+    fake.add(answer("同じ動きをくり返しています。", [21]))
     w.ask(sid, "何をしている？")
     assert len(fake.requests[-1]["messages"]) == 1  # 前の会話を入れない（新しい内容で答える）
     for op in (lambda: w.undo(sid), lambda: w.load(demo_bytes(), previous=sid)):
@@ -773,7 +775,7 @@ def test_ai_guess_is_shown_separately_and_not_registered(tmp_path):
     r = w.ask(sid, "くわしく")
     assert r["guesses"] == ["ボタンを押す動きのようです。"] and meanings(w, sid) == []
     t = r["talk"]
-    assert t["human_mark"] == "人が教えた（この会話の中だけ）" and t["ai_mark"] == "AI の推定（未確定）"
+    assert t["human_mark"] == "ユーザー登録情報（人が教えた・この会話の中だけ）" and t["ai_mark"] == "AI の推定（未確定）"  # 11/4 の決定
 
 
 def test_reset_clears_meaning(tmp_path):
@@ -794,7 +796,7 @@ def test_static_talk_panel_marks_and_thinking():
 
 
 # ======== 台本 Ver.6.1 Scene 3（3-1 読む・3-2 教える・3-3 変える） ========
-SCENE_31 = "待機の位置から作業の場所へ動き、下りて戻る動きを2回くり返してから、待機の位置に戻ります。何をする作業ですか？"
+SCENE_31 = "待機の位置から作業の場所へ動き、下りて戻る動きをくり返してから、待機の位置に戻ります。何をする作業ですか？"
 
 
 def confirmed_config(tmp_path) -> Path:
@@ -824,7 +826,7 @@ def test_scene_3_1_updown_unconfirmed_needs_z_words(tmp_path):
     sid = w.load(demo_bytes())["session_id"]
     assert w.state(sid)["state"]["updown"]["status"] != "confirmed"
     assert w.ask(sid, "このロボット、何をしている？")["reply"] == cx.FIXED_UPDOWN
-    w2, fake2 = flow(tmp_path, answer("Zのマイナスへ動いて戻る動きを2回くり返します。何をする作業ですか？", [21]))
+    w2, fake2 = flow(tmp_path, answer("Zのマイナスへ動いて戻る動きをくり返します。何をする作業ですか？", [21]))
     sid2 = w2.load(demo_bytes())["session_id"]
     assert w2.ask(sid2, "このロボット、何をしている？")["reply_by"] == "claude"
 
@@ -846,7 +848,8 @@ def test_scene_3_2_and_3_3_teach_then_three_times(tmp_path):
     fake.add(answer("ボタンを押す動きを、2回から3回にしますか？", [21, 22, 23, 24, 25, 26], "change_request",
                     {"kind": "repeat", "from_count": 2, "to_count": 3}))
     r = w.ask(sid, "じゃあ、3回にして")
-    assert r["reply_by"] == "claude" and r["reply"] == "ボタンを押す動きを、2回から3回にしますか？"
+    # CHECKER_033 P1-A（唐川さんの方針② 11/4）：変更の会話はプログラムの定型文（Claude の文は出さない）
+    assert r["reply_by"] == "app" and "2回から3回" in r["reply"] and "受け取りました" in r["reply"]
     assert r["notes"] == [cx.READ_ONLY_NOTE] and r["highlight"]["lines"] == [21, 22, 23, 24, 25, 26]
     rec = r["change_record"]
     assert (rec["program_from"], rec["program_total"], rec["claude_from"], rec["claude_total"]) == (2, 3, 2, 3)
@@ -873,15 +876,17 @@ def test_scene_3_taught_mark_is_drawn_in_3d():
 
 
 # ======== シクロの本物の通し（2026-11-03）で見つかったこと ========
-REAL_1 = ("最初の位置に動いたあと、同じ3か所をめぐる動きを2回くり返し、最後に別の位置へ移ります。"
+REAL_1 = ("最初の位置に動いたあと、同じ3か所をめぐる動きをくり返し、最後に別の位置へ移ります。"
           "作業の目的は分からないので、何の作業か教えてもらえますか？")
+REAL_1_PLAIN = REAL_1.replace("同じ3か所をめぐる", "同じ場所をめぐる")  # 方針③（11/4）：数を含めない言い方
 
 
 def test_real_counted_numbers_are_allowed_but_uncounted_are_not(tmp_path):
     w, fake = flow(tmp_path, answer(REAL_1, list(range(20, 28))), updown_config=confirmed_config(tmp_path))
     sid = w.load(demo_bytes())["session_id"]
     r = w.ask(sid, "このロボット、何をしている？")
-    assert r["reply_by"] == "claude" and r["reply"] == REAL_1
+    # 唐川さんの方針③（11/4）：「3か所」のような数えた数でも、MVP では Claude の自由文に入れない（数はアプリの補足）
+    assert r["reply_by"] == "app" and r["reply"] == talk.FIXED_NO_NUMBER
     facts = json.loads(fake.requests[0]["messages"][0]["content"][0]["text"])["job_facts"]
     assert facts["repeats"][0]["points_per_cycle"] == 3  # プログラムが数えて Claude にも渡す
     assert facts["counts"] == {"positions": 5, "instructions": 10, "moves": 8, "repeat_blocks": 1,
@@ -892,7 +897,7 @@ def test_real_counted_numbers_are_allowed_but_uncounted_are_not(tmp_path):
 
 
 def test_real_three_turns_single_block_confirm_then_three_times(tmp_path):
-    w, fake = flow(tmp_path, answer(REAL_1, list(range(20, 28))), updown_config=confirmed_config(tmp_path))
+    w, fake = flow(tmp_path, answer(REAL_1_PLAIN, list(range(20, 28))), updown_config=confirmed_config(tmp_path))
     sid = w.load(demo_bytes())["session_id"]
     r1 = w.ask(sid, "このロボット、何をしている？")
     assert r1["reply_by"] == "claude"

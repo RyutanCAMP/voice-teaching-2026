@@ -32,7 +32,7 @@ def calls(f):
 
 # ---- Scene 3：同じ入口で 説明 → 教える → ボタンで確かめる → 3回にしたい → 範囲のボタン → 候補 ----
 def test_scene_3_through_one_entry(tmp_path):
-    w, f, sid = start(tmp_path, T.answer("3か所を通る同じ動きを2回くり返しています。" + T.ASKED, BLOCK))
+    w, f, sid = start(tmp_path, T.answer("同じ動きをくり返しています。" + T.ASKED, BLOCK))
     r = w.talk(sid, "このロボット、何をしている？", "voice")
     assert r["ok"] and r["via"] == ["ask"] and r["ask"]["reply_by"] == "claude" and r["hear"] is None
     assert w._entries[sid].session.candidate is None
@@ -46,7 +46,7 @@ def test_scene_3_through_one_entry(tmp_path):
                    {"kind": "repeat", "from_count": 2, "to_count": 3}))
     r = w.talk(sid, "じゃあ、3回にして", "voice")
     assert r["via"] == ["ask", "hear"]
-    assert r["ask"]["reply_by"] == "claude"  # 回数の照らし合わせを通った Claude の文
+    assert r["ask"]["reply_by"] == "app"  # CHECKER_033 P1-A：変更の会話はプログラムの定型文（Claude は意図を読むだけ）
     rr = r["state"]["repeat_range"]
     assert rr and rr["total"] == 3 and rr["count"] == 2 and rr["positions"] == ["C00001", "C00002", "C00003"]
     assert r["hear"]["heard"] == rc.canonical("C00001", "C00003", 2, 3)  # 変更の道へはプログラムの決まった文だけ
@@ -60,7 +60,7 @@ def test_scene_3_through_one_entry(tmp_path):
 
 
 def test_claude_count_mismatch_is_shown_as_error_but_range_comes_from_the_program(tmp_path):
-    w, f, sid = start(tmp_path, T.answer("同じ動きを2回くり返しています。" + T.ASKED, BLOCK))
+    w, f, sid = start(tmp_path, T.answer("同じ動きをくり返しています。" + T.ASKED, BLOCK))
     w.talk(sid, "このロボット、何をしている？")
     f.add(T.answer("ボタンを押す動作を2回から5回に変更しますか？", BLOCK, "change_request",
                    {"kind": "repeat", "from_count": 2, "to_count": 5}))
@@ -117,7 +117,7 @@ def test_reference_only_position_is_said_clearly(tmp_path):
 
 
 def test_explanation_never_creates_candidates(tmp_path):
-    w, f, sid = start(tmp_path, T.answer("同じ動きを2回くり返しています。" + T.ASKED, BLOCK))
+    w, f, sid = start(tmp_path, T.answer("同じ動きをくり返しています。" + T.ASKED, BLOCK))
     r = w.talk(sid, "このロボット、何をしている？")
     assert r["via"] == ["ask"] and r["state"]["candidate"] is None and r["state"]["repeat_range"] is None
 
@@ -187,7 +187,7 @@ def test_approve_word_during_range_confirmation_explains_the_two_steps(tmp_path)
 
 
 def test_question_after_approval_is_answered_without_cancelling(tmp_path):
-    w, f, sid = start(tmp_path, T.answer("同じ動きを2回くり返しています。" + T.ASKED, BLOCK), data=DEMO_C)
+    w, f, sid = start(tmp_path, T.answer("同じ動きをくり返しています。" + T.ASKED, BLOCK), data=DEMO_C)
     w.select(sid, "C00005")
     w.talk(sid, "Zマイナス3ミリ")
     w.approve(sid, "テスト")

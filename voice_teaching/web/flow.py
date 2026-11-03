@@ -43,6 +43,31 @@ STEP_F_RANGE_NOTE = ("範囲を確かめてください。［この範囲を繰�
 # Step F：承認・出力・転送・起動など、ボタンだけで行う操作の言葉。会話の道（Claude）へは送らず、指示の道の決まった文で止める
 _BUTTON_ONLY_WORDS = re.compile(r"承認|出力|書き出|転送|送信|保存|起動|実行|スタート|エクスポート|ダウンロード|登録|上書き|確定")
 _QUESTION_WORDS = re.compile(r"[?？]|何|なに|どこ|どう|どれ|なぜ|教えて|説明")
+# CHECKER_033 P1-B（11/4）：1つの文に2つ以上の変更（「3回にして、あと3ミリ下げて」）は、どれも受け付けない
+# （前半だけ・後半だけを黙って受けない）。候補・範囲の確認・承認は変えず、Claude も呼ばない
+STEP_F_ONE_AT_A_TIME = ("変更は1つずつ指示してください。この文には変更が2つ以上あるため、どれも受け付けていません"
+                        "（候補・承認の状態は変えていません）")
+# 唐川さんの決定（11/4）：「登録」「保存」は、作業目的の意味付け（「ボタンを押す作業として登録して」）と、ジョブの変更・出力を分ける
+STEP_F_PURPOSE_OR_CHANGE = ("作業の目的を教えるのか、動作データを変えるのかが分かりませんでした。何も変えていません。"
+                            "目的を教えるときは「ボタンを押す作業です」のように、変更は1つずつ指示してください")
+_PURPOSE_SAVE = re.compile(r"として(?:登録|保存|覚え)|と(?:登録|覚え)|の(?:作業|動き|動作)(?:です|だよ|だ)?(?:と|として)?(?:登録|保存|覚え)")
+_OUTPUT_WORDS = re.compile(r"承認|出力|書き出|転送|送信|起動|実行|スタート|エクスポート|ダウンロード|上書き|確定")
+
+
+def _status_line(has_candidate: bool, blocked: bool, approved: bool, exported: bool, range_pending: bool) -> str:
+    """いまの状態（プログラムの確定情報だけ）。"""
+    if range_pending:
+        cand = "範囲の確認中（まだ候補はありません）"
+    elif not has_candidate:
+        cand = "なし"
+    elif blocked:
+        cand = "参考の表示だけ（変更しません・承認できません）"
+    else:
+        cand = "あり（まだ動作データは変えていません）"
+    return (f"アプリの記録：変更の候補 {cand}／承認 {'済み（ボタンで承認）' if approved else 'まだ'}"
+            f"／出力 {'済み（シミュレーション用）' if exported else 'まだ'}")
+
+
 STEP_F_APPROVED_NEXT = "承認済みです。出力は画面の［シミュレーション用に出力］のボタンで行います（声や文字では出力しません）"
 SOURCES = ("voice", "text")
 NO_SESSION = "このジョブの画面の情報がありません（時間が経って捨てたか、サーバーを起動し直しました）。ジョブを読み込み直してください"
@@ -757,15 +782,17 @@ class WebFlow:
             route = self._talk_route(e, text)
         ask_out = hear_out = None
         via: list[str] = []
-        if route in ("button", "approved"):
+        if route in ("button", "approved", "several", "purpose_or_change"):
             f0 = ut.read_utterance(text)
             msg = (STEP_F_APPROVED_NEXT if route == "approved"
+                   else STEP_F_ONE_AT_A_TIME if route == "several"
+                   else STEP_F_PURPOSE_OR_CHANGE if route == "purpose_or_change"
                    else ("。".join(f0.stop_reasons) if f0.stop_reasons else ut.APPROVE_MESSAGE))
             with e.lock:
                 e.session.log.append(("発話", f"{'音声' if source == 'voice' else '文字'}：{text}"))
                 e.session.log.append(("止めた理由", msg))
             hear_out = {"ok": True, "status": "stop", "message": msg, "heard": text, "source": source}
-            via.append("button")
+            via.append(route if route in ("several", "purpose_or_change") else "button")
         elif route == "hear":
             hear_out = self.hear(sid, text, source)
             via.append("hear")
@@ -797,6 +824,12 @@ class WebFlow:
         change = bool(set(f.kinds) & {"move", "speed", "select", "undo", "compare"} or f.axes or f.amounts or f.positions
                       or f.place_ref or count is not None or rc.is_repeat_request(text))
         approved = self._approved(e)
+        if self._several_changes(f, count, text):
+            return "several"  # 変更が2つ以上：どれも受け付けない（どの状態でも。承認も取り消さない）
+        nt = ut.normalize(text)
+        if _PURPOSE_SAVE.search(nt) and not _OUTPUT_WORDS.search(nt):
+            # 作業目的の意味付け（「〜として登録して」）：変更の言葉もあればあいまい → 確かめる。無ければ会話の道（意味を教える）
+            return "purpose_or_change" if (change and count is None) or count is not None else "ask"
         if not approved and (e.dialog.step is not None or s.repeat_range is not None):
             return "hear"  # 会話・範囲の確認の続き（「承認」と言ったときの2段階の案内も、今の道が出す）
         if f.stop_reasons or _BUTTON_ONLY_WORDS.search(ut.normalize(text)):
@@ -814,6 +847,13 @@ class WebFlow:
         if rc.is_repeat_request(text) or f.kinds or f.axes or f.positions or f.amounts or f.place_ref or f.shimasu_text:
             return "hear"  # プログラムが指示として読める（Claude を呼ばない）
         return "ask"
+
+    @staticmethod
+    def _several_changes(f, count, text: str) -> bool:
+        """1つの文に、回数の変更と、位置・速度・元に戻す・比べる・選ぶ のどれかが一緒にあるか（P1-B）。"""
+        repeat = count is not None or rc.is_repeat_request(text)
+        other = bool(set(f.kinds) & {"move", "speed", "undo", "compare"} or f.amounts or f.axes)
+        return repeat and other
 
     def _repeat_canonical(self, e: _Entry, text: str) -> str | None:
         """回数の変更の希望から、変更の道へ渡す決まった文を作る（プログラムが読んだ区間・今の回数・利用者の文の回数だけ）。"""
@@ -1097,6 +1137,9 @@ class WebFlow:
             "dialog": self._dialog_state(e),
             # 回数の変更の範囲の確認（ボタンを待っている間だけ。行番号・命令の行・回数はプログラムが入れたもの）
             "repeat_range": _range_state(s.repeat_range),
+            # いまの状態の1行（CHECKER_033 P1-A・唐川さんの方針①）：プログラムの確定情報だけから作る。Claude の文では変わらない
+            "status_line": _status_line(ch is not None, bool(s.candidate_blocked_reason) if ch is not None else False,
+                                        approved, bool(e.exported) if approved else False, s.repeat_range is not None),
         }
 
     def _dialog_state(self, e: _Entry) -> dict:
