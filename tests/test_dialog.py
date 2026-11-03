@@ -208,7 +208,8 @@ def test_negation_in_position_step_stops_and_keeps_step(word, counting):
     w, sid = start(counting, select="C00001")
     w.hear(sid, OPENING)
     r = w.hear(sid, word)
-    assert r["status"] == "stop" and "打ち消し" in r["message"]
+    # CHECKER_026 S-pick：「ほかの位置」のボタンが見えているので、次にすることを案内する（止まる動きは今どおり）
+    assert r["status"] == "stop" and r["message"] == dg.PICK_AFTER_NEGATION
     assert r["state"]["selected"] == "C00001" and dlg(r)["step"] == "confirm_position"
     assert counting.locates == 1 and counting.decides == 0
 

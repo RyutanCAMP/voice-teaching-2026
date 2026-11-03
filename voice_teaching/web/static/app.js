@@ -419,8 +419,9 @@ function applyResult(res, showOk = true) {
     showReply("stop", res.error || "理由が分かりません");
   } else if (res.status && res.status !== "ok") {
     showReply(res.status, res.message, res.choices);
-  } else if (res.message && (showOk || res.dialog)) {
-    showReply("ok", res.message);  // 会話が終わったとき（「やめて」など）も、返事の欄に出す
+  } else if (res.message && (showOk || res.dialog || res.no_change)) {
+    // 会話が終わったとき（「やめて」など）・［説明です］（何も変えない。CHECKER_026 M3）も、返事の欄に出す
+    showReply("ok", res.message);
   }
   renderState();
 }

@@ -28,6 +28,10 @@ Simulator = Callable[[jbi.Job, ut.ProposedChange, str], "jbi.ChangeProposal | No
 _NUM = jbi._NUM
 # 承認待ちの候補があるときの文。web/flow.py は、これを解釈の係（Claude）を呼ぶ前に返す（呼ばない）
 PENDING_MESSAGE = "承認待ちの変更候補があります。比べるか、元に戻してから指示してください"
+# 承認したあとの候補があるときの文（CHECKER_026 S-msg）。新しい指示があると承認は今どおり取り消すので、そのことも書く。
+# web/flow.py が、承認していたときだけ Session.pending_message をこれにする
+APPROVED_PENDING_MESSAGE = ("承認した変更候補があります。新しい指示があったため、承認は取り消しました。"
+                            "もう一度承認して出力するか、元に戻してから指示してください")
 
 
 @dataclass(frozen=True)
@@ -77,6 +81,8 @@ class Session:
         self._awaiting_answer: ut.UtteranceFacts | None = None
         self._locked = False
         self.log: list[tuple[str, str]] = []
+        # 承認待ちの候補があるときの文。web/flow.py が承認の有無で選ぶ（承認は Session の外にある）
+        self.pending_message = PENDING_MESSAGE
 
     @classmethod
     def from_file(cls, path: str | Path, **kw) -> "Session":
@@ -94,6 +100,8 @@ class Session:
     # ---- 発話 ----
     def hear(self, text: str, source: str = "text") -> Reply:
         """新しい発話。source（voice / text）は記録だけに使い、結果は変えない。"""
+        if ut.is_explain_choice(text):
+            return self.explain_only(text, source)
         facts = ut.read_utterance(text)
         prev = self._awaiting_answer
         if prev is not None and not facts.kinds:
@@ -108,17 +116,29 @@ class Session:
         v = ut.pre_check(facts, self.selected)
         if v.status == "ask" and facts.question and v.choices and facts.op in ("move", "speed"):
             v = self._check_question(facts, v)  # 疑問の形の確かめ（2026-11-03 夜）
+        shimasu = ut.is_shimasu_confirmation(v)
+        if shimasu and self.candidate is not None:
+            v = ut.Verdict("stop", self.pending_message)  # 「〜します」の確かめより先に、承認待ちの候補を知らせる
         if v.status != "ok":
             self._locked = True  # 聞き返し・止めた発話では、Claude が量を作って提案しても使わない
         # 知らない言葉で聞き返したときは、次の発話を答えとして前の発話に足さない（言い直しを新しい指示として読む。
-        # 前の発話の残り「下げて」と合わせて、知らない言葉を捨てた候補にしない）
-        self._awaiting_answer = facts if v.status == "ask" and not facts.unknown_words else None
+        # 前の発話の残り「下げて」と合わせて、知らない言葉を捨てた候補にしない）。
+        # 「〜します」の2択のあとも足さない（「3mm」と答えても、確かめを飛ばして候補にしない。ボタンで選んでもらう）
+        self._awaiting_answer = facts if v.status == "ask" and not facts.unknown_words and not shimasu else None
         choices = v.choices
         if self.selected is not None:
-            # 選択肢の文には、聞き返したときの位置を必ず入れる（あとで別の位置を選んでも、その位置に当てない）
-            choices = tuple((label, text if ut.normalize_position(text[:6]) else f"{self.selected}を{text}")
+            # 選択肢の文には、聞き返したときの位置を必ず入れる（あとで別の位置を選んでも、その位置に当てない）。
+            # ［説明です］（何もしない）と、場所の言葉の入った文（位置は会話で人が選ぶ）には足さない
+            choices = tuple((label, text if (ut.normalize_position(text[:6]) or ut.is_explain_choice(text)
+                                             or ut.read_utterance(text).place_ref) else f"{self.selected}を{text}")
                             for label, text in choices)
         return self._reply(v.status, v.message, facts=facts, choices=choices)
+
+    def explain_only(self, text: str, source: str = "text") -> Reply:
+        """［説明です］（「〜します」の2択）：何もしない。候補・選択中の位置・元のジョブは変えない（CHECKER_026 M3）。"""
+        self._awaiting_answer = None
+        self._log("発話", f"{'音声' if source == 'voice' else '文字'}：{text}")
+        return self._reply("ok", ut.EXPLAIN_REPLY)
 
     def forget_question(self) -> None:
         """聞き返しへの答えを待つのをやめる（会話の機能が自分で聞き返したとき。次の発話を前の発話に足さない）。"""
@@ -127,7 +147,7 @@ class Session:
     def pending_reply(self, facts: ut.UtteranceFacts | None) -> Reply:
         """承認待ちの候補があるのに来た移動・速度の指示を、解釈の係を呼ばずに断る。"""
         self._locked = True
-        return self._reply("stop", PENDING_MESSAGE, facts=facts)
+        return self._reply("stop", self.pending_message, facts=facts)
 
     def _check_question(self, facts: ut.UtteranceFacts, v: ut.Verdict) -> ut.Verdict:
         """疑問の形の移動・速度（「5mm下げて？」）：確かめる前に、どうせ止まるものは今止める。候補は作らない。
@@ -135,7 +155,7 @@ class Session:
         承認待ちの候補があれば、その知らせ。量の上限・0 などで実機用の検査とシミュレーションの両方に断られるなら、その理由。
         """
         if self.candidate is not None:
-            return ut.Verdict("stop", PENDING_MESSAGE)
+            return ut.Verdict("stop", self.pending_message)
         position, value = facts.position or self.selected, facts.requested_value()
         if position is None or value is None or (facts.op == "move" and facts.axis is None):
             return v  # 位置・量・軸が決まらなければ、確かめたあとの指示で聞き返す
@@ -173,7 +193,7 @@ class Session:
         except ValueError as e:
             return self._refuse("stop", f"{e}。この提案は使いません")
         if self.candidate is not None:
-            return self._refuse("stop", PENDING_MESSAGE)
+            return self._refuse("stop", self.pending_message)
         v = ut.check_proposal(self.facts, changes, self.selected)
         if v.status != "ok":
             return self._refuse(v.status, v.message)
