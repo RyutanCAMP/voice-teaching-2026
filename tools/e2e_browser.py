@@ -2246,7 +2246,9 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
           "方式を選ぶ欄は出さず（詳細表示の中）、マイクのボタンだけが目立つ")
     check(pg.inner_text("#mic-label") == "マイク OFF" and pg.get_attribute("#mic-button", "aria-pressed") == "false",
           "マイクは最初 OFF と出る")
-    side = chars(pg, ".side")
+    # 右側の文字の量は、操作のカード（会話の欄は PC 版の画面で右側に移したので数えない）
+    side = len("".join(pg.evaluate("""() => [...document.querySelectorAll('.side > :not(#ask-panel)')]
+        .filter((e) => e.offsetParent !== null).map((e) => e.innerText).join('')""").split()))
     check(all(pg.is_visible(s) for s in ["#voice-position", "#mic-button", "#text-input", "#text-send"])
           and pg.inner_text("#text-send") == "次へ" and side <= 80,
           f"音声のカードは「位置・マイク・入力欄・次へ」（右側の文字 {side}文字。80文字まで）")
