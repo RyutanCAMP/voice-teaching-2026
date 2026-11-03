@@ -34,7 +34,7 @@ pytestmark = pytest.mark.usefixtures("updown_demo_c")
 LABELS = ["変更したい", "説明です"]
 TAIL = "それとも操作の説明でしょうか？"
 EXPLAIN_REPLY = "分かりました。変更はしません"
-APPROVED_PENDING = "新しい指示があったため、承認を取り消しました。"  # fix/c026-r2 QA P2 で文を変えた
+APPROVED_PENDING = "新しい指示を受け取ったため、前の承認を取り消しました。"  # fix/c026-r2 唐川さんの決定の文
 PICK_AFTER_NEGATION = "分かりました。合っていなければ「ほかの位置」を押してください"
 
 
@@ -346,7 +346,7 @@ def test_s_msg_after_approval():
     assert w.approve(sid, "テスト太郎")["ok"] is True
     r = w.hear(sid, "Yのマイナス3ミリ移動して")
     assert r["status"] == "stop" and r["message"].startswith(APPROVED_PENDING)
-    assert "出力するか、元に戻してから指示してください" in r["message"]
+    assert r["message"] == "新しい指示を受け取ったため、前の承認を取り消しました。変更候補は残しています。内容を確認して、もう一度承認してください。"
     assert "承認待ち" not in r["message"]
     assert r["tool_calls"] == [] and cand(r) == ("C00005 X", "+2.000")
     # 新しい指示があったので、承認は今どおり取り消す（文もそれを伝える）

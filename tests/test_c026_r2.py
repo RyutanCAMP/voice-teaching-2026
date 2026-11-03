@@ -544,13 +544,92 @@ def test_p2_3_other_cancel_reasons_keep_not_approved(make_updown, tmp_path):
 # ======================================================================
 # QA P2：S-msg の文
 # ======================================================================
-def test_qa_p2_s_msg_text():
-    assert session_mod.APPROVED_PENDING_MESSAGE == (
-        "新しい指示があったため、承認を取り消しました。変更候補は残っています。"
-        "もう一度承認して出力するか、元に戻してから指示してください")
+APPROVAL_CANCELLED = "新しい指示を受け取ったため、前の承認を取り消しました。変更候補は残しています。内容を確認して、もう一度承認してください。"
+
+
+def test_s_msg_text_is_the_decided_one():
+    # 唐川さんの決定（一字一句このとおり）
+    assert session_mod.APPROVED_PENDING_MESSAGE == APPROVAL_CANCELLED
+
+
+def test_s_msg_only_when_approval_was_really_cancelled(make_updown, tmp_path):
+    w, sid, _ = start("confirmed", make_updown, tmp_path)
+    assert cand(w.hear(sid, "Zマイナス3ミリ")) == ("C00005 Z", "-3.000")
+    # 承認していない：今の「承認待ちの変更候補があります…」のまま
+    r = w.hear(sid, "Yのマイナス3ミリ")
+    assert r["status"] == "stop" and r["message"] == session_mod.PENDING_MESSAGE
+    # 承認した：新しい指示で承認を取り消したときだけ、決まった文
+    assert w.approve(sid, "テスト太郎")["ok"] is True
+    r = w.hear(sid, "Yのマイナス3ミリ", source="voice")
+    assert r["status"] == "stop" and r["message"] == APPROVAL_CANCELLED and r["state"]["approval"] is None
+    assert cand(r) == ("C00005 Z", "-3.000")
+    # もう承認されていない：次は今の文
+    r = w.hear(sid, "Yのマイナス3ミリ")
+    assert r["message"] == session_mod.PENDING_MESSAGE
 
 
 def test_messages_have_no_forbidden_words():
     for m in (ut.SIDE_MESSAGE, ut.AXIS_ASK, ut.AXIS_ASK_UPDOWN, ci.ASK_FIXED, session_mod.APPROVED_PENDING_MESSAGE,
               ut.unknown_words_message(["あ"], "move"), session_mod.NO_POSITION):
         assert not ut.contains_forbidden(m)
+
+
+# ======================================================================
+# 唐川さんの判断①：「Z座標を3mm下げて」は Z の値を減らす指示として今どおり許可。物理的な上下の指示とは facts の上で区別する
+#   value_axes：軸の文字＋値の増減（「Z座標を…下げて」「Zの値を減らして」）。vertical：上下の言葉から補った Z
+#   会話を分けても、前の発話の上下の言葉・打ち消し・知らない言葉・疑問の形を引き継ぐ。迷う組み合わせは聞き返す側
+# ======================================================================
+def test_value_axes_and_vertical_are_separate_facts():
+    f = ut.read_utterance("Z座標を3mm下げて")
+    assert f.value_axes == ("Z",) and f.vertical is False and f.explicit_axes == ("Z",)
+    f = ut.read_utterance("Zの値を3mm減らして")
+    assert f.value_axes == ("Z",) and f.vertical is False
+    f = ut.read_utterance("3mm下げて")
+    assert f.value_axes == () and f.vertical is True and f.explicit_axes == ()
+    f = ut.read_utterance("Z座標を下に3mm")  # 値の言葉と上下の言葉の両方：上下として扱う（未確認なら聞き返す）
+    assert f.value_axes == ("Z",) and f.vertical is True
+    f = ut.read_utterance("Zマイナス3ミリ")
+    assert f.value_axes == () and f.vertical is False and f.explicit_axes == ("Z",)
+    m = ut.merge_answer(ut.read_utterance("Z座標を下げて"), ut.read_utterance("3ミリ"))
+    assert m.value_axes == ("Z",) and m.vertical is False
+    m = ut.combine_axes(ut.read_utterance("Z座標を"), ut.read_utterance("3mm下げて"))
+    assert m.value_axes == ("Z",) and m.vertical is True
+
+
+Z3 = ("C00005 Z", "-3.000")
+VALUE_COMBOS = [
+    # (順に話す文, 未確認のときの候補, 確認済みのときの候補)
+    (["Z座標を3mm下げて"], Z3, Z3),
+    (["Zの値を3mm減らして"], Z3, Z3),
+    (["Z座標を下げて", "3ミリ"], Z3, Z3),
+    (["Zの値を減らして", "3ミリ"], Z3, Z3),
+    (["3mm下げて"], None, Z3),
+    (["下げて", "3ミリ"], None, Z3),
+    # 「下げて」のあとの「Z座標」「Zの3ミリ」は新しい指示として読む（向きを言っていないので聞き返す。前の「下げて」を値の増減にしない）
+    (["下げて", "Z座標", "3ミリ"], None, None),
+    (["下げて", "Zの3ミリ"], None, None),
+    # 分けて言った「Z座標を」→「3mm下げて」：あとの「下げて」は上下の言葉として読む（迷うので未確認なら聞き返す）
+    (["Z座標を", "3mm下げて"], None, Z3),
+    (["Z座標を下げて", "3ミリ下げて"], None, Z3),
+    (["Z座標を下に", "3ミリ"], None, Z3),
+    # 前の発話の打ち消し・知らない言葉・疑問の形は、答えのあとも残す（候補にしない）
+    (["Z座標を下げないで", "3ミリ"], None, None),
+    (["Z座標をバイオ下げて", "3ミリ"], None, None),
+    (["Z座標を下げて？", "3ミリ"], None, None),
+    (["下げて？", "3ミリ"], None, None),
+    (["バイオ下げて", "3ミリ"], None, None),
+]
+
+
+@pytest.mark.parametrize("source", SOURCES)
+@pytest.mark.parametrize("kind", ["missing", "changed", "mismatch", "confirmed"])
+@pytest.mark.parametrize("texts,unconf,conf", VALUE_COMBOS)
+def test_value_change_and_up_down_combinations(texts, unconf, conf, kind, source, make_updown, tmp_path):
+    w, sid, _ = start(kind, make_updown, tmp_path)
+    for t in texts:
+        r = w.hear(sid, t, source=source)
+    want = conf if kind == "confirmed" else unconf
+    assert cand(r) == want, (texts, kind, r["message"])
+    if want is None:
+        assert r["status"] != "ok" and r["state"]["can_approve"] is False
+        assert w.approve(sid, "テスト太郎")["ok"] is False and w.export(sid)["ok"] is False

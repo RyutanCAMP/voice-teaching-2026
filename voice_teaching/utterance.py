@@ -92,6 +92,10 @@ class UtteranceFacts:
     # 軸の文字（X・Y・Z）ではっきり言った軸（「Zマイナス」「Zの」「Z座標」「Z方向」など）。上・下から補った Z は入れない。
     # 上下の向きが確認済みでないときは、check_proposal が Z の提案をこの中に Z があるときだけ通す（最後の止め。CHECKER_026 M2）
     explicit_axes: tuple[str, ...] = ()
+    # 軸の文字＋値の増減で言った軸（「Z座標を3mm下げて」「Zの値を減らして」＝その軸の値を減らす。唐川さんの判断 2026-11-03）。
+    # 物理的な上下の指示（vertical：「3mm下げて」から補った Z）とは別の項目で持つ。上下の向きの照合は要らない（今どおり許可）。
+    # 同じ発話に「上に・下に」もあれば vertical も立ち、上下の指示として扱う（未確認なら聞き返す）
+    value_axes: tuple[str, ...] = ()
     stop_reasons: tuple[str, ...] = ()
     # 読み取りで使わなかった言葉（つなぎの言葉の一覧 FILLER_WORDS にも無いもの）。
     # 移動・速度の指示で1つでもあれば聞き返す（「バイオ 3ミリ 下げて」を Z −3 にしない。docs/UNKNOWN_WORDS_PLAN.md）
@@ -689,6 +693,7 @@ def _read(raw: str, question: bool) -> UtteranceFacts:
         stray_signs=len(_SIGN_TOKEN.findall(rest)) - sum(a.sign is not None for a in amounts) - placed_axis_signs,
         vertical=vertical,
         explicit_axes=tuple(a for a in axes if a in explicit),
+        value_axes=tuple(coord),
         stop_reasons=tuple(stops),
         unknown_words=unknown,
         negations=negations, undo_negations=undo_negations,
@@ -714,6 +719,7 @@ def combine_axes(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceF
     return replace(answer, raw=f"{previous.raw} ／ {answer.raw}", text=f"{previous.text} ／ {answer.text}",
                    axes=tuple(dict.fromkeys(previous.axes + answer.axes)),
                    explicit_axes=tuple(dict.fromkeys(previous.explicit_axes + answer.explicit_axes)),
+                   value_axes=tuple(dict.fromkeys(previous.value_axes + answer.value_axes)),
                    vertical=previous.vertical or answer.vertical,
                    positions=answer.positions or previous.positions,
                    refers_to_selection=previous.refers_to_selection or answer.refers_to_selection,
@@ -752,6 +758,7 @@ def merge_answer(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceF
         axis_signs=answer.axis_signs if answer.axes else previous.axis_signs,
         # 軸の文字で言った軸・上下から補った印は、どちらかにあれば残す（上下から補った Z を、確かめずに使わない）
         explicit_axes=tuple(dict.fromkeys(previous.explicit_axes + answer.explicit_axes)),
+        value_axes=tuple(dict.fromkeys(previous.value_axes + answer.value_axes)),
         vertical=previous.vertical or answer.vertical,
         sides=answer.sides or previous.sides,
         speed_signs=answer.speed_signs or previous.speed_signs,

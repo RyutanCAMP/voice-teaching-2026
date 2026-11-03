@@ -784,6 +784,8 @@ def _facts(f: ut.UtteranceFacts | None) -> dict | None:
         "amounts": [a.text for a in f.amounts],
         "unclear_amounts": list(f.unclear_amounts),
         "axes": list(f.axes),
+        # 軸の文字で言った軸・軸の値の増減で言った軸・上下の言葉から補った Z（区別して持つ。CHECKER_026 再修正）
+        "explicit_axes": list(f.explicit_axes), "value_axes": list(f.value_axes), "vertical": f.vertical,
         "sides": list(f.sides),
         "refers_to_selection": f.refers_to_selection,
         "requested_value": f.requested_value(),

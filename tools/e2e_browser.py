@@ -909,8 +909,8 @@ def check_dialog(browser, check, shots: Path | None, errors: list, updown_config
         before = interp.decides
         r = pg.request.post(url + "api/hear", data={"session_id": sid, "text": "この位置を上に2mm", "source": "text"}).json()
         r2 = pg.request.post(url + "api/hear", data={"session_id": sid, "text": "置くところを上に2mm", "source": "text"}).json()
-        # 1つ目は承認したあと（CHECKER_026 S-msg：「新しい指示があったため、承認を取り消しました…」）、2つ目は承認前の文
-        check(r["status"] == "stop" and r["message"].startswith("新しい指示があったため、承認を取り消しました。変更候補は残っています")
+        # 1つ目は承認したあと（承認を取り消したときだけの決まった文。唐川さんの決定）、2つ目は承認前の文
+        check(r["status"] == "stop" and r["message"] == "新しい指示を受け取ったため、前の承認を取り消しました。変更候補は残しています。内容を確認して、もう一度承認してください。"
               and r2["status"] == "stop" and r2["message"].startswith("承認待ちの変更候補があります")
               and interp.decides == before and interp.locates == 1,
               f"承認待ちの候補があるとき、新しい移動の指示は解釈の係を呼ばずに断る（{interp.decides - before}回）")
