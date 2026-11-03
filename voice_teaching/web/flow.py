@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import claude_interpreter, jbi, mock_claude, sim
+from .. import repeat_count as rc
 from .. import dialog as dg
 from .. import updown as ud
 from .. import utterance as ut
@@ -146,6 +147,12 @@ class WebFlow:
             return {"ok": False, "error": "指示の種類（voice か text）が分かりません"}
 
         def run(e: _Entry) -> dict:
+            if e.session.repeat_range is not None and rc.is_range_confirm_word(text):
+                # 範囲の確認の最中の「この範囲を繰り返す」「はい」など：確定せず、範囲の確認を残して案内する（QA P1-A）。
+                # 承認・候補・会話の状態は変えない（候補が無い間だけ範囲の確認がある）
+                r = e.session.hear(text, source)
+                return {"ok": True, "heard": text, "source": source, "facts": None, "tool_calls": [],
+                        "dialog": False, **self._reply(e, r)}
             if ut.is_explain_choice(text):
                 # ［説明です］（「〜します」の2択。CHECKER_026 M3）：何もしない。承認・候補・会話の状態も変えない
                 r = e.session.explain_only(text, source)
@@ -161,8 +168,14 @@ class WebFlow:
         """指示の本体（会話の続き・会話の始め・ふつうの指示）。承認の取り消しの文は呼んだ側（hear）が付ける。"""
         f0 = ut.read_utterance(text)
         talking = e.dialog.step is not None
-        out = (self._dialog_turn(e, text, source, f0) if talking
-               else self._maybe_start_dialog(e, text, source, f0))
+        if rc.is_repeat_request(text):
+            # 回数の変更（docs/REPEAT_COUNT_DESIGN.md）：会話にしない。会話の途中なら会話をやめて、ふつうの指示として読む
+            if talking:
+                e.dialog.end()
+            out = None
+        else:
+            out = (self._dialog_turn(e, text, source, f0) if talking
+                   else self._maybe_start_dialog(e, text, source, f0))
         if out is not None:
             return out
         out = self._instruction(e, text, source)
@@ -180,7 +193,9 @@ class WebFlow:
         s = e.session
         r = s.hear(text, source=source)
         calls: list[dict] = []
-        if r.status == "ok":
+        if r.candidate_made:
+            self._remember(e, r)  # 回数の変更：プログラムが候補まで作った。解釈の係（Claude）は呼ばない
+        elif r.status == "ok":
             f = s.facts
             if f is not None and f.op in ("move", "speed") and s.candidate is not None:
                 # 承認待ちの候補がある：解釈の係（Claude）には送らない（呼ぶ前に断る）
@@ -474,6 +489,7 @@ class WebFlow:
             ids = {c["id"]: c["label"] for c in d.choices()}
             if (d.step is None or isinstance(turn, bool) or not isinstance(turn, int) or turn != d.turn
                     or not isinstance(choice, str) or choice not in ids):
+                e.session.forget_range()  # ほかのボタンを押した：回数の変更の範囲の確認も捨てる（止める側）
                 e.session.log.append(("止めた理由", dg.STALE))
                 return {"ok": True, "status": "stop", "message": dg.STALE, "blocked_reason": None,
                         "candidate_made": False, "choices": [], "dialog": True, "tool_calls": []}
@@ -493,6 +509,16 @@ class WebFlow:
                 direction = choice[4:]
                 out = self._merge_slots(e, label, "text", None, None, direction[0], 1 if direction[1] == "+" else -1)
             return self._say_cancelled(e, out) if cancelled else out
+        return self._run(sid, run)
+
+    def repeat_choose(self, sid: object, choice: object, turn: object) -> dict:
+        """回数の変更の範囲の確認のボタン（［この範囲を繰り返す］［違う］）。画面のボタンからだけ呼ぶ。
+        今の範囲の確認の番号（turn）と合わなければ使わない。承認・出力は呼ばない（承認は今どおり確認表示のボタン）。"""
+        def run(e: _Entry) -> dict:
+            r = e.session.confirm_repeat(turn, choice)
+            if r.candidate_made:
+                self._remember(e, r)
+            return {"ok": True, "tool_calls": [], **self._reply(e, r)}
         return self._run(sid, run)
 
     def _dispatch(self, e: _Entry, heard: Reply, calls: list[dict]) -> Reply:
@@ -611,8 +637,10 @@ class WebFlow:
                 return self._fail(e, "承認する変更候補がありません")
             if not isinstance(approver, str) or not approver.strip():
                 return self._fail(e, "承認した人の名前がないため、承認できません")
+            if ch.kind == "repeat":
+                return self._approve_repeat(e, ch, approver)
             if ch.kind != "shift":
-                return self._fail(e, "シミュレーションの出力は位置の移動だけです。この候補は承認できません")
+                return self._fail(e, "シミュレーションの出力は位置の移動と回数の変更だけです。この候補は承認できません")
             if s.candidate_blocked_reason:
                 # 実機用の検査で止まった候補は、合成ジョブでも承認しない（CHECKER_019 R1）
                 return self._fail(e, f"実機用の検査で止まった変更候補は、承認できません（理由：{s.candidate_blocked_reason}）")
@@ -637,6 +665,29 @@ class WebFlow:
             s.log.append(("承認", f"{ap.approved_by} さんが承認ボタンで承認しました（{ap.approved_at}）。{_updown_note(st)}"))
             return {"ok": True, "state": None}
         return self._run(sid, run)
+
+    def _approve_repeat(self, e: _Entry, ch, approver: str) -> dict:
+        """回数の変更の承認（ボタンから）。元のジョブから同じ候補を作り直し、バイト列が同じときだけ承認する。"""
+        s = e.session
+        try:
+            sp = sim.simulate_repeat(s.original, ch.start, ch.end, ch.after_count)
+        except sim.SimError as ex:
+            return self._fail(e, f"承認できません：{ex}")
+        if sp.original_bytes != s.original_bytes or sp.new_bytes != ch.new_job.render_bytes():
+            return self._fail(e, "変更候補と、出力する中身が合わないため、承認できません")
+        st = s.updown_status()  # 位置の移動と同じく、候補を作ったときの照合の結果と比べる（ガードを変えない）
+        if s.candidate_updown is None or s.candidate_updown.token != st.token:
+            return self._fail(e, UPDOWN_CHANGED_APPROVE)
+        try:
+            ap = sim.approve(sp, approver, updown=st)
+        except sim.SimError as ex:
+            return self._fail(e, str(ex))
+        e.sim_proposal, e.approval, e.approved_candidate = sp, ap, ch
+        e.approval_updown = st
+        e.updown_cancelled = False
+        e.exported = None
+        s.log.append(("承認", f"{ap.approved_by} さんが承認ボタンで承認しました（{ap.approved_at}）。{_updown_note(st)}"))
+        return {"ok": True, "state": None}
 
     # ---- シミュレーション用の出力（合成ジョブだけ） ----
     def export(self, sid: object) -> dict:
@@ -709,6 +760,7 @@ class WebFlow:
         """新しい指示の始め：承認を今どおり取り消す。承認していたときは、承認待ちの文を決まった文にする（S-msg）。
         承認を実際に取り消したら True（返事の頭に決まった文を付けるため。_say_cancelled）。"""
         e.session.pending_message = APPROVED_PENDING_MESSAGE if self._approved(e) else PENDING_MESSAGE
+        e.session.forget_range()  # 回数の変更の範囲の確認も捨てる（古いボタンを押しても候補にならない）
         return self._cancel_approval(e, "新しい指示があったため")
 
     def _say_cancelled(self, e: _Entry, out: dict) -> dict:
@@ -794,7 +846,7 @@ class WebFlow:
                           "updown_fingerprint": e.approval.updown_fingerprint,
                           "updown_confirmed_by": e.approval.updown_confirmed_by}
                          if approved else None),
-            "can_approve": (ch is not None and ch.kind == "shift" and not approved
+            "can_approve": (ch is not None and ch.kind in ("shift", "repeat") and not approved
                             and not s.candidate_blocked_reason and same_updown),
             # 出力できるのは合成ジョブ（samples/dummy と同じバイト列）だけ。実機の JOB は承認しても出力ボタンを押せない（画面で明示する）
             "exportable": sim._is_synthetic(s.original_bytes),
@@ -808,6 +860,8 @@ class WebFlow:
                             "notice": self.interpreter.notice},
             "log": _log_entries(s.log),
             "dialog": self._dialog_state(e),
+            # 回数の変更の範囲の確認（ボタンを待っている間だけ。行番号・命令の行・回数はプログラムが入れたもの）
+            "repeat_range": _range_state(s.repeat_range),
         }
 
     def _dialog_state(self, e: _Entry) -> dict:
@@ -830,6 +884,14 @@ class WebFlow:
         }
 
 
+def _range_state(rr: dict | None) -> dict | None:
+    if rr is None:
+        return None
+    keep = ("turn", "target", "total", "count", "positions", "cycle_lines", "line_nos", "block_line_nos",
+            "yes_label", "no_label", "note", "side_note", "heading", "cycles", "button_note")
+    return {k: rr[k] for k in keep}
+
+
 def _updown_note(st: "ud.UpdownStatus | None") -> str:
     """承認・出力の作業ログに残す、上下の向きの設定の事実（状態・確認した人・指紋）。"""
     if st is None:
@@ -846,7 +908,28 @@ def _xyz(job: jbi.Job, name: str) -> list[str] | None:
     return [f"{v:.3f}" for v in pos.xyz]
 
 
+def _with_cycles(segments: list[dict], block: "jbi.RepeatBlock") -> list[dict]:
+    """図の区間の線に、何回目の区間の線か（cycle。区間の外は None）を付ける。再生で「2回目」と数えるため。"""
+    return [{**seg, "cycle": block.cycle_of(seg["line_no"] - 1)} for seg in segments]
+
+
 def _comparison_dict(c: Comparison, ch: jbi.ChangeProposal, s) -> dict:
+    if ch.kind == "repeat":
+        after, before = api.figure_data(ch.new_job), api.figure_data(s.original)
+        return {
+            "kind": "repeat", "target": c.target, "line_no": c.line_number, "heading": c.heading,
+            "before_line": "", "after_line": "",
+            "before_value": c.before_value, "after_value": c.after_value, "delta": c.delta,
+            "diff": [{"sign": sign, "line_no": n, "text": t} for sign, n, t in c.diff],
+            "affected": list(c.affected), "warnings": list(c.warnings), "blocked_reason": c.blocked_reason,
+            "heard": s.candidate_utterance,
+            "repeat": {"positions": list(ch.block.positions), "before_count": ch.before_count,
+                       "after_count": ch.after_count},
+            # 図：変更前と変更後の区間の線（回の番号つき）。位置は変えないので、変更後の位置は変更前と同じ
+            "before_segments": _with_cycles(before["segments"], ch.block),
+            "after_segments": _with_cycles(after["segments"], ch.new_block),
+            "after_positions": after["positions"], "moved": None, "before_xyz": None, "after_xyz": None,
+        }
     d = {
         "kind": c.kind, "target": c.target, "line_no": c.line_number,
         "before_line": c.before_line, "after_line": c.after_line,

@@ -167,6 +167,9 @@ def job_view(data: bytes) -> dict:
         "notes": notes,
         "max_shift_mm": jbi.DEFAULT_MAX_SHIFT_MM,
         "max_shift_label": _max_shift_label(),
+        # 2回以上続けて書かれた区間（回数の変更の対象になり得るもの。図の「×2」の印に使うだけ。変更はしない）
+        "repeat_blocks": [{"target": b.target, "positions": list(b.positions), "count": b.count}
+                          for b in job.find_repeat_blocks()],
     }
 
 

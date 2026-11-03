@@ -414,6 +414,20 @@ class Job:
             before_value=before_value, after_value=after_value,
             affected=(f"{index + 1}行目「{ins.text}」",), warnings=tuple(warnings), new_job=new_job)
 
+    # ---- 作業の回数の変更（docs/REPEAT_COUNT_DESIGN.md。続けてそのまま書かれた区間だけ） ----
+    def find_repeat(self, start: str, end: str) -> "RepeatBlock":
+        """区間（start〜end の番号の位置を行き先にする MOVL の並び）が、ジョブの中に続けて何回書かれているかを調べる。
+        分からないもの・扱わない形は JbiError（理由の文）。"""
+        return _find_repeat(self, start, end)
+
+    def find_repeat_blocks(self) -> list["RepeatBlock"]:
+        """範囲を言わない指示のために、ジョブの中の数えられる区間（2回以上続けて書かれたもの）をすべて探す。"""
+        return _find_repeat_blocks(self)
+
+    def plan_repeat(self, start: str, end: str, new_total: int) -> "RepeatProposal":
+        """区間の回数を new_total にした変更案。このプロトタイプでは、今が2回の区間を合計3回にするときだけ作る。元の Job は変えない。"""
+        return _plan_repeat(self, start, end, new_total)
+
     # ---- 互換（変更案の new_job を返す） ----
     def shift_position(self, position: str, axis: str, delta_mm: float) -> "Job":
         return self.plan_shift(position, axis, delta_mm).new_job
@@ -449,6 +463,322 @@ class Job:
         new_job = parse("".join(new_lines), encoding=self.encoding)
         new_job.baseline = dict(self.baseline)
         return new_job
+
+
+# ---- 作業の回数の変更（docs/REPEAT_COUNT_DESIGN.md） ----
+# 区間（1サイクル）がジョブの中に続けてそのまま N 回書かれている形だけを数える。JUMP・ラベル・カウンタの繰り返しは扱わない。
+# このプロトタイプでは、今が2回の区間を合計3回にする変更だけを扱う（CURRENT_DECISIONS・唐川さんの決定 2026-11-03）。
+# 足すのは最後の回の直後に1回分（1回目と同じバイト列）だけ。減らす変更は扱わない。
+# 将来、ほかの回数を扱うときは、専門家の枠で上限を決める（今は決めていないので止める）。
+# 変えるのは INST 部の命令の行の並びだけ（位置の値・ヘッダー・ほかの行は変えない。新しい位置は作らない）
+REPEAT_NOT_SAFETY = "検査を通ったことは、物理的な安全の保証ではありません"
+REPEAT_WARNINGS_ADD = (
+    "同じ動きを1回ぶん足します。新しい位置・新しい移動の線は作りません",
+    "サイクルの時間が長くなります",
+    REPEAT_NOT_SAFETY,
+)
+# 誤解させないための固定文（唐川さんの決定 2026-11-03）：DOUT・TIMER を含む作業全体の繰り返しは対象外
+REPEAT_SCOPE_NOTE = ("繰り返すのは移動の行だけです。信号（DOUT）や待ち時間（TIMER）を含む作業は、"
+                     "このプロトタイプでは対象外です")
+REPEAT_DECREASE_MESSAGE = "減らす変更は、このプロトタイプでは扱いません"
+REPEAT_ONLY_MESSAGE = "このプロトタイプでは、2回から3回への変更だけを扱います"
+REPEAT_FROM, REPEAT_TO = 2, 3  # 扱う変更（今の回数 → 合計の回数）。これだけ
+_POS_NAME = re.compile(r"C[0-9]{5}")
+
+
+@dataclass(frozen=True)
+class RepeatBlock:
+    """ジョブの中に続けてそのまま書かれた区間。行番号は 0 から。"""
+    positions: tuple[str, ...]    # 区間の位置（C00001・C00002・C00003）
+    count: int                    # 今の回数
+    first_line: int               # 1回目の最初の行
+    cycle_lines: tuple[str, ...]  # 1回分の行（改行コードを含む。1回目の行そのまま）
+
+    @property
+    def cycle_len(self) -> int:
+        return len(self.positions)
+
+    @property
+    def end_line(self) -> int:
+        """最後の回の次の行（この行は区間に入らない）。"""
+        return self.first_line + self.count * self.cycle_len
+
+    @property
+    def target(self) -> str:
+        return f"{self.positions[0]}〜{self.positions[-1]}"
+
+    def cycle_of(self, line_index: int) -> int | None:
+        """その行が何回目の区間の行か（1から）。区間の外なら None。"""
+        if self.first_line <= line_index < self.end_line:
+            return (line_index - self.first_line) // self.cycle_len + 1
+        return None
+
+
+@dataclass(frozen=True)
+class RepeatProposal:
+    """回数の変更の変更案。new_job は承認されるまで書き出さない。元の Job は変えない。"""
+    kind: str                     # 常に "repeat"
+    target: str                   # "C00001〜C00003"
+    start: str
+    end: str
+    before_count: int
+    after_count: int
+    line_index: int               # 足した最初の行（new_job の行番号）。0 から
+    added: tuple[tuple[int, str], ...]    # (new_job の行番号, 行の中身)
+    removed: tuple[tuple[int, str], ...]  # 消した行。減らす変更は扱わないので、いつも空
+    affected: tuple[str, ...]
+    warnings: tuple[str, ...]
+    new_job: "Job"
+    block: RepeatBlock            # 元のジョブの区間
+    new_block: RepeatBlock        # 変更後のジョブの区間
+
+
+def repeat_count_problem(current: int, total: object, target: str) -> str | None:
+    """今の回数 current から合計 total 回にしてよいか。だめなら理由の文、よければ None。"""
+    if isinstance(total, bool) or not isinstance(total, int):
+        return "回数が整数で決まっていないため、変更しません"
+    if total == current:
+        return f"{target} は今 {current} 回で、同じ回数のため、変更しません"
+    if total < current:
+        return f"{target} は今 {current} 回です。{REPEAT_DECREASE_MESSAGE}"
+    if current < 2:
+        return (f"{target} は今 {current} 回です。回数は、今が2回以上のときだけ変えます"
+                "（1回から増やすと、区間と区間のつなぎの、新しい移動の線ができるため）。変更しません")
+    if (current, total) != (REPEAT_FROM, REPEAT_TO):
+        return f"{target} は今 {current} 回です。{REPEAT_ONLY_MESSAGE}。{total}回にはしません"
+    return None
+
+
+def move_segments(job: Job) -> list[tuple[str | None, str, int]]:
+    """ジョブの移動の区間：(直前の移動の行き先, この移動の命令の行（命令の種類・行き先・速度・PL を含む）, 行番号)。
+    最初の移動は直前が無いので None。行き先が位置でない移動は、行の文字をそのまま行き先として扱う（止める側）。"""
+    out: list[tuple[str | None, str, int]] = []
+    prev: str | None = None
+    for ins in job.instructions:
+        if not _ANY_MOVE.search(ins.text):
+            continue
+        out.append((prev, ins.text, ins.index))
+        prev = ins.position if ins.position is not None else ins.text
+    return out
+
+
+def new_move_segments(before: Job, after: Job) -> list[tuple[str | None, str, int]]:
+    """変更後のジョブの移動の区間のうち、変更前のジョブに無い「始点→命令」の組（唐川さんの指示 2026-11-03）。
+    区間の数は増えてよい。新しい種類の区間が1つでもあれば、新しい移動を作ることになる。"""
+    known = {(p, t) for p, t, _ in move_segments(before)}
+    return [s for s in move_segments(after) if (s[0], s[1]) not in known]
+
+
+def new_segment_message(seg: tuple[str | None, str, int]) -> str:
+    prev, text, _ = seg
+    dest = _MOVE.match(text)
+    to = dest.group(2) if dest else f"「{text}」"
+    start = "ジョブの初め" if prev is None else prev
+    return f"{start} から {to} への移動（「{text}」）が、今のジョブにありません。新しい移動を作るため、回数は変えません"
+
+
+def _inst_header_index(job: Job) -> int:
+    for i, line in enumerate(job.lines):
+        if _split_ending(line)[0] == "//INST":
+            return i
+    raise JbiError("命令の見出し（//INST）が見つからないため、変更しません")
+
+
+def _repeat_line_reason(i: int, body: str, ins: Instruction | None, seq: frozenset[str], target: str,
+                        edge: bool = False) -> str:
+    """区間の中（区間と区間の間を含む）にある、区間の行でない行の理由の文。edge：区間の位置を使う最初か最後の行。"""
+    where = f"（{i + 1}行目「{body}」）"
+    if edge and ins is not None and ins.command != "MOVL" and not body.startswith("'"):
+        # 区間の前後の命令（例 区間の前の MOVJ C00001）が区間の位置を使っている：実際の行に合わせて書く（QA P2-7）
+        used = next((r for r in ins.refs if r in seq), None)
+        if used is not None:
+            return f"区間の位置 {used} が、区間の外の {ins.command} でも使われているため、複写しません{where}"
+    if body.startswith("'"):
+        return f"区間の中に コメントの行 があるため、複写しません{where}"
+    if ins is None:
+        return f"区間の中に 命令でない行 があるため、複写しません{where}"
+    if ins.position is not None and ins.position not in seq:
+        return f"区間（{target}）の中に、区間の外の位置（{ins.position}）への移動があるため、複写しません{where}"
+    if ins.command == "MOVL" and ins.position is not None:
+        if _SECOND_MOVE.search(body):
+            what = "別の移動との組"
+        elif _CR_LOOSE.search(body):
+            what = "CR"
+        elif _PL_LOOSE.search(body):
+            m = _PL.search(body)
+            what = f"PL={m.group(1)}" if m is not None and m.group(1) != "0" else "読み取れない形の PL"
+        else:
+            what = "このアプリで扱える形（MOVL 位置 V=数値）でない書き方"
+        return f"{where.strip('（）')}は {what} が付いているため（区間の中は MOVL 位置 V=数値 だけを扱います）、複写しません"
+    if ins.command == "MOVJ":
+        return f"区間の中に MOVJ（関節移動）があるため、複写しません{where}"
+    return f"区間の中に {ins.command} があるため、複写しません{where}"
+
+
+def _find_repeat(job: Job, start: str, end: str) -> RepeatBlock:
+    job._check_no_problems()
+    if not (isinstance(start, str) and isinstance(end, str) and _POS_NAME.fullmatch(start) and _POS_NAME.fullmatch(end)):
+        raise JbiError("区間の位置番号の形が分かりません（C と5桁の数字）。変更しません")
+    a, b = int(start[1:]), int(end[1:])
+    if a >= b:
+        raise JbiError(f"区間の始まり（{start}）が終わり（{end}）より前の番号ではないため、区間が決まりません。変更しません")
+    target = f"{start}〜{end}"
+    seq = []
+    for n in range(a, b + 1):
+        name = f"C{n:05d}"
+        if name not in job.positions:
+            raise JbiError(f"位置 {name} はこのジョブにありません。区間 {target} の位置がそろわないため、変更しません")
+        seq.append(name)
+    for name in seq:
+        p = job.positions[name]
+        if p.after_unknown_directive or not p.is_robot_coordinates() or len(p.values) != _ROBOT_VALUES:
+            raise JbiError(f"位置 {name} はロボット座標（6軸の値）の形式ではないため、区間の回数は変えません")
+    for ins in job.instructions:
+        if _BLOCKING.search(ins.text):
+            raise JbiError(f"{ins.index + 1}行目「{ins.text}」は位置の意味を変える命令のため、"
+                           "このジョブの区間の回数は変えません")
+        if _FLOW.search(ins.text) or _LABEL_LINE.match(ins.text):
+            raise JbiError(f"{ins.index + 1}行目「{ins.text}」があります。JUMP・ラベル・カウンタによる繰り返しは扱いません"
+                           "（区間が続けてそのまま書かれた形だけを扱います）。変更しません")
+    seqset = frozenset(seq)
+    users = [ins for ins in job.instructions if seqset & set(ins.refs)]
+    if not users:
+        raise JbiError(f"区間 {target} の位置を行き先にする命令が、ジョブにありません。変更しません")
+    lo, hi = users[0].index, users[-1].index
+    if lo <= _inst_header_index(job):
+        raise JbiError("区間の行が命令の部分にないため、変更しません")
+    by_index = {ins.index: ins for ins in job.instructions}
+    region = list(range(lo, hi + 1))  # 区間の位置を使う最初の行から最後の行まで（間の行もすべて）
+    for i in region:
+        body = _split_ending(job.lines[i])[0]
+        ins = by_index.get(i)
+        if (ins is not None and ins.position in seqset and ins.refs == (ins.position,)
+                and _EDITABLE_MOVL.fullmatch(body)):
+            if ins.speed is None or ins.speed <= 0:  # 速度 0 の行は複写しない（QA P2-8）
+                raise JbiError(f"{i + 1}行目「{body}」は速度が 0 のため、複写しません")
+            continue
+        raise JbiError(_repeat_line_reason(i, body, ins, seqset, target, edge=i in (lo, hi)))
+    size = len(seq)
+    order = "→".join(seq)
+    for j, i in enumerate(region):
+        if by_index[i].position != seq[j % size]:
+            raise JbiError(f"区間の並び（{order}）が、続けてそのまま繰り返されていません"
+                           f"（{i + 1}行目「{by_index[i].text}」）。並びが違うため、変更しません")
+    if len(region) % size != 0:
+        raise JbiError(f"区間の並び（{order}）が、途中で終わっています（{hi + 1}行目まで）。並びが違うため、変更しません")
+    count = len(region) // size
+    first = tuple(job.lines[i] for i in region[:size])
+    for c in range(1, count):
+        for j in range(size):
+            i = region[c * size + j]
+            if job.lines[i] != first[j]:
+                raise JbiError(f"{c + 1}回目の {i + 1}行目「{by_index[i].text}」が1回目の行と同じではありません"
+                               "（速度・PL=0 の有無・改行も同じときだけ扱います）。変更しません")
+    if any(not line.endswith("\n") for line in first):
+        raise JbiError("区間の行の終わりが読めないため、変更しません")
+    return RepeatBlock(positions=tuple(seq), count=count, first_line=lo, cycle_lines=first)
+
+
+def _find_repeat_blocks(job: Job) -> list[RepeatBlock]:
+    if job.problems:
+        return []
+    # 軽くするため（QA）：「番号が1つずつ増える MOVL が続く並び」で、その1回分のすぐ後ろが同じ行で始まるものだけを
+    # _find_repeat で確かめる（行を1回ずつ読むだけ。1回分は10行まで）
+    ins = job.instructions
+    plain = [bool(i.command == "MOVL" and i.position is not None and _EDITABLE_MOVL.fullmatch(i.text)) for i in ins]
+    found: dict[tuple[str, ...], RepeatBlock] = {}
+    tried: set[tuple[str, str]] = set()
+    for k in range(len(ins)):
+        if not plain[k]:
+            continue
+        for size in range(2, 11):
+            j = k + size - 1
+            if j >= len(ins) or not plain[j] or ins[j].index != ins[k].index + size - 1:
+                break
+            if int(ins[j].position[1:]) != int(ins[j - 1].position[1:]) + 1:
+                break
+            nxt = k + size
+            if nxt >= len(ins) or ins[nxt].text != ins[k].text:
+                continue  # 1回分のすぐ後ろが同じ行で始まらなければ、続けて2回は書かれていない
+            key = (ins[k].position, ins[j].position)
+            if key in tried:
+                continue
+            tried.add(key)
+            try:
+                blk = _find_repeat(job, *key)
+            except JbiError:
+                continue
+            if blk.count >= 2:
+                found.setdefault(blk.positions, blk)
+    return list(found.values())
+
+
+def _plan_repeat(job: Job, start: str, end: str, new_total: int) -> RepeatProposal:
+    block = _find_repeat(job, start, end)
+    n = block.count
+    why = repeat_count_problem(n, new_total, block.target)
+    if why is not None:
+        raise JbiError(why)
+    size, stop = block.cycle_len, block.end_line
+    lines = list(job.lines)
+    at = stop  # 最後の回の直後に1回分を足すだけ（減らす変更は repeat_count_problem で止めている）
+    new_lines = lines[:stop] + list(block.cycle_lines) + lines[stop:]
+    added = tuple((at + j, _split_ending(block.cycle_lines[j])[0]) for j in range(size))
+    new_job = parse("".join(new_lines), encoding=job.encoding)
+    new_job.baseline = dict(job.baseline)
+    try:
+        new_job.render_bytes()
+    except UnicodeEncodeError:
+        raise JbiError("変更後のジョブを書き出せないため、変更しません") from None
+    if new_job.problems or new_job.name != job.name:
+        raise JbiError("変更後のジョブを読み直せなかったため、変更しません")
+    try:
+        nb = _find_repeat(new_job, start, end)
+    except JbiError:
+        raise JbiError("変更後のジョブで区間を数え直せなかったため、変更しません") from None
+    if (nb.count != new_total or nb.positions != block.positions or nb.first_line != block.first_line
+            or nb.cycle_lines != block.cycle_lines):
+        raise JbiError("変更後のジョブの区間が、思った回数・並びにならないため、変更しません")
+    # つなぎの移動を暗黙に作らない（唐川さんの指示 2026-11-03）：変更後の移動の区間が、すべて変更前のジョブにあること
+    fresh = new_move_segments(job, new_job)
+    if fresh:
+        raise JbiError(new_segment_message(fresh[0]))
+    # 1回目に入る移動と、最後の回のあとの移動（命令の行と、その直前の移動の行き先）が変わらないこと
+    def around(j: Job, b: RepeatBlock) -> tuple[object, object]:
+        segs = move_segments(j)
+        entry = next(((p, t) for p, t, i in segs if i == b.first_line), None)
+        exit_ = next(((p, t) for p, t, i in segs if i >= b.end_line), None)
+        return entry, exit_
+    if around(job, block) != around(new_job, nb) or around(job, block)[0] is None:
+        raise JbiError("1回目に入る移動、または最後の回のあとの移動が、変更の前後で同じにならないため、回数は変えません")
+    for p, t, i in move_segments(new_job):
+        if nb.first_line <= i < nb.end_line:  # 区間の中の移動とその始点は、MOVL 位置 V=数値（PL なし／ちょうど PL=0）だけ
+            ins = new_job.instruction_at(i)
+            prev_ins = new_job._prev_move(i)
+            try:
+                _check_editable_move(ins)
+                if i != nb.first_line and prev_ins is not None:
+                    _check_editable_move(prev_ins)
+            except JbiError as e:
+                raise JbiError(f"複写したあとの区間の移動が、扱える形ではありません。{e}") from None
+    k = _inst_header_index(job)
+    if (new_job.lines[:k + 1] != job.lines[:k + 1]
+            or {p: v.values for p, v in new_job.positions.items()} != {p: v.values for p, v in job.positions.items()}):
+        raise JbiError("変更後のジョブで位置やヘッダーが変わってしまうため、変更しません")
+    conn = block.first_line + size  # 2回目の最初の行（区間の最後 → 最初へのつなぎの移動）
+    affected = (
+        f"{at + 1}〜{at + size}行目（足す行。{new_total}回目の {block.target}）",
+        f"{block.positions[-1]} から {block.positions[0]} へのつなぎの移動は、元のジョブの "
+        f"{conn + 1}行目「{_split_ending(lines[conn])[0]}」と同じ移動です",
+    )
+    warnings = REPEAT_WARNINGS_ADD + (REPEAT_SCOPE_NOTE,)
+    kinds = len({(p, t) for p, t, _ in move_segments(job)})
+    warnings = tuple(warnings) + (
+        f"新しい移動の区間はありません（変更のあとも、今のジョブにある {kinds} 種類の移動の区間だけです。プログラムで確かめました）",)
+    return RepeatProposal(
+        kind="repeat", target=block.target, start=start, end=end, before_count=n, after_count=new_total,
+        line_index=at, added=added, removed=(), affected=affected, warnings=tuple(warnings),
+        new_job=new_job, block=block, new_block=nb)
 
 
 # ---- 読み込み ----

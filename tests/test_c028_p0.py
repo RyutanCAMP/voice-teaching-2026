@@ -205,12 +205,20 @@ def test_a_cancelled_approval_drops_the_pending_question(make_updown):
 # ======================================================================
 def test_b_only_session_propose_creates_candidates():
     src = inspect.getsource(session_mod.Session)
-    # 候補を入れるのは _accept だけ。_accept を呼ぶのは propose と _blocked だけ。_blocked を呼ぶのは propose だけ
-    assert len(re.findall(r"self\.candidate = change", src)) == 1
-    accept_calls = [m.start() for m in re.finditer(r"self\._accept\(", src)]
-    blocked_calls = [m.start() for m in re.finditer(r"self\._blocked\(", src)]
+    # 位置の移動・速度の候補を入れるのは _accept だけ。_accept を呼ぶのは propose と _blocked だけ。_blocked を呼ぶのは propose だけ。
+    # 回数の変更（feat/repeat-count。docs/REPEAT_COUNT_DESIGN.md）の候補は、もう1か所 confirm_repeat（範囲の確認のボタン）が
+    # jbi.plan_repeat の結果だけを入れる（位置の移動の提案・plan_shift・シミュレーションの参考の候補は使わない）。この2か所のほかでは入れない。
+    # 動きでも確かめる：tests/test_repeat_count.py の test_repeat_candidate_path_*（plan_shift を壊しても回数の候補は作れる・位置の値は変わらない など）
     def owner(pos):
         return re.findall(r"\n    def (\w+)\(", src[:pos])[-1]
+    sets = [m.start() for m in re.finditer(r"self\.candidate = change", src)]
+    assert len(sets) == 2 and {owner(p) for p in sets} == {"_accept", "confirm_repeat"}
+    hr = inspect.getsource(Session.confirm_repeat)
+    assert "plan_repeat(" in hr and hr.index("plan_repeat(") < hr.index("self.candidate = change")
+    assert "_plan(" not in hr and "plan_shift(" not in hr and "_simulate" not in hr and "propose" not in hr
+    assert "self.candidate =" not in inspect.getsource(Session._hear_repeat)  # 指示（声・文字）からは候補を作らない
+    accept_calls = [m.start() for m in re.finditer(r"self\._accept\(", src)]
+    blocked_calls = [m.start() for m in re.finditer(r"self\._blocked\(", src)]
     assert {owner(p) for p in accept_calls} == {"propose", "_blocked"}
     assert {owner(p) for p in blocked_calls} == {"propose"}
     # check_proposal は始めに axis_source_gate を呼ぶ

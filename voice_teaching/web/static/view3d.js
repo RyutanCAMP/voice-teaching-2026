@@ -6,6 +6,8 @@
 //   再生の印は MOVL の区間だけ線の上を動く。MOVJ・目安の区間では印を消し、終わったら終点に置く。
 // - 画面の上下は Z、奥行きは X・Y を回して見せる（表示の向きだけ。指示の方向の解釈には使わない）。
 // - 変更候補があるときは、動かす点に触れる区間（入る・出る）だけを変更後の色で描く。止まった候補は灰色の点線。
+// - 回数の変更の候補（data.repeat）：区間の近くに「×2 → ×3」の印。足した回の線（元からある線と同じ線）を変更後の色で重ねる。
+//   再生では、区間の線（サーバーの seg.cycle）ごとに「2回目」を印の横に出す。新しい点・新しい線は描かない
 "use strict";
 import { displayMinus, segmentLook, segmentTitle } from "/static/highlight.js";
 
@@ -20,6 +22,8 @@ const HOLD_MS = 700;          // MOVJ・目安の区間で、印を消してお�
 function svgEl(tag, attrs) {
   const e = document.createElementNS(SVG_NS, tag);
   for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, String(v));
+  // 文字の大きさ：画面の CSS（svg text { font-size: 12px }）より強く、CSP（style 属性は使えない）でも効くように CSSOM で入れる
+  if (attrs && attrs["data-fs"]) e.style.fontSize = `${attrs["data-fs"]}px`;
   return e;
 }
 
@@ -120,6 +124,10 @@ export class View3D {
         stroke: look.color && key === "before" ? look.color : color, "stroke-width": w * look.width + (playing ? 1.5 : 0),
         "stroke-linecap": "round", class: `seg ${key} seg-${look.kind}`, "data-kind": look.kind, "data-from": s.from, "data-to": s.to });
       if (look.dash) line.setAttribute("stroke-dasharray", look.dash);
+      // 回数の変更の範囲を確かめている間：その範囲の線を光らせる（会話の位置の候補と同じ色）
+      if (key === "before" && (d.rangeLines || []).includes(s.line_no)) {
+        line.setAttribute("stroke", "#5e5ce6"); line.setAttribute("stroke-width", "5"); line.classList.add("range");
+      }
       // 止まった候補は、目安の区間（6 5 の破線）・MOVJ の点線と見分けられる細かい点線
       if (key === "after" && stopped) { line.setAttribute("stroke-dasharray", "0.5 7"); line.setAttribute("stroke-width", "4"); }
       const t = svgEl("title", {}); t.textContent = segmentTitle(s);
@@ -129,7 +137,11 @@ export class View3D {
     };
     for (const s of d.segments) seg(s, d.points, c ? "#a1a6ad" : "#c7cbd1", 2.5, "before");
     // 変更後は、動かす点に触れる区間だけ（ほかの区間は変更前と同じ線なので描き直さない）
-    if (c) for (const s of c.segments) if (s.from === c.moved || s.to === c.moved) seg(s, c.points, cAfter, 3, "after");
+    if (c && !d.repeat) for (const s of c.segments) if (s.from === c.moved || s.to === c.moved) seg(s, c.points, cAfter, 3, "after");
+    // 回数の変更：足した回の線だけを変更後の色で重ねる（元からある線と同じ線。新しい線は無い）
+    if (c && d.repeat && d.repeat.after > d.repeat.before) {
+      for (const s of c.segments) if (s.cycle === d.repeat.after) seg(s, c.points, cAfter, 3, "after");
+    }
     this.lines = lines;
 
     // 点（奥から手前の順に描く）。近く見える点は1つの印にまとめ、押すと選び分ける
@@ -201,13 +213,65 @@ export class View3D {
         this._inset(svg, p0.xyz, q.xyz, displayMinus(d.delta_label || ""), cAfter, cAfterText);
       }
     }
+    if (d.repeat) this._repeatMark(svg, d, labelBoxes, cAfterText);
     if (this.marker && this.marker.xyz) {  // MOVJ・目安の区間の間は xyz が無い（印を出さない）
       const m = this.project(this.marker.xyz);
       svg.append(svgEl("circle", { cx: m[0], cy: m[1], r: 9, fill: this.marker.color, stroke: "#fff", "stroke-width": 3, class: "marker" }));
+      const n = this.marker.seg && this.marker.seg.cycle;
+      if (d.repeat && Number.isInteger(n)) {  // 回数の変更：再生中の区間が何回目か
+        const t = svgEl("text", { x: m[0] - 14, y: m[1] + 26, "text-anchor": "end", fill: this.marker.color, "font-weight": "700", class: "cycle-label" });
+        t.textContent = `${n}回目`;
+        svg.append(t);
+      }
     }
     this.host.querySelector("svg")?.remove();
     this.host.prepend(svg);
     this.svg = svg;
+  }
+
+  // 回数の変更の印：区間の点の近くに「C00001〜C00003 ×2 → ×3」（読み込んだ直後は「×2」）、右上の窓に回数。
+  // 数はサーバーの文字のまま。文字は図の中に収まる所に置く（はみ出すなら別の所。QA P1-4）
+  _repeatMark(svg, d, boxes, textColor) {
+    const r = d.repeat;
+    const pts = d.points.filter((p) => r.positions.includes(p.name)).map((p) => this.project(p.xyz));
+    if (pts.length) {
+      const text = `${r.target} ${r.label}`, tw = Math.ceil(textWidth(text) * 1.25);
+      const right = Math.max(...pts.map((q) => q[0])), left = Math.min(...pts.map((q) => q[0]));
+      const top = Math.min(...pts.map((q) => q[1])), bottom = Math.max(...pts.map((q) => q[1]));
+      const box = ([x, y]) => ({ x0: x, x1: x + tw, y0: y - 14, y1: y + 4 });
+      const inside = (q) => q.x0 >= 8 && q.x1 <= this.W - 8 && q.y0 >= 8 && q.y1 <= this.H - 8;
+      // 点・点の名前・右上の窓に重ならず、図の中に収まる所を探す（右・右下・左・下・上の順）
+      const inset = { x0: this.W - 156, x1: this.W, y0: 0, y1: 110 };
+      const spots = [[right + 90, (top + bottom) / 2], [right + 24, bottom + 24], [left - tw - 24, (top + bottom) / 2],
+        [left - tw / 2, bottom + 40], [left - tw / 2, top - 30], [left - tw - 24, bottom + 24], [12, this.H - 44]];
+      const spot = spots.find((s) => inside(box(s)) && !boxes.some((q) => overlaps(box(s), q)) && !overlaps(box(s), inset))
+        || spots.find((s) => inside(box(s))) || [12, this.H - 44];
+      const lab = svgEl("text", { x: spot[0], y: spot[1], fill: textColor, "font-weight": "700", "data-fs": 13, class: "repeat-label" });
+      lab.textContent = text;
+      svg.append(lab);
+      boxes.push(box(spot));
+    }
+    // 右上の窓：変更後の回数（×3）を大きく、変更前（×2）を灰色で小さく。候補が無ければ今の回数だけ
+    const S = 140, x0 = this.W - S - 12, y0 = 12;
+    const g = svgEl("g", { class: "inset repeat-inset" });
+    g.append(svgEl("rect", { x: x0, y: y0, width: S, height: 92, rx: 14, fill: "#fff", stroke: "#e5e5ea" }));
+    const head = svgEl("text", { x: x0 + 12, y: y0 + 22, class: "inset-head", "data-fs": 12 });
+    head.textContent = "区間を通る回数";
+    g.append(head);
+    if (r.after != null) {
+      const was = svgEl("text", { x: x0 + 14, y: y0 + 70, fill: "#8e8e93", "data-fs": 18, "font-weight": "600", class: "repeat-was" });
+      was.textContent = `×${r.before} →`;
+      const now = svgEl("text", { x: x0 + S - 14, y: y0 + 74, "text-anchor": "end", fill: textColor, "data-fs": 34,
+        "font-weight": "800", class: "repeat-now" });
+      now.textContent = `×${r.after}`;
+      g.append(was, now);
+    } else {
+      const now = svgEl("text", { x: x0 + S / 2, y: y0 + 72, "text-anchor": "middle", fill: "#6e6e73", "data-fs": 30,
+        "font-weight": "700", class: "repeat-now" });
+      now.textContent = `×${r.before}`;
+      g.append(now);
+    }
+    svg.append(g);
   }
 
   // 拡大の窓：変更前（灰）と変更後（オレンジ）を大きくして並べる。小さな変更も見えるように
