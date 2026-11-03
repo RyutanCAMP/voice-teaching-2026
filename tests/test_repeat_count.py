@@ -1042,3 +1042,16 @@ def test_position_not_in_the_job_is_named():
     w, sid = start()
     r = w.hear(sid, "C00099を3回")
     assert r["status"] == "stop" and r["message"] == "位置 C00099 はこのジョブにありません" and rng(r) is None
+
+
+# ---- 家のPCの内部レビュー（9ec263c）P2-1・P3-1：範囲・回数を変えたい言葉、別の指示は、範囲の確認のつもりの言葉にしない ----
+@pytest.mark.parametrize("word", ["範囲を変えて", "範囲を広げて", "範囲を短くして", "範囲を選び直す", "別の範囲", "前の範囲",
+                                  "はい、四回にして", "はい五回", "はい、十回", "はい出力して", "はい、転送して",
+                                  "はい、ゆっくり", "はい、全部", "やっぱりいい", "もういい"])
+def test_requests_to_change_range_or_count_are_not_range_confirm_words(word):
+    assert not rc.is_range_confirm_word(word), word
+    w, sid = start()
+    turn = rng(w.hear(sid, SAY))["turn"]
+    r = w.hear(sid, word, source="voice")
+    assert r["message"] not in (rc.RANGE_BUTTON_ONLY, rc.RANGE_APPROVE_GUIDE), (word, r["message"])
+    assert cand(r) is None and r["state"]["approval"] is None
