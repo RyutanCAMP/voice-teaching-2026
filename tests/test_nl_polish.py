@@ -46,7 +46,7 @@ def cand(r):
 @pytest.mark.parametrize("source", SOURCES)
 @pytest.mark.parametrize("text,plain", [
     ("3mm下げて？", "3mm下げて"), ("3mm下げて?", "3mm下げて"), ("下に3mmですか", "下に3mmです"),
-    ("Y座標を3mm下げますか", "Y座標を3mm下げます"), ("下に3mm？", "下に3mm"), ("下に3mmですか？", "下に3mmです"),
+    ("Y座標を3mm下げますか", "Y座標を3mm下げて"),  # CHECKER_030 S30-2：「〜ます」も外して確かめる ("下に3mm？", "下に3mm"), ("下に3mmですか？", "下に3mmです"),
 ])
 def test_question_asks_for_confirmation_with_one_choice(text, plain, source):
     w, sid = new()
@@ -96,7 +96,7 @@ def test_question_facts():
 # ---- 2. 言い終わり・ひらがなの上げ下げ ----
 @pytest.mark.parametrize("source", SOURCES)
 @pytest.mark.parametrize("text,want", [
-    ("3mm下げます", ("Z", "-3.000")),
+    # 「3mm下げます」は CHECKER_030 S30-2（2026-11-03 17:14）で2択に変えた（下の test_s_p3_3_single_endings_still_work）
     ("下に3ミリです", ("Z", "-3.000")), ("Xのマイナス5ミリです", ("X", "-5.000")),
     ("3mmさげて", ("Z", "-3.000")), ("3mmあげて", ("Z", "+3.000")), ("Y座標を 3 ミリ さげて", ("Y", "-3.000")),
     ("Y座標を3mmあげてください", ("Y", "+3.000")), ("えーとさげて3mm", ("Z", "-3.000")),
@@ -348,7 +348,10 @@ def test_s_p3_3_no_stacked_endings(text, source):
 
 
 def test_s_p3_3_single_endings_still_work():
-    assert cand(hear("3mm下げます")) == ("Z", "-3.000")
+    # CHECKER_030 S30-2（唐川さんの決定 2026-11-03 17:14）：「3mm下げます」は候補にせず、「〜して動かします」と同じ2択
+    r = hear("3mm下げます")
+    assert cand(r) is None and [c["label"] for c in r["choices"]] == ["変更したい", "説明です"]
+    assert cand(hear("3mm下げる")) == ("Z", "-3.000")
 
 
 @pytest.mark.parametrize("source", SOURCES)

@@ -224,11 +224,16 @@ HESITATIONS = ("えーと", "ええと", "えっと", "あのー", "あの")    
 OPENERS = ("それでは", "じゃあ", "では", "まず")                             # 文の初め（読んだ言葉より前）に1つだけで
 FILLER_WORDS = PARTICLES + TE_FORMS + REQUESTS + POLITE_AFTER_TE + FINALS + HESITATIONS + OPENERS
 # 読み取りで使った動きの言葉のすぐ後の言い終わり（「下げる」「下げます」「ずらす」「移動させて」）。2026-11-03 シクロの判断
-VERB_ENDINGS = ("させます", "させて", "させ", "ます", "です", "る", "す")  # 「移動させます」（唐川さんの決定 2026-11-03：〜ます は変更の希望）
+# 「ます」「させます」は入れない（CHECKER_030 S30-2。唐川さんの決定 2026-11-03 17:14）：文の終わりの「〜ます」は read_utterance が
+# 「〜します」と同じく外して facts.shimasu_text に入れ、2択で確かめる。文の途中の「ます」（「下げます3mm」）は知らない言葉として聞き返す
+VERB_ENDINGS = ("させて", "させ", "です", "る", "す")
 # 「動かします」「移動します」「ずらします」の「します」。CHECKER_026 M3（唐川さんの判断 2026-11-03 13:27）で、
 # 読み取りのつなぎの言葉としては使わない（3b4cac1 の「受け付ける」は取り消し）。文の終わりにあるときだけ read_utterance が外して
 # facts.shimasu_text に入れ、pre_check が「変更をご希望ですか？ それとも操作の説明でしょうか？」と確かめる（候補にしない）
 SHIMASU_AFTER = ("動か", "移動", "ずら")
+# 言い終わりの「〜ます」（CHECKER_030 S30-2）：この言葉のすぐ後の、文の終わりの「ます」だけ。「下げます」→「下げて」と読み、
+# 「〜します」と同じ2択にする（候補にしない）。「ません」（打ち消し）・「ますね」「ますです」（重ねた言い終わり）は外さない
+MASU_AFTER = ("下げ", "上げ", "さげ", "あげ", "させ", "寄せ")
 # 疑問の形のときだけ、元に戻す・比較・選択の言葉の後の「ます」「します」（「元に戻しますか」「比較しますか」）
 QUESTION_ONLY_ENDINGS = ("します", "ます")
 # 読んだ指示の後の、文の終わりの「です」（「下に3ミリです」「Xのマイナス5ミリです」。2026-11-03 夜）。文の途中・初めでは使わない
@@ -454,17 +459,20 @@ def _repeat(text: str) -> tuple[tuple[int | None, str] | None, list[tuple[int, i
 # 文の終わりの「動かします」「移動します」「ずらします」（後ろは句読点・空白だけ）。CHECKER_026 M3
 _SHIMASU_END = re.compile(rf"(?<={'|'.join(SHIMASU_AFTER)})します[\s　。．.!！]*$")
 _SHIMASU_VERB = re.compile(f"(?:{'|'.join(SHIMASU_AFTER)})$")
+_MASU_END = re.compile(rf"(?<={'|'.join(MASU_AFTER)})ます[\s　。．.!！]*$")
 
 
 def _strip_shimasu(text: str) -> str | None:
-    """「3mm下げて動かします」→「3mm下げて」、「下に3mm移動します」→「下に3mm移動して」。文の終わりが「〜します」でなければ None。
+    """「3mm下げて動かします」→「3mm下げて」、「下に3mm移動します」→「下に3mm移動して」。文の終わりが「〜します」「〜ます」でなければ None。
 
     すぐ前が「て」の動きの言葉（「下げて動かします」）なら、後ろの「動かします」ごと外す。それ以外は「します」を「して」にする。
     言葉は足さない・変えない（外した文は、ふつうの指示と同じ検査を通る）。
     """
     m = _SHIMASU_END.search(text)
     if m is None:
-        return None
+        m = _MASU_END.search(text)
+        # 「3mm下げます」→「3mm下げて」、「Yのマイナス3ミリ移動させます」→「…移動させて」（CHECKER_030 S30-2）
+        return None if m is None else text[: m.start()] + "て"
     head = text[: m.start()]
     verb = _SHIMASU_VERB.search(head)
     before = head[: verb.start()].rstrip()
@@ -927,7 +935,7 @@ def shimasu_request_text(facts: UtteranceFacts, selected: str | None = None) -> 
     return f"{head}{facts.axis}の{'プラス' if value > 0 else 'マイナス'}{v}ミリ"
 
 
-SHIMASU_RESTATE_MESSAGE = "「〜します」の言い方では変更しません。してほしいことを、もう一度言ってください"
+SHIMASU_RESTATE_MESSAGE = "「〜ます」の言い方では変更しません。してほしいことを、もう一度言ってください"
 
 
 SHIMASU_CHOOSE_SIGN_MESSAGE = ("プラスかマイナスかを、ボタンで選んでください"

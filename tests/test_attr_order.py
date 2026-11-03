@@ -5,8 +5,9 @@
    相対ジョブでないジョブには並びを求めない：samples/dummy の PAT_SJIS_COMMENT（・_CRLF）が ///DATE と ///ATTR の間に
    ///COMM を持つため（決定の「違うものがあれば相対ジョブだけに限る」）。
 2. ///ATTR の行が無い JOB は変更の対象にしない（problems「///ATTR の行がありません」。全部の位置を止める）。
-3. 「3ミリ下げます」（〜ます）は変更の希望として受け付ける。方向の確認（上下の設定）と承認（ボタン）は今どおり必須。
-   「〜します」（M3）の扱いは変えない。
+3. 「〜ます」の言い終わり（「3ミリ下げます」など）は、CHECKER_030 S30-2（唐川さんの決定 2026-11-03 17:14）で
+   「〜して動かします」（M3）と同じ2択（［変更したい］［説明です］）に統一した。7e6f4e8 では「〜ます」を候補にする期待だったが、
+   この決定に合わせて2択の期待に直した（詳しくは tests/test_c030_masu.py）。
 """
 from pathlib import Path
 
@@ -87,40 +88,37 @@ def test_no_attr_stops_every_position(data):
 
 
 # ======================================================================
-# 3. 「〜ます」は変更の希望として受け付ける（方向の確認・承認は今どおり）
+# 3. 「〜ます」は「〜して動かします」と同じ2択（CHECKER_030 S30-2。7e6f4e8 の「候補にする」期待から直した）
 # ======================================================================
+LABELS = ["変更したい", "説明です"]
 MASU = [
-    ("3ミリ下げます", "updown", ("C00005 Z", "-3.000")),
-    ("下に3ミリ下げます", "updown", ("C00005 Z", "-3.000")),
-    ("Zマイナス3ミリ下げます", "any", None),           # 符号が2つ（Zマイナス＋下げ）：聞き返し
-    ("Zマイナス3ミリずらします", "shimasu", None),      # 「〜します」は M3 のまま（2択）
-    ("Yのマイナス3ミリ移動させます", "any", ("C00005 Y", "-3.000")),
-    ("Z座標を3ミリ下げます", "any", ("C00005 Z", "-3.000")),
-    ("3ミリ上げます", "updown", ("C00005 Z", "+3.000")),
+    # (発話, 種類, 確認済みのときの［変更したい］の文)
+    ("3ミリ下げます", "updown", "C00005を3ミリ下げて"),
+    ("下に3ミリ下げます", "updown", "C00005を3ミリ下げて"),
+    ("Zマイナス3ミリ下げます", "ask", None),               # 符号が2つ（Zマイナス＋下げ）：聞き返し（2択にしない）
+    ("Zマイナス3ミリずらします", "two", "C00005をZのマイナス3ミリ"),  # 「〜します」（M3）
+    ("Yのマイナス3ミリ移動させます", "two", "C00005をYのマイナス3ミリ"),
+    ("Z座標を3ミリ下げます", "two", "C00005をZのマイナス3ミリ"),
+    ("3ミリ上げます", "updown", "C00005を3ミリ上げて"),
 ]
 
 
 @pytest.mark.parametrize("source", ["voice", "text"])
 @pytest.mark.parametrize("mode", ["none", "confirmed"])
 @pytest.mark.parametrize("text,kind,want", MASU)
-def test_masu_is_a_request_with_the_usual_checks(text, kind, want, mode, source, make_updown, tmp_path):
+def test_masu_is_two_choices_like_shimasu(text, kind, want, mode, source, make_updown, tmp_path):
     cfg = make_updown() if mode == "confirmed" else tmp_path / "none.json"
     w = WebFlow(interpreter=ci.MockInterpreter(), updown_config=cfg)
     sid = w.load(DEMO_C)["session_id"]
     w.select(sid, "C00005")
     r = w.hear(sid, text, source)
-    c = r["state"]["candidate"]
-    got = None if c is None else (c["target"], c["delta"])
-    if kind == "shimasu":
-        assert got is None and [x["label"] for x in r["choices"]] == ["変更したい", "説明です"], r["message"]
-        return
+    assert r["state"]["candidate"] is None, (text, mode, r["message"])  # 「〜ます」からは候補を作らない
+    assert r["state"]["approval"] is None
     if kind == "updown" and mode == "none":
-        assert got is None and r["message"] == w._entries[sid].session.updown.message, r["message"]
+        assert r["choices"] == [] and r["message"] == w._entries[sid].session.updown.message, r["message"]
         return
-    if kind == "any" and want is None:
-        assert got is None and r["status"] == "ask", r["message"]
+    if kind == "ask":
+        assert r["status"] == "ask" and LABELS != [x["label"] for x in r["choices"]], r["message"]
         return
-    assert got == want, (text, mode, r["message"])
-    assert not ut.read_utterance(text).unknown_words
-    # 承認は画面のボタン（approve）だけ。「〜ます」の言葉では承認しない
-    assert r["state"]["approval"] is None and r["state"]["can_approve"] is True
+    assert r["status"] == "ask" and [x["label"] for x in r["choices"]] == LABELS, (text, mode, r["message"])
+    assert r["choices"][0]["text"] == want, r["choices"]

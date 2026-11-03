@@ -247,7 +247,7 @@ def test_checker023_b1_no_over_asking(text):
 
 # ---- 動きの言葉の後の言い終わり・位置番号の後の「位置」（2026-11-03 シクロの判断）----
 @pytest.mark.parametrize("text", [
-    "下に3ミリ移動させて", "下に3ミリ移動させ", "下に3ミリずらす", "3mm下げる", "3ミリ下げます", "3mm下げです",
+    "下に3ミリ移動させて", "下に3ミリ移動させ", "下に3ミリずらす", "3mm下げる", "3mm下げです",  # 「3ミリ下げます」は CHECKER_030 S30-2 で2択（tests/test_c030_masu.py）
     "C00005の位置を下に3mm", "C00005 の 位置を下に3mm",
 ])
 def test_allowed_endings_and_position_word(text):
