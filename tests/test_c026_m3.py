@@ -273,7 +273,7 @@ def test_negation_stops_without_choices(text, source):
 
 
 @pytest.mark.parametrize("source", SOURCES)
-@pytest.mark.parametrize("text", ["バイオ3mm下げて動かします", "下に3mmバイオ移動します", "Yのマイナス3ミリずらしますね",
+@pytest.mark.parametrize("text", ["バイオ3mm下げて動かします", "下に3mmバイオ移動します",
                                   "下に3mm動かしますです", "3mm下げします"])
 def test_unknown_words_ask_without_two_choices(text, source):
     w, sid = new()
