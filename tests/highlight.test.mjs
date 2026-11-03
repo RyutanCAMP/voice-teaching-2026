@@ -1,7 +1,7 @@
 // 読めなかった言葉（facts.unknown_words）を、聞き取った文の中で目立たせるための分け方（CHECKER_023 B1）。
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { splitUnknown, displayMinus, segmentLook, segmentTitle, trimDecimal, confirmHeading, updownStatus, updownConfirmLine, speechExamples }
+import { splitUnknown, displayMinus, segmentLook, segmentTitle, trimDecimal, confirmHeading, updownStatus, updownConfirmLine, updownDetail, speechExamples }
   from '../voice_teaching/web/static/highlight.js';
 
 test('unknown words are split out in order', () => {
@@ -136,4 +136,30 @@ test('updownConfirmLine: one line only when confirmed', () => {
   assert.equal(updownConfirmLine({ status: 'confirmed' }), '上下の向き：確認済み');
   for (const u of [undefined, null, [], { status: 'unconfirmed', confirmed_by: '唐川' }, { status: 'mismatch' }, { status: 'changed' }])
     assert.equal(updownConfirmLine(u), '', JSON.stringify(u));
+});
+
+// ---- CHECKER_030 S30-1（唐川さんの決定 2026-11-03 17:14）：ロボット名と確認した人・日時を常に見せる1行 ----
+test('updownDetail: confirmed shows robot of the config, who and when', () => {
+  const u = { status: 'confirmed', robot: 'HC20DT', app_robot: 'HC20DT', confirmed_by: '唐川', confirmed_at: '2026-11-03T14:00:00+09:00' };
+  assert.equal(updownDetail(u), '上下の向き：HC20DT・唐川（11/3 14:00）で確認済み');
+  // 確認済みのときは設定の robot を出す（無ければアプリの値）
+  assert.equal(updownDetail({ ...u, robot: undefined }), '上下の向き：HC20DT・唐川（11/3 14:00）で確認済み');
+  assert.equal(updownDetail({ status: 'confirmed', robot: 'HC10DTP', confirmed_by: '唐川' }), '上下の向き：HC10DTP・唐川で確認済み');
+  assert.equal(updownDetail({ status: 'confirmed' }), '上下の向き：確認済み');
+});
+test('updownDetail: other states show the app robot', () => {
+  assert.equal(updownDetail({ status: 'unconfirmed', app_robot: 'HC20DT' }), '上下の向き：未確認（HC20DT）');
+  assert.equal(updownDetail({ status: 'mismatch', app_robot: 'HC20DT', robot: 'HC10DTP' }), '上下の向き：確認した設定と違います（HC20DT）');
+  assert.equal(updownDetail({ status: 'changed', app_robot: 'HC20DT' }), '上下の向き：設定が変わっています（HC20DT）');
+  // 確認済みでないときは、設定の名前・確認した人を出さない（確認済みに見せない）
+  for (const s of ['unconfirmed', 'ok', 'CONFIRMED', undefined, '']) {
+    const t = updownDetail({ status: s, app_robot: 'HC20DT', robot: 'X', confirmed_by: '唐川' });
+    assert.ok(!t.includes('唐川') && !t.includes('確認済み') && !t.includes('X') && t.includes('HC20DT'), String(s));
+  }
+  assert.equal(updownDetail({ status: 'unconfirmed' }), '上下の向き：未確認');
+});
+test('updownDetail: nothing when the server does not send it, and names are text only', () => {
+  for (const u of [undefined, null, 'confirmed', 3, []]) assert.equal(updownDetail(u), '', String(u));
+  assert.equal(updownDetail({ status: 'unconfirmed', app_robot: 3 }), '上下の向き：未確認');
+  assert.equal(updownDetail({ status: 'confirmed', robot: ['A'], confirmed_by: {} }), '上下の向き：確認済み');
 });

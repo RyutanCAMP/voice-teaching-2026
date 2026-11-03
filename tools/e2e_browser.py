@@ -482,6 +482,10 @@ def check_c026(browser, url, check, shots: Path | None) -> None:
     pg.goto(url)
     pg.click("#sample-button")
     pg.wait_for_selector("#job-area:not([hidden])")
+    # CHECKER_030 S30-1：確認済みのサーバー：図の欄の上に、ロボット名と確認した人・日時を、マウスを重ねなくても出す
+    det = pg.inner_text("#updown-detail") if pg.is_visible("#updown-detail") else ""
+    check(det.startswith("上下の向き：HC20DT・e2e（一時フォルダの仮の設定）（") and det.endswith("）で確認済み"),
+          f"S30-1：確認済みは「上下の向き：HC20DT・確認した人（日時）で確認済み」を常に出す（{det!r}）")
     to_candidate(pg, "C00005", "Zプラス方向に10mm")
     pg.click("#open-confirm")
     pg.wait_for_selector("#confirm-overlay:not([hidden])")
@@ -544,6 +548,16 @@ def check_c026(browser, url, check, shots: Path | None) -> None:
         ({"status": "mismatch", "message": ""}, "上下の向き：確認した座標系・ツールと違います"),
         ({"status": "changed", "message": ""}, "上下の向き：設定が変わっています"),
     ]
+    # CHECKER_030 S30-1：ロボット名と確認した人・日時の1行（図の欄の上。マウスを重ねなくても見える）
+    details = {
+        "unconfirmed": "上下の向き：未確認（HC20DT）",
+        "confirmed": "上下の向き：HC20DT・唐川（11/3 14:00）で確認済み",
+        "mismatch": "上下の向き：確認した設定と違います（HC20DT）",
+        "changed": "上下の向き：設定が変わっています（HC20DT）",
+    }
+    for value, _ in cases:
+        value["app_robot"] = "HC20DT"
+        value["robot"] = "HC20DT" if value["status"] == "confirmed" else None
     pg.close()
     for value, want in cases:
         updown["value"] = value
@@ -556,10 +570,31 @@ def check_c026(browser, url, check, shots: Path | None) -> None:
         until(pg, lambda: pg.inner_text("#voice-position strong") == "C00005")
         got = pg.inner_text("#updown-status") if pg.is_visible("#updown-status") else ""
         check(got == want, f"上下の向き：{value['status']} は「{want}」と出す（{got!r}）")
+        det = pg.inner_text("#updown-detail") if pg.is_visible("#updown-detail") else ""
+        # 音声のカード（.side）の外に置く：右側の 80文字の決まり（下の check_updown_unconfirmed・4ステップで数える）を変えない
+        inside = pg.evaluate("() => !!document.querySelector('.side #updown-detail')")
+        check(det == details[value["status"]] and not inside,
+              f"S30-1：{value['status']} は図の欄の上に「{details[value['status']]}」（{det!r}）。音声のカードの外に置く")
         if value["status"] == "unconfirmed":
             fs = pg.evaluate("() => parseFloat(getComputedStyle(document.querySelector('#updown-status')).fontSize)")
             check(fs <= 13, f"上下の向き：目立たせすぎない（文字 {fs}px）")
             shot(pg, "C026_1280_e_updown.png")
+        pg.close()
+    # 長い名前（設定の上限 40文字ずつ）でも、狭い画面ではみ出さず、音声のカードの文字数は変わらない
+    updown["value"] = {"status": "confirmed", "confirmed_by": "確" * 40, "confirmed_at": "2026-11-03T14:00:00+09:00",
+                       "message": "", "fingerprint": "x", "robot": "R" * 40, "app_robot": "R" * 40}
+    for width in (1280, 390, 360):
+        pg = browser.new_page(viewport={"width": width, "height": 900})
+        pg.route("**/api/*", add_updown)
+        pg.goto(url)
+        pg.click("#sample-button")
+        pg.wait_for_selector("#job-area:not([hidden])")
+        pg.locator("#position-chips button", has_text="C00005").click()
+        until(pg, lambda: pg.inner_text("#voice-position strong") == "C00005")
+        det = pg.inner_text("#updown-detail") if pg.is_visible("#updown-detail") else ""
+        o = pg.evaluate(OVERFLOW_JS, 8)
+        check("R" * 40 in "".join(det.split()) and "確" * 40 in "".join(det.split()) and o["scroll"] <= o["vw"] and not o["out"],
+              f"S30-1 {width}px：長い名前でも全部出し、はみ出さない（{o['out']}）")
         pg.close()
 
 
@@ -1215,6 +1250,8 @@ def check_updown_unconfirmed(browser, check, shots: Path | None, errors: list) -
               f"上下の設定なし：入力欄・使い方・？の例文に上下の言葉を使わない（{ph!r}）")
         check(pg.inner_text("#updown-status") == "上下の向き：未確認（Z＋・Z−で指示）",
               f"上下の設定なし：「上下の向き：未確認（Z＋・Z−で指示）」と出す（{pg.inner_text('#updown-status')!r}）")
+        det = pg.inner_text("#updown-detail") if pg.is_visible("#updown-detail") else ""
+        check(det == "上下の向き：未確認（HC20DT）", f"S30-1：設定なしのサーバーでもロボット名（--robot）を出す（{det!r}）")
         side = len("".join(pg.inner_text(".side").split()))
         check(side <= 80, f"上下の設定なし：次にすることを足しても、音声のカードの右側の文字は80文字まで（{side}文字）")
         # 不一致・変更済みの表示の文に入れ替えても 80文字まで（表示の文だけを入れ替えて数える。サーバーの状態は変えない）

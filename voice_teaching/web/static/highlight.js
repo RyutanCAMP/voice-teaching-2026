@@ -5,6 +5,7 @@
 // - segmentLook・segmentTitle：図の区間の見た目と、マウスを重ねたときの文（CHECKER_026 S-MOVJ）。
 // - trimDecimal・confirmHeading：確認表示の見出し（CHECKER_026 S5）。数はサーバーの候補の文字のまま（末尾の0を削るだけ）。
 // - updownStatus：上下の向きの状態（サーバーの state.updown）。無いときは何も出さない。
+// - updownDetail：上下の向きの、ロボット名と確認した人・日時の1行（CHECKER_030 S30-1）。
 "use strict";
 
 export function splitUnknown(text, words) {
@@ -107,6 +108,24 @@ export function updownStatus(u) {
   if (u.status === "mismatch") return { text: "上下の向き：確認した座標系・ツールと違います", tone: "warn", title };
   if (u.status === "changed") return { text: "上下の向き：設定が変わっています", tone: "warn", title };
   return { text: "上下の向き：未確認（Z＋・Z−で指示）", tone: "unconfirmed", title: u.status === "unconfirmed" ? title : "" };
+}
+
+// 上下の向きの、ロボット名と確認した人・日時の1行（CHECKER_030 S30-1。唐川さんの決定 2026-11-03 17:14）。
+// マウスを重ねなくても常に見せる（図の欄の上。音声のカードの文字数の決まりの外）。サーバーが返さないときは ""。
+// 確認済み：設定の robot（無ければアプリの --robot の値）と、確認した人・日時。ほか：アプリの --robot の値だけ（確認した人は出さない）
+export function updownDetail(u) {
+  if (!u || typeof u !== "object" || Array.isArray(u)) return "";
+  const str = (x) => (typeof x === "string" && x.length > 0 ? x : "");
+  const app = str(u.app_robot);
+  if (u.status === "confirmed") {
+    const names = [str(u.robot) || app, str(u.confirmed_by)].filter((x) => x).join("・");
+    const at = str(u.confirmed_at) ? `（${shortTime(u.confirmed_at)}）` : "";
+    return names ? `上下の向き：${names}${at}で確認済み` : `上下の向き：確認済み${at}`;
+  }
+  const tail = app ? `（${app}）` : "";
+  if (u.status === "mismatch") return `上下の向き：確認した設定と違います${tail}`;
+  if (u.status === "changed") return `上下の向き：設定が変わっています${tail}`;
+  return `上下の向き：未確認${tail}`;
 }
 
 // 確認表示に出す、上下の向きを確認した人と日時の1行（確認済みのときだけ。ほかは ""）。u は候補を作ったときの照合の結果

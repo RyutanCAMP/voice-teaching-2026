@@ -761,7 +761,8 @@ class WebFlow:
             # 確認済みの方向の名前だけ（上下の向きの照合に通ったときだけ Z の 上・下。右・前 などは入れない）
             "direction_names": st.direction_names, "direction_names_source": st.direction_names_source,
             # 上下の向きの照合の結果（CHECKER_026 M2）。画面の表示は別の担当
-            "updown": st.as_state(),
+            # app_robot：アプリの --robot の値（どの状態でも。画面にロボット名を常に出すため。CHECKER_030 S30-1）
+            "updown": {**st.as_state(), "app_robot": self.robot},
             "candidate": cand,
             "confirmation_text": s.confirmation_text(),
             "blocked_reason": s.candidate_blocked_reason if ch is not None else None,

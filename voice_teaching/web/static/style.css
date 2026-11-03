@@ -489,6 +489,8 @@ body:not(.in-dialog) .side > #dialog-panel { order: 1; }  /* 会話のあと（�
 .updown { margin: 4px 0 0; font-size: 12px; color: var(--sub); }
 .updown[data-tone="confirmed"] { color: #2f7d4f; }
 .updown[data-tone="warn"] { color: #b04a00; font-weight: 600; }
+/* 図の欄の上の、ロボット名と確認した人・日時の1行（CHECKER_030 S30-1）。長い名前でも折り返して、はみ出さない */
+.updown-detail { margin: 0 0 8px; overflow-wrap: anywhere; }
 /* CHECKER_026 M1：狭い画面の確認表示で、図・注意・差分が箱の幅を超えない（列を中身の最小幅で広げない） */
 @media (max-width: 1100px) { .confirm-grid { grid-template-columns: minmax(0, 1fr); } }
 .confirm-grid > * { min-width: 0; }

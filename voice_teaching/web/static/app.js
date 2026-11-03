@@ -11,7 +11,7 @@
 "use strict";
 import { SpeechInput } from "/static/speech.js";
 import { View3D } from "/static/view3d.js";
-import { splitUnknown, displayMinus, segmentLook, segmentTitle, confirmHeading, updownStatus, updownConfirmLine, speechExamples }
+import { splitUnknown, displayMinus, segmentLook, segmentTitle, confirmHeading, updownStatus, updownConfirmLine, updownDetail, speechExamples }
   from "/static/highlight.js";
 
 const state = {
@@ -217,6 +217,11 @@ function renderUpdown(u) {
   box.title = v ? v.title : "";
   box.dataset.tone = v ? v.tone : "";
   box.hidden = !v;
+  // ロボット名と確認した人・日時の1行（CHECKER_030 S30-1）。図の欄の上に、マウスを重ねなくても見えるように出す
+  const detail = $("updown-detail");
+  detail.textContent = updownDetail(u);
+  detail.dataset.tone = v ? v.tone : "";
+  detail.hidden = !detail.textContent;
   // 話し方の例：確認済みのときだけ上下の例。ほかは軸と符号の例（そのまま送れば候補になる文）
   const ex = speechExamples(u);
   $("text-input").placeholder = ex.placeholder;

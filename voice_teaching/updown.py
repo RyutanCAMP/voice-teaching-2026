@@ -100,6 +100,7 @@ class UpdownStatus:
     confirmed_at: str | None = None   # confirmed のときだけ
     fingerprint: str | None = None    # confirmed のときだけ（使った設定の指紋）
     file_sha256: str | None = None    # 設定ファイルのバイト列の sha256（あれば。変更の検出に使う）
+    robot: str | None = None          # confirmed のときだけ（設定の robot。画面に常に出す。CHECKER_030 S30-1。token には入れない）
 
     @property
     def confirmed(self) -> bool:
@@ -122,7 +123,7 @@ class UpdownStatus:
 
     def as_state(self) -> dict:
         return {"status": self.status, "message": self.message, "confirmed_by": self.confirmed_by,
-                "confirmed_at": self.confirmed_at, "fingerprint": self.fingerprint}
+                "confirmed_at": self.confirmed_at, "fingerprint": self.fingerprint, "robot": self.robot}
 
 
 def unconfirmed(reason: str = "設定ファイルがありません", file_sha256: str | None = None) -> UpdownStatus:
@@ -324,7 +325,7 @@ def check(job: jbi.Job, path: str | Path | None, robot: str = DEFAULT_ROBOT) -> 
                             file_sha256=sha)
     return UpdownStatus(CONFIRMED, MSG_CONFIRMED.format(by=cfg.confirmed_by, at=cfg.confirmed_at),
                         reason="照合に通りました", confirmed_by=cfg.confirmed_by, confirmed_at=cfg.confirmed_at,
-                        fingerprint=cfg.fingerprint, file_sha256=sha)
+                        fingerprint=cfg.fingerprint, file_sha256=sha, robot=cfg.robot)
 
 
 def checker(path: str | Path | None, robot: str = DEFAULT_ROBOT) -> Callable[[jbi.Job], UpdownStatus]:
