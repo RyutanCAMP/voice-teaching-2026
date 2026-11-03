@@ -1613,7 +1613,7 @@ def check_talk(browser, check, shots: Path | None, errors: list, out: Path) -> N
             check("（人が教えた）" in (pg.text_content("#fig-3d g.taught-mark") or ""), "会話：3D にも「人が教えた」の印が出る")
             pg.fill("#ask-input", "じゃあ、3回にして")
             pg.click("#ask-send")
-            until(pg, lambda: pg.locator("#ask-turns .bubble.record").count() == 1)
+            until(pg, lambda: "範囲を確かめてください" in pg.inner_text("#ask-turns"))
             txt = pg.inner_text("#ask-turns")
             check("ボタンを押す動きを、2回から3回にしますか？" in txt and "範囲を確かめてください" in txt
                   and pg.is_disabled("#approve-button") and pg.is_hidden("#approval-status"),
