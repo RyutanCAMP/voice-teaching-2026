@@ -1007,7 +1007,9 @@ function renderFigures() {
   $("fig-3d").hidden = !is3d;
   $("fig-main").hidden = is3d;
   $("view-reset").hidden = !is3d || !view3d.changed();  // 回した・拡大したときだけ出す
-  if (is3d) view3d.setData(data3d());
+  // 回数の変更の比較（動きの並びのカードを出すとき）は、区間の点に寄せて大きく見せる（表示の向き・大きさだけ）
+  const rc = repeatCompare();
+  if (is3d) view3d.setData({ ...data3d(), focus: rc && rc.sequence ? rc.repeat.positions : null });
   else drawFigure($("fig-main"), ...VIEWS[state.figView === "3d" ? bestView(state.view.positions) : state.figView], true);
   drawFigure($("fig-xy"), "X", "Y", false);
   drawFigure($("fig-xz"), "X", "Z", false);
@@ -1152,6 +1154,7 @@ function stopPlayback() {
   view3d.stop();
   renderNow(null);
   state.tally = { run: "", max: 0 };
+  state.statusBase = "";
   renderSequence("after", null);
   renderPlayButtons();
 }
@@ -1208,8 +1211,16 @@ function playRuns(which, segsBefore, segsAfter) {
   return runs;
 }
 
+// 一時停止中・1つ進むで止めているときは「を再生中」を「（一時停止中）」にする
+function showStatus() {
+  const base = state.statusBase || "";
+  const p = state.player;
+  $("play-status").textContent = p && p.state === "paused" ? base.replace("を再生中", "（一時停止中）") : base;
+}
+
 function onPlayStep(run, seg, i, n) {
-  $("play-status").textContent = playStatus(run.name, i, n, segmentLook(seg.kind), seg);
+  state.statusBase = playStatus(run.name, i, n, segmentLook(seg.kind), seg);
+  showStatus();
   $("play-status").title = segmentTitle(seg);  // 命令の行は、マウスを重ねたときだけ
   renderNow(nowPlaying(seg, { run: run.name === "命令の順" ? "" : run.name, count: run.count, added: run.added }), run.color);
   // 動きの並び：今の区間の回を光らせ、通った回を「1・2・3」と数える（サーバーの seg.cycle のまま）
@@ -1226,6 +1237,7 @@ function onPlayStep(run, seg, i, n) {
 }
 
 function onPlayEnd() {
+  state.statusBase = "再生が終わりました";
   $("play-status").textContent = "再生が終わりました";
   if (state.tally.run) renderSequence(state.tally.run, null);  // 数えた「1・2・3」は残す（次の再生・止めるで消す）
   $("play-button").classList.remove("playing");
@@ -1261,7 +1273,7 @@ function renderPlayButtons() {
   $("play-button").disabled = none;
   $("play-pause").disabled = none || !live;
   $("play-pause").textContent = p && p.state === "paused" ? "続ける" : "一時停止";
-  $("play-step").disabled = none || (!!p && p.state === "ended");
+  $("play-step").disabled = none;  // 終わったあとは、はじめから1区間ずつ
   $("play-stop").disabled = none || !live;
   const rep = repeatCompare();
   $("play-compare").hidden = !rep;
@@ -1281,6 +1293,15 @@ function startPlayback(which = "both", start = true) {
   state.playWhich = typeof which === "string" ? which : "both";
   const p = !$("fig-3d").hidden ? startPlayback3d(state.playWhich, start) : startPlayback2d(state.playWhich, start);
   state.player = p;
+  if (p && p.items.length === 0) {
+    // 図に描ける区間が1つも無い：すぐ終わる（再生中の見た目を残さない）
+    p.stop();
+    state.player = null;
+    $("play-button").classList.remove("playing");
+    $("play-status").textContent = "図に描ける区間が無いため、再生できません";
+    renderPlayButtons();
+    return null;
+  }
   if (p && start) $("play-button").classList.add("playing");
   renderPlayButtons();
   return p;
@@ -1303,9 +1324,17 @@ function startPlayback2d(which, start) {
       return s.look.animate ? Math.max(350, (Math.hypot(s.to[0] - s.from[0], s.to[1] - s.from[1]) / SPEED) * 1000) : HOLD_MS;
     },
     onStep: (it) => {
-      if (cur) cur.s.line.setAttribute("stroke-width", String(cur.s.width));
+      if (cur) {
+        cur.s.line.setAttribute("stroke-width", String(cur.s.width));
+        if (cur.restore) cur.s.line.setAttribute("stroke", cur.restore);
+      }
       cur = it;
       const s = it.s;
+      // 変更後の線のうち、変更前と同じで透明にしてある線（回数の変更の1回目・2回目など）は、再生している間だけ灰色で見せる
+      if (s.line.getAttribute("stroke") === "transparent" && !(it.run.added && s.seg.cycle === it.run.added)) {
+        it.restore = "transparent";
+        s.line.setAttribute("stroke", "#6e6e73");
+      }
       s.line.setAttribute("stroke-width", String(s.look.animate ? 5 : Math.max(s.width + 1.5, 3)));
       marker.setAttribute("fill", it.run.color);
       dest.setAttribute("fill", it.run.color);
@@ -1329,7 +1358,10 @@ function startPlayback2d(which, start) {
       }
     },
     onEnd: () => {
-      if (cur) cur.s.line.setAttribute("stroke-width", String(cur.s.width));
+      if (cur) {
+        cur.s.line.setAttribute("stroke-width", String(cur.s.width));
+        if (cur.restore) cur.s.line.setAttribute("stroke", cur.restore);
+      }
       marker.remove(); dest.remove();
       if (state.player2d === p) onPlayEnd();
     },
@@ -1342,10 +1374,11 @@ function startPlayback2d(which, start) {
 // 再生の状態の文。MOVJ・目安の区間では、印が線の上を動かないことを添える
 const HOLD_MS = 700;  // MOVJ・目安の区間で、印を消しておく時間（画面の上だけ。実際の動きとは関係ない）
 function playStatus(name, i, n, look, seg) {
-  // 回数の変更の候補では、区間の線ごとに「2回目」と数える（サーバーの seg.cycle）
+  // 回数の変更の候補では「変更後：3回目を再生中」（サーバーの seg.cycle）。区間の番号（7/10）は回数と紛れるので出さない
   const c = state.st && state.st.candidate;
-  const cyc = c && c.kind === "repeat" ? cycleStatus(seg, c.target) : "";
-  const head = `${name}を再生中 ${i}/${n}` + (cyc ? `　${cyc}` : "");
+  const rep = c && c.kind === "repeat";
+  const cyc = rep ? cycleStatus(seg, c.target) : "";
+  const head = rep ? (cyc ? `${name}：${cyc.replace(/（.*$/, "")}を再生中` : `${name}を再生中`) : `${name}を再生中 ${i}/${n}`;
   if (look.kind === "movj") return `${head}　MOVJ：関節移動（点線は順番だけ。実際の通り道ではありません）`;
   if (look.kind === "other") return `${head}　直線とは限らない区間（印は終点へ移ります）`;
   return head;
@@ -1369,14 +1402,16 @@ $("play-pause").addEventListener("click", () => {
   if (!p) return;
   if (p.state === "playing") { p.pause(); $("play-button").classList.remove("playing"); }
   else if (p.state === "paused") { p.play(); $("play-button").classList.add("playing"); }
+  showStatus();
   renderPlayButtons();
 });
 $("play-step").addEventListener("click", () => {
   let p = state.player;
-  if (!p || p.state === "stopped") p = startPlayback(state.playWhich || "both", false);
+  if (!p || p.state === "stopped" || p.state === "ended") p = startPlayback(state.playWhich || "both", false);
   if (!p) return;
   p.step();
   $("play-button").classList.remove("playing");
+  showStatus();
   renderPlayButtons();
 });
 $("play-stop").addEventListener("click", () => {

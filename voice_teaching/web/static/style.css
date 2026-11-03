@@ -116,7 +116,7 @@ svg text { font-size: 12px; user-select: none; }
 svg text.axis { fill: #a1a1a6; font-size: 11px; }
 svg .pt { cursor: pointer; }
 svg .pt:hover circle:last-of-type { r: 8; }
-.play-row { display: flex; align-items: center; gap: 14px; margin-top: 6px; }
+.play-row { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
 button.play { width: 44px; height: 44px; padding: 0; font-size: 16px; flex: none; }
 button.play.playing { background: var(--text); color: #fff; }
 .play-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -511,15 +511,14 @@ body:not(.in-dialog) .side > #dialog-panel { order: 1; }  /* 会話のあと（�
 .now-cycle { display: inline-block; margin-left: 8px; padding: 0 8px; border-radius: 999px; background: #ececf0; font-family: inherit; font-size: 15px; }
 .now-cycle.added { background: var(--accent); color: #fff; }
 .now-note { font-size: 13px; font-weight: 600; color: #6e6e73; }
-.play-overlay {
-  position: absolute; right: 8px; bottom: 8px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
-}
-.play-controls, .play-compare { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-.play-overlay button { padding: 6px 12px; background: rgba(232, 232, 237, 0.95); }
-.play-overlay button[disabled] { background: rgba(240, 240, 243, 0.9); }
+.play-controls, .play-compare { display: flex; gap: 6px; flex-wrap: wrap; flex: none; }
+.play-row .play-status { flex: 1 1 0; min-width: 0; font-size: 14px; font-weight: 600; color: var(--text); }
+.play-row .play-compare { margin-left: auto; }
+.play-controls button, .play-compare button { padding: 6px 12px; }
 .play-compare button { border: 2px solid #d1d1d6; font-weight: 600; }
 .play-compare #play-after { border-color: var(--accent); color: #c4470a; }
 .play-compare button.on { background: var(--text); color: #fff; border-color: var(--text); }
+.play-text { flex-direction: row; flex-wrap: wrap; column-gap: 18px; row-gap: 0; margin-top: 4px; }
 svg .dest-mark { pointer-events: none; }
 @media (max-width: 600px) {
   .play-now { flex-basis: 100%; order: 3; padding: 4px 8px; }
@@ -527,9 +526,9 @@ svg .dest-mark { pointer-events: none; }
   .now-line { font-size: 13px; }
   .now-cycle { font-size: 12px; }
   .now-note { font-size: 11px; }
-  /* 狭い画面では図に重ねない（点を隠さない） */
-  .play-overlay { position: static; align-items: stretch; margin-top: 6px; }
-  .play-controls, .play-compare { justify-content: flex-start; }
+  .play-row { flex-wrap: wrap; row-gap: 6px; }
+  .play-row .play-status { flex-basis: 100%; order: 5; white-space: normal; }
+  .play-row .play-compare { margin-left: 0; }
 }
 /* 「いま」の表示が長くても、図の向きのボタンは縮めない */
 .stage-head .view-tabs { flex: none; }
@@ -563,5 +562,5 @@ svg .dest-mark { pointer-events: none; }
 }
 /* 背の低い画面で動きの並びを出すときは、図を少し小さくして、図の注意まで1画面に収める（注意は隠さない） */
 @media (max-height: 800px) and (min-width: 601px) {
-  .stage:has(#play-seq:not([hidden])) .fig-3d svg, .stage:has(#play-seq:not([hidden])) .fig-main svg { max-height: calc(50vh - 76px); }
+  .stage:has(#play-seq:not([hidden])) .fig-3d svg, .stage:has(#play-seq:not([hidden])) .fig-main svg { max-height: calc(50vh - 62px); }
 }

@@ -77,6 +77,16 @@ export class View3D {
     this.center = [0, 1, 2].map((k) => (lo[k] + hi[k]) / 2);
     this.lo = lo; this.hi = hi;
     this.span = Math.max(Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]), 1);
+    // data.focus（位置の名前）：その点を図の中央に大きく見せる（回数の変更の比較で、区間の3点を見分けやすく）。
+    // 表示の向き・大きさだけ。座標は変えない。区間の外の点は図の外に出ることがある（動きの並びのカードに番号を出す）
+    const fp = (data.focus || []).map((n) => data.points.find((p) => p.name === n)).filter((p) => p && p.xyz);
+    if (fp.length >= 2) {
+      const flo = [0, 1, 2].map((k) => Math.min(...fp.map((p) => p.xyz[k])));
+      const fhi = [0, 1, 2].map((k) => Math.max(...fp.map((p) => p.xyz[k])));
+      this.center = [0, 1, 2].map((k) => (flo[k] + fhi[k]) / 2);
+      const fspan = Math.hypot(fhi[0] - flo[0], fhi[1] - flo[1], fhi[2] - flo[2]);
+      this.span = Math.max(fspan * 1.8, this.span * 0.5, 1);
+    }
     this.render();
   }
 
@@ -226,12 +236,7 @@ export class View3D {
     if (this.marker && this.marker.xyz) {  // MOVJ・目安の区間の間は xyz が無い（印を出さない）
       const m = this.project(this.marker.xyz);
       svg.append(svgEl("circle", { cx: m[0], cy: m[1], r: 9, fill: this.marker.color, stroke: "#fff", "stroke-width": 3, class: "marker" }));
-      const n = this.marker.seg && this.marker.seg.cycle;
-      if (d.repeat && Number.isInteger(n)) {  // 回数の変更：再生中の区間が何回目か
-        const t = svgEl("text", { x: m[0] - 14, y: m[1] + 26, "text-anchor": "end", fill: this.marker.color, "font-weight": "700", class: "cycle-label" });
-        t.textContent = `${n}回目`;
-        svg.append(t);
-      }
+      // 何回目かは図の上の帯（いま：…）と動きの並びに出す（印の横には出さない。重複を減らす）
     }
     this.host.querySelector("svg")?.remove();
     this.host.prepend(svg);
