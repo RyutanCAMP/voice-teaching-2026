@@ -116,9 +116,20 @@ def test_p2_no_text_without_approval(tmp_path):
         assert KEPT not in m and DROPPED not in m and RESELECT not in m
 
 
-def test_undo_button_keeps_its_text(tmp_path):
+def test_undo_button_after_approval_uses_the_decided_text(tmp_path):
+    # 唐川さんの決定：元に戻す・キャンセル・別の位置の選択の「どの場合でも」同じ文（内部 QA N-2 でボタンも合わせた）
     w, sid = approved(tmp_path)
     r = w.undo(sid)
+    assert r["message"] == flow_mod.APPROVAL_AND_CANDIDATE_CANCELLED
+    assert r["state"]["candidate"] is None and r["state"]["approval"] is None
+
+
+def test_undo_button_without_approval_keeps_its_text(tmp_path):
+    w = WebFlow(interpreter=ci.MockInterpreter(), updown_config=tmp_path / "none.json")
+    sid = w.load(DEMO_C)["session_id"]
+    w.select(sid, "C00005")
+    assert w.hear(sid, "Zマイナス3ミリ")["state"]["candidate"] is not None
+    r = w.undo(sid)  # 承認していない：決まった文は出さない
     assert r["message"] == "変更候補を捨てました。元のジョブは変わっていません"
 
 

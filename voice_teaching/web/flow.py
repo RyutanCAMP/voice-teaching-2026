@@ -582,11 +582,15 @@ class WebFlow:
 
     def undo(self, sid: object) -> dict:
         def run(e: _Entry) -> dict:
+            was_approved = self._approved(e)
             self._cancel_approval(e, "元に戻したため")
             if e.dialog.step is not None:
                 e.dialog.end()
             e.dialog.estimated = None
             r = e.session.undo()
+            if was_approved and e.session.candidate is None:
+                # 承認のあとの「元に戻す」ボタンも、声の「元に戻して」と同じ決まった文（唐川さんの決定・内部 QA N-2）
+                r = Reply(r.status, APPROVAL_AND_CANDIDATE_CANCELLED, facts=getattr(r, "facts", None))
             return {"ok": True, **self._reply(e, r)}
         return self._run(sid, run)
 

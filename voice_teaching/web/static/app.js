@@ -340,7 +340,7 @@ function renderSteps() {
   } else if (st.exportable === false) {
     // 実機の JOB（合成ジョブでない）：承認しても出力しない。出力を促さない（内部 QA の再レビュー P1-1）
     text = "承認しました（変更案の確認のみ。実機用JOBは出力できません）";
-    primary = "undo-button";
+    primary = null;  // 出力も、捨てる操作も勧めない（内部 QA N-1）
   } else if (!st.exported) {
     text = "承認しました。出力してください";
     primary = "export-button";
