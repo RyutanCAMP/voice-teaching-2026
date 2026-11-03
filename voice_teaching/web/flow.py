@@ -44,6 +44,7 @@ UPDOWN_CHANGED_APPROVE = ("変更候補を作ったあとで、上下の向き�
 UPDOWN_CHANGED_EXPORT = ("承認のあとで、上下の向きの設定（または照合の結果）が変わったため、出力しません。"
                          "承認を取り消しました")
 UPDOWN_CHANGED_WHY = "上下の向きの設定（または照合の結果）が変わったため"
+RESELECT_APPROVAL = "承認も取り消しました。"  # 位置の選び直しで承認を取り消したときに、選び直しの決まった文のあとに足す
 # 上下の向きの設定ファイルの場所の既定。None ＝ 設定なし（未確認。上・下を Z にしない）。
 # サーバーは起動オプション（--updown-config。既定 records/updown.json）の場所を渡す。テストでは一時フォルダの設定に置き換える
 DEFAULT_UPDOWN_CONFIG: "str | Path | None" = None
@@ -138,23 +139,29 @@ class WebFlow:
                 r = e.session.explain_only(text, source)
                 return {"ok": True, "heard": text, "source": source, "facts": None, "tool_calls": [],
                         "dialog": False, "no_change": True, **self._reply(e, r)}
-            self._begin_instruction(e)
-            f0 = ut.read_utterance(text)
-            talking = e.dialog.step is not None
-            out = (self._dialog_turn(e, text, source, f0) if talking
-                   else self._maybe_start_dialog(e, text, source, f0))
-            if out is not None:
-                return out
-            out = self._instruction(e, text, source)
-            s = e.session
-            if out.get("candidate_made") or (s.facts is not None and s.facts.op == "undo" and out.get("status") == "ok"):
-                e.dialog.estimated = None  # ふつうの指示が通った：推定（未確定）の名前は使わない（断られた発話では消さない）
-            if talking:  # 会話の途中の新しい指示：会話をやめたことを知らせる
-                out["message"] = dg.ENDED_NEW + (out.get("message") or "")
-                out["dialog"] = True
-                e.dialog.say(APP_SPEAKER, out["message"], out.get("status") or "ok")
-            return out
+            cancelled = self._begin_instruction(e)
+            out = self._hear_body(e, text, source)
+            # 新しい指示（どんな発話でも）で承認を実際に取り消したときは、返事の頭に決まった文（唐川さんの決定②）
+            return self._say_cancelled(e, out, APPROVED_PENDING_MESSAGE) if cancelled else out
         return self._run(sid, run)
+
+    def _hear_body(self, e: _Entry, text: str, source: str) -> dict:
+        """指示の本体（会話の続き・会話の始め・ふつうの指示）。承認の取り消しの文は呼んだ側（hear）が付ける。"""
+        f0 = ut.read_utterance(text)
+        talking = e.dialog.step is not None
+        out = (self._dialog_turn(e, text, source, f0) if talking
+               else self._maybe_start_dialog(e, text, source, f0))
+        if out is not None:
+            return out
+        out = self._instruction(e, text, source)
+        s = e.session
+        if out.get("candidate_made") or (s.facts is not None and s.facts.op == "undo" and out.get("status") == "ok"):
+            e.dialog.estimated = None  # ふつうの指示が通った：推定（未確定）の名前は使わない（断られた発話では消さない）
+        if talking:  # 会話の途中の新しい指示：会話をやめたことを知らせる
+            out["message"] = dg.ENDED_NEW + (out.get("message") or "")
+            out["dialog"] = True
+            e.dialog.say(APP_SPEAKER, out["message"], out.get("status") or "ok")
+        return out
 
     def _instruction(self, e: _Entry, text: str, source: str) -> dict:
         """ふつうの指示：Session.hear → 解釈の係 → select / propose / compare / undo。"""
@@ -458,20 +465,22 @@ class WebFlow:
                 e.session.log.append(("止めた理由", dg.STALE))
                 return {"ok": True, "status": "stop", "message": dg.STALE, "blocked_reason": None,
                         "candidate_made": False, "choices": [], "dialog": True, "tool_calls": []}
-            self._begin_instruction(e)
+            cancelled = self._begin_instruction(e)
             label = ids[choice]
             d.say("人", label, "human")
             e.session.log.append(("選択", f"ボタン：{label}"))
             if choice.startswith("pos:"):
-                return self._confirm_position(e, label, "text", None, choice[4:])
-            if choice == "go":  # 手で選んだ位置で、方向と量がそろったことの確かめ
-                return self._run_canonical(e, "text")
-            if choice == "other":
+                out = self._confirm_position(e, label, "text", None, choice[4:])
+            elif choice == "go":  # 手で選んだ位置で、方向と量がそろったことの確かめ
+                out = self._run_canonical(e, "text")
+            elif choice == "other":
                 d.step, d.candidates = "pick", []
                 d.turn += 1
-                return self._dialog_out(e, label, "text", None, "ask", dg.PICK_PROMPT, who="アプリ")
-            direction = choice[4:]
-            return self._merge_slots(e, label, "text", None, None, direction[0], 1 if direction[1] == "+" else -1)
+                out = self._dialog_out(e, label, "text", None, "ask", dg.PICK_PROMPT, who="アプリ")
+            else:
+                direction = choice[4:]
+                out = self._merge_slots(e, label, "text", None, None, direction[0], 1 if direction[1] == "+" else -1)
+            return self._say_cancelled(e, out, APPROVED_PENDING_MESSAGE) if cancelled else out
         return self._run(sid, run)
 
     def _dispatch(self, e: _Entry, heard: Reply, calls: list[dict]) -> Reply:
@@ -518,24 +527,35 @@ class WebFlow:
     # ---- 画面の操作 ----
     def select(self, sid: object, position: object) -> dict:
         def run(e: _Entry) -> dict:
-            self._cancel_approval(e, "位置を選び直したため")
-            r = e.session.select(position if isinstance(position, str) else "")
-            d = e.dialog
-            if r.status == "ok":
-                d.estimated = None  # 人が選び直した：推定の名前は使わない
-                if d.step == "pick":  # 「ほかの位置」のあとの手で選ぶ段：選んだ位置で続ける
-                    d.say("人", f"{e.session.selected} を選びました", "human")
-                    return self._dialog_pick(e)
-                if d.step is not None:
-                    # 位置の候補の確かめ・方向と量を聞いている段での選び直し：会話をやめる。持っていた量・方向を
-                    # 別の位置に当てない（CHECKER_028 A）
-                    d.say("人", f"{e.session.selected} を選びました", "human")
-                    d.end()
-                    d.amount = d.axis = d.sign = None
-                    d.vertical = False
-                    r = Reply("ok", dg.ENDED_RESELECT + r.message)
-            return {"ok": True, **self._reply(e, r)}
+            cancelled = self._cancel_approval(e, "位置を選び直したため")
+            out = self._select_body(e, position)
+            # 位置の選び直しで承認を実際に取り消した：選び直しの決まった文と「承認も取り消しました。」を頭に付ける
+            if not cancelled:
+                return out
+            msg = out.get("message") or ""
+            if msg.startswith(dg.ENDED_RESELECT):  # 会話をやめた選び直しの文は、1回だけにする
+                out["message"] = msg[len(dg.ENDED_RESELECT):]
+            return self._say_cancelled(e, out, dg.ENDED_RESELECT + RESELECT_APPROVAL)
         return self._run(sid, run)
+
+    def _select_body(self, e: _Entry, position: object) -> dict:
+        """位置の選び直しの本体。承認の取り消しの文は呼んだ側（select）が付ける。"""
+        r = e.session.select(position if isinstance(position, str) else "")
+        d = e.dialog
+        if r.status == "ok":
+            d.estimated = None  # 人が選び直した：推定の名前は使わない
+            if d.step == "pick":  # 「ほかの位置」のあとの手で選ぶ段：選んだ位置で続ける
+                d.say("人", f"{e.session.selected} を選びました", "human")
+                return self._dialog_pick(e)
+            if d.step is not None:
+                # 位置の候補の確かめ・方向と量を聞いている段での選び直し：会話をやめる。持っていた量・方向を
+                # 別の位置に当てない（CHECKER_028 A）
+                d.say("人", f"{e.session.selected} を選びました", "human")
+                d.end()
+                d.amount = d.axis = d.sign = None
+                d.vertical = False
+                r = Reply("ok", dg.ENDED_RESELECT + r.message)
+        return {"ok": True, **self._reply(e, r)}
 
     def _dialog_pick(self, e: _Entry) -> dict:
         """会話の途中で人が位置を選んだ（「ほかの位置」のあとなど）：その位置で、方向と量を聞く。"""
@@ -654,19 +674,35 @@ class WebFlow:
         """承認したときの上下の向きの照合の結果と、今（読み直した）結果が同じか。"""
         return e.approval_updown is not None and e.approval_updown.token == e.session.updown_status().token
 
-    def _begin_instruction(self, e: _Entry) -> None:
-        """新しい指示の始め：承認を今どおり取り消す。承認していたときは、承認待ちの文を「承認した変更候補…」にする（S-msg）。"""
+    def _begin_instruction(self, e: _Entry) -> bool:
+        """新しい指示の始め：承認を今どおり取り消す。承認していたときは、承認待ちの文を決まった文にする（S-msg）。
+        承認を実際に取り消したら True（返事の頭に決まった文を付けるため。_say_cancelled）。"""
         e.session.pending_message = APPROVED_PENDING_MESSAGE if self._approved(e) else PENDING_MESSAGE
-        self._cancel_approval(e, "新しい指示があったため")
+        return self._cancel_approval(e, "新しい指示があったため")
 
-    def _cancel_approval(self, e: _Entry, why: str) -> None:
+    def _say_cancelled(self, e: _Entry, out: dict, head: str) -> dict:
+        """承認を実際に取り消した返事の頭に、決まった文を付ける（唐川さんの決定②。承認していなければ呼ばない）。
+        会話の欄の最後の文が同じ返事なら、そちらにも付ける。"""
+        msg = out.get("message") or ""
+        if msg.startswith(head):
+            return out
+        out["message"] = head + msg
+        turns = e.dialog.turns
+        if out.get("dialog") and turns and turns[-1].get("text") == msg and turns[-1].get("who") != "人":
+            turns[-1] = {**turns[-1], "text": head + msg}
+        return out
+
+    def _cancel_approval(self, e: _Entry, why: str) -> bool:
+        """承認を取り消す。実際に取り消したら True。"""
         if why != UPDOWN_CHANGED_WHY:
             e.updown_cancelled = False  # 新しい指示・選び直し・元に戻す：上下の文はもう出さない
-        if e.approval is not None:
-            e.session.forget_question()  # 承認の取り消し：未確定の聞き返しも捨てる（CHECKER_028 A）
-            e.updown_cancelled = why == UPDOWN_CHANGED_WHY
-            e.approval = e.sim_proposal = e.approved_candidate = e.approval_updown = None
-            e.session.log.append(("承認", f"{why}、承認を取り消しました。もう一度確かめて、承認ボタンで承認してください"))
+        if e.approval is None:
+            return False
+        e.session.forget_question()  # 承認の取り消し：未確定の聞き返しも捨てる（CHECKER_028 A）
+        e.updown_cancelled = why == UPDOWN_CHANGED_WHY
+        e.approval = e.sim_proposal = e.approved_candidate = e.approval_updown = None
+        e.session.log.append(("承認", f"{why}、承認を取り消しました。もう一度確かめて、承認ボタンで承認してください"))
+        return True
 
     def _sync(self, e: _Entry) -> None:
         if e.approval is not None and not self._approved(e):

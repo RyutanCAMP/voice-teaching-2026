@@ -236,7 +236,8 @@ def test_choice_keeps_the_position_it_was_asked_about():
     # 内部 QA P2：聞き返しの後に別の位置を選んでも、古い選択肢はその位置に当たらない（選択肢の文に位置を入れる）
     w, sid = flow()
     r = w.hear(sid, "Yを3mm下げて", source="voice")
-    assert all(c["text"].startswith("C00005を") for c in r["choices"])
+    # 「C00005のY座標を…」（「を」を続けない。fix/c026-r2 QA P2-6）・「C00005を下に…」
+    assert all(c["text"].startswith(("C00005を", "C00005の")) for c in r["choices"])
     w.hear(sid, "C00004を選択して", source="text")
     r2 = w.hear(sid, r["choices"][0]["text"], source="text")
     got = r2["state"]["candidate"]

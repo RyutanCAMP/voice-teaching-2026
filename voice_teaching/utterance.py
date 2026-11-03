@@ -781,6 +781,9 @@ class Verdict:
     status: str   # "ok" / "ask"（聞き返す） / "stop"（止める）
     message: str = ""
     choices: tuple[tuple[str, str], ...] = ()  # 聞き返しの短い選択肢（見せる文, 指示の文）。押すと、その文を指示として送る
+    # 答えを待つ形の質問（「何mm動かしますか？」「どの方向に…？」など。ふつうの指示なら、次の答えを前の発話に足す）。
+    # 「〜します」の発話には答えを足さないので、_shimasu_check がこの印を見て、言い直してもらう文に変える（QA P1-A）
+    needs_answer: bool = False
 
 
 # 「上・下 ＝ Z±」は、上下の向きの設定（voice_teaching/updown.py）の照合に通ったときだけ使う（CHECKER_026 M2・11章）。
@@ -806,6 +809,11 @@ OK = Verdict("ok")
 
 def _ask(msg: str, choices: tuple[tuple[str, str], ...] = ()) -> Verdict:
     return Verdict("ask", msg, choices)
+
+
+def _ask_slot(msg: str, choices: tuple[tuple[str, str], ...] = ()) -> Verdict:
+    """量・方向・向きが足りない・はっきりしないときの、答えを待つ形の質問。"""
+    return Verdict("ask", msg, choices, needs_answer=True)
 
 
 def _num(x: float) -> str:
@@ -922,7 +930,18 @@ def shimasu_request_text(facts: UtteranceFacts, selected: str | None = None) -> 
 SHIMASU_RESTATE_MESSAGE = "「〜します」の言い方では変更しません。してほしいことを、もう一度言ってください"
 
 
-def _shimasu_check(facts: UtteranceFacts, v: Verdict, selected: str | None = None) -> Verdict:
+def shimasu_restate_message(facts: UtteranceFacts, updown: "ud.UpdownStatus | None" = None) -> str:
+    """「〜します」で量か方向が足りないときの、言い直してもらう文（答えを待つ形にしない。QA P1-A）。
+    上下の向きが確認済みのときだけ、上下の言葉の例も出す。"""
+    if facts.op == "speed":
+        return "速度の向きと量を一緒に、もう一度言ってください（例：速度を10%下げて）"
+    if _updown(updown).confirmed:
+        return "量と向きを一緒に、もう一度言ってください（例：Zマイナス3ミリ／下に3ミリ）"
+    return "量と向きを一緒に、もう一度言ってください（例：Zマイナス3ミリ）"
+
+
+def _shimasu_check(facts: UtteranceFacts, v: Verdict, selected: str | None = None,
+                   updown: "ud.UpdownStatus | None" = None) -> Verdict:
     """言い終わりの「〜します」：候補にしない。外した文がふつうの指示として通るとき（v が ok）だけ、
     変更の希望か操作の説明かを2択で確かめる（CHECKER_026 M3、QA P1-1）。
 
@@ -931,6 +950,9 @@ def _shimasu_check(facts: UtteranceFacts, v: Verdict, selected: str | None = Non
     ［変更したい］は facts から作った指示の文（shimasu_request_text）を、ふつうの指示として送る
     （確認・検査・上限・確認表示・承認ボタンを全部通る）。
     """
+    if v.status == "ask" and v.needs_answer:
+        # 量・方向が足りない：「〜します」の発話には答えを足さないので、答えを待つ形で聞かない。一緒に言い直してもらう
+        return _ask(shimasu_restate_message(facts, updown), v.choices)
     if v.status != "ok":
         return v
     if facts.unknown_words:
@@ -950,7 +972,7 @@ def pre_check(facts: UtteranceFacts, selected: str | None = None,
     updown：上下の向きの照合の結果（渡さなければ未確認として扱う）。"""
     v = _pre_check(facts, selected, updown)
     if facts.shimasu_text is not None and not facts.question:
-        return _shimasu_check(facts, v, selected)
+        return _shimasu_check(facts, v, selected, updown)
     if v.status != "ok" or not facts.question:
         return v
     # 疑問の形（「3mm下げて？」）：候補にせず、？を外した同じ指示でよいかを確かめる。選択肢はその文の1つだけ。
@@ -1038,7 +1060,7 @@ def _pre_check_core(facts: UtteranceFacts, selected: str | None = None,
         # 場所の言葉は、量・向きを聞く前に調べる（「置くところへ動かして」に「何mm？」と聞いて、続きの答えで別の位置の候補にしない）
         return _place_check(facts, selected)
     if op in ("move", "speed") and facts.stray_signs > 0:
-        return _ask("プラス・マイナスがどこに付くか分かりません。「Xのマイナス5ミリ」のように、軸のすぐ後に言ってください")
+        return _ask_slot("プラス・マイナスがどこに付くか分かりません。「Xのマイナス5ミリ」のように、軸のすぐ後に言ってください")
     if op == "move":
         if len(facts.amounts) > 1 or len(facts.axes) > 1:
             moves = _split_moves(facts.raw)
@@ -1061,7 +1083,8 @@ def _pre_check_core(facts: UtteranceFacts, selected: str | None = None,
                     and a.unit == "mm" and not facts.unclear_amounts):
                 sign, v, w = facts.axis_signs[0], _num(a.value), _where(facts)
                 up = sign > 0
-                choices = ((f"{other}座標を {'+' if up else '−'}{v}mm", f"{w}{other}座標を{v}mm{'上げて' if up else '下げて'}"),)
+                wn = f"{facts.position}の" if facts.position else ""  # 「C00005のY座標を…」（「を」を続けない。QA P2-6）
+                choices = ((f"{other}座標を {'+' if up else '−'}{v}mm", f"{wn}{other}座標を{v}mm{'上げて' if up else '下げて'}"),)
                 if st.confirmed:
                     choices += ((f"{'上' if up else '下'}方向へ {v}mm", f"{w}{'上' if up else '下'}に{v}mm"),)
             if not st.confirmed:
@@ -1079,24 +1102,24 @@ def _pre_check_core(facts: UtteranceFacts, selected: str | None = None,
         if v is not OK:
             return v
         if not facts.axes:
-            return _ask(AXIS_ASK_UPDOWN if st.confirmed else AXIS_ASK)
+            return _ask_slot(AXIS_ASK_UPDOWN if st.confirmed else AXIS_ASK)
         if len(facts.axes) > 1:
-            return _ask("方向が2つ以上あります。1回の指示で動かすのは1つの方向だけです")
+            return _ask_slot("方向が2つ以上あります。1回の指示で動かすのは1つの方向だけです")
         if facts.sign_count() == 0:
             a, ax, w = facts.amount, facts.axis, _where(facts)
             choices = ()
             if a is not None and a.unit == "mm":
                 v = _num(a.value)
                 choices = ((f"{ax}のプラス {v}mm", f"{w}{ax}プラスに{v}mm"), (f"{ax}のマイナス {v}mm", f"{w}{ax}マイナスに{v}mm"))
-            return _ask(f"{ax}方向のプラスですか、マイナスですか？（「{ax}のマイナス」のように向きも言ってください）", choices)
+            return _ask_slot(f"{ax}方向のプラスですか、マイナスですか？（「{ax}のマイナス」のように向きも言ってください）", choices)
         if facts.requested_value() is None:
-            return _ask("向きの指定が2つあります。どちらの向きか、もう一度指示してください")
+            return _ask_slot("向きの指定が2つあります。どちらの向きか、もう一度指示してください")
     elif op == "speed":
         v = _amount_check(facts, "%", "今の速度に対して、何%変えますか？")
         if v is not OK:
             return v
         if facts.requested_value() is None:
-            return _ask("速度を上げますか、下げますか？（向きが分からないか、2つあります）")
+            return _ask_slot("速度を上げますか、下げますか？（向きが分からないか、2つあります）")
     elif "select" in facts.kinds and not facts.positions and not facts.refers_to_selection:
         return _ask("どの位置ですか？ 位置番号（C と5桁の数字）で言ってください")
     return OK
@@ -1128,15 +1151,15 @@ def _split_moves(raw: str) -> list[tuple[str, float]] | None:
 
 def _amount_check(facts: UtteranceFacts, unit: str, missing_question: str) -> Verdict:
     if facts.unclear_amounts:
-        return _ask(f"量がはっきりしません（{'・'.join(facts.unclear_amounts)}）。"
+        return _ask_slot(f"量がはっきりしません（{'・'.join(facts.unclear_amounts)}）。"
                     f"算用数字と {'mm（ミリ）' if unit == 'mm' else '%'} で量を言ってください")
     if not facts.amounts:
-        return _ask(missing_question)
+        return _ask_slot(missing_question)
     if len(facts.amounts) > 1:
-        return _ask("量が2つ以上あります。1つの量で指示してください")
+        return _ask_slot("量が2つ以上あります。1つの量で指示してください")
     if facts.amounts[0].unit != unit:
         word = "移動" if unit == "mm" else "速度"
-        return _ask(f"{word}の量は {'mm（ミリ）' if unit == 'mm' else '%'} で言ってください")
+        return _ask_slot(f"{word}の量は {'mm（ミリ）' if unit == 'mm' else '%'} で言ってください")
     return OK
 
 

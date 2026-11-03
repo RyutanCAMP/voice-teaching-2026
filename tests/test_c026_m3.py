@@ -109,10 +109,13 @@ def test_shimasu_facts_and_pre_check(text, plain, head, updown_ok):
 
 
 def test_shimasu_without_a_clear_phrase_asks_amount():
-    # 量も方向も無い「動かします」は、2択を出さずに、ふつうの指示と同じ聞き返し（fix/c026-r2 P2-2・QA P1-1）
+    # 量も方向も無い「動かします」は、2択を出さない（fix/c026-r2 P2-2・QA P1-1）。「〜します」の発話には答えを足さないので、
+    # 答えを待つ形の質問（「何mm動かしますか？」）にせず、一緒に言い直してもらう（内部再レビュー QA P1-A）
     w, sid = new()
     r = w.hear(sid, "動かします")
-    assert r["status"] == "ask" and r["message"] == "何mm動かしますか？" and labels(r) == []
+    assert r["status"] == "ask" and r["message"] == ut.shimasu_restate_message(r_facts := ut.read_utterance("動かします"),
+                                                                               w._entries[sid].session.updown)
+    assert labels(r) == [] and "一緒に、もう一度言ってください" in r["message"] and r_facts.shimasu_text is not None
     assert cand(r) is None
 
 
@@ -230,9 +233,10 @@ def test_old_want_change_after_other_work_is_a_normal_instruction():
 def test_after_two_choices_an_answer_is_not_merged():
     # 2択のあとに「3mm」だけ言っても、前の発話と合わせて候補にしない（ボタンで選んでもらう）
     # fix/c026-r2：量の無い「下に動かします」は2択にせず量を聞くが、「〜します」の発話には答えを足さない
+    # 内部再レビュー QA P1-A：答えを待つ形にせず、量と向きを一緒に言い直してもらう文
     w, sid = new()
     r = w.hear(sid, "下に動かします")
-    assert r["message"] == "何mm動かしますか？" and labels(r) == []
+    assert "一緒に、もう一度言ってください" in r["message"] and labels(r) == []
     r2 = w.hear(sid, "3mm")
     assert r2["status"] == "ask" and cand(r2) is None
 

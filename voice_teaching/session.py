@@ -32,6 +32,8 @@ from . import utterance as ut
 Simulator = Callable[[jbi.Job, ut.ProposedChange, str], "jbi.ChangeProposal | None"]
 
 _NUM = jbi._NUM
+# 位置番号のあとに「の」でつなぐ文の始め（「C00005のY座標を3mm下げて」「C00005の速度を…」。「を」を続けない）
+_OF_HEAD = re.compile(r"(?:[XYZ]\s?(?:座標|の値)|速度)")
 # 承認待ちの候補があるときの文。web/flow.py は、これを解釈の係（Claude）を呼ぶ前に返す（呼ばない）
 PENDING_MESSAGE = "承認待ちの変更候補があります。比べるか、元に戻してから指示してください"
 # 承認したあとの候補があるときの文（CHECKER_026 S-msg）。新しい指示があると承認は今どおり取り消すので、そのことも書く。
@@ -170,7 +172,8 @@ class Session:
         if self.selected is None:
             return tuple(choices)
         return tuple((label, text if (ut.normalize_position(text[:6]) or ut.is_explain_choice(text)
-                                      or ut.read_utterance(text).place_ref) else f"{self.selected}を{text}")
+                                      or ut.read_utterance(text).place_ref)
+                      else f"{self.selected}{'の' if _OF_HEAD.match(text) else 'を'}{text}")
                      for label, text in choices)
 
     def check_shimasu(self, facts: ut.UtteranceFacts, v: ut.Verdict) -> ut.Verdict:
@@ -188,7 +191,7 @@ class Session:
         if position is None:
             return ut.Verdict("ask", NO_POSITION)
         if value is None or (facts.op == "move" and facts.axis is None) or facts.op not in ("move", "speed"):
-            return ut.Verdict("ask", ut.SHIMASU_RESTATE_MESSAGE)
+            return ut.Verdict("ask", ut.shimasu_restate_message(facts, self.updown))
         p = (ut.ProposedChange(kind="shift", position=position, axis=facts.axis, delta_mm=float(value))
              if facts.op == "move" else ut.ProposedChange(kind="speed", position=position, percent=float(value)))
         try:
