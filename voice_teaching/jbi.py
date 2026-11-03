@@ -418,7 +418,7 @@ class Job:
         return _find_repeat_blocks(self)
 
     def plan_repeat(self, start: str, end: str, new_total: int) -> "RepeatProposal":
-        """区間の回数を new_total（今の回数 ±1、合計 1〜5 回、今が2回以上のときだけ）にした変更案。元の Job は変えない。"""
+        """区間の回数を new_total にした変更案。このプロトタイプでは、今が2回の区間を合計3回にするときだけ作る。元の Job は変えない。"""
         return _plan_repeat(self, start, end, new_total)
 
     # ---- 互換（変更案の new_job を返す） ----
@@ -675,15 +675,30 @@ def _find_repeat(job: Job, start: str, end: str) -> RepeatBlock:
 def _find_repeat_blocks(job: Job) -> list[RepeatBlock]:
     if job.problems:
         return []
-    plain = [ins for ins in job.instructions
-             if ins.command == "MOVL" and ins.position is not None and _EDITABLE_MOVL.fullmatch(ins.text)]
+    # 軽くするため（QA）：「番号が1つずつ増える MOVL が続く並び」で、その1回分のすぐ後ろが同じ行で始まるものだけを
+    # _find_repeat で確かめる（行を1回ずつ読むだけ。1回分は10行まで）
+    ins = job.instructions
+    plain = [bool(i.command == "MOVL" and i.position is not None and _EDITABLE_MOVL.fullmatch(i.text)) for i in ins]
     found: dict[tuple[str, ...], RepeatBlock] = {}
-    for k, a in enumerate(plain):
-        for b in plain[k + 1:k + 11]:  # 1回分は10行まで（デモの範囲）
-            if int(b.position[1:]) <= int(a.position[1:]):
+    tried: set[tuple[str, str]] = set()
+    for k in range(len(ins)):
+        if not plain[k]:
+            continue
+        for size in range(2, 11):
+            j = k + size - 1
+            if j >= len(ins) or not plain[j] or ins[j].index != ins[k].index + size - 1:
+                break
+            if int(ins[j].position[1:]) != int(ins[j - 1].position[1:]) + 1:
+                break
+            nxt = k + size
+            if nxt >= len(ins) or ins[nxt].text != ins[k].text:
+                continue  # 1回分のすぐ後ろが同じ行で始まらなければ、続けて2回は書かれていない
+            key = (ins[k].position, ins[j].position)
+            if key in tried:
                 continue
+            tried.add(key)
             try:
-                blk = _find_repeat(job, a.position, b.position)
+                blk = _find_repeat(job, *key)
             except JbiError:
                 continue
             if blk.count >= 2:

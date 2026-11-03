@@ -380,15 +380,35 @@ def test_range_is_shown_then_button_makes_the_candidate(counting):
     assert f"変更前の範囲 {ranges}" in r2["state"]["confirmation_text"]  # 確認表示にも、1回目・2回目・全体の範囲
 
 
-@pytest.mark.parametrize("word", ["はい", "そうそう", "この範囲を繰り返す", "OK", "うん"])
-def test_voice_does_not_confirm_the_range(word):
+@pytest.mark.parametrize("word", ["はい", "そうそう", "この範囲を繰り返す", "OK", "うん", "繰り返して", "お願いします",
+                                  "承認して", "この範囲を繰り返す。"])
+@pytest.mark.parametrize("source", ["voice", "text"])
+def test_voice_does_not_confirm_the_range_but_keeps_it(word, source, counting):
+    # QA P1-A：範囲を決めようとする言葉は、確定せず、範囲の確認を残したまま「ボタンで決めてください」と案内する
+    w, sid = start(counting)
+    turn = rng(w.hear(sid, SAY))["turn"]
+    r2 = w.hear(sid, word, source=source)
+    assert r2["status"] == "ask" and r2["message"] == rc.RANGE_BUTTON_ONLY and r2["choices"] == []
+    assert cand(r2) is None and rng(r2) is not None and rng(r2)["turn"] == turn
+    assert r2["state"]["approval"] is None and counting.decides == 0
+    r3 = w.repeat_choose(sid, "yes", turn)  # ボタンなら決まる
+    assert r3["candidate_made"] and cand(r3)["kind"] == "repeat"
+
+
+@pytest.mark.parametrize("text", ["違う", "やめて", "比較して", "C00001からC00003の作業を2回から3回にしないで", "3回にして"])
+def test_other_words_during_the_range_drop_it(text):
+    # 打ち消し・別の指示・別の回数の指示は、今どおり範囲の確認を捨てる（新しい回数の指示は、新しい範囲の確認になる）
     w, sid = start()
-    r = w.hear(sid, SAY)
-    turn = rng(r)["turn"]
-    r2 = w.hear(sid, word, source="voice")
-    assert cand(r2) is None and rng(r2) is None  # 範囲の確認は捨てた
-    r3 = w.repeat_choose(sid, "yes", turn)  # 古いボタン
-    assert r3["status"] == "stop" and r3["message"] == rc.RANGE_STALE and cand(r3) is None
+    turn = rng(w.hear(sid, SAY))["turn"]
+    r = w.hear(sid, text)
+    assert rng(r) is None or rng(r)["turn"] != turn
+    assert w.repeat_choose(sid, "yes", turn)["status"] == "stop"
+
+
+def test_confirm_like_words_without_a_range_are_handled_as_before():
+    w, sid = start()
+    r = w.hear(sid, "はい")
+    assert r["message"] != rc.RANGE_BUTTON_ONLY and cand(r) is None
 
 
 def test_no_button_does_nothing():
@@ -436,8 +456,12 @@ def test_new_range_ask_gets_a_new_turn():
     t1 = rng(w.hear(sid, SAY))["turn"]
     t2 = rng(w.hear(sid, SAY))["turn"]
     assert t2 != t1
-    assert w.repeat_choose(sid, "yes", t1)["status"] == "stop"
-    assert w.repeat_choose(sid, "yes", t2)["candidate_made"]
+    r = w.repeat_choose(sid, "yes", t1)
+    # 古いボタンは断り、範囲の確認も捨てる（「もう使えません」の文と状態を合わせる。QA P2-E）
+    assert r["status"] == "stop" and r["message"] == rc.RANGE_STALE and rng(r) is None
+    assert w.repeat_choose(sid, "yes", t2)["status"] == "stop"
+    t3 = rng(w.hear(sid, SAY))["turn"]
+    assert w.repeat_choose(sid, "yes", t3)["candidate_made"]
 
 
 def test_range_button_on_the_server_route():
@@ -490,7 +514,60 @@ def test_range_less_sentence_on_the_demo_goes_to_the_range_button():
 def test_range_less_sentence_without_a_block_asks_for_the_range():
     w, sid = start(data=DEMO_C)
     r = w.hear(sid, "3回にして")
-    assert r["status"] == "ask" and r["message"] == rc.RANGE_NEEDED and rng(r) is None and cand(r) is None
+    # 区間が0件：範囲を言うよう案内し、対象外の文も添える（QA）
+    assert r["status"] == "ask" and r["message"] == f"{rc.RANGE_NEEDED}。{SCOPE}" and rng(r) is None and cand(r) is None
+
+
+def test_range_less_sentence_with_two_blocks_asks_for_the_range():
+    # 区間が2つ以上あって決まらない（テストの中で作る：C00001〜C00003 ×2 のあとに、同じ形の C00005〜C00006 ×2）
+    pos = b"C00005=500.000,0.000,300.000,180.00,0.00,0.00\r\nC00006=500.000,0.000,250.000,180.00,0.00,0.00\r\n"
+    data = variant((b"///NPOS 5,0,0,0,0,0", b"///NPOS 7,0,0,0,0,0"),
+                   (b"C00004=350.000,60.000,420.000,180.00,0.00,0.00\r\n",
+                    b"C00004=350.000,60.000,420.000,180.00,0.00,0.00\r\n" + pos),
+                   (b"MOVJ C00004 VJ=25.00", b"MOVL C00005 V=100.0\r\nMOVL C00006 V=100.0\r\n" * 2 + b"MOVJ C00004 VJ=25.00"))
+    job = jbi.parse_bytes(data)
+    assert job.problems == [] and len(job.find_repeat_blocks()) == 2
+    w, sid = start(data=data)
+    r = w.hear(sid, "3回にして")
+    assert r["status"] == "ask" and r["message"] == rc.RANGE_NEEDED and rng(r) is None
+    r2 = w.hear(sid, "C00005を3回にして")  # 位置を1つ言えば、その位置を含む区間だけ
+    assert rng(r2) is not None and rng(r2)["target"] == "C00005〜C00006"
+
+
+@pytest.mark.parametrize("text", ["3回", "3回お願いします", "C00001を3回", "C1を3回にして"])
+def test_short_count_sentences_go_to_the_range_button(text):
+    # QA：昔の2択［3回の移動］［3往復］に流さない
+    w, sid = start()
+    r = w.hear(sid, text)
+    assert r["status"] == "ask" and rng(r) is not None and rng(r)["total"] == 3, (text, r["message"])
+
+
+def test_single_position_outside_any_block_asks_for_the_range():
+    w, sid = start()
+    r = w.hear(sid, "C00004を3回にして")
+    assert r["status"] == "ask" and rng(r) is None and rc.RANGE_NEEDED in r["message"]
+
+
+@pytest.mark.parametrize("text", ["六回にして", "十回にして", "ろっかいにして", "C00001からC00003を六回にして"])
+def test_big_kanji_and_kana_counts_are_read_then_stopped(text):
+    w, sid = start()
+    r = w.hear(sid, text)
+    assert r["status"] == "stop" and r["choices"] == [] and "2回から3回への変更だけ" in r["message"], (text, r["message"])
+    assert "「から」" not in r["message"]
+
+
+@pytest.mark.parametrize("text", ["C00001からC00003を−1回にして", "-1回にして", "マイナス1回にして"])
+def test_negative_counts_stop(text):
+    w, sid = start()
+    r = w.hear(sid, text)
+    assert r["status"] == "stop" and r["message"] == rc.NEGATIVE_MESSAGE, (text, r["message"])
+
+
+def test_said_three_to_three_has_a_reason_and_one_choice():
+    # 「3回から3回」：言った今の回数が違い、目標が3回 → ［合計3回にする］の1択（唐川さんの判断待ち。今のまま）
+    w, sid = start()
+    r = w.hear(sid, "C00001からC00003の作業を3回から3回にして")
+    assert r["status"] == "ask" and r["message"] and [c["label"] for c in r["choices"]] == ["合計3回にする"]
 
 
 def test_short_names_not_in_the_job_stop():
@@ -876,3 +953,41 @@ def test_no_side_note_without_such_lines():
     w, sid = start()
     rr = rng(w.hear(sid, SAY))
     assert rr["side_note"] is None and rr["heading"] == "この範囲を繰り返しますか？"
+
+
+def test_export_runs_the_diff_check(monkeypatch, tmp_path):
+    # sim.export_sim（回数の変更）は、書く前に _repeat_diff_ok で差分を確かめる（QA：呼ばれていることのテスト）
+    calls = []
+    real = sim._repeat_diff_ok
+
+    def spy(*a, **k):
+        calls.append(a[2])
+        return real(*a, **k)
+    monkeypatch.setattr(sim, "_repeat_diff_ok", spy)
+    w, sid = start()
+    to_candidate(w, sid)
+    assert w.approve(sid, "確認者")["ok"]
+    calls.clear()
+    monkeypatch.setattr(sim, "_repeat_diff_ok", lambda *a, **k: False)
+    x = w.export(sid)
+    assert x["ok"] is False and "ほかにも違い" in x["error"]
+    assert not (tmp_path / "sim").exists() or list((tmp_path / "sim").iterdir()) == []
+    monkeypatch.setattr(sim, "_repeat_diff_ok", spy)
+    x = w.export(sid)
+    assert x["ok"] is True and calls == [END]
+
+
+def test_find_repeat_blocks_is_light_on_a_big_job():
+    # 大きなジョブ（MOVL 400行。テストの中で作る）でも、区間の候補の確かめは数えるほどしか呼ばない
+    import time
+    n = 400
+    pos = "".join(f"C{i:05d}=400.000,{i}.000,300.000,180.00,0.00,0.00\r\n" for i in range(n))
+    inst = "".join(f"MOVL C{i:05d} V=100.0\r\n" for i in range(n))
+    text = ("/JOB\r\n//NAME BIG\r\n//POS\r\n///NPOS " + f"{n},0,0,0,0,0\r\n///TOOL 0\r\n///POSTYPE ROBOT\r\n///RECTAN\r\n"
+            "///RCONF 0,0,0,0,0,0,0,0\r\n" + pos + "//INST\r\n///DATE 2026/11/03 20:00\r\n///ATTR SC,RW\r\n"
+            "///GROUP1 RB1\r\nNOP\r\n" + inst + "END\r\n")
+    job = jbi.parse_bytes(text.encode("ascii"))
+    assert job.problems == []
+    t0 = time.perf_counter()
+    assert job.find_repeat_blocks() == []
+    assert time.perf_counter() - t0 < 1.0

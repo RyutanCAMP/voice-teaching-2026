@@ -135,7 +135,12 @@ class Session:
     # ---- 発話 ----
     def hear(self, text: str, source: str = "text") -> Reply:
         """新しい発話。source（voice / text）は記録だけに使い、結果は変えない。"""
-        self.forget_range()  # 新しい指示：範囲の確認は捨てる（声の「はい」でも確定しない）
+        if self.repeat_range is not None and rc.is_range_confirm_word(text):
+            # 範囲の確認を待っている間の「この範囲を繰り返す」「はい」など（QA P1-A）：確定はせず、範囲の確認は残して案内する
+            self._log("発話", f"{'音声' if source == 'voice' else '文字'}：{text}")
+            self._locked = True
+            return self._reply("ask", rc.RANGE_BUTTON_ONLY)
+        self.forget_range()  # 新しい指示（打ち消し・別の指示・別の回数）：範囲の確認は捨てる（声の「はい」でも確定しない）
         if ut.is_explain_choice(text):
             return self.explain_only(text, source)
         if rc.is_repeat_request(text):
@@ -241,6 +246,8 @@ class Session:
             return stop(rc.MIXED_MESSAGE)
         if rc.has_decimal_count(body):
             return stop(rc.DECIMAL_MESSAGE)
+        if rc.has_negative_count(body):
+            return stop(rc.NEGATIVE_MESSAGE)
         req = rc.read(body)
         if req is None:
             return self._reply("ask", rc.unknown_message(rc.leftovers(body)), facts=facts)
@@ -254,6 +261,10 @@ class Session:
         else:
             # 範囲を言わない：ジョブに数えられる区間が1つだけなら、その区間を示して確かめる（QA P1-1）
             blocks = self._job.find_repeat_blocks()
+            if req.position is not None:  # 「C00001を3回」：その位置を含む区間だけ
+                blocks = [b for b in blocks if req.position in b.positions]
+            if not blocks:  # 数えられる区間が無い（区間の中に DOUT があるときなど）：対象外のことも添える
+                return self._reply("ask", f"{rc.RANGE_NEEDED}。{jbi.REPEAT_SCOPE_NOTE}", facts=facts)
             if len(blocks) != 1:
                 return self._reply("ask", rc.RANGE_NEEDED, facts=facts)
             block = blocks[0]
@@ -324,6 +335,7 @@ class Session:
         rr = self.repeat_range
         if (rr is None or isinstance(turn, bool) or not isinstance(turn, int) or turn != rr["turn"]
                 or choice not in ("yes", "no")):
+            self.repeat_range = None  # 断ったら範囲の確認も捨てる（「もう使えません」の文と状態を合わせる。QA P2-E）
             return self._reply("stop", rc.RANGE_STALE)
         self.repeat_range = None
         if choice == "no":

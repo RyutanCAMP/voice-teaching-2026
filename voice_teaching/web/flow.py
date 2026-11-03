@@ -134,6 +134,12 @@ class WebFlow:
             return {"ok": False, "error": "指示の種類（voice か text）が分かりません"}
 
         def run(e: _Entry) -> dict:
+            if e.session.repeat_range is not None and rc.is_range_confirm_word(text):
+                # 範囲の確認の最中の「この範囲を繰り返す」「はい」など：確定せず、範囲の確認を残して案内する（QA P1-A）。
+                # 承認・候補・会話の状態は変えない（候補が無い間だけ範囲の確認がある）
+                r = e.session.hear(text, source)
+                return {"ok": True, "heard": text, "source": source, "facts": None, "tool_calls": [],
+                        "dialog": False, **self._reply(e, r)}
             if ut.is_explain_choice(text):
                 # ［説明です］（「〜します」の2択。CHECKER_026 M3）：何もしない。承認・候補・会話の状態も変えない
                 r = e.session.explain_only(text, source)

@@ -569,13 +569,22 @@ def check_repeat(browser, url, check, shots: Path | None, out: Path, errors: lis
     pg.click("#text-send")
     pg.wait_for_selector("#range-yes")
     reply = pg.inner_text("#reply-message")
-    check(all(x in reply for x in ("この範囲を繰り返しますか？", "1回目：21〜23行目", "MOVL C00002 V=30.0",
+    check(all(x in reply for x in ("1回目：21〜23行目", "MOVL C00002 V=30.0",
                                     "2回目：24〜26行目", "全体：21〜26行目（2回）", "今は2回続けて書かれています")),
-          f"回数の変更：範囲の確認に見出し・1回目・2回目・全体の範囲と命令の行：{reply[:160]}")
+          f"回数の変更：範囲の確認に1回目・2回目・全体の範囲と命令の行：{reply[:160]}")
     shot(pg, "R2_range_confirm.png")
     check("繰り返すのは移動の行だけです" in reply, "回数の変更：範囲の確認に、対象外の固定文")
     check(pg.inner_text("#range-yes") == "この範囲を繰り返す" and pg.inner_text("#range-no") == "違う",
           "回数の変更：［この範囲を繰り返す］［違う］のボタン")
+    check("primary" in (pg.get_attribute("#range-yes", "class") or "") and pg.inner_text("#next-action") == "この範囲を繰り返しますか？"
+          and "もう少し教えてください" not in pg.inner_text("#reply-message") and pg.is_hidden("#max-shift-label"),
+          "回数の変更：［この範囲を繰り返す］が目立つボタン、見出しは1回だけ、「1回に動かせる量」は隠す")
+    # 声・文字で「はい」：確定せず、範囲の確認を残して、ボタンで決めるよう案内する（QA P1-A）
+    pg.fill("#text-input", "はい")
+    pg.click("#text-send")
+    until(pg, lambda: "ボタンで決めてください" in pg.inner_text("#reply-message"))
+    check(pg.is_visible("#range-yes") and pg.get_attribute("#step-4", "aria-current") != "step",
+          "回数の変更：「はい」では確定せず、範囲の確認とボタンは残る")
     check(pg.get_attribute("#step-4", "aria-current") != "step" and pg.is_hidden("#open-confirm"),
           "回数の変更：範囲をボタンで確定するまで、候補にしない")
     check(pg.locator("#fig-3d g.pt3.cand").count() >= 1 and pg.locator("#fig-3d line.range").count() == 5,
@@ -589,6 +598,8 @@ def check_repeat(browser, url, check, shots: Path | None, out: Path, errors: lis
           "回数の変更：候補のカードに「新しい移動の区間はありません」と対象外の固定文")
     detail = pg.text_content("#candidate-detail") or ""
     check(detail.count("+ ") == 3 and "MOVL C00002 V=30.0" in detail, f"回数の変更：詳細に足す3行の差分：{detail[:120]}")
+    check("C00001〜C00003 ×2 → ×3" in (pg.text_content("#fig-3d text.repeat-label") or ""),
+          f"回数の変更：3D の区間の横に「C00001〜C00003 ×2 → ×3」：{pg.text_content('#fig-3d text.repeat-label')}")
     check("×3" in (pg.text_content("#fig-3d text.repeat-now") or "")
           and "×2" in (pg.text_content("#fig-3d text.repeat-was") or ""), "回数の変更：右上の窓は ×3 を大きく、×2 を灰色で")
     check(svg_text_outside(pg, "#fig-3d") == [], f"回数の変更：1280px 相当で文字が図からはみ出さない：{svg_text_outside(pg, '#fig-3d')}")
@@ -663,6 +674,10 @@ def check_repeat(browser, url, check, shots: Path | None, out: Path, errors: lis
     pg.add_init_script(FAKE_RECOGNITION)
     pg.goto(url)
     to_range(pg)
+    pg.wait_for_timeout(200)
+    vis = pg.evaluate("""() => { const b = document.querySelector('#range-yes').getBoundingClientRect();
+      return b.top >= 0 && b.bottom <= window.innerHeight; }""")
+    check(vis, "回数の変更 390px：範囲の確認のボタンが、最初の画面（スクロールしたあと）に見えている")
     shot(pg, "R7_390_range.png")
     pg.click("#range-yes")
     until(pg, lambda: pg.get_attribute("#step-4", "aria-current") == "step")

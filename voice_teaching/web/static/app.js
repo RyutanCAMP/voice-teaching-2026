@@ -446,15 +446,25 @@ function applyResult(res, showOk = true) {
     showReply("ok", res.message);
   }
   renderState();
-  renderRepeatRange();
+  // 範囲の確認の最中に声・文字で決めようとした（「はい」など）：案内の文を、範囲の確認の上に添える（QA P1-A）
+  renderRepeatRange(res && res.status === "ask" && res.message && !res.message.startsWith("この範囲（") ? res.message : "");
 }
 
 // 回数の変更の範囲の確認（サーバーの state.repeat_range）：［この範囲を繰り返す］［違う］のボタン。声では確定しない。
 // 押すと /api/repeat に、今の確認の番号（turn）と一緒に送る。番号が古ければサーバーが断る
-function renderRepeatRange() {
+function renderRepeatRange(notice = "") {
   const rr = state.st && state.st.repeat_range;
   const box = $("reply-message");
-  if (!rr || box.hidden) return;
+  // 範囲の確認の間は、マイクの下の例文と「1回に動かせる量」の行を目立たせない（隠す）
+  const limit = $("max-shift-label").closest("p");
+  if (limit) limit.hidden = !!rr;
+  if (rr) $("text-input").placeholder = "";
+  if (!rr) {
+    // 範囲の確認が無くなった：この関数が作った部品だけを消す（Safety S2-P2-1）
+    if (box.classList.contains("range-ask")) { box.replaceChildren(); box.hidden = true; box.classList.remove("range-ask"); }
+    return;
+  }
+  if (box.hidden && !notice) return;
   const row = el("div", { class: "choices range-choices" });
   const send = async (choice) => {
     if (recording()) return;
@@ -464,8 +474,9 @@ function renderRepeatRange() {
     if (res.candidate_made && state.st && state.st.candidate) startPlayback();
     keepHeadingInView();
   };
-  const yes = el("button", { type: "button", class: "choice", id: "range-yes" }, rr.yes_label);
-  const no = el("button", { type: "button", class: "choice", id: "range-no" }, rr.no_label);
+  // ［この範囲を繰り返す］を目立たせ、［違う］は控えめに
+  const yes = el("button", { type: "button", class: "choice primary", id: "range-yes" }, rr.yes_label);
+  const no = el("button", { type: "button", class: "choice quiet", id: "range-no" }, rr.no_label);
   yes.addEventListener("click", () => send("yes"));
   no.addEventListener("click", () => send("no"));
   row.append(yes, no);
@@ -474,8 +485,9 @@ function renderRepeatRange() {
   const big = (node, px, weight) => { node.style.fontSize = `${px}px`; if (weight) node.style.fontWeight = weight; return node; };
   const first = rr.line_nos[0], last = rr.line_nos[rr.line_nos.length - 1];
   const blockLast = rr.block_line_nos[rr.block_line_nos.length - 1];
+  // 見出し（この範囲を繰り返しますか？）は画面の上の「次にすること」に1回だけ出す（ここでは出さない）
   const parts = [
-    big(el("strong", { class: "range-head" }, rr.heading), 20, "700"),
+    ...(notice ? [big(el("p", { class: "range-guide" }, notice), 15, "700")] : []),
     big(el("p", { class: "range-where" }, `${rr.target}　1回目：${first}〜${last}行目`), 18, "700"),
     el("div", { class: "diff range-lines" }, ...rr.cycle_lines.map((t, i) => big(el("div", {}, `${first + i}行目  ${t}`), 15))),
     // 2回目以降の範囲と、全体の範囲（数・行番号はサーバーのもの）
@@ -487,7 +499,10 @@ function renderRepeatRange() {
   parts.push(el("p", { class: "fine range-note" }, rr.note), row);
   box.className = "reply ask range-ask";
   box.replaceChildren(...parts);
+  box.hidden = false;
   renderSteps();  // 見出しを、ボタンに合わせる
+  // 狭い画面：範囲の確認の中身とボタンが見えるところまで送る
+  if (window.innerWidth < 700) box.scrollIntoView({ block: "start", behavior: "auto" });
 }
 
 function showReply(status, message, choices) {
