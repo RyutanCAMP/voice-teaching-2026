@@ -46,7 +46,8 @@ def cand(r):
 @pytest.mark.parametrize("source", SOURCES)
 @pytest.mark.parametrize("text,plain", [
     ("3mm下げて？", "3mm下げて"), ("3mm下げて?", "3mm下げて"), ("下に3mmですか", "下に3mmです"),
-    ("Y座標を3mm下げますか", "Y座標を3mm下げて"),  # CHECKER_030 S30-2：「〜ます」も外して確かめる ("下に3mm？", "下に3mm"), ("下に3mmですか？", "下に3mmです"),
+    ("Y座標を3mm下げますか", "Y座標を3mm下げて"),  # CHECKER_030 S30-2：「〜ます」も外して確かめる
+    ("下に3mm？", "下に3mm"), ("下に3mmですか？", "下に3mmです"),
 ])
 def test_question_asks_for_confirmation_with_one_choice(text, plain, source):
     w, sid = new()
