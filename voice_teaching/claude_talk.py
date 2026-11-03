@@ -437,7 +437,8 @@ def change_record(reading: CountReading | None, intent: str | None, change: dict
 
 # ---- Claude の答えの中の回数（内部レビュー P1-1・P2-1、唐川さん 11/3 夜：検証エラーとして扱う。文は書き換えない） ----
 _KANJI_NUM = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
-_REPLY_COUNT = re.compile(r"(\d+|[一二三四五六七八九十]+)\s*回")
+_REPLY_COUNT = re.compile(r"(\d+|[一二三四五六七八九十]+)\s*(?:回|度)")
+_REPLY_PLACES = re.compile(r"(\d+|[一二三四五六七八九十]+)\s*(?:か所|カ所|ヶ所|ヵ所|箇所|個所)")
 _REPLY_FROM_TO = re.compile(r"(\d+|[一二三四五六七八九十]+)\s*回\s*から\s*(\d+|[一二三四五六七八九十]+)\s*回")
 _REPLY_TIME = re.compile(r"\d+(?:\.\d+)?\s*(?:秒|分|時間)|[一二三四五六七八九十]+\s*(?:秒|分間|時間)")
 
@@ -459,16 +460,22 @@ def reply_counts(text: str) -> list[int | None]:
     return [_count_value(m.group(1)) for m in _REPLY_COUNT.finditer(_nfkc(text))]
 
 
-def reply_count_problem(text: str, allowed_counts: set[int], from_to: tuple[int, int] | None = None) -> str | None:
-    """Claude の文の回数が、プログラムが数えた・読んだ回数と合うか。合わなければ理由（"time"・"from_to"・"count"）。
-    from_to：変更の確認のときの（プログラムが数えた今の回数, 利用者の文から読んだ回数）。"""
+def reply_count_problem(text: str, allowed_counts: set[int], from_to: tuple[int, int] | None = None,
+                        places: set[int] | None = None, strict_from_to: bool = False) -> str | None:
+    """Claude の文の回数が、プログラムが数えた・読んだ回数と合うか。合わなければ理由（"time"・"from_to"・"count"・"places"）。
+    from_to：変更の確認のときの（プログラムが数えた今の回数, 利用者の文から読んだ回数）。
+    strict_from_to：今の回数をプログラムが決められないとき、「N回からM回」はどれも検証エラーにする。
+    places：「Nか所」に使ってよい数（くり返しの区間の位置の数）。None なら調べない。"""
     t = _nfkc(text)
     if _REPLY_TIME.search(t):
         return "time"  # 時間はプログラムが数えていない
-    if from_to is not None:
-        for m in _REPLY_FROM_TO.finditer(t):
-            if (_count_value(m.group(1)), _count_value(m.group(2))) != tuple(from_to):
-                return "from_to"
+    for m in _REPLY_FROM_TO.finditer(t):
+        if strict_from_to:
+            return "from_to"
+        if from_to is not None and (_count_value(m.group(1)), _count_value(m.group(2))) != tuple(from_to):
+            return "from_to"
+    if places is not None and any(_count_value(m.group(1)) not in places for m in _REPLY_PLACES.finditer(t)):
+        return "places"
     if any(c is None or c not in allowed_counts for c in reply_counts(t)):
         return "count"
     return None

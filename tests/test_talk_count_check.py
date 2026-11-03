@@ -77,3 +77,53 @@ def test_verified_counts_in_explanations_are_shown(tmp_path):
 ])
 def test_reply_count_check_unit(text, ok):
     assert (talk.reply_count_problem(text, allowed_counts={2, 3}, from_to=(2, 3)) is None) == ok
+
+
+# ---- 再レビュー（65ba391：FAIL）：区間をプログラムが1つに決められないとき（根拠が 20〜27）も、回数の照らし合わせを止めない ----
+WIDE = tuple(range(20, 28))  # 本物の通しと同じ（区間の外の行も根拠に入る）
+
+
+def wide_taught(tmp_path, first=WIDE):
+    w, f = T.flow(tmp_path)
+    sid = w.load(T.demo_bytes())["session_id"]
+    f.add(T.answer("3か所を通る同じ動きを2回くり返しています。何の作業ですか？", first))
+    w.ask(sid, "このロボット、何をしている？")
+    T.taught_button(w, f, sid)
+    return w, f, sid
+
+
+@pytest.mark.parametrize("first", [WIDE, BLOCK])
+@pytest.mark.parametrize("reply", ["ボタンを押す動作を3回から2回に変更しますか？", "ボタンを押す動作を2回から5回に変更しますか？"])
+def test_count_check_holds_when_the_block_is_not_pinned(tmp_path, first, reply):
+    w, f, sid = wide_taught(tmp_path, first)
+    f.add(T.answer(reply, BLOCK, "change_request", {"kind": "repeat", "from_count": 2, "to_count": 3}))
+    r = w.ask(sid, "じゃあ、3回にして")
+    assert r["reply_by"] == "app" and r["reply"] == talk.COUNT_MISMATCH and r["change_record"]["mismatch"] is True
+
+
+@pytest.mark.parametrize("first", [WIDE, BLOCK])
+def test_correct_confirmation_still_shows_when_the_block_is_not_pinned(tmp_path, first):
+    w, f, sid = wide_taught(tmp_path, first)
+    f.add(T.answer("ボタンを押す動作を2回から3回に変更しますか？", BLOCK, "change_request",
+                   {"kind": "repeat", "from_count": 2, "to_count": 3}))
+    r = w.ask(sid, "じゃあ、3回にして")
+    assert r["reply_by"] == "claude" and r["change_record"]["mismatch"] is False
+
+
+def test_earlier_user_counts_do_not_pass_a_change_confirmation(tmp_path):
+    w, f, sid = wide_taught(tmp_path)
+    f.add(T.answer("できますが、何回にしますか？", BLOCK))
+    w.ask(sid, "5回にもできる？")
+    f.add(T.answer("ボタンを押す動作を5回にしますか？", BLOCK, "change_request", {"kind": "repeat", "from_count": 2, "to_count": 3}))
+    r = w.ask(sid, "じゃあ、3回にして")
+    assert r["reply_by"] == "app" and r["change_record"]["mismatch"] is True
+
+
+@pytest.mark.parametrize("reply", ["5か所を通る同じ動きを2回くり返しています。何の作業ですか？",
+                                   "3か所を通る同じ動きを3度くり返しています。何の作業ですか？"])
+def test_places_and_do_are_checked_too(tmp_path, reply):
+    w, f = T.flow(tmp_path)
+    sid = w.load(T.demo_bytes())["session_id"]
+    f.add(T.answer(reply, BLOCK))
+    r = w.ask(sid, "このロボット、何をしている？")
+    assert r["reply_by"] == "app"

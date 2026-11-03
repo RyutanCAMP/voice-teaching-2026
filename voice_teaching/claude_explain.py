@@ -786,16 +786,30 @@ class Explainer:
         ev_lines = [e["line"] for e in conv.evidence(data["evidence_lines"])]
         record = talk.change_record(count, intent, change, ev_lines)
         if shown is None:
-            # 文の中の回数：プログラムが数えたくり返しの回数・利用者が言った回数・（変更の確認なら）今の回数と読んだ回数だけ
-            allowed = {r["count"] for r in (conv.facts or {}).get("repeats", [])}
-            for u in conv.utterances:
-                allowed |= {c for c in talk.reply_counts(u) if c is not None}
-            from_to = None
+            # 文の中の回数・か所：プログラムが数えたものと、利用者が言ったものだけ（検証エラーにする。文は書き換えない）
+            repeats = (conv.facts or {}).get("repeats", [])
+            rep_counts = {r["count"] for r in repeats}
+            places = {len(r["positions"]) for r in repeats}
+            said_now = {c for c in talk.reply_counts(conv.utterances[-1] if conv.utterances else "") if c is not None}
+            from_to, strict = None, False
             if record is not None and intent == "change_request":
-                allowed |= {c for c in (record["program_from"], record["program_total"]) if c is not None}
-                if record["program_from"] is not None and record["program_total"] is not None:
-                    from_to = (record["program_from"], record["program_total"])
-            problem = talk.reply_count_problem(data["reply"], allowed, from_to)
+                # 変更の確認：今の回数と、この文から読んだ回数だけ（前の文で言った回数は使わない）
+                prog_from = record["program_from"]
+                if prog_from is None and len(rep_counts) == 1:
+                    prog_from = next(iter(rep_counts))  # 区間を1つに決められなくても、くり返しの回数が1通りならその数
+                allowed = {c for c in (prog_from, record["program_total"]) if c is not None} | said_now
+                if prog_from is not None and record["program_total"] is not None:
+                    from_to = (prog_from, record["program_total"])
+                else:
+                    strict = True  # 今の回数をプログラムが決められない：「N回からM回」は検証エラー
+                cf = record.get("claude_from")
+                if cf is not None and prog_from is not None and cf != prog_from:
+                    record["mismatch"] = True
+            else:
+                allowed = set(rep_counts)
+                for u in conv.utterances:
+                    allowed |= {c for c in talk.reply_counts(u) if c is not None}
+            problem = talk.reply_count_problem(data["reply"], allowed, from_to, places=places or None, strict_from_to=strict)
             if problem is not None and intent == "change_request" and record is not None:
                 record["mismatch"] = True  # 回数の食い違い（検証エラー）。Claude の文は使わない
             elif problem is not None:
