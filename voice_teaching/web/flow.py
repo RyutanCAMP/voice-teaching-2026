@@ -348,7 +348,7 @@ def _facts(f: ut.UtteranceFacts | None) -> dict | None:
         "requested_value": f.requested_value(),
         "stop_reasons": list(f.stop_reasons),
         "unknown_words": list(f.unknown_words),  # 読み取りで使わなかった言葉（移動・速度の指示なら聞き返す）
-        "negations": list(f.negations),  # 打ち消しの言葉（移動・速度の指示なら止める）
+        "negations": list(f.negations),  # 打ち消しの言葉（あれば止める）
     }
 
 

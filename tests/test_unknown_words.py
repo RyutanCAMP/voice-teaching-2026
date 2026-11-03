@@ -324,8 +324,10 @@ def test_negation_words_are_never_allowed_words():
     for n in ut.NEGATION_WORDS + ("な",):
         for w in allowed:
             assert n not in w, (n, w)
-    for n in ut.NEGATION_WORDS:
-        assert ut.read_utterance(f"下に3mm{n}").negations, n
+    for n in ut.NEGATION_WORDS + ("NG",):
+        f = ut.read_utterance(f"下に3mm {n}")
+        assert f.negations or f.undo_negations, n
+        assert ut.pre_check(f).status == "stop", n
 
 
 # ---- CHECKER_023A の SHOULD・内部レビューの指摘 ----
@@ -383,3 +385,131 @@ def test_qa_p3_5_invisible_and_emoji(text, shown):
     r = hear(text)
     assert r["status"] == "ask" and cand(r) is None and f"「{shown}」" in r["message"]
     assert "「\u200b」" not in r["message"] and "「」" not in r["message"]
+
+
+# ---- a8f6193 の内部レビュー（QA P2-1・P3-2〜P3-5・P3-9、Safety P3-1・P3-3）----
+def flow_with_candidate(source):
+    w = WebFlow()
+    sid = w.load(DEMO_C)["session_id"]
+    w.select(sid, "C00005")
+    r = w.hear(sid, "下に3mm", source=source)
+    assert r["status"] == "ok" and cand(r) == ("Z", "-3.000")
+    return w, sid
+
+
+@pytest.mark.parametrize("source", ["voice", "text"])
+def test_negated_select_does_not_change_selection(source):
+    w = WebFlow()
+    sid = w.load(DEMO_C)["session_id"]
+    w.select(sid, "C00005")
+    r = w.hear(sid, "C00004は選択しない", source=source)
+    assert r["status"] == "stop" and "「選択しない」" in r["message"] and r["tool_calls"] == []
+    assert r["state"]["selected"] == "C00005"
+    r = w.hear(sid, "下に3mm", source=source)
+    assert r["state"]["candidate"]["target"] == "C00005 Z"  # 打ち消した C00004 に当てない
+
+
+@pytest.mark.parametrize("source", ["voice", "text"])
+@pytest.mark.parametrize("text,word", [("元に戻さないで", "戻さないで"), ("比較しないで", "比較しないで"),
+                                       ("C00004を選択しないで", "選択しないで")])
+def test_negated_undo_compare_select_keep_candidate(text, word, source):
+    w, sid = flow_with_candidate(source)
+    r = w.hear(sid, text, source=source)
+    assert r["status"] == "stop" and f"「{word}」" in r["message"] and r["choices"] == []
+    assert r["tool_calls"] == []                        # 元に戻す・比較・選択を呼ばない
+    assert cand(r) == ("Z", "-3.000") and r["state"]["selected"] == "C00005"
+
+
+@pytest.mark.parametrize("source", ["voice", "text"])
+@pytest.mark.parametrize("text", ["やめて", "元に戻して", "取り消して", "キャンセル"])
+def test_plain_undo_still_discards_the_candidate(text, source):
+    w, sid = flow_with_candidate(source)
+    r = w.hear(sid, text, source=source)
+    assert r["status"] == "ok" and cand(r) is None
+
+
+NEW_NEGATIONS = [
+    ("3mm下げません", "下げません"), ("下げずに3mm", "下げずに"), ("3mm下げず", "下げず"), ("下に3mmぬ", "ぬ"),
+    ("下に3mmはなし", "なし"), ("下に3mmNG", "NG"), ("下に3mm NG", "NG"), ("3mm下げるのは不要", "不要"),
+    ("下に3mmストップ", "ストップ"), ("下に3mm中止", "中止"), ("いや下に3mm", "いや"), ("下げるのは嫌3mm", "嫌"),
+    ("3mm下げるなよ", "下げるなよ"), ("3mm下げんな", "下げんな"), ("下に3mmはいらない", "いらない"),
+]
+
+
+@pytest.mark.parametrize("source", ["voice", "text"])
+@pytest.mark.parametrize("text,word", NEW_NEGATIONS)
+def test_more_negation_words_stop(text, word, source):
+    r = hear(text, source=source)
+    assert r["status"] == "stop" and cand(r) is None and r["choices"] == [], (text, r.get("message"))
+    assert f"「{word}」" in r["message"] and "変更しません" in r["message"]
+
+
+@pytest.mark.parametrize("text", ["ストップ", "中止", "いらない", "いや"])
+def test_negation_only_utterance_gets_the_negation_message(text):
+    r = hear(text)
+    assert r["status"] == "stop" and "変更しません" in r["message"] and "分かりませんでした" not in r["message"]
+
+
+def test_merge_and_combine_keep_previous_negations():
+    # 変異 N2・N3：前の発話の打ち消しを落とさない
+    neg = ut.read_utterance("Y座標を下げないで")
+    assert neg.negations
+    assert ut.merge_answer(neg, ut.read_utterance("3ミリ")).negations == neg.negations
+    assert ut.combine_axes(neg, ut.read_utterance("3mm下げて")).negations == neg.negations
+    und = ut.read_utterance("Y座標を下げるのはやめて")
+    assert und.undo_negations
+    assert ut.merge_answer(und, ut.read_utterance("3ミリ")).undo_negations == und.undo_negations
+    assert ut.combine_axes(und, ut.read_utterance("3mm下げて")).undo_negations == und.undo_negations
+    assert ut.pre_check(ut.merge_answer(neg, ut.read_utterance("3ミリ"))).status == "stop"
+
+
+def test_sokosoko_is_vague_but_kokokoko_is_unknown():
+    r = hear("そこそこ下に3mm")
+    assert r["status"] == "ask" and "量がはっきりしません" in r["message"] and "「そこそこ」" in r["message"]
+    assert "分かりませんでした" not in r["message"]
+    r = hear("ここここ下に3mm")
+    assert r["status"] == "ask" and r["message"].startswith("「ここここ」が分かりませんでした")
+
+
+@pytest.mark.parametrize("source", ["voice", "text"])
+@pytest.mark.parametrize("text,word", [("値を3mm下げて", "値"), ("エクス座標を3mm下げて", "エクス座標"),
+                                       ("座標を3mm下げて", "座標")])
+def test_b8_axis_letter_lost_both_paths(text, word, source):
+    r = hear(text, source=source)
+    assert r["status"] == "ask" and cand(r) is None and r["choices"] == [] and f"「{word}」" in r["message"]
+
+
+@pytest.mark.parametrize("source", ["voice", "text"])
+@pytest.mark.parametrize("seq", [["バイオ下げて", "3mm"], ["バイオ3mm", "下げて"]])
+def test_b1_two_step_both_paths(seq, source):
+    w = WebFlow()
+    sid = w.load(DEMO_C)["session_id"]
+    w.select(sid, "C00005")
+    for t in seq:
+        r = w.hear(sid, t, source=source)
+    assert r["status"] in ("ask", "stop") and cand(r) is None
+
+
+@pytest.mark.parametrize("source", ["voice", "text"])
+@pytest.mark.parametrize("text", ["3mm下げてください", "えーと3mm下げて", "えーと、3mm下げて", "3mm下げてお願いします",
+                                  "じゃあ3mm下げて", "あと3mm下げて", "もう3mm下げて", "3mm下へ", "この位置を3mm下げて"])
+def test_checker023_should_sentences_both_paths(text, source):
+    r = hear(text, source=source)
+    assert r["status"] == "ok" and cand(r) == ("Z", "-3.000"), (text, r.get("message"))
+
+
+@pytest.mark.parametrize("text,shown", [("えーとえーと下に3mm", "えーとえーと"), ("あのあの下に3mm", "あのあの"),
+                                        ("あともう下に3mm", "あともう")])
+def test_shown_unknown_word_is_not_cut(text, shown):
+    r = hear(text)
+    assert r["status"] == "ask" and r["message"].startswith(f"「{shown}」が分かりませんでした")
+
+
+def test_negation_shown_word_is_not_cut():
+    r = hear("下に3mmとか言わない")
+    assert r["status"] == "stop" and "「言わない」" in r["message"]
+
+
+def test_question_mark_is_unchanged_for_now():
+    # 「？」の扱いは唐川さんの判断待ち。今は今までどおり候補になる（変えていないことの記録）
+    assert cand(hear("3mm下げて？")) == ("Z", "-3.000")

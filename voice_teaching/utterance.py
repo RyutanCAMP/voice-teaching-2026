@@ -86,6 +86,8 @@ class UtteranceFacts:
     unknown_words: tuple[str, ...] = ()
     # 打ち消し・取り消し・言い直しの言葉（「下げないで」「駄目」「じゃなくて」）。移動・速度の指示にあれば止める（CHECKER_023A B6・B7）
     negations: tuple[str, ...] = ()
+    # 元に戻す言葉そのもの（「やめて」「取り消して」）の打ち消し。移動・速度と一緒のときだけ止める
+    undo_negations: tuple[str, ...] = ()
 
     @property
     def position(self) -> str | None:
@@ -199,7 +201,9 @@ AMOUNT_PREFIXES = ("あと", "もう")
 
 # 打ち消し・取り消し・言い直しの言葉。移動・速度の指示にあれば、知らない言葉より先に止める（CHECKER_023A B6・B7）
 NEGATION_WORDS = ("じゃなく", "じゃない", "ではなく", "でなく", "たくない", "なかっ", "ないで", "なくて", "ない", "なく",
-                  "駄目", "だめ", "ダメ", "やめ", "禁止", "違う", "ちがう", "取り消し")
+                  "駄目", "だめ", "ダメ", "やめ", "禁止", "違う", "ちがう", "取り消し",
+                  "ません", "ずに", "ぬ", "なし", "不要", "ストップ", "中止", "いや", "嫌", "なよ", "んな", "いらない")
+# 一覧のほかに、決まった形で見つける打ち消し：文の終わりの「下げるな」「動かすな」、文の終わりの「下げず」、英字の「NG」
 NEGATION_MESSAGE = "{word}などの打ち消しの言葉があるため、変更しません。してほしいことだけを言ってください"
 
 
@@ -209,7 +213,9 @@ def _alt(words) -> str:
 
 _NEGATION_RE = re.compile(
     f"(?:{_alt(NEGATION_WORDS)})"
-    r"|(?<=[るすく])な(?=[\s、。,.!！?？]*$)")  # 文の終わりの「下げるな」「動かすな」
+    r"|(?<=[るすく])な(?=[\s、。,.!！?？]*$)"   # 文の終わりの「下げるな」「動かすな」
+    r"|(?<=[ぁ-ゖ])ず(?=[\s、。,.!！?？]*$)"    # 文の終わりの「下げず」「動かさず」
+    r"|(?:(?<![A-Z])|(?<=MM))NG(?![A-Z])")  # 「3mmNG」は大文字にすると「3MMNG」
 _P, _TE, _REQ, _FIN = _alt(PARTICLES), _alt(TE_FORMS), _alt(REQUESTS), _alt(FINALS)
 # 読んだ言葉の後の1つのひと続き（文の終わりでないとき／文の終わりのとき）
 _TAIL_MID = re.compile(f"(?:{_P})|(?:{_P})?(?:{_REQ})|(?:{_TE})(?:{_REQ}|{_alt(POLITE_AFTER_TE)})?")
@@ -219,8 +225,8 @@ _TAIL_STRIP = re.compile(f"(?:{_P})?(?:{_REQ})?")  # 示すときに後ろから
 _ANY_FILLER_SEQ = re.compile(f"(?:{_alt(FILLER_WORDS)})+")
 _HESITATION_RE = re.compile(_alt(HESITATIONS))
 _OPENER_RE = re.compile(_alt(OPENERS))
-# て・して が付いてよい、読んだ動きの言葉の最後の字（下げ・動か・増や・ずら・寄せ・遅く・移動、元に戻・取り消・比べ）
-_VERB_END_CHARS = "げかやらせく動戻消べ"
+# て・して が付いてよい、読んだ動きの言葉の最後の字（下げ・動か・増や・ずら・寄せ・遅く・移動、元に戻・取り消・比べ・比較・選択）
+_VERB_END_CHARS = "げかやらせく動戻消べ較択"
 # 言葉の区切り（空白・句読点など）。読み取りで使った部分も空白にしてから区切る
 _WORD_SEP = re.compile(r"[\s、。,，.．!！?？・／/「」『』（）()…~〜]+")
 _WORD = re.compile(r"[^\s、。,，.．!！?？・／/「」『』（）()…~〜]+")
@@ -237,18 +243,25 @@ _POSITION_WORD = re.compile(r"^\s?(?:の\s?)?位置")
 _THIS_REPEAT = re.compile(r"(?:この位置|この点|この命令|ここ|その位置|その点|そこ){2,}")
 
 
-def _negation_words(text: str) -> tuple[str, ...]:
-    """打ち消しの言葉を、前の動きの言葉ごと取り出す（「下げないで」「駄目」）。取り除くことはしない。"""
+def _negation_words(text: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """打ち消しの言葉を、前の動きの言葉ごと取り出す（「下げないで」「駄目」）。取り除くことはしない。
+
+    返す値：(打ち消し, 元に戻す言葉そのものの打ち消し)。「やめて」「取り消して」は元に戻す指示の言葉なので、
+    ほかの打ち消しと分ける（移動・速度が無ければ、元に戻す指示として使う）。「元に戻さないで」の「ないで」は打ち消し。
+    """
+    undo = [m.span() for m in _UNDO.finditer(text)]
     out: list[str] = []
+    of_undo: list[str] = []
     for m in _NEGATION_RE.finditer(text):
         start = m.start()
         while start > 0 and m.start() - start < 4 and ("ぁ" <= text[start - 1] <= "ゖ" or _script(text[start - 1]) == "kanji") \
-                and text[start - 1] not in PARTICLES:
+                and text[start - 1] not in PARTICLES and text[start - 2:start] != "とか":
             start -= 1
         word = text[start:m.end()]
-        if word not in out:
-            out.append(word)
-    return tuple(out)
+        target = of_undo if any(a < m.end() and m.start() < b for a, b in undo) else out
+        if word not in target:
+            target.append(word)
+    return tuple(out), tuple(of_undo)
 
 
 def _script(ch: str) -> str:
@@ -304,9 +317,11 @@ def _unknown_words(residual: str, used_mask: Sequence[bool], source: str) -> tup
         if _run_is_allowed(run, before, after, prev):
             continue
         # 示すときは、後ろの助詞などを外す（「バイオを」→「バイオ」）。外すと何も残らないときは、そのまま示す
-        # 前の助詞・つなぎの言葉も外す（「をバイオ」→「バイオ」。ひらがなの言葉の途中では分けない）
-        word = next((run[:k] for k in range(1, len(run)) if _TAIL_STRIP.fullmatch(run[k:])
-                     and not _ANY_FILLER_SEQ.fullmatch(run[:k])), run)
+        # 前の助詞・つなぎの言葉も外す（「をバイオ」→「バイオ」。ひらがなの言葉の途中では分けない）。
+        # つなぎの言葉を並べただけのもの（「えーとえーと」「あのあの」）は、分けずにそのまま示す
+        word = run if _ANY_FILLER_SEQ.fullmatch(run) else next(
+            (run[:k] for k in range(1, len(run)) if _TAIL_STRIP.fullmatch(run[k:])
+             and not _ANY_FILLER_SEQ.fullmatch(run[:k])), run)
         word = next((word[k:] for k in range(1, len(word)) if _LEAD_STRIP.fullmatch(word[:k])
                      and _script(word[k]) != "hira" and not _ANY_FILLER_SEQ.fullmatch(word[k:])), word)
         word = _show(word)
@@ -466,6 +481,7 @@ def read_utterance(raw: str) -> UtteranceFacts:
             w = _POSITION_WORD.match(text[m.end():])
             if w:
                 blank(m.end(), m.end() + w.end())
+    negations, undo_negations = _negation_words(text)
     used_mask = [used[i] == " " and not text[i].isspace() for i in range(len(text))]
     unknown = _unknown_words("".join(used), used_mask, text)
 
@@ -481,7 +497,7 @@ def read_utterance(raw: str) -> UtteranceFacts:
         vertical=vertical,
         stop_reasons=tuple(stops),
         unknown_words=unknown,
-        negations=_negation_words(text),
+        negations=negations, undo_negations=undo_negations,
     )
 
 
@@ -492,7 +508,8 @@ def combine_axes(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceF
                    positions=answer.positions or previous.positions,
                    refers_to_selection=previous.refers_to_selection or answer.refers_to_selection,
                    unknown_words=tuple(dict.fromkeys(previous.unknown_words + answer.unknown_words)),
-                   negations=tuple(dict.fromkeys(previous.negations + answer.negations)))
+                   negations=tuple(dict.fromkeys(previous.negations + answer.negations)),
+                   undo_negations=tuple(dict.fromkeys(previous.undo_negations + answer.undo_negations)))
 
 
 def merge_answer(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceFacts:
@@ -522,6 +539,7 @@ def merge_answer(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceF
         # 答えの中の知らない言葉も、前の発話の知らない言葉も捨てない（どちらかにあれば聞き返す）
         unknown_words=tuple(dict.fromkeys(previous.unknown_words + answer.unknown_words)),
         negations=tuple(dict.fromkeys(previous.negations + answer.negations)),
+        undo_negations=tuple(dict.fromkeys(previous.undo_negations + answer.undo_negations)),
     )
 
 
@@ -574,9 +592,11 @@ def unknown_words_message(words: Sequence[str], op: str) -> str:
 
 def pre_check(facts: UtteranceFacts) -> Verdict:
     """Claude に頼らず、発話だけで止める・聞き返すことが決まるかを調べる。"""
-    if facts.negations and ("move" in facts.kinds or "speed" in facts.kinds):
-        # 打ち消しの言葉を捨てて、言ったことと逆の変更にしない。いちばん先に止める（選択肢も出さない）
-        return _stop(NEGATION_MESSAGE.format(word="".join(f"「{w}」" for w in facts.negations)))
+    found = facts.negations + (facts.undo_negations if ("move" in facts.kinds or "speed" in facts.kinds) else ())
+    if found:
+        # 打ち消しの言葉を捨てて、言ったことと逆の操作にしない。選択・比較・元に戻すも含めて、いちばん先に止める（選択肢も出さない）。
+        # 移動・速度の無い「やめて」「取り消して」だけは、元に戻す指示として使う
+        return _stop(NEGATION_MESSAGE.format(word="".join(f"「{w}」" for w in found)))
     if facts.stop_reasons:
         return _stop("。".join(facts.stop_reasons))
     if not facts.kinds:
