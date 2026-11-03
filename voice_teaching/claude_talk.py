@@ -443,8 +443,46 @@ _REPLY_COUNT = re.compile(r"(\d+|[一二三四五六七八九十]+)\s*(?:回|度
 _REPLY_PLACES = re.compile(r"(\d+|[一二三四五六七八九十]+)\s*(?:か所|カ所|ヶ所|ヵ所|箇所|個所)")
 _REPLY_FROM_TO = re.compile(r"(\d+|[一二三四五六七八九十]+)\s*(?:回|度)\s*から\s*(\d+|[一二三四五六七八九十]+)\s*(?:回|度)")
 # 移動量（mm・ミリ・cm・センチ）：量はプログラムが計算する。Claude の文には書かせない（CHECKER_032 P1-4・K14）
-_REPLY_AMOUNT = re.compile(r"(?:\d+(?:\.\d+)?|[一二三四五六七八九十]+)\s*(?:mm|ミリ|cm|センチ)", re.I)
-_REPLY_POSITION = re.compile(r"C\s?([0-9]{5})")
+_REPLY_AMOUNT = re.compile(r"(?:\d+(?:\.\d+)?|[〇一二三四五六七八九十百千]+)\s*(?:mm|ミリ|みり|粍|cm|センチ|せんち|メートル)", re.I)
+_REPLY_POSITION = re.compile(r"C\s?([0-9]{5})(?![0-9])", re.I)
+
+# ---- 数の許可リスト（内部 Safety ad77d67：FAIL への直し）：Claude の文の数は「事実と合う言い方」だけ。
+# 許した言い方を文から取り除いて、まだ数（算用数字・単位の付いた漢数字）が残れば検証エラー（文は書き換えない）
+_UNITS = r"回|度|周|サイクル|往復|セット|か所|カ所|ヶ所|ヵ所|箇所|個所|つ|個|行目|行|秒|分|時間|ミリ|みり|mm|粍|センチ|cm|メートル|%|％|倍"
+_KANJI_RUN = re.compile(rf"[〇一二三四五六七八九十百千]+(?=\s*(?:{_UNITS}))")
+_DIGITS = {"〇": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+_LINE_RANGE = re.compile(r"([0-9]+)\s*[〜~～\-ー]\s*([0-9]+)\s*行目")
+_LINE_ONE = re.compile(r"([0-9]+)\s*行目")
+
+
+def _kanji_value(s: str) -> int | None:
+    total, cur = 0, 0
+    for ch in s:
+        if ch in _DIGITS:
+            cur = _DIGITS[ch]
+        elif ch in "十百千":
+            total += (cur or 1) * {"十": 10, "百": 100, "千": 1000}[ch]
+            cur = 0
+        else:
+            return None
+    return total + cur
+
+
+def _with_digits(text: str) -> str:
+    t = _nfkc(text)
+    return _KANJI_RUN.sub(lambda m: str(_kanji_value(m.group(0))) if _kanji_value(m.group(0)) is not None else m.group(0), t)
+
+
+def reply_numbers_left(text: str, phrases: list[str], lines: set[int] | None = None) -> bool:
+    """許した言い方（phrases：「2回から3回」「3か所」など）と、ジョブにある行番号（lines）を除いても数が残るか。"""
+    t = re.sub(r"\s+", "", _with_digits(text))
+    t = _REPLY_POSITION.sub(" ", t)  # 位置番号は別に確かめる（reply_unknown_positions）
+    known = set(lines or ())
+    t = _LINE_RANGE.sub(lambda m: " " if {int(m.group(1)), int(m.group(2))} <= known else m.group(0), t)
+    t = _LINE_ONE.sub(lambda m: " " if int(m.group(1)) in known else m.group(0), t)
+    for ph in sorted(set(phrases), key=len, reverse=True):
+        t = t.replace(re.sub(r"\s+", "", ph), " ")
+    return bool(re.search(r"[0-9]", t))
 
 
 def reply_amount_problem(text: str) -> bool:

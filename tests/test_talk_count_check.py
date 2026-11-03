@@ -188,3 +188,55 @@ def test_position_not_in_the_job_is_not_shown(tmp_path):
 def test_button_words_are_marked_as_ai_guess_until_taught():
     assert talk.ai_guesses("C00004 でボタンを押しています。") == ["C00004 でボタンを押しています。"]
     assert talk.ai_guesses("ボタンを押す動作を2回から3回に変更しますか？", ["ボタンを押してる"]) == []
+
+
+# ---- 内部 Safety（ad77d67：FAIL）：数は「事実と合う言い方」だけを許す（許した言い方を除いて数が残れば検証エラー） ----
+@pytest.mark.parametrize("reply", [
+    "今は3回くり返す動きです。3回に変更しますか？",
+    "現在の回数は3回です。3回に変更しますか？",
+    "いまは三回くり返す動きです。三回にしますか？",
+    "ボタンを押す動作を3回を2回に変更しますか？",
+    "ボタンを押す動作を3回→2回にしますか？",
+    "ボタンを押す動作を3周にしますか？",
+])
+def test_change_confirmation_allows_only_program_count_phrases(tmp_path, reply):
+    w, f, sid = wide_taught(tmp_path)
+    f.add(T.answer(reply, BLOCK, "change_request", {"kind": "repeat", "from_count": 2, "to_count": 3}))
+    r = w.ask(sid, "じゃあ、3回にして")
+    assert r["reply_by"] == "app" and reply not in r["reply"], reply
+
+
+@pytest.mark.parametrize("reply", [
+    "ボタンを押す動作を2回から3回に変更しますか？", "ボタンを押す動作を二回から三回に変更しますか？",
+    "ボタンを押す動作を3回にしますか？", "ボタンを押す動作を、2回から3回にしますか？",
+])
+def test_correct_change_confirmations_still_show(tmp_path, reply):
+    w, f, sid = wide_taught(tmp_path)
+    f.add(T.answer(reply, BLOCK, "change_request", {"kind": "repeat", "from_count": 2, "to_count": 3}))
+    r = w.ask(sid, "じゃあ、3回にして")
+    assert r["reply_by"] == "claude", (reply, r["reply"])
+
+
+@pytest.mark.parametrize("reply", [
+    "同じ動きを3周しています。何の作業ですか？", "同じ動きを3サイクル行っています。何の作業ですか？",
+    "同じ動きを3往復しています。何の作業ですか？", "同じ動きを3セット行っています。何の作業ですか？",
+    "百ミリ下げるとよいです。", "3みり下げるとよいです。", "3粍下げます。", "3メートル動きます。",
+    "c00009 でボタンを押しています。", "C000001 でボタンを押しています。",
+])
+def test_unverified_numbers_units_and_positions_are_not_shown(tmp_path, reply):
+    w, f = T.flow(tmp_path)
+    sid = w.load(T.demo_bytes())["session_id"]
+    f.add(T.answer(reply, BLOCK))
+    r = w.ask(sid, "このロボット、何をしている？")
+    assert r["reply_by"] == "app" and reply not in r["reply"], reply
+
+
+@pytest.mark.parametrize("reply", [
+    "3か所を通る同じ動きを2回くり返しています。何の作業ですか？",
+    "同じ3か所を通る動きを2回くり返しています。途中で下がってまた上がる動きがあります。何の作業か、教えてもらえますか？",
+])
+def test_real_run_explanations_still_show(tmp_path, reply):
+    w, f = T.flow(tmp_path, updown_config=T.confirmed_config(tmp_path))  # 本物の通しと同じく上下は確認済みの仮の設定
+    sid = w.load(T.demo_bytes())["session_id"]
+    f.add(T.answer(reply, BLOCK))
+    assert w.ask(sid, "このロボット、何をしている？")["reply_by"] == "claude"
