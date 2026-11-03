@@ -10,6 +10,8 @@ SpeechRecognition が無いブラウザーでの表示を確かめる。
 """
 from __future__ import annotations
 
+import json
+import re
 import sys
 import tempfile
 import threading
@@ -52,6 +54,139 @@ NO_RECOGNITION = """
 Object.defineProperty(window, "SpeechRecognition", { value: undefined, configurable: true });
 Object.defineProperty(window, "webkitSpeechRecognition", { value: undefined, configurable: true });
 """
+
+
+def _primaries(page):
+    return page.locator("button.primary:not([disabled]):visible, .drop-zone.primary:visible").count()
+
+
+def check_ux_polish(browser, url, check, shots: Path | None) -> None:
+    """UX 監査の直し（feat/ux-polish）：版・使い方の小窓・サンプルで試す・390px・1280×720・止まった候補・読めなかった言葉。"""
+    def shot(page, name, full=False):
+        if shots is not None:
+            shots.mkdir(parents=True, exist_ok=True)
+            page.screenshot(path=str(shots / name), full_page=full)
+
+    def no_hscroll(page):
+        w = page.evaluate("() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]")
+        return w[0] <= w[1], w
+
+    # ---- 1280×720：版・使い方の小窓・サンプルで試す・図の注意・止まった候補の帯 ----
+    pg = browser.new_page(viewport={"width": 1280, "height": 720})
+    pg.add_init_script(FAKE_RECOGNITION)
+    pg.goto(url)
+    check(pg.is_visible("#app-version") and pg.inner_text("#app-version") == "Ver.1.00-dev",
+          f"左下に版を出す：{pg.inner_text('#app-version')}")
+    check(pg.is_hidden("#help-pop"), "使い方の小窓は最初は閉じている")
+    pg.click("#help-button")
+    pop = pg.inner_text("#help-pop") if pg.is_visible("#help-pop") else ""
+    check("Y座標を3ミリ下げて" in pop and "承認は確認表示のボタンだけです" in pop
+          and pg.get_attribute("#help-button", "aria-expanded") == "true", "「？」で使い方の小窓が開く")
+    shot(pg, "9_help.png")
+    pg.keyboard.press("Escape")
+    check(pg.is_hidden("#help-pop"), "Esc で使い方の小窓が閉じる")
+    pg.click("#help-button")
+    pg.mouse.click(640, 600)
+    check(pg.is_hidden("#help-pop"), "小窓の外を押すと閉じる")
+
+    pg.click("#sample-button")
+    pg.wait_for_selector("#job-area:not([hidden])")
+    check(pg.inner_text("#file-name") == "DEMO_C_PLACE.JBI" and pg.get_attribute("#step-2", "aria-current") == "step"
+          and pg.is_visible("#fig-3d svg"), "「サンプルで試す」で DEMO_C_PLACE を読み、3D で位置を選ぶステップになる")
+    pg.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    pg.wait_for_timeout(100)
+    gap = pg.evaluate("""() => document.querySelector('.foot').getBoundingClientRect().top
+                         - document.querySelector('#figure-note').getBoundingClientRect().bottom""")
+    check(gap >= 0, f"1280×720：下の帯に図の注意が隠れない（間 {gap:.0f}px）")
+    pg.evaluate("window.scrollTo(0, 0)")
+    shot(pg, "L1280_a_loaded.png")
+
+    # 止まる位置（C00000）：確認表示を開くと、赤い帯が見える所にある。変更後はオレンジにしない
+    pg.locator("#position-chips button", has_text="C00000").click()
+    until(pg, lambda: pg.inner_text("#voice-position strong") == "C00000")
+    pg.fill("#text-input", FAKE_TEXT)
+    pg.click("#text-send")
+    until(pg, lambda: pg.get_attribute("#step-4", "aria-current") == "step")
+    colors = pg.eval_on_selector_all("#fig-3d line.seg.after", "els => els.map(e => e.getAttribute('stroke'))")
+    check(colors and "#ff6a1a" not in colors, f"止まった候補の変更後は、オレンジにしない（灰色の点線）：{colors}")
+    shot(pg, "L1280_b_blocked_card.png")
+    pg.click("#open-confirm")
+    pg.wait_for_selector("#confirm-overlay:not([hidden])")
+    pg.wait_for_timeout(100)
+    r = pg.evaluate("() => { const b = document.querySelector('#confirm-blocked').getBoundingClientRect(); return [b.top, b.bottom]; }")
+    check(pg.is_visible("#confirm-blocked") and r[0] >= 0 and r[1] <= 720 and not pg.is_enabled("#approve-button"),
+          f"1280×720：止まった候補の確認表示で、赤い「承認できません」の帯が見える（上 {r[0]:.0f}px・下 {r[1]:.0f}px）")
+    shot(pg, "L1280_c_blocked_confirm.png")
+    pg.click("#confirm-close")
+    pg.close()
+
+    # ---- 390px：横にはみ出さない ----
+    pg = browser.new_page(viewport={"width": 390, "height": 844})
+    pg.add_init_script(FAKE_RECOGNITION)
+    pg.goto(url)
+    ok, w = no_hscroll(pg)
+    check(ok, f"390px：最初の画面は横にはみ出さない（{w}）")
+    shot(pg, "P390_a_start.png", full=True)
+    pg.click("#sample-button")
+    pg.wait_for_selector("#job-area:not([hidden])")
+    pg.wait_for_timeout(200)
+    ok, w = no_hscroll(pg)
+    check(ok, f"390px：読み込んだあとも横にはみ出さない（{w}）")
+    shot(pg, "P390_b_loaded.png", full=True)
+    pg.locator("#position-chips button", has_text="C00005").click()
+    until(pg, lambda: pg.inner_text("#voice-position strong") == "C00005")
+    pg.fill("#text-input", FAKE_TEXT)
+    pg.click("#text-send")
+    until(pg, lambda: pg.get_attribute("#step-4", "aria-current") == "step")
+    pg.wait_for_timeout(200)
+    ok, w = no_hscroll(pg)
+    check(ok, f"390px：変更候補のステップも横にはみ出さない（{w}）")
+    shot(pg, "P390_c_candidate.png", full=True)
+    pg.close()
+
+    # ---- 読めなかった言葉（CHECKER_023 B1）：facts.unknown_words を目立たせ、言い直しを求める ----
+    # このブランチのサーバーはまだ unknown_words を返さないので、別のブランチの返し方をまねる：
+    # 「バイオ」を含む文は、聞き返しになる文（「少し動かして」）に差し替えて送り、返事に unknown_words と元の文を足す（画面の確認だけ）
+    pg = browser.new_page(viewport={"width": 1280, "height": 900})
+    pg.add_init_script(FAKE_RECOGNITION)
+
+    def fake_unknown(route):
+        req = json.loads(route.request.post_data or "{}")
+        if "バイオ" not in str(req.get("text", "")):
+            return route.continue_()
+        heard = req["text"]
+        req["text"] = "少し動かして"
+        res = route.fetch(post_data=json.dumps(req))
+        body = res.json()
+        if body.get("facts") is not None and not body["facts"].get("unknown_words"):
+            body["facts"]["unknown_words"] = ["バイオ"]
+        body["heard"] = heard
+        route.fulfill(response=res, body=json.dumps(body, ensure_ascii=False),
+                      headers={**res.headers, "content-type": "application/json; charset=utf-8"})
+
+    pg.route("**/api/hear", fake_unknown)
+    pg.goto(url)
+    pg.click("#sample-button")
+    pg.wait_for_selector("#job-area:not([hidden])")
+    pg.locator("#position-chips button", has_text="C00005").click()
+    until(pg, lambda: pg.inner_text("#voice-position strong") == "C00005")
+    pg.evaluate("window.__fakeText = 'バイオ 3ミリ 下げて'")
+    pg.click("#mic-button")
+    pg.click("#consent-yes")
+    until(pg, lambda: pg.is_enabled("#voice-stop"))
+    pg.click("#voice-stop")
+    until(pg, lambda: pg.input_value("#text-input") == "バイオ 3ミリ 下げて")
+    pg.click("#voice-cancel")
+    pg.click("#text-send")
+    until(pg, lambda: pg.is_visible("#reply-message"))
+    marks = pg.locator("#reply-message mark.unknown").all_inner_texts()
+    check(marks == ["バイオ"] and "バイオ 3ミリ 下げて" in pg.inner_text("#reply-message")
+          and pg.inner_text("#next-action") == "もう一度、言い直してください"
+          and pg.get_attribute("#step-3", "aria-current") == "step",
+          f"読めなかった言葉は聞き取った文の中で目立たせ、見出しは「もう一度、言い直してください」：{marks}")
+    pg.wait_for_timeout(400)
+    shot(pg, "3f_unknown_word.png")
+    pg.close()
 
 
 def until(pg, cond, timeout_ms: int = 5000) -> None:
@@ -199,6 +334,8 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             until(pg3, lambda: pg3.inner_text("#voice-position strong") == "C00004")
             check(pg3.is_visible("#browser-note") and "Google Chrome" in pg3.inner_text("#browser-note")
                   and pg3.is_visible("#copy-url"), "Chrome 以外では「Google Chrome で開いてください」とアドレスのコピーを出す")
+            if shots is not None:
+                pg3.screenshot(path=str(shots / "8_other_selected.png"))
             pg3.evaluate("window.__fails = ['network']")
             pg3.click("#mic-button")
             check("提供元のサーバー" in pg3.inner_text("#consent-text"), "Chrome 以外の同意の文は、送り先を決めつけない")
@@ -207,6 +344,14 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check("Google Chrome で開いてください" in pg3.inner_text("#voice-error")
                   and pg3.inner_text("#mic-label") == "マイク OFF",
                   "Chrome 以外で通信に失敗したら、聞き直さずに Chrome で開くよう案内する")
+            side_text = pg3.inner_text(".side")
+            mic_op = float(pg3.evaluate("() => getComputedStyle(document.querySelector('#mic-button')).opacity"))
+            check(side_text.count("Google Chrome で開いてください") == 1 and pg3.is_visible("#copy-url")
+                  and "primary" in (pg3.get_attribute("#copy-url", "class") or "") and _primaries(pg3) == 1 and mic_op < 0.5,
+                  f"Chrome 以外の案内は1回だけ（{side_text.count('Google Chrome で開いてください')}回）、"
+                  f"「アドレスをコピー」だけが目立ち、マイクは薄い（不透明度 {mic_op}）")
+            if shots is not None:
+                pg3.screenshot(path=str(shots / "8b_other_network.png"))
             pg3.close()
 
             # 聞き返しの短い選択肢（CHECKER_021 10章・CHECKER_022）：「Yを3mm下げて」は2択。押すと候補を作るだけ（承認しない）
@@ -223,14 +368,33 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             labels = pg4.locator("#reply-message button.choice").all_inner_texts()
             check(labels == ["Y座標を −3mm", "下方向へ 3mm"] and pg4.get_attribute("#step-3", "aria-current") == "step",
                   f"「Yを3mm下げて」は候補を作らず、短い2択で聞き返す：{labels}")
+            check(pg4.inner_text("#next-action") == "どちらですか？",
+                  f"選択肢で聞き返している間の見出しは「どちらですか？」：{pg4.inner_text('#next-action')}")
+            check(pg4.locator("#reply-message button.choice.primary").count() == 0,
+                  "選択肢のボタンはどれも同じ重さ（目立たせない）")
             if shots is not None:
                 pg4.screenshot(path=str(shots / "3e_choices.png"))
             pg4.locator("#reply-message button.choice", has_text="Y座標を").click()
             until(pg4, lambda: pg4.get_attribute("#step-4", "aria-current") == "step")
             cv = pg4.inner_text("#candidate-view")
-            check("Y方向に -3.000mm" in cv and "150.000" in cv and "147.000" in cv and pg4.is_hidden("#export-button")
+            # 表示のマイナスは "−"（U+2212）。数はサーバーの値のまま（以前の確認は ASCII の "-" を見ていた）
+            check("Y方向に −3.000mm" in cv and "150.000" in cv and "147.000" in cv and pg4.is_hidden("#export-button")
                   and pg4.is_enabled("#open-confirm"),
                   "選択肢を押すと Y −3mm の候補（変更前後の XYZ 付き）になるだけで、承認・出力はされない（確認へ進む）")
+            change = pg4.inner_text("#candidate-view .cand-change")
+            check(re.sub(r"\s", "", change) == "Y150.000→147.000",
+                  f"候補のカードに、変わる値を大きく（サーバーの値のまま）：{change}")
+            segs = pg4.eval_on_selector_all("#fig-3d line.seg.after",
+                                            "els => els.map(e => [e.dataset.from, e.dataset.to, e.getAttribute('stroke')])")
+            check(segs and all("C00005" in (f, t) and color == "#ff6a1a" for f, t, color in segs)
+                  and len(segs) == 2,
+                  f"3D の変更後（オレンジ）は、動かす点に触れる区間だけ：{segs}")
+            labels3 = [t for t in pg4.eval_on_selector_all("#fig-3d svg text", "els => els.map(e => e.textContent)")
+                       if "C00005" in t]
+            check(len(labels3) == 1 and "Y −3.000mm" in labels3[0],
+                  f"動かす点の名前は1つだけ（変更量つき）：{labels3}")
+            if shots is not None:
+                pg4.screenshot(path=str(shots / "4b_candidate_y.png"))
             pg4.click("#open-confirm")
             pg4.wait_for_selector("#confirm-overlay:not([hidden])")
             cx = pg4.inner_text("#confirm-xyz")
@@ -239,6 +403,8 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             if shots is not None:
                 pg4.screenshot(path=str(shots / "6b_confirm_xyz.png"))
             pg4.close()
+
+            check_ux_polish(b, url, check, shots)
 
             # SpeechRecognition が無いブラウザー
             pg2 = b.new_page()
@@ -323,7 +489,8 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
           "最初の画面：ステップ1が今のステップで、ドロップの枠が目立つ")
     n = chars(pg)
     check(n <= 160, f"最初の画面の文字は少ない（{n}文字。160文字まで）")
-    check(primaries(pg) == 1 and buttons(pg) <= 2, f"最初の画面：目立つものは1つ（ボタン {buttons(pg)}個）")
+    # ボタンは「？」（使い方）・「サンプルで試す」・「詳細表示」の3つまで（以前は2つまで。？とサンプルを足した）
+    check(primaries(pg) == 1 and buttons(pg) <= 3, f"最初の画面：目立つものは1つ（ボタン {buttons(pg)}個）")
     check(pg.is_visible("#mode-banner") and pg.is_visible("#readonly-note"),
           "最初の画面にも、シミュレーションモードと「実機用の出力・転送・ロボットの起動はしません」を出す")
     shot(pg, "1_start.png")
@@ -351,13 +518,15 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     check(shown == lines, f"3D の点はジョブの位置そのもの（{len(shown)}点。ジョブは {len(lines)}点）")
     shot(pg, "2_loaded.png")
 
-    # 回転・拡大縮小・視点を戻す
+    # 回転・拡大縮小・視点を戻す（「視点を戻す」は回したあとだけ出す）
+    check(pg.is_hidden("#view-reset") and "ドラッグで回す" in pg.text_content("#fig-3d svg"),
+          "最初は「視点を戻す」を出さず、図の中に薄く「ドラッグで回す・ホイールで拡大」を出す")
     a0 = pos_of(pg, "C00005")
     box = pg.locator("#fig-3d").bounding_box()
     cx, cy = box["x"] + box["width"] * 0.25, box["y"] + box["height"] * 0.85
     pg.mouse.move(cx, cy); pg.mouse.down(); pg.mouse.move(cx + 120, cy - 40, steps=8); pg.mouse.up()
     a1 = pos_of(pg, "C00005")
-    check(a0 != a1, f"ドラッグで視点が回る（C00005 の画面の位置 {a0} → {a1}）")
+    check(a0 != a1 and pg.is_visible("#view-reset"), f"ドラッグで視点が回り、「視点を戻す」が出る（C00005 の画面の位置 {a0} → {a1}）")
     check(pg.get_attribute("#step-2", "aria-current") == "step", "回しただけでは位置は選ばれない")
     shot(pg, "2b_rotated.png")
     p, q = pos_of(pg, "C00002"), pos_of(pg, "C00005")
@@ -368,7 +537,7 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     d2 = abs(p[0] - q[0]) + abs(p[1] - q[1])
     check(d2 > d1 * 1.3, f"ホイールで拡大できる（点の間 {d1}px → {d2}px）")
     pg.click("#view-reset")
-    check(pos_of(pg, "C00005") == a0, "「視点を戻す」で最初の向き・大きさに戻る")
+    check(pos_of(pg, "C00005") == a0 and pg.is_hidden("#view-reset"), "「視点を戻す」で最初の向き・大きさに戻る（ボタンは隠れる）")
 
     # 重なって見える点（C00000 と C00007）は、押すと選び分けの一覧が出る
     pt(pg, "C00000").click()
@@ -477,6 +646,11 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     shot(pg, "3c_recording.png")
     pg.click("#voice-stop")
     until(pg, lambda: pg.input_value("#text-input") == FAKE_TEXT)
+    check(pg.is_visible("#heard-label") and pg.inner_text("#heard-label") == "聞き取った文（直せます）"
+          and "heard" in (pg.get_attribute("#text-input", "class") or ""),
+          "声から入った文は「聞き取った文（直せます）」と大きく出す")
+    pg.wait_for_timeout(400)  # ボタンの色の切り替え（0.15秒）が終わってから撮る
+    shot(pg, "3d_heard.png")
     check("一時停止" in pg.inner_text("#mic-label") and pg.is_enabled("#text-input")
           and "primary" in (pg.get_attribute("#text-send", "class") or "") and primaries(pg) == 1,
           "話し終わると認識文が入力欄に入り、マイクは ON のまま一時停止（確かめて「次へ」）")
@@ -495,6 +669,8 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     reply = pg.inner_text("#reply-message")
     check(pg.get_attribute("#step-3", "aria-current") == "step" and pg.is_visible("#reply-message .friendly strong"),
           f"はっきりしない指示には、次にすることを出す：{' / '.join(reply.splitlines())[:60]}")
+    check(pg.inner_text("#next-action") == "もう一度、言い直してください",
+          f"選択肢の無い聞き返しの見出しは「もう一度、言い直してください」：{pg.inner_text('#next-action')}")
     shot(pg, "3b_ask.png")
     until(pg, lambda: pg.is_enabled("#voice-stop"), timeout_ms=4000)
     check("聞いています" in pg.inner_text("#mic-label"), "結果が出ると、マイク ON のまま続けて聞き始める（2回目の指示）")
@@ -533,6 +709,8 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     pg.click('.view-tab[data-view="yz"]')
     check(pg.get_attribute('.view-tab[data-view="yz"]', "aria-selected") == "true" and pg.is_visible("#fig-main svg")
           and pg.is_hidden("#fig-3d"), "2D（Y・Z）に切り替えられる")
+    orange2d = pg.eval_on_selector_all("#fig-main line", "els => els.filter(e => e.getAttribute('stroke') === '#ff6a1a').length")
+    check(orange2d == 2, f"2D でも、変更後（オレンジ）は動かす点に触れる区間だけ（{orange2d}本）")
     pg.click('.view-tab[data-view="3d"]')
 
     check(pg.is_hidden("#engineer-view"), "詳細表示は最初は閉じている")

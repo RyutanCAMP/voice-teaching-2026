@@ -101,6 +101,7 @@ body.loaded #load-error:not([hidden]) { display: block; }
 .work {
   display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 28px;
   max-width: 1360px; width: 100%; margin: 0 auto; padding: 28px 32px 32px; align-items: start;
+  padding-bottom: 64px;  /* 下の固定の帯に、図の注意が隠れないように */
 }
 .stage, .card, .engineer { background: var(--card); border-radius: var(--radius); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04); }
 .stage { padding: 20px 24px 22px; }
@@ -162,7 +163,7 @@ body.recording .rec-buttons { display: flex; }
 body.recording .mic-big { background: var(--red); color: #fff; animation: pulse 1.4s infinite; }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(215, 0, 21, 0.45); } 100% { box-shadow: 0 0 0 24px rgba(215, 0, 21, 0); } }
 .voice-status { min-height: 1.3em; text-align: center; font-size: 14px; color: var(--sub); margin: 0; }
-.partial { min-height: 1.3em; text-align: center; color: #a1a1a6; margin: 2px 0; }
+.partial { min-height: 1.3em; text-align: center; color: var(--text); font-size: 18px; margin: 2px 0; }
 #voice-mode-change { display: block; margin: 0 auto; font-size: 12px; color: #a1a1a6; }
 .text-form { display: flex; gap: 8px; margin-top: 18px; }
 #text-input {
@@ -240,7 +241,7 @@ button.approve { font-size: 17px; padding: 13px 32px; }
 button.approve:not([disabled]) { background: var(--accent); color: #fff; font-weight: 600; }
 
 @media (max-width: 1100px) {
-  .work { grid-template-columns: 1fr; }
+  .work { grid-template-columns: minmax(0, 1fr); }
   .side { position: static; }
   .confirm-grid { grid-template-columns: 1fr; }
   .top { flex-wrap: wrap; }
@@ -310,9 +311,13 @@ body.recording .mic-big[disabled] { opacity: 1; }
 .work:has(#engineer-view:not([hidden])) .side { position: static; }
 
 /* 聞き返しの短い選択肢 */
-.choices { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-.choice { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 8px 14px; font-size: 14px; cursor: pointer; }
-.choice:hover { border-color: var(--blue); }
+.choices { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+/* 選択肢はどれも同じ重さ（目立たせる primary は付けない）。押すと文を送るだけ */
+.choice {
+  flex: 1 1 45%; min-width: 45%; border: 1.5px solid var(--line); background: #fff; border-radius: 14px;
+  padding: 14px 22px; font-size: 17px; font-weight: 600; color: var(--text); cursor: pointer; white-space: nowrap;
+}
+.choice:hover:not([disabled]) { border-color: var(--blue); background: #f5f9ff; }
 /* 認識した文字・変更前後の X・Y・Z */
 .cand-heard { font-size: 13px; color: var(--sub); margin: 4px 0; }
 .xyz table { border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 13px; margin: 6px 0 2px; }
@@ -321,3 +326,70 @@ body.recording .mic-big[disabled] { opacity: 1; }
 .xyz .chg { color: var(--text); font-weight: 700; background: #fff3e8; }
 .xyz .dir { display: block; font-size: 11px; color: var(--sub); font-weight: 400; }
 .xyz .fine { margin: 2px 0 0; }
+
+/* ---- UX 監査の直し（feat/ux-polish） ---- */
+/* 小さな画面：横にはみ出さない。今のステップの名前だけ出す */
+@media (max-width: 600px) {
+  .top { padding: 10px 14px; gap: 10px; }
+  .work { padding: 14px 12px 64px; gap: 16px; }
+  .stage { padding: 14px 12px 16px; }
+  .card { padding: 18px 16px; }
+  .stage-head { flex-wrap: wrap; }
+  .step { padding: 6px 8px; }
+  .step:not(.current) .label { display: none; }
+  .next-action { font-size: 22px; }
+  .load-panel { width: calc(100% - 24px); margin-top: 6vh; }
+  .drop-zone { padding: 48px 16px; }
+  .drop-big { font-size: 22px; }
+  .confirm-box { padding: 20px 16px; }
+  .foot { padding: 6px 12px 8px; }
+}
+/* 背の低い画面：図を小さくして、図の注意が見えるように */
+@media (max-height: 800px) {
+  .fig-3d svg, .fig-main svg { max-height: 50vh; }
+}
+/* 図の下の注意（3つを1つの段落に。文はそのまま） */
+.figure-notes span { display: inline; }
+/* 3D の操作のヒント（格子の目盛りの横に薄く） */
+.view3d text.hint3 { fill: #c0c0c6; font-size: 11px; }
+.stage-head .view-tabs { margin-left: auto; }
+/* 候補のカード：変わる値を大きく（サーバーの値をそのまま） */
+.cand-change { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; margin: 2px 0 6px; font-family: "SF Mono", Consolas, monospace; }
+.cand-change .arrow { color: var(--sub); margin: 0 6px; font-weight: 400; }
+.cand-change .to { color: var(--accent-dark); }
+.friendly.blocked ~ .cand-change .to { color: var(--sub); }  /* 止まった候補はオレンジにしない */
+/* 聞き取った文（直せます） */
+.heard-label { display: block; font-size: 13px; font-weight: 600; color: var(--accent-dark); margin: 18px 0 -10px; }
+#text-input.heard { font-size: 20px; border: 2px solid var(--accent); background: #fff; }
+/* 読めなかった言葉（表示だけ） */
+mark.unknown { background: #ffe3cc; color: var(--text); border-bottom: 2px solid var(--accent); border-radius: 3px; padding: 0 2px; }
+.heard-line { margin: 8px 0 0; font-size: 17px; color: var(--text); }
+/* マイクの状態 */
+.mic-label .dot { color: var(--red); display: inline-block; margin-right: 6px; animation: dotpulse 1.2s ease-in-out infinite; }
+@keyframes dotpulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+body.recording .mic-label::before, body.live .mic-label::before { content: none; }
+body.recording .mic-label { color: var(--red); }
+.mic-hint { text-align: center; margin: -6px 0 0; }
+/* Chrome 以外で声を文字にできなかったとき：コピーを1つだけ目立たせ、マイクは薄く */
+body.need-chrome .mic-big { opacity: 0.35; box-shadow: none; }
+body.need-chrome #browser-note > span { display: none; }
+body.need-chrome #copy-url { font-size: 15px; }
+/* 版と、使い方の小窓 */
+.foot { display: flex; align-items: center; justify-content: center; position: sticky; }
+.foot .ver { position: absolute; left: 32px; font-size: 11px; color: #b0b0b5; font-variant-numeric: tabular-nums; }
+@media (max-width: 600px) { .foot .ver { position: static; margin-right: 8px; } .foot { flex-wrap: wrap; } }
+.help-wrap { position: relative; margin-left: 8px; }
+.help-btn { width: 30px; height: 30px; padding: 0; font-size: 15px; font-weight: 600; color: var(--sub); background: #ececf0; }
+.help-pop {
+  position: absolute; right: 0; top: 40px; z-index: 20; width: min(340px, 86vw); background: #fff; border-radius: 16px;
+  padding: 16px 18px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18); font-size: 14px; line-height: 1.6;
+}
+.help-head { margin: 0 0 4px; font-weight: 600; }
+.help-examples { margin: 0 0 8px; padding-left: 18px; }
+.help-line { margin: 4px 0 0; color: var(--sub); font-size: 13px; }
+.top .help-wrap + #engineer-toggle { margin-left: -12px; }
+/* サンプルで試す */
+.sample-row { margin: 18px 0 0; }
+#sample-button { font-size: 15px; }
+#view-reset:not([hidden]) + .view-tabs { margin-left: 0; }
+@media (max-width: 600px) { .top .help-wrap { margin-left: auto; } }

@@ -10,6 +10,7 @@
 "use strict";
 import { SpeechInput } from "/static/speech.js";
 import { View3D } from "/static/view3d.js";
+import { splitUnknown, displayMinus } from "/static/highlight.js";
 
 const state = {
   sessionId: null,  // サーバーのメモリにある画面の状態の番号
@@ -24,7 +25,10 @@ const state = {
   live: false,          // マイク ON（Web会議のように、一度 ON にすると続けて話せる）
   liveTimer: null,
   liveAt: 0,            // マイクを ON にした・最後に話した時刻（長く放っておいたら OFF）
+  unknownWords: [],     // 最後の指示で、プログラムが読めなかった言葉（facts.unknown_words。表示で目立たせるだけ）
+  needChrome: false,    // Chrome 以外で声を文字にできなかった（アドレスのコピーを目立たせる）
 };
+const SAMPLE_NAME = "DEMO_C_PLACE.JBI";  // 「サンプルで試す」で読む架空のジョブ（サーバーが決まった1つを読む）
 
 const $ = (id) => document.getElementById(id);
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -84,14 +88,19 @@ function recording() {
 }
 
 // ---- 1. 読み込み（ドラッグ＆ドロップ、またはファイルを選ぶ。どちらも loadFile を通る） ----
-async function loadFile(f) {
-  if (!f || recording()) return;
+function resetForLoad() {
   voice.cancel();
   state.live = false;  // ジョブが変わったらマイクは OFF に戻す
   state.voiceFinal = null;
+  state.unknownWords = [];
   $("voice-hint").hidden = true;
   $("voice-consent").hidden = true;
   $("text-input").value = "";
+}
+
+async function loadFile(f) {
+  if (!f || recording()) return;
+  resetForLoad();
   const bytes = new Uint8Array(await f.arrayBuffer());
   let res;
   try {
@@ -104,6 +113,11 @@ async function loadFile(f) {
   } catch (e) {
     res = { ok: false, error: NO_SERVER };
   }
+  applyLoad(res, f.name);
+}
+
+// 読み込みの結果を画面に出す（ファイルから読んでも、サンプルでも同じ）
+function applyLoad(res, fileName) {
   state.sessionId = null; state.view = null; state.st = null;
   closeConfirm();
   stopPlayback();
@@ -119,7 +133,7 @@ async function loadFile(f) {
     return;
   }
   $("load-error").hidden = true;
-  $("file-name").textContent = f.name;
+  $("file-name").textContent = fileName;
   state.sessionId = res.session_id;
   state.view = res.view;
   state.st = res.state;
@@ -135,6 +149,15 @@ async function loadFile(f) {
 }
 
 $("file-input").addEventListener("change", (ev) => loadFile(ev.target.files[0]));
+
+// 「サンプルで試す」：サーバーが決まった1つの架空のジョブ（samples/dummy/DEMO_C_PLACE.JBI）を読む。名前も場所も渡さない
+async function loadSample() {
+  if (recording()) return;
+  resetForLoad();
+  const res = await postJson("/api/sample", {});
+  applyLoad(res, SAMPLE_NAME);
+}
+$("sample-button").addEventListener("click", loadSample);
 
 const drop = $("drop-zone");
 drop.addEventListener("dragover", (ev) => {
@@ -227,7 +250,7 @@ function renderSteps() {
     $(id).hidden = Number(n) !== step;
   }
   // 次に押すものを1つだけ目立たせる
-  for (const id of ["drop-zone", "mic-button", "voice-stop", "consent-yes", "text-send", "open-confirm", "undo-button", "export-button"]) {
+  for (const id of ["drop-zone", "mic-button", "voice-stop", "consent-yes", "text-send", "open-confirm", "undo-button", "export-button", "copy-url"]) {
     $(id).classList.remove("primary");
   }
   const st = state.st;
@@ -238,12 +261,24 @@ function renderSteps() {
   } else if (step === 2) {
     text = "点か番号を押してください";
   } else if (step === 3) {
-    if (recording()) {
-      text = "どうぞ、話してください";
+    // 聞き返しの間は、見出しも聞き返しに合わせる（選択肢があれば「どちらですか？」）
+    const reply = $("reply-message");
+    const asking = !reply.hidden && reply.classList.contains("ask");
+    const askText = asking && reply.querySelector("button.choice:not([disabled])") && !state.unknownWords.length
+      ? "どちらですか？" : "もう一度、言い直してください";
+    if (state.needChrome && !recording() && !$("text-input").value.trim()) {
+      text = "この画面では音声を使えません";
+      primary = "copy-url";
+    } else if (recording()) {
+      text = asking ? askText : "どうぞ、話してください";
       primary = "voice-stop";
     } else if ($("text-input").value.trim()) {
       text = "文を確かめて「次へ」";
       primary = "text-send";
+    } else if (asking) {
+      text = askText;
+      // 選択肢があるときは、どれも同じ重さ（目立たせるボタンを作らない）
+      primary = askText === "どちらですか？" ? null : $("voice-controls").hidden ? "text-send" : "mic-button";
     } else if (!$("voice-consent").hidden) {
       text = "音声入力を使いますか？";
       primary = "consent-yes";
@@ -268,10 +303,37 @@ function renderSteps() {
   }
   $("next-action").textContent = text;
   if (primary) $(primary).classList.add("primary");
+  renderHeard();
   resumeLive();  // マイクが ON なら、入力欄が空のステップ3で、また聞き始める
 }
 
 $("text-input").addEventListener("input", renderSteps);
+
+// 声から入った文は、大きく・枠を付けて「聞き取った文（直せます）」と出す（聞き違いに気づけるように）
+function renderHeard() {
+  const heard = state.voiceFinal !== null && !!$("text-input").value.trim();
+  $("heard-label").hidden = !heard;
+  $("text-input").classList.toggle("heard", heard);
+}
+
+// 聞き取った文を、読めなかった言葉だけ目立たせて出す（テキストのノードで作る。文は変えない）
+function heardNodes(text) {
+  return splitUnknown(text, state.unknownWords).map((part) =>
+    part.unknown ? el("mark", { class: "unknown", title: "この言葉は読めませんでした" }, part.text) : document.createTextNode(part.text));
+}
+
+// ---- 使い方の小窓（？）。Esc か外を押すと閉じる ----
+function setHelp(open) {
+  $("help-pop").hidden = !open;
+  $("help-button").setAttribute("aria-expanded", String(open));
+}
+$("help-button").addEventListener("click", (ev) => {
+  ev.stopPropagation();
+  setHelp($("help-pop").hidden);
+});
+document.addEventListener("click", (ev) => {
+  if (!$("help-pop").hidden && !ev.target.closest(".help-wrap")) setHelp(false);
+});
 $("voice-position").addEventListener("click", () => {
   if (recording()) return;
   state.pickAgain = true;
@@ -330,6 +392,10 @@ function showReply(status, message, choices) {
   if (status === "ok") box.replaceChildren(el("p", {}, message));
   else if (status === "ask") {
     box.replaceChildren(friendly("ask", message));
+    // 読めなかった言葉があれば、聞き取った文の中で目立たせる（言い直すときの手がかり）
+    if (state.unknownWords.length && state.lastHeard) {
+      box.append(el("p", { class: "heard-line" }, "聞き取った文：「", ...heardNodes(state.lastHeard), "」"));
+    }
     // 短い選択肢：押すと、その文を指示として送る（同じ検査を通る。承認・出力はしない）
     if (choices && choices.length) {
       const row = el("div", { class: "choices" });
@@ -371,6 +437,10 @@ async function sendInstruction(text, source) {
   $("reply-message").replaceChildren();
   const res = await postJson("/api/hear", { session_id: state.sessionId, text: text, source: source });
   $("heard-text").textContent = res.heard !== undefined ? res.heard : text;
+  // 別のブランチで facts.unknown_words（読めなかった言葉）が足される。無ければ空のまま
+  const uw = res.facts && res.facts.unknown_words;
+  state.unknownWords = Array.isArray(uw) ? uw.filter((w) => typeof w === "string" && w) : [];
+  state.lastHeard = res.heard !== undefined ? res.heard : text;
   renderFacts(res.facts);
   applyResult(res, false);
   // 候補ができたら、まず図で変更前後の経路を再生して見せる（承認は確認表示のボタンだけ）
@@ -413,9 +483,10 @@ function renderCandidate() {
   const parts = [];
   if (c.blocked_reason) parts.push(friendly("blocked", c.blocked_reason));
   parts.push(el("p", { class: "cand-pos" }, pos));
-  parts.push(el("p", { class: "cand-big" }, `${axis}方向に ${c.delta}mm${dirName(axis, c.delta)}`));
-  if (c.heard) parts.push(el("p", { class: "cand-heard" }, `指示：「${c.heard}」`));
-  parts.push(c.before_xyz ? xyzView(c) : el("p", { class: "cand-values" }, `${c.before_value} → ${c.after_value}`));
+  parts.push(el("p", { class: "cand-big" }, displayMinus(`${axis}方向に ${c.delta}mm`) + dirName(axis, c.delta)));
+  parts.push(changeLine(axis, c));
+  if (c.heard) parts.push(el("p", { class: "cand-heard" }, "指示：「", ...heardNodes(c.heard), "」"));
+  if (c.before_xyz) parts.push(xyzView(c));
   if (c.warnings.length) parts.push(el("ul", { class: "cand-warn" }, ...c.warnings.map((w) => el("li", {}, w))));
   host.replaceChildren(...parts);
   $("candidate-detail").replaceChildren(
@@ -423,6 +494,12 @@ function renderCandidate() {
     diffView(c),
     el("p", {}, "変わる命令の行："),
     el("ul", {}, ...c.affected.map((a) => el("li", {}, a))));
+}
+
+// 変わる値を大きく：「Y 150.000 → 147.000」（サーバーの before_value・after_value をそのまま。表示でマイナスだけ − に）
+function changeLine(axis, c) {
+  return el("p", { class: "cand-change" }, `${axis} ${displayMinus(c.before_value)}`,
+    el("span", { class: "arrow" }, "→"), el("span", { class: "to" }, displayMinus(c.after_value)));
 }
 
 // 確認済みの方向の名前（サーバーの direction_names。今は Z の 上・下 だけ）。未確認の軸には名前を付けない
@@ -490,8 +567,9 @@ function openConfirm() {
   $("confirm-diff").replaceChildren(diffView(st.candidate));
   const cc = st.candidate, [, ax] = cc.target.split(" ");
   $("confirm-xyz").replaceChildren(
-    el("p", { class: "cand-big" }, `${cc.target.split(" ")[0]}：${ax}方向に ${cc.delta}mm${dirName(ax, cc.delta)}`),
-    cc.heard ? el("p", { class: "cand-heard" }, `指示：「${cc.heard}」`) : "",
+    el("p", { class: "cand-big" }, displayMinus(`${cc.target.split(" ")[0]}：${ax}方向に ${cc.delta}mm`) + dirName(ax, cc.delta)),
+    changeLine(ax, cc),
+    cc.heard ? el("p", { class: "cand-heard" }, "指示：「", ...heardNodes(cc.heard), "」") : "",
     cc.before_xyz ? xyzView(cc) : "");
   if (state.view.positions.some((p) => p.xyz)) {
     confirm3d.reset();
@@ -503,7 +581,9 @@ function openConfirm() {
   $("approve-button").disabled = !st.can_approve || recording();
   $("approver-name").disabled = !st.can_approve;
   $("confirm-overlay").hidden = false;
-  if (st.can_approve) $("approver-name").focus(); else $("confirm-close").focus();
+  // 止まった候補の赤い帯がいちばん上に見えるように、上から出す（ボタンへ移るときにスクロールさせない）
+  document.querySelector("#confirm-overlay .confirm-box").scrollTop = 0;
+  if (st.can_approve) $("approver-name").focus({ preventScroll: true }); else $("confirm-close").focus({ preventScroll: true });
 }
 
 function closeConfirm() {
@@ -515,7 +595,9 @@ function closeConfirm() {
 $("open-confirm").addEventListener("click", openConfirm);
 $("confirm-close").addEventListener("click", closeConfirm);
 document.addEventListener("keydown", (ev) => {
-  if (ev.key === "Escape" && !$("confirm-overlay").hidden) closeConfirm();
+  if (ev.key !== "Escape") return;
+  if (!$("help-pop").hidden) { setHelp(false); $("help-button").focus(); return; }
+  if (!$("confirm-overlay").hidden) closeConfirm();
 });
 
 // ---- 承認（このボタンからだけ） ----
@@ -634,6 +716,7 @@ function renderTables() {
 const AXES = { X: 0, Y: 1, Z: 2 };
 const VIEWS = { xy: ["X", "Y"], xz: ["X", "Z"], yz: ["Y", "Z"] };
 const C_LINE = "#c7cbd1", C_BEFORE = "#a1a6ad", C_AFTER = "#ff6a1a", C_POINT = "#1d1d1f", C_SEL = "#0a84ff";
+const C_STOPPED = "#8e8e93";  // 止まった候補（承認できない）の変更後
 
 // 位置の広がりがいちばん大きい2つの軸の図を、最初に大きく出す
 function bestView(positions) {
@@ -663,7 +746,7 @@ const view3d = new View3D($("fig-3d"), { onPick: (name) => {
     return;
   }
   select(name);
-} });
+}, onView: () => { $("view-reset").hidden = $("fig-3d").hidden || !view3d.changed(); } });
 const confirm3d = new View3D($("confirm-figure"), { width: 640, height: 440 });  // 確認表示の中では選び直さない
 
 function data3d() {
@@ -675,6 +758,7 @@ function data3d() {
     selected: state.st ? state.st.selected : null,
     after: c ? { points: c.after_positions.filter((p) => p.xyz), segments: c.after_segments, moved: c.moved } : null,
     delta_label: c ? `${c.target.split(" ")[1]} ${c.delta}mm` : "",
+    stopped: !!(c && c.blocked_reason),  // 止まった候補：変更後をオレンジにしない
     blocked: Object.fromEntries(v.positions.filter((p) => !p.shift_check.ok).map((p) => [p.name, p.shift_check.reason])),
   };
 }
@@ -689,7 +773,7 @@ function renderFigures() {
   const is3d = state.figView === "3d" && state.view.positions.some((p) => p.xyz);
   $("fig-3d").hidden = !is3d;
   $("fig-main").hidden = is3d;
-  $("view-reset").hidden = !is3d;
+  $("view-reset").hidden = !is3d || !view3d.changed();  // 回した・拡大したときだけ出す
   if (is3d) view3d.setData(data3d());
   else drawFigure($("fig-main"), ...VIEWS[state.figView === "3d" ? bestView(state.view.positions) : state.figView], true);
   drawFigure($("fig-xy"), "X", "Y", false);
@@ -742,9 +826,17 @@ function drawFigure(host, axA, axB, big) {
   };
 
   const w = big ? 2.5 : 2;
+  const stopped = !!(c && c.blocked_reason);
+  const cAfter = stopped ? C_STOPPED : C_AFTER;
   if (c) {
     drawSegs(v.segments, before, C_BEFORE, w, "before");        // 変更前（灰色）
-    drawSegs(c.after_segments, after, C_AFTER, w + 0.5, "after"); // 変更後（オレンジ）
+    // 変更後は、動かす点に触れる区間だけを見せる（オレンジ。止まった候補は灰色の点線）。
+    // ほかの区間は変更前と同じ線なので見せない（再生の印が通れるように、線は透明で置いておく）
+    drawSegs(c.after_segments, after, cAfter, w + 0.5, "after");
+    for (const x of segLines.after) {
+      if (x.seg.from !== c.moved && x.seg.to !== c.moved) x.line.setAttribute("stroke", "transparent");
+      else if (stopped) x.line.setAttribute("stroke-dasharray", "3 5");
+    }
   } else {
     drawSegs(v.segments, before, C_LINE, w, "before");
   }
@@ -762,15 +854,16 @@ function drawFigure(host, axA, axB, big) {
     const x = sx(p.xyz[a]), y = sy(p.xyz[b]);
     const moved = c && c.moved === p.name;
     const sel = p.name === selected;
-    const text = p.name + (moved ? "（変更前）" : "");
     const g = svgEl("g", { class: "pt" + (sel ? " sel" : ""), "data-name": p.name });
     g.append(svgEl("circle", { cx: x, cy: y, r: big ? 18 : 8, fill: "transparent" }));  // 押しやすい大きさ
     if (sel) g.append(svgEl("circle", { cx: x, cy: y, r: big ? 14 : 7, fill: "rgba(10,132,255,0.15)", stroke: C_SEL, "stroke-width": 2 }));
     g.append(svgEl("circle", { cx: x, cy: y, r: big ? 6 : 4, fill: moved ? C_BEFORE : (sel ? C_SEL : C_POINT) }));
-    const label = svgEl("text", { x: x + 12, y: placeLabel(x, moved ? y + 24 : y, text.length * 8),
-      fill: sel ? C_SEL : "#6e6e73", "font-weight": sel ? "600" : "400" });
-    label.textContent = text;
-    g.append(label);
+    if (!moved) {  // 動かす点の名前は、変更後の点の横に1つだけ出す
+      const label = svgEl("text", { x: x + 12, y: placeLabel(x, y, p.name.length * 8),
+        fill: sel ? C_SEL : "#6e6e73", "font-weight": sel ? "600" : "400" });
+      label.textContent = p.name;
+      g.append(label);
+    }
     const t = svgEl("title", {});
     t.textContent = `${p.name}  ${p.line}`;
     g.append(t);
@@ -781,9 +874,9 @@ function drawFigure(host, axA, axB, big) {
     const q = after.find((p) => p.name === c.moved);
     if (q) {
       const x = sx(q.xyz[a]), y = sy(q.xyz[b]);
-      svg.append(svgEl("circle", { cx: x, cy: y, r: big ? 7 : 4, fill: C_AFTER }));
-      const text = `${q.name}（変更後）`;
-      const label = svgEl("text", { x: x + 12, y: placeLabel(x, y, text.length * 8), fill: "#c4470a", "font-weight": "600" });
+      svg.append(svgEl("circle", { cx: x, cy: y, r: big ? 7 : 4, fill: cAfter }));
+      const text = `${q.name} ${displayMinus(`${c.target.split(" ")[1]} ${c.delta}mm`)}`;
+      const label = svgEl("text", { x: x + 12, y: placeLabel(x, y, text.length * 8), fill: stopped ? C_STOPPED : "#c4470a", "font-weight": "600" });
       label.textContent = text;
       svg.append(label);
     }
@@ -968,7 +1061,11 @@ const voice = new SpeechInput(Recognition, {
     state.netRetry = 0;
     showVoiceError(failText(kind, message));  // 固定の文。入力欄は変えない
     $("browser-note").hidden = BROWSER !== "other";
+    // Chrome 以外で声を文字にできない：案内の文は1回だけ（上の文）にして、「アドレスをコピー」だけを目立たせる
+    state.needChrome = BROWSER === "other" && (kind === "network" || kind === "not-allowed");
+    document.body.classList.toggle("need-chrome", state.needChrome);
     renderMic();
+    renderSteps();
     offerLocalInstall();
   },
 });
@@ -1018,9 +1115,11 @@ function renderMic() {
   document.body.classList.toggle("live", on);
   $("mic-button").setAttribute("aria-pressed", String(on));
   $("mic-button").setAttribute("aria-label", on ? "マイクをOFFにする" : "マイクをONにする");
-  $("mic-label").textContent = rec ? "マイク ON・聞いています"
-    : state.live ? "マイク ON・一時停止（「次へ」で再開）"
-    : "マイク OFF";
+  if (rec) $("mic-label").replaceChildren(el("span", { class: "dot", "aria-hidden": "true" }, "●"), "聞いています");
+  else $("mic-label").textContent = state.live ? "一時停止中" : "マイク OFF";
+  // 長い説明は、小さな文字の行に分ける
+  $("mic-hint").textContent = !rec && state.live ? "マイクは ON のまま。「次へ」で送ると、また聞きます" : "";
+  $("mic-hint").hidden = !$("mic-hint").textContent;
 }
 
 function startListening() {
@@ -1032,6 +1131,8 @@ function startListening() {
   $("voice-error").hidden = true;
   $("voice-hint").hidden = true;
   $("voice-partial").textContent = "";
+  state.needChrome = false;
+  document.body.classList.remove("need-chrome");
   closeConfirm();
   state.voiceToken = { sessionId: state.sessionId, selected: state.st ? state.st.selected : null };
   state.resumeArmed = false;
