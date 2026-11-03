@@ -85,7 +85,8 @@ export function confirmHeading(c, dir = "") {
   const amount = `${pos} を ${axis} ${displayMinus(trimDecimal(c.delta))}mm${dir || ""}`;
   // 止まった候補は「動かします」と言わない（承認も出力もできない）
   const sp = dir ? "" : " ";  // 「（上へ）」のあとは空けない
-  return c.blocked_reason ? `${amount}${sp}動かす候補（承認できません）` : `${amount}${sp}動かします`;
+  // 止まった候補の見出しも「参考の表示だけ・変更しません」から始める（CHECKER_032 P1-2・内部 Safety P3）
+  return c.blocked_reason ? `参考の表示だけ・変更しません：${amount}${sp}動かした場合（承認できません）` : `${amount}${sp}動かします`;
 }
 
 // ---- 上下の向きの状態（サーバーの state.updown）。無いときは null（何も出さない） ----

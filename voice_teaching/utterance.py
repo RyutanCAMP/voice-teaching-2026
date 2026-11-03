@@ -459,10 +459,11 @@ def _repeat(text: str) -> tuple[tuple[int | None, str] | None, list[tuple[int, i
 # 文の終わりの「動かします」「移動します」「ずらします」（後ろは句読点・空白だけ）。CHECKER_026 M3
 # CHECKER_032 P1-1（唐川さん 11/3 夜）：言い終わりの「ね」「よ」（「下げますね」）・「〜ておきます」・「量＋にします」も、
 # 既定の確認ルール（11/3 17:14）どおり2択で確かめる（候補にしない）。「ません」「ました」「ましょう」は外さない（今まで通り）
-_SHIMASU_END = re.compile(rf"(?<={'|'.join(SHIMASU_AFTER)})します[ねよ]?[\s　。．.!！]*$")
+MAX_AMOUNT_DECIMALS = 6
+_SHIMASU_END = re.compile(rf"(?<={'|'.join(SHIMASU_AFTER)})(?:しておき|し)ます[ねよ]?[\s　。．.!！]*$")
 _SHIMASU_VERB = re.compile(f"(?:{'|'.join(SHIMASU_AFTER)})$")
 _MASU_END = re.compile(rf"(?<={'|'.join(MASU_AFTER)})(?:ておき)?ます[ねよ]?[\s　。．.!！]*$")
-_NI_SHIMASU_END = re.compile(r"([0-9０-９]+(?:[.．][0-9０-９]+)?\s*(?:mm|ＭＭ|MM|ｍｍ|ミリ))\s*にします[ねよ]?[\s　。．.!！]*$", re.I)
+_NI_SHIMASU_END = re.compile(r"([0-9０-９]+(?:[.．][0-9０-９]+)?\s*(?:mm|ＭＭ|MM|ｍｍ|ミリ))\s*に(?:しておき|し)ます[ねよ]?[\s　。．.!！]*$", re.I)
 
 
 def _strip_shimasu(text: str) -> str | None:
@@ -536,6 +537,10 @@ def _read(raw: str, question: bool) -> UtteranceFacts:
         after = rest[m.end():]
         if before.endswith((".", ",")) or (before and "0" <= before[-1] <= "9") or after.startswith((",", ".")):
             unclear.append(f"「{m.group(0)}」（区切りのある数字）")
+            continue
+        if "." in m.group(1) and len(m.group(1).split(".", 1)[1]) > MAX_AMOUNT_DECIMALS:
+            # 細かすぎる小数（float の誤差と区別できない）：黙って丸めず聞き返す（内部 Safety ad77d67 P2）
+            unclear.append(f"「{m.group(0)}」（小数が細かすぎます。小数点以下 {MAX_AMOUNT_DECIMALS}けたまで）")
             continue
         unit = _UNIT_AFTER.match(after)
         if unit is None:

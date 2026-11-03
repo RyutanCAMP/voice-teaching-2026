@@ -134,3 +134,23 @@ def test_masu_endings_are_confirmed_with_two_choices(said, restated):
 def test_other_masu_forms_are_not_turned_into_requests(said):
     # 打ち消し・文の途中の「ます」・過去・誘いは、指示として読まない（今まで通り：候補にしない）
     assert hear(DEMO_C, said)["state"]["candidate"] is None
+
+
+# ---- 内部 Safety（ad77d67）の P2・P3 ----
+@pytest.mark.parametrize("said", ["Zマイナス19.99999999999999ミリ", "Zマイナス3.0000000000004ミリ", "Zマイナス1.1234567ミリ"])
+def test_amounts_with_too_many_decimals_are_asked_back(said):
+    # 細かすぎる小数（float の誤差と区別できない）は、黙って丸めず聞き返す（候補にしない）
+    r = hear(DEMO_C, said)
+    assert r["state"]["candidate"] is None and r["status"] == "ask"
+
+
+def test_six_decimals_are_still_read():
+    f = ut.read_utterance("Zマイナス0.123456ミリ")
+    assert f.amounts and not f.unclear_amounts
+
+
+@pytest.mark.parametrize("said", ["Zマイナス3ミリずらしておきます", "Zマイナス3ミリ動かしておきます", "Zマイナス3ミリにしておきます"])
+def test_te_oku_masu_variants_are_confirmed(said):
+    f = ut.read_utterance(said)
+    assert f.shimasu_text is not None, said
+    assert hear(DEMO_C, said)["state"]["candidate"] is None
