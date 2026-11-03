@@ -755,7 +755,8 @@ def test_e7_claude_tries_to_set_meaning_on_backchannel(tmp_path):
     fake.add(answer("ボタンを押す動作ですね。", [22]))
     r = w.ask(sid, "そう")
     assert r["reply_by"] == "claude" and meanings(w, sid) == []  # 文は出しても、意味は登録しない
-    assert r["guesses"] == []
+    # CHECKER_032 K04：人が教えていない目的の言葉（ボタン・押す）は「AI の推定」の印を付ける（事実のように出さない）
+    assert r["guesses"] == ["ボタンを押す動作ですね。"]
 
 
 def test_ai_guess_is_shown_separately_and_not_registered(tmp_path):
