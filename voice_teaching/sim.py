@@ -137,6 +137,9 @@ def _simulate_blocked(job, original, position, axis, delta_mm, reason, users) ->
         raise SimError(f"{pos.line_index + 1}行目の位置の数値が読めないため、候補を作りません")
     old_token = tokens[k]
     before_value = float(old_token)
+    problem = jbi.precision_problem(position, axis, old_token, delta_mm)
+    if problem:
+        raise SimError(problem)  # 参考の表示でも、言った量と違う量では作らない（CHECKER_032 P1-3）
     tokens[k] = _format_like(old_token, before_value + delta_mm)
     new_body = f"{m.group(1)}={','.join(tokens)}"
     lines[pos.line_index] = new_body + ending

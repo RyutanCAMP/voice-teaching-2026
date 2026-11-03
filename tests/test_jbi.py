@@ -61,7 +61,7 @@ def test_shift_z_works_with_same_mechanism():
 
 
 def test_shift_keeps_decimal_places():
-    job = jbi.parse(load()).shift_position("C00004", "X", 0.1234)
+    job = jbi.parse(load()).shift_position("C00004", "X", 0.123)  # 保存できる量（小数3けた）
     line = [l for l in job.render().splitlines() if l.startswith("C00004=")][0]
     assert line.startswith("C00004=450.123,")
 

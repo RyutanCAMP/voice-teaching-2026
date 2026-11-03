@@ -165,11 +165,9 @@ def test_preview_does_not_return_the_new_job():
 def test_preview_shift_rounding_is_reported():
     res = api.preview_shift(demo(), "C00004", "Z", 0.0004)
     assert res["ok"] is False  # 丸めると変わらない
+    # CHECKER_032 P1-3：保存の精度で丸まる量は候補にしない（理由に言った量と違うことを出す）
     res = api.preview_shift(demo(), "C00004", "Z", 1.2345)
-    assert res["ok"] is True
-    assert res["proposal"]["after_value"] == pytest.approx(121.235) or \
-        res["proposal"]["after_value"] == pytest.approx(121.234)
-    assert any("丸め" in w for w in res["proposal"]["warnings"])
+    assert res["ok"] is False and "言った量と違う" in json.dumps(res, ensure_ascii=False)
 
 
 @pytest.mark.parametrize("position,axis,delta,word", [

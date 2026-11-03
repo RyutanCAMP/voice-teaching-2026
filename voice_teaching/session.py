@@ -364,21 +364,28 @@ class Session:
         delta_text = f"{'+' if delta >= 0 else ''}{delta}"
         if ch.kind == "shift":
             pos, axis = ch.target.split()
+        blocked = self.candidate_blocked_reason
+        if ch.kind == "shift":
+            pos, axis = ch.target.split()
             if self._candidate_value_change:
                 # 「Z座標を3mm下げて」：軸の値の増減として書く。物理の上下（下へ・上へ）とは書かない（CHECKER_028 K2）
                 size = format(abs(delta).normalize(), "f")
-                head = f"位置 {pos} の {axis} の値を {size}mm {'増やします' if delta > 0 else '減らします'}"
+                verb = ("増やした場合" if delta > 0 else "減らした場合") if blocked else ("増やします" if delta > 0 else "減らします")
+                head = f"位置 {pos} の {axis} の値を {size}mm {verb}"
             else:
-                head = f"位置 {pos} を {axis}方向に {delta_text}mm 動かします"
-            text = (f"{head}（{axis}：{before} → {after}）。"
-                    "この位置へ入る移動と、この位置から出る移動の通り道も変わります。")
+                head = f"位置 {pos} を {axis}方向に {delta_text}mm " + ("動かした場合" if blocked else "動かします")
+            if blocked:
+                text = f"{head}の図です（{axis}：{before} → {after}）。"
+            else:
+                text = (f"{head}（{axis}：{before} → {after}）。"
+                        "この位置へ入る移動と、この位置から出る移動の通り道も変わります。")
         else:
-            text = f"{ch.target}の速度を V={before} から V={after} に変えます。"
-        blocked = self.candidate_blocked_reason
+            text = (f"{ch.target}の速度を V={before} から V={after} にした場合の図です。" if blocked
+                    else f"{ch.target}の速度を V={before} から V={after} に変えます。")
         if blocked:
-            # 止まった候補は承認・出力できない（CHECKER_019 R1）。シミュレーションの図と差分で確かめるだけ
-            text += (f"【参考の表示だけ】実機用の検査で止まりました：{blocked}。"
-                     "この候補は承認も出力もできません（シミュレーションの図と差分で確かめるだけです）")
+            # 止まった候補は承認・出力できない（CHECKER_019 R1）。最初に「参考の表示だけ・変更しません」と出す（CHECKER_032 P1-2）
+            text = (f"【参考の表示だけ・変更しません】実機用の検査で止まりました：{blocked}。{text}"
+                    "この候補は承認も出力もできません（シミュレーションの図と差分で確かめるだけです）")
         else:
             text += "これでいいですか？ 承認は画面のボタンで行います"
         warnings = tuple(ch.warnings) + ((f"実機用の検査で止まった理由：{blocked}",) if blocked else ())

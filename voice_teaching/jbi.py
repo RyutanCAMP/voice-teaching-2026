@@ -302,6 +302,9 @@ class Job:
         if not re.fullmatch(_NUM, old_token):
             raise JbiError(f"{pos.line_index + 1}行目の位置の数値が読めないため、変更しません")
         before_value = float(old_token)
+        problem = precision_problem(position, axis, old_token, delta)
+        if problem:
+            raise JbiError(problem)  # 言った量と保存される量が違う：黙って丸めない（CHECKER_032 P1-3）
         new_token = _format_like(old_token, before_value + delta)
         tokens[k] = new_token
         new_body = f"{m.group(1)}={','.join(tokens)}"
@@ -835,6 +838,35 @@ def _split_ending(line: str) -> tuple[str, str]:
 
 def _int_digits(token: str) -> int:
     return len(token.lstrip("+-").split(".", 1)[0])
+
+
+def _decimals_of(token: str) -> int:
+    t = token.strip()
+    return len(t.split(".", 1)[1]) if "." in t else 0
+
+
+def precision_problem(position: str, axis: str, old_token: str, delta_mm: float) -> str | None:
+    """言った量が、その値の JBI の書き方（小数点以下の桁数）でそのまま保存できるか（CHECKER_032 P1-3）。
+
+    保存できなければ理由の文（候補を作らない）。桁数は3けたと決めつけず、その値が書かれている桁数を使う。
+    言った量は10進数のまま比べる（float の誤差 0.1＋0.2＝0.30000000000000004 は丸めとしない）。"""
+    from decimal import Decimal, InvalidOperation
+    try:
+        said = Decimal(repr(float(delta_mm)))
+        old = Decimal(old_token.strip())
+    except (InvalidOperation, ValueError, TypeError):
+        return f"位置 {position} の {axis} の量が読めないため、候補を作りません"
+    d = _decimals_of(old_token)
+    step = Decimal(1).scaleb(-d)
+    # 言った量を、ごく小さな float の誤差（10けた目より下）だけ丸めてから比べる
+    said = said.quantize(Decimal(1).scaleb(-12)) if said.as_tuple().exponent < -12 else said
+    if said == said.quantize(step):
+        return None
+    stored = Decimal(_format_like(old_token, float(old) + float(delta_mm))) - old
+    where = "整数" if d == 0 else f"小数点以下 {d}けた"
+    return (f"位置 {position} の {axis} は JBI に{where}で書かれているため、{said.normalize():f}mm はそのまま保存できません"
+            f"（保存すると {stored:+f}mm になり、言った量と違うため、候補を作りません）。"
+            f"{step:f}mm 単位の量で、もう一度言ってください")
 
 
 def _format_like(original: str, value: float) -> str:

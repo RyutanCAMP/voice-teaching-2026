@@ -179,15 +179,16 @@ def test_load_reads_dummy_as_bytes():
 
 # ---- 6. 丸め・実際の出力値・異常値 ----
 def test_change_that_rounds_to_zero_is_rejected():
-    with pytest.raises(jbi.JbiError, match="値が変わりません"):
+    # CHECKER_032 P1-3：保存の精度で丸まる量は候補にしない（0 になるものも同じ）
+    with pytest.raises(jbi.JbiError, match="言った量と違う"):
         jbi.parse(base()).plan_shift("C00004", "X", 0.0004)
 
 
 def test_rounding_is_reported_with_actual_value():
-    p = jbi.parse(base()).plan_shift("C00004", "X", 0.1234)
-    assert p.after_value == 450.123
-    assert abs(p.actual_delta - 0.123) < 1e-9
-    assert any("丸め" in w for w in p.warnings)
+    # CHECKER_032 P1-3（唐川さん 11/3 夜）：言った量と保存される量が違えば、黙って丸めずに候補を作らない
+    with pytest.raises(jbi.JbiError) as e:
+        jbi.parse(base()).plan_shift("C00004", "X", 0.1234)
+    assert "言った量と違う" in str(e.value) and "+0.123mm" in str(e.value)
 
 
 @pytest.mark.parametrize("bad", [0, float("nan"), float("inf"), True])
