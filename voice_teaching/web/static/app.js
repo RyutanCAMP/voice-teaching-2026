@@ -209,6 +209,9 @@ function renderAll() {
   renderState();
 }
 
+// 実機の JOB の承認のあとの案内（CHECKER_030 S30-3。唐川さんの決定 2026-11-03 17:14）
+const UNDO_HINT = "もう一度直すときは［元に戻す］を押してください";
+
 // 上下の向きの状態（サーバーの state.updown）。無いときは何も出さない。文は highlight.js の updownStatus が作る
 function renderUpdown(u) {
   const box = $("updown-status");
@@ -293,7 +296,7 @@ function renderSteps() {
     $(id).classList.remove("primary");
   }
   const st = state.st;
-  let text = "", primary = null;
+  let text = "", primary = null, hint = "";
   if (step === 1) {
     text = "JOBファイルをドロップしてください";
     primary = "drop-zone";
@@ -346,6 +349,7 @@ function renderSteps() {
     // 実機の JOB（合成ジョブでない）：承認しても出力しない。出力を促さない（内部 QA の再レビュー P1-1）
     text = "承認しました（変更案の確認のみ。実機用JOBは出力できません）";
     primary = null;  // 出力も、捨てる操作も勧めない（内部 QA N-1）
+    hint = UNDO_HINT;  // 次の操作の案内を1行（CHECKER_030 S30-3）。「元に戻す」は目立たせない（primary にしない）
   } else if (!st.exported) {
     text = "承認しました。出力してください";
     primary = "export-button";
@@ -353,6 +357,8 @@ function renderSteps() {
     text = "出力しました";
   }
   $("next-action").textContent = text;
+  $("next-hint").textContent = hint;
+  $("next-hint").hidden = !hint;
   if (primary) $(primary).classList.add("primary");
   renderHeard();
   resumeLive();  // マイクが ON なら、入力欄が空のステップ3で、また聞き始める

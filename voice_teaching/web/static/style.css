@@ -130,6 +130,7 @@ button.play.playing { background: var(--text); color: #fff; }
 /* 右側：大きな見出し（次にすること）と、今のステップのカード1枚 */
 .side { display: flex; flex-direction: column; gap: 16px; position: sticky; top: 92px; }
 .next-action { font-size: 26px; font-weight: 700; line-height: 1.35; margin: 4px 4px 0; letter-spacing: 0.01em; }
+.next-hint { font-size: 14px; color: var(--sub); line-height: 1.5; margin: 4px 4px 0; overflow-wrap: anywhere; }
 .card { padding: 24px; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip { padding: 8px 14px; font-family: "SF Mono", Consolas, monospace; font-size: 14px; background: #f2f2f5; }

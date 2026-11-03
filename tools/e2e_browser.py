@@ -273,6 +273,7 @@ MOVJ_LABEL = "関節移動（MOVJ）：実際の通り道は直線ではあり�
 
 
 REVIEW_ONLY = "変更案の確認のみ。実機用JOBは出力できません"
+UNDO_HINT = "もう一度直すときは［元に戻す］を押してください"  # CHECKER_030 S30-3（唐川さんの決定 2026-11-03 17:14）
 
 
 def check_review_only(browser, url, check, shots: Path | None) -> None:
@@ -309,6 +310,15 @@ def check_review_only(browser, url, check, shots: Path | None) -> None:
                 head = pg.inner_text("#next-action")
                 exp_btn = pg.is_visible("#export-button")
                 band2 = pg.is_visible("#export-review-only")
+                hint = pg.inner_text("#next-hint") if pg.is_visible("#next-hint") else ""
+                if synthetic:
+                    check(hint == "", f"S30-3 {name}（{width}px）：合成ジョブの承認のあとは、元に戻す案内を出さない（{hint!r}）")
+                else:
+                    o = pg.evaluate(OVERFLOW_JS, 8)
+                    check(head == "承認しました（変更案の確認のみ。実機用JOBは出力できません）" and hint == UNDO_HINT
+                          and pg.is_visible("#undo-button") and "primary" not in (pg.get_attribute("#undo-button", "class") or "")
+                          and o["scroll"] <= o["vw"] and not o["out"],
+                          f"S30-3 {name}（{width}px）：承認のあとに「{UNDO_HINT}」を1行出す（{hint!r}・{o['out']}）。元に戻すは目立たせない")
                 if synthetic:
                     check(exp_btn and not band2 and "出力してください" in head,
                           f"{name}（{width}px）：承認のあと、出力ボタンが出て出力を案内する（{head!r}）")
@@ -319,6 +329,10 @@ def check_review_only(browser, url, check, shots: Path | None) -> None:
                     if shots is not None:
                         shots.mkdir(parents=True, exist_ok=True)
                         pg.screenshot(path=str(shots / f"review_only_{width}.png"))
+                    # 元に戻すと、案内は消える（ステップ3に戻る）
+                    pg.click("#undo-button")
+                    until(pg, lambda: pg.get_attribute("#step-4", "aria-current") != "step")
+                    check(pg.is_hidden("#next-hint"), f"S30-3 {name}（{width}px）：元に戻したあとは案内を出さない")
                 pg.close()
 
 
