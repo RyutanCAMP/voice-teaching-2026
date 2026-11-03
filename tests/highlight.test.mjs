@@ -154,3 +154,15 @@ test('ask highlight uses only the line numbers from the server', () => {
   assert.equal(isAskHighlighted({ line_no: 22 }, undefined), false);
   assert.equal(isAskHighlighted(null, [22]), false);
 });
+
+// 前後の移動（highlight.context_lines）は、強調の区間（オレンジ）と見分けられる控えめな見た目（唐川さん 11/3 夜）
+import { askContextLook, ASK_CONTEXT_COLOR, ASK_HIGHLIGHT_COLOR } from '../voice_teaching/web/static/highlight.js';
+test('前後の移動は控えめ：強調と違う色・細い・薄い。MOVJ の点線はそのまま', () => {
+  for (const k of ['movl', 'movj', 'other']) {
+    const c = askContextLook(k), h = askHighlightLook(k);
+    assert.notEqual(c.color, h.color);
+    assert.ok(c.width < h.width && c.opacity < h.opacity);
+    assert.equal(c.dash, segmentLook(k).dash);
+  }
+  assert.notEqual(ASK_CONTEXT_COLOR, ASK_HIGHLIGHT_COLOR);
+});

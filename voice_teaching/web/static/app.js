@@ -956,6 +956,7 @@ function data3d() {
       : askHighlight().positions,  // 「Claude に聞く」の根拠の行の位置（光らせるだけ。選択ではない）
     // 「Claude に聞く」の答えの根拠の区間（サーバーが行番号から決めた行。光らせるだけ）。位置の確認中は出さない
     askLines: dialogStep() === "confirm_position" ? [] : askHighlight().lines,
+    askContext: dialogStep() === "confirm_position" ? [] : askHighlight().context_lines,  // 前後の移動（控えめ）
     // 人が教えた意味（「Claude に聞く」の欄が置く。サーバーのメモリの中だけのもの）。図に印を出すだけ
     taught: Array.isArray(window.vtTaught) ? window.vtTaught : [],
   };
@@ -965,8 +966,13 @@ function data3d() {
 function askHighlight() {
   const h = window.vtAskHighlight;
   if (Array.isArray(h)) return { positions: h, lines: [] };  // 根拠の行を押したとき（その行の位置だけ）
-  if (h && Array.isArray(h.positions) && Array.isArray(h.lines)) return h;
-  return { positions: [], lines: [] };
+  if (h && Array.isArray(h.positions) && Array.isArray(h.lines)) {
+    const entry = Array.isArray(h.entry_lines) ? h.entry_lines : [];
+    const context = (Array.isArray(h.context_lines) ? h.context_lines : []).concat(entry);
+    // 区間に外から入ってくる線（entry_lines）は強調しない（前後の移動と同じく控えめ）
+    return { positions: h.positions, lines: h.lines.filter((n) => !entry.includes(n)), context_lines: context };
+  }
+  return { positions: [], lines: [], context_lines: [] };
 }
 
 $("view-reset").addEventListener("click", () => view3d.reset());

@@ -574,7 +574,7 @@ def test_e4_highlight_is_decided_from_line_numbers(tmp_path):
     w, fake = flow(tmp_path, answer("同じ動きを2回くり返しています。", [22]))
     sid = w.load(demo_bytes())["session_id"]
     r = w.ask(sid, "何をしている？")
-    assert r["highlight"] == {"lines": [21, 22, 23, 24, 25, 26], "positions": ["C00001", "C00002", "C00003"]}
+    assert r["highlight"] == {"lines": [21, 22, 23, 24, 25, 26], "positions": ["C00001", "C00002", "C00003"], "context_lines": [], "entry_lines": [21]}
     assert r["supplement"] == ["21〜26行目：C00001→C00002→C00003（2回）"]
 
 
@@ -583,18 +583,18 @@ def test_e4_movj_line_and_lines_not_in_job(tmp_path):
     sid = first_turn(w, fake)
     fake.add(answer("最後は待機の位置へ戻ります。", [27, 99, 3]))
     r = w.ask(sid, "最後は？")
-    assert r["highlight"] == {"lines": [27], "positions": ["C00004"]}
+    assert r["highlight"] == {"lines": [27], "positions": ["C00004"], "context_lines": [], "entry_lines": []}
     assert r["supplement"] == ["27行目：MOVJ C00004 VJ=25.00（C00004 へ動く）"]
     fake.add(answer("ありません。", [99]))
     r = w.ask(sid, "ほかは？")
-    assert r["highlight"] == {"lines": [], "positions": []} and r["supplement"] == []
+    assert r["highlight"] == {"lines": [], "positions": [], "context_lines": [], "entry_lines": []} and r["supplement"] == []
 
 
 def test_e4_highlight_does_not_come_from_claude_text(tmp_path):
     w, fake = flow(tmp_path)
     sid = first_turn(w, fake)
     fake.add(answer("C00004 の動きです。", []))  # 文に位置番号があっても、根拠の行が無ければ光らせない
-    assert w.ask(sid, "どこ？")["highlight"] == {"lines": [], "positions": []}
+    assert w.ask(sid, "どこ？")["highlight"] == {"lines": [], "positions": [], "context_lines": [], "entry_lines": []}
 
 
 def test_e4_static_auto_highlight_and_movj_look():
@@ -895,7 +895,7 @@ def test_real_three_turns_single_block_confirm_then_three_times(tmp_path):
     assert r2["status"] == "ask_which" and r2["reply"] == q and len(fake.requests) == n
     p = r2["talk"]["pending"]
     assert p["question"] == q and [o["label"] for o in p["options"]] == [talk.CONFIRM_YES, talk.CONFIRM_NO]
-    assert r2["highlight"] == {"lines": [21, 22, 23, 24, 25, 26], "positions": ["C00001", "C00002", "C00003"]}
+    assert r2["highlight"] == {"lines": [21, 22, 23, 24, 25, 26], "positions": ["C00001", "C00002", "C00003"], "context_lines": [], "entry_lines": [21]}
     assert meanings(w, sid) == []  # 押すまで登録しない（E2-7 ④）
     # 声・文字の「はい」では選ばない
     fake.add(answer("どの動きか、ボタンで選んでください。", []))
@@ -928,13 +928,15 @@ def test_real_single_block_other_move_does_not_register(tmp_path):
 
 
 def test_real_first_turn_highlight_includes_movj_lines_but_they_stay_dotted(tmp_path):
-    # 1ターン目の根拠 20〜27 は、MOVJ の行（20・27）と C00000・C00004 も光らせる。
-    # 線の見た目は区間の種類のまま（MOVJ は点線。highlight.js の askHighlightLook・e2e で確かめる）
+    # 1ターン目の根拠 20〜27：くり返しの区間（21〜26）を強く光らせ、前後の移動（MOVJ の 20・27 行）は控えめに出す
+    # （唐川さん 11/3 夜）。線の見た目は区間の種類のまま（MOVJ は点線。highlight.js・e2e で確かめる）
     w, fake = flow(tmp_path, answer(REAL_1, list(range(20, 28))), updown_config=confirmed_config(tmp_path))
     sid = w.load(demo_bytes())["session_id"]
     r = w.ask(sid, "このロボット、何をしている？")
-    assert r["highlight"]["lines"] == list(range(20, 28))
-    assert r["highlight"]["positions"] == ["C00000", "C00001", "C00002", "C00003", "C00004"]
+    assert r["highlight"]["lines"] == list(range(21, 27))  # 区間（意味の登録などに使う）
+    assert r["highlight"]["context_lines"] == [20, 27]
+    assert r["highlight"]["entry_lines"] == [21]  # 1回目に C00000 から入ってくる線は、強調せず控えめに描く
+    assert r["highlight"]["positions"] == ["C00001", "C00002", "C00003"]
     segs = {s["line_no"]: s["kind"] for s in __import__("voice_teaching.web.api", fromlist=["x"]).job_view(
         demo_bytes())["segments"]}
     assert segs[27] == "movj" and 20 not in segs  # 20行目は最初の移動（線は無い）。27行目は MOVJ の点線

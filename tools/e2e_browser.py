@@ -911,13 +911,19 @@ def check_talk(browser, check, shots: Path | None, errors: list, out: Path) -> N
             pg.wait_for_selector("#ask-turns .thinking", timeout=3000)
             check("考えています" in pg.inner_text("#ask-turns .thinking"), "会話：返事を待つ間「考えています…」が出る")
             pg.wait_for_selector("#ask-turns .bubble.claude:not(.thinking)")
-            until(pg, lambda: pg.locator("#fig-3d line.ask-hl").count() == 7)
-            check(pg.locator("#fig-3d line.ask-hl").count() == 7,
-                  "会話：返事が出たら、根拠の行（20〜27行目）の区間が 3D で自動で光る（押さなくてよい）")
-            movj = pg.locator("#fig-3d line.ask-hl.seg-movj")
+            until(pg, lambda: pg.locator("#fig-3d line.ask-hl").count() == 5)
+            check(sorted(pg.eval_on_selector_all("#fig-3d line.ask-hl", "els => els.map(e => +e.dataset.line)")) == [22, 23, 24, 25, 26],
+                  "会話：返事が出たら、くり返しの動き（22〜26行目の線）が 3D で自動で強く光る（押さなくてよい）")
+            ctx = pg.locator("#fig-3d line.ask-hl-context")
+            check(sorted(pg.eval_on_selector_all("#fig-3d line.ask-hl-context", "els => els.map(e => +e.dataset.line)")) == [21, 27]
+                  and all(float(x) < 0.5 for x in pg.eval_on_selector_all("#fig-3d line.ask-hl-context", "els => els.map(e => e.getAttribute('stroke-opacity'))")),
+                  "会話：区間に入ってくる移動（21行目・C00000 から）と、区間のあとの移動（27行目）は、控えめな色で出す")
+            movj = pg.locator("#fig-3d line.ask-hl-context.seg-movj")
             check(movj.count() == 1 and movj.first.get_attribute("stroke-dasharray") == "2 6"
                   and pg.locator('#fig-3d line.seg.before.seg-movj[data-to="C00004"]').get_attribute("stroke-dasharray") == "2 6",
-                  "会話：光らせても MOVJ の区間は点線のまま（直線の通り道に見せない）")
+                  "会話：控えめに出しても MOVJ の区間は点線のまま（直線の通り道に見せない）")
+            if shots is not None:
+                pg.screenshot(path=str(shots / "talk_1_highlight.png"))
             check(pg.locator("#ask-turns .bubble.claude").count() == 1, "会話：本物と同じ文（3か所・2回）がそのまま表示される")
             check("21〜26行目：C00001→C00002→C00003（2回）" in pg.inner_text("#ask-turns .supplement"),
                   "会話：番号は補足として小さく出る")
@@ -927,9 +933,9 @@ def check_talk(browser, check, shots: Path | None, errors: list, out: Path) -> N
             pg.click("#ask-send")
             pg.wait_for_selector("#ask-turns .talk-choice")
             labels = pg.locator("#ask-turns .talk-choice").all_inner_texts()
-            until(pg, lambda: pg.locator("#fig-3d line.ask-hl").count() == 6)
+            until(pg, lambda: pg.locator("#fig-3d line.ask-hl").count() == 5)
             check(labels == ["この動きです", "ほかの動き"] and "この光っている動き（21〜26行目のくり返し）" in pg.inner_text("#ask-turns")
-                  and pg.locator("#fig-3d line.ask-hl").count() == 6 and pg.locator("#fig-3d g.taught-mark").count() == 0,
+                  and pg.locator("#fig-3d line.ask-hl").count() == 5 and pg.locator("#fig-3d g.taught-mark").count() == 0,
                   f"会話：区間が1つなら、その区間を光らせて［この動きです］［ほかの動き］で確かめる（押すまで覚えない）：{labels}")
             pg.locator("#ask-turns .talk-choice", has_text="この動きです").click()
             until(pg, lambda: pg.locator("#fig-3d g.taught-mark").count() == 1)

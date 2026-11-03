@@ -61,7 +61,14 @@ export function segmentLook(kind) {
 export const ASK_HIGHLIGHT_COLOR = "#ff9f0a";
 export function askHighlightLook(kind) {
   const look = segmentLook(kind);
-  return { kind: look.kind, color: ASK_HIGHLIGHT_COLOR, dash: look.dash, width: 5 * look.width, opacity: look.kind === "movl" ? 0.55 : 0.8 };
+  return { kind: look.kind, color: ASK_HIGHLIGHT_COLOR, dash: look.dash, width: 5 * look.width, opacity: look.kind === "movl" ? 0.85 : 0.8 };  // 変える対象の区間は、はっきり（唐川さん 11/3 夜）
+}
+
+// 前後の移動（サーバーの highlight.context_lines）：強調の区間と見分けられるよう、控えめな色・細さ・薄さで出す
+export const ASK_CONTEXT_COLOR = "#8fa3bf";
+export function askContextLook(kind) {
+  const look = segmentLook(kind);
+  return { kind: look.kind, color: ASK_CONTEXT_COLOR, dash: look.dash, width: 3 * look.width, opacity: 0.35 };
 }
 
 // 光らせる行（サーバーの highlight.lines）に入る区間か。行番号が数でない・無いときは光らせない

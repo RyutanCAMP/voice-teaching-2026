@@ -785,6 +785,21 @@ class Explainer:
             change, notes, count = None, [], None
         ev_lines = [e["line"] for e in conv.evidence(data["evidence_lines"])]
         record = talk.change_record(count, intent, change, ev_lines)
+        if shown is None:
+            # 文の中の回数：プログラムが数えたくり返しの回数・利用者が言った回数・（変更の確認なら）今の回数と読んだ回数だけ
+            allowed = {r["count"] for r in (conv.facts or {}).get("repeats", [])}
+            for u in conv.utterances:
+                allowed |= {c for c in talk.reply_counts(u) if c is not None}
+            from_to = None
+            if record is not None and intent == "change_request":
+                allowed |= {c for c in (record["program_from"], record["program_total"]) if c is not None}
+                if record["program_from"] is not None and record["program_total"] is not None:
+                    from_to = (record["program_from"], record["program_total"])
+            problem = talk.reply_count_problem(data["reply"], allowed, from_to)
+            if problem is not None and intent == "change_request" and record is not None:
+                record["mismatch"] = True  # 回数の食い違い（検証エラー）。Claude の文は使わない
+            elif problem is not None:
+                why = shown = FIXED_NUMBER
         if shown is None and record is not None and record["mismatch"] and intent == "change_request":
             why = shown = talk.COUNT_MISMATCH  # 人の文の回数と Claude の数が違う：Claude の文（数を言う）は使わない
         conv.pending_result = RESULT_SHOWN if why is None else RESULT_HIDDEN.format(why=why)

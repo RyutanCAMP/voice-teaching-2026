@@ -219,13 +219,25 @@ def discussed_block(blocks: list[Block], last_evidence) -> tuple[Block | None, l
 
 
 # ---- 光らせる範囲と補足（E4・E1。プログラムが行番号から決める） ----
+def _enters_from_outside(texts: dict, b: "Block") -> bool:
+    """区間の最初の行の移動が、区間の外の位置から入ってくるか（直前の移動の命令の位置が区間に無い）。"""
+    before = [n for n in texts if n < b.first_line and texts[n].refs]
+    if not before:
+        return False
+    return not set(texts[max(before)].refs) <= set(b.positions)
+
+
 def highlight_and_supplement(job: jbi.Job | None, evidence: list[dict]) -> tuple[dict, list[str]]:
-    """根拠の行（プログラムが確かめたもの）から、光らせる行・位置と、補足の文を作る。Claude の文は使わない。"""
+    """根拠の行（プログラムが確かめたもの）から、光らせる行・位置と、補足の文を作る。Claude の文は使わない。
+    くり返しの区間に当たる根拠があれば、その区間を lines（強く光らせる）にし、区間の外の根拠の行（前後の移動）は
+    context_lines（控えめに出す）に分ける（唐川さん 11/3 夜：動作全体と、変える対象の区間の両方が分かるように）。"""
     if job is None or not evidence:
-        return {"lines": [], "positions": []}, []
+        return {"lines": [], "positions": [], "context_lines": [], "entry_lines": []}, []
     texts = {ins.index + 1: ins for ins in job.instructions}
     blocks = repeat_blocks(job)
     lines: list[int] = []
+    block_lines: list[int] = []
+    other_lines: list[int] = []
     supplement: list[str] = []
     for ev in evidence:
         n = ev.get("line")
@@ -236,21 +248,33 @@ def highlight_and_supplement(job: jbi.Job | None, evidence: list[dict]) -> tuple
             for b in hit:
                 if b.label not in supplement:
                     supplement.append(b.label)
-                lines.extend(x for x in b.lines() if x not in lines)
+                block_lines.extend(x for x in b.lines() if x not in block_lines)
         else:
             ins = texts[n]
             note = dg.evidence_note(ins.text)
             s = f"{n}行目：{ins.text}" + (f"（{note}）" if note else "")
             if s not in supplement:
                 supplement.append(s)
-            if n not in lines:
-                lines.append(n)
+            if n not in other_lines:
+                other_lines.append(n)
+    if block_lines:
+        # 区間の最初の行の線は、1回目だけ区間の外の点から入ってくる（例：C00000 → C00001）。その線は「前の移動」として控えめに出す
+        entering = []
+        for b in blocks:
+            if b.first_line in block_lines and _enters_from_outside(texts, b):
+                entering.append(b.first_line)
+        lines = block_lines  # 区間（意味の登録などに使う。変えない）
+        context = [n for n in other_lines if n not in block_lines]
+    else:
+        lines, context, entering = other_lines, [], []
     positions: list[str] = []
     for n in sorted(lines):
         for p in texts[n].refs:
             if _POS.fullmatch(p) and p in job.positions and p not in positions:
                 positions.append(p)
-    return {"lines": sorted(lines), "positions": positions}, supplement
+    # entry_lines：表示だけ。区間の最初の行の線（1回目に区間の外から入ってくる線）は、強調せず控えめに描く
+    return {"lines": sorted(lines), "positions": positions, "context_lines": sorted(context),
+            "entry_lines": sorted(entering)}, supplement
 
 
 # ---- E1 やさしい言葉（返事の検査） ----
@@ -388,6 +412,9 @@ def change_record(reading: CountReading | None, intent: str | None, change: dict
     else:
         mismatch = claude_total != prog_total
     target = reading.target if reading else None
+    claude_from = claude_repeat.get("from_count") if claude_repeat else None
+    if claude_from is not None and target is not None and claude_from != target.count:
+        mismatch = True  # Claude が読んだ今の回数が、プログラムが数えた回数と違う
     ev = list(evidence_lines or [])
     return {
         "kind": "repeat",
@@ -406,6 +433,45 @@ def change_record(reading: CountReading | None, intent: str | None, change: dict
         "target_note": (reading.target_note if reading else None) if target is None else None,
         "note": CHANGE_RECORD_NOTE,
     }
+
+
+# ---- Claude の答えの中の回数（内部レビュー P1-1・P2-1、唐川さん 11/3 夜：検証エラーとして扱う。文は書き換えない） ----
+_KANJI_NUM = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+_REPLY_COUNT = re.compile(r"(\d+|[一二三四五六七八九十]+)\s*回")
+_REPLY_FROM_TO = re.compile(r"(\d+|[一二三四五六七八九十]+)\s*回\s*から\s*(\d+|[一二三四五六七八九十]+)\s*回")
+_REPLY_TIME = re.compile(r"\d+(?:\.\d+)?\s*(?:秒|分|時間)|[一二三四五六七八九十]+\s*(?:秒|分間|時間)")
+
+
+def _count_value(s: str) -> int | None:
+    if s.isdigit():
+        return int(s)
+    if s in _KANJI_NUM:
+        return _KANJI_NUM[s]
+    if len(s) == 2 and s[0] == "十" and s[1] in _KANJI_NUM:  # 十一〜十九
+        return 10 + _KANJI_NUM[s[1]]
+    if len(s) == 2 and s[1] == "十" and s[0] in _KANJI_NUM:  # 二十〜九十
+        return 10 * _KANJI_NUM[s[0]]
+    return None  # 読めない形（使ってよい数とみなさない）
+
+
+def reply_counts(text: str) -> list[int | None]:
+    """文の中の「N回」の N（読めない形は None）。"""
+    return [_count_value(m.group(1)) for m in _REPLY_COUNT.finditer(_nfkc(text))]
+
+
+def reply_count_problem(text: str, allowed_counts: set[int], from_to: tuple[int, int] | None = None) -> str | None:
+    """Claude の文の回数が、プログラムが数えた・読んだ回数と合うか。合わなければ理由（"time"・"from_to"・"count"）。
+    from_to：変更の確認のときの（プログラムが数えた今の回数, 利用者の文から読んだ回数）。"""
+    t = _nfkc(text)
+    if _REPLY_TIME.search(t):
+        return "time"  # 時間はプログラムが数えていない
+    if from_to is not None:
+        for m in _REPLY_FROM_TO.finditer(t):
+            if (_count_value(m.group(1)), _count_value(m.group(2))) != tuple(from_to):
+                return "from_to"
+    if any(c is None or c not in allowed_counts for c in reply_counts(t)):
+        return "count"
+    return None
 
 
 def looks_like_change(text: str) -> bool:
