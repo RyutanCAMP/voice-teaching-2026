@@ -172,11 +172,16 @@ def test_repeat_facts():
 @pytest.mark.parametrize("source", SOURCES)
 @pytest.mark.parametrize("phrase", ["置くところ", "置き場所", "置く位置", "取るところ", "つかむところ", "離すところ"])
 def test_place_ref_without_position_asks(phrase, source):
-    r = hear(f"{phrase}を下に3mm", source)
-    assert r["status"] == "ask" and cand(r) is None and r["choices"] == []
-    assert r["message"] == f"「{phrase}」がどの位置か決まっていません。位置を選んでください"
+    # 発話の検査（pre_check）は今どおり聞き返す（位置は決めない）
     f = ut.read_utterance(f"{phrase}を下に3mm")
     assert f.place_ref == phrase and phrase not in f.unknown_words
+    assert ut.pre_check(f).message == f"「{phrase}」がどの位置か決まっていません。位置を選んでください"
+    # 画面の流れでは、feat/claude-dialog の会話の層がこの聞き返しを受け持つ：位置の候補を出して、人に選んでもらう。
+    # 候補（変更）はまだ作らない。どの位置かは人がボタンか短い肯定で選ぶ（tests/test_dialog.py）
+    r = hear(f"{phrase}を下に3mm", source)
+    assert r["status"] == "ask" and cand(r) is None and r["choices"] == []
+    assert r["state"]["dialog"]["step"] in ("confirm_position", "pick")
+    assert r["state"]["selected"] == "C00005"
 
 
 def test_place_ref_with_position_number_is_read_normally():

@@ -7,6 +7,11 @@
 - 出力（export）は sim.export_sim（合成ジョブだけ）。失敗は理由を返し、成功と表示させない。
 - 承認の後で新しい指示・元に戻す・位置の選択があったら、承認を取り消す。
 - 実機用の出力・転送・ロボットの起動は無い。
+- 承認待ちの候補があるときの移動・速度の指示は、解釈の係（Claude）を呼ぶ前に断る（呼ばない）。
+- Claude との会話（「置くところを少し手前にして」。voice_teaching/dialog.py）：場所の言葉があれば、位置の候補を
+  解釈の係に頼み（合成ジョブだけ）、プログラムが照合して、人がボタン（か短い肯定）で選ぶ。方向は6つのボタン、
+  量は人の言葉。集めたことは決まった文（「C00005をYのマイナス3ミリ」）にして、ふつうの指示と同じ流れに通す。
+  会話の選択肢は choose（/api/dialog）で受け取り、今の選択肢の番号（turn）と合わなければ使わない。
 """
 from __future__ import annotations
 
@@ -17,8 +22,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import claude_interpreter, jbi, mock_claude, sim
+from .. import dialog as dg
 from .. import utterance as ut
-from ..session import Comparison, Reply, Session
+from ..session import PENDING_MESSAGE, Comparison, Reply, Session
 from . import api
 
 MAX_SESSIONS = 8
@@ -39,6 +45,8 @@ class _Entry:
     approval: sim.Approval | None = None
     approved_candidate: object | None = None      # 承認したときの候補（同じものか確かめる）
     exported: str | None = None
+    dialog: dg.Dialog = field(default_factory=dg.Dialog)  # Claude との会話の状態（メモリの中だけ。保存しない）
+    frame: object | None = None                   # 案B：FRAME（まだ無い。あれば label・aliases で位置を決める）
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     # Session に渡すシミュレーション（実機用の検査に断られたときだけ呼ばれる）
@@ -101,27 +109,248 @@ class WebFlow:
             return {"ok": False, "error": "指示の種類（voice か text）が分かりません"}
 
         def run(e: _Entry) -> dict:
-            s = e.session
             self._cancel_approval(e, "新しい指示があったため")
-            r = s.hear(text, source=source)
-            calls: list[dict] = []
-            if r.status == "ok":
-                f = s.facts
-                if f is not None and f.op in ("move", "speed") and (f.position or s.selected) is None:
-                    # 位置が決まらなければ、解釈の係（Claude）には送らない
-                    s.log.append(("聞き返し", NO_POSITION))
-                    r = Reply("ask", NO_POSITION, facts=f)
+            f0 = ut.read_utterance(text)
+            out = (self._dialog_turn(e, text, source, f0) if e.dialog.step is not None
+                   else self._maybe_start_dialog(e, text, source, f0))
+            if out is not None:
+                return out
+            return self._instruction(e, text, source)
+        return self._run(sid, run)
+
+    def _instruction(self, e: _Entry, text: str, source: str) -> dict:
+        """ふつうの指示：Session.hear → 解釈の係 → select / propose / compare / undo。"""
+        s = e.session
+        r = s.hear(text, source=source)
+        calls: list[dict] = []
+        if r.status == "ok":
+            f = s.facts
+            if f is not None and f.op in ("move", "speed") and s.candidate is not None:
+                # 承認待ちの候補がある：解釈の係（Claude）には送らない（呼ぶ前に断る）
+                r = s.pending_reply(f)
+            elif f is not None and f.op in ("move", "speed") and (f.position or s.selected) is None:
+                # 位置が決まらなければ、解釈の係（Claude）には送らない
+                s.log.append(("聞き返し", NO_POSITION))
+                r = Reply("ask", NO_POSITION, facts=f)
+            else:
+                try:
+                    calls = self.interpreter.decide(s.facts, s.selected, list(s.original.positions))
+                except claude_interpreter.InterpreterError as ex:
+                    # モックへ自動で切り替えない。固定の文で止める
+                    s.log.append(("止めた理由", str(ex)))
+                    r = Reply("stop", str(ex), facts=f)
                 else:
-                    try:
-                        calls = self.interpreter.decide(s.facts, s.selected, list(s.original.positions))
-                    except claude_interpreter.InterpreterError as ex:
-                        # モックへ自動で切り替えない。固定の文で止める
-                        s.log.append(("止めた理由", str(ex)))
-                        r = Reply("stop", str(ex), facts=f)
-                    else:
-                        r = self._dispatch(e, r, calls)
-            return {"ok": True, "heard": text, "source": source, "facts": _facts(s.facts),
-                    "tool_calls": calls, **self._reply(e, r)}
+                    r = self._dispatch(e, r, calls)
+        return {"ok": True, "heard": text, "source": source, "facts": _facts(s.facts),
+                "tool_calls": calls, "dialog": False, **self._reply(e, r)}
+
+    # ---- Claude との会話（voice_teaching/dialog.py） ----
+    def _speaker(self) -> str:
+        return "Claude" if self.interpreter.kind == "claude" else dg.MOCK_SPEAKER
+
+    def _dialog_out(self, e: _Entry, text: str, source: str, f0, status: str, message: str,
+                    who: str | None = None, choices: tuple = ()) -> dict:
+        """会話の1回分の応答（ここでは候補を作らない）。会話の欄と作業ログに残す。"""
+        s = e.session
+        s.forget_question()
+        e.dialog.say(who or self._speaker(), message, status)
+        s.log.append(({"ok": "結果", "ask": "聞き返し", "stop": "止めた理由"}[status], message))
+        return {"ok": True, "heard": text, "source": source, "facts": _facts(f0), "tool_calls": [], "dialog": True,
+                "status": status, "message": message, "blocked_reason": None, "candidate_made": False,
+                "choices": [{"label": label, "text": t} for label, t in choices]}
+
+    def _human(self, e: _Entry, text: str, source: str) -> None:
+        e.dialog.say("人", text, "human")
+        e.session.log.append(("発話", f"{'音声' if source == 'voice' else '文字'}：{text}"))
+
+    def _maybe_start_dialog(self, e: _Entry, text: str, source: str, f0) -> dict | None:
+        """場所の言葉（「置くところ」）で始まる会話。ほかの pre_check の結果（打ち消し・繰り返し・疑問の形など）は変えない。"""
+        s, d = e.session, e.dialog
+        word = dg.find_place_word(text, f0)
+        if word is None:
+            return None
+        ops = [k for k in f0.kinds if k in ut.OPS]
+        if (f0.negations or f0.undo_negations or getattr(f0, "repeat", None) or getattr(f0, "question", False)
+                or f0.positions or f0.bad_positions or len(ops) > 1 or f0.op in ("speed", "compare", "undo")
+                or any(r != ut.FRONT_BACK_MESSAGE for r in f0.stop_reasons)):
+            return None  # 今の流れのまま（打ち消しは止める・繰り返しは2択・承認の言葉は断る など）
+        d.start(word, dg.find_relative_dir(text, f0), dg.Slots())
+        self._human(e, text, source)
+        if s.candidate is not None:  # 承認待ちの候補がある：位置の候補も頼まない
+            d.end()
+            return self._dialog_out(e, text, source, f0, "stop", PENDING_MESSAGE, who="アプリ")
+        fs = ut.read_utterance(dg.substitute_opening(text, word))
+        if fs.unknown_words:  # B1：知らない言葉を捨てて読まない
+            d.end()
+            return self._dialog_out(e, text, source, f0, "ask", ut.unknown_words_message(fs.unknown_words, "move"),
+                                    who="アプリ")
+        slots = dg.read_slots(fs, opening=True)
+        if slots.problem:
+            d.end()
+            return self._dialog_out(e, text, source, f0, "ask", slots.problem, who="アプリ")
+        d.amount, d.axis, d.sign = slots.amount, slots.axis, slots.sign
+        d.turn += 1
+        return self._locate(e, text, source, f0, word)
+
+    def _locate(self, e: _Entry, text: str, source: str, f0, word: str) -> dict:
+        s, d = e.session, e.dialog
+        job = s.original
+        frame_pos = dg.frame_lookup(e.frame, word)
+        cand = dg.frame_candidate(job, frame_pos) if frame_pos else None
+        if cand is not None:  # 案B：専門家が確定した名前。Claude は呼ばない
+            d.candidates = [cand]
+        elif not sim._is_synthetic(s.original_bytes):  # 合成でないジョブの中身は送らない
+            d.step = "pick"
+            return self._dialog_out(e, text, source, f0, "ask", dg.NOT_SYNTHETIC.format(word=word), who="アプリ")
+        else:
+            locate = getattr(self.interpreter, "locate", None)
+            if locate is None:
+                d.step = "pick"
+                return self._dialog_out(e, text, source, f0, "ask", dg.NO_LOCATOR, who="アプリ")
+            try:
+                raw = locate(text, word, list(job.positions), dg.instruction_lines(job))
+            except claude_interpreter.InterpreterError as ex:
+                d.step = "pick"
+                return self._dialog_out(e, text, source, f0, "ask", dg.LOCATE_ERROR.format(error=ex), who="アプリ")
+            except Exception:
+                d.step = "pick"
+                return self._dialog_out(e, text, source, f0, "ask", dg.LOCATE_FAILED.format(word=word), who="アプリ")
+            d.candidates = dg.verify_candidates(job, raw)
+            if not d.candidates:  # 照合に通らない答えは使わない（推測で補わない）
+                s.log.append((self._who(), "位置の候補は、照合に通りませんでした"))
+                d.step = "pick"
+                return self._dialog_out(e, text, source, f0, "ask", dg.LOCATE_FAILED.format(word=word), who="アプリ")
+            s.log.append((self._who(), "位置の候補：" + "・".join(
+                f"{c.position}（根拠 {'・'.join(str(x.line_no) for x in c.evidence)}行目）" for c in d.candidates)))
+        d.step = "confirm_position"
+        msg = (dg.ASK_ONE.format(word=word, pos=d.candidates[0].position) if len(d.candidates) == 1
+               else dg.ASK_MANY.format(word=word, n=len(d.candidates)))
+        return self._dialog_out(e, text, source, f0, "ask", msg)
+
+    def _dialog_turn(self, e: _Entry, text: str, source: str, f0) -> dict | None:
+        """会話の途中の発話。None を返したら、会話をやめて、ふつうの指示として読む。"""
+        d = e.dialog
+        if d.step == "pick":
+            d.end()
+            return None
+        v = ut.pre_check(f0)
+        if d.step == "confirm_position":
+            self._human(e, text, source)
+            if dg.is_affirmative(text):  # 選択であって承認ではない（候補が1つのときだけ）
+                if len(d.candidates) == 1:
+                    return self._confirm_position(e, text, source, f0, d.candidates[0].position)
+                return self._dialog_out(e, text, source, f0, "ask", dg.AFFIRM_MANY)
+            if f0.op == "undo" and v.status == "ok":
+                d.end()
+                return self._dialog_out(e, text, source, f0, "ok", dg.END_UNDO)
+            if v.status == "stop":  # 打ち消し・承認の言葉など：止めて、同じ所にいる（選択肢もそのまま）
+                return self._dialog_out(e, text, source, f0, "stop", v.message, who="アプリ")
+            return self._dialog_out(e, text, source, f0, "ask", dg.CONFIRM_STAY)
+        # ask_move：方向と量を聞いている
+        if f0.negations or f0.undo_negations:
+            self._human(e, text, source)
+            return self._dialog_out(e, text, source, f0, "stop", v.message, who="アプリ")
+        if f0.op == "undo" and v.status == "ok":
+            self._human(e, text, source)
+            d.end()
+            return self._dialog_out(e, text, source, f0, "ok", dg.END_UNDO)
+        if f0.positions or f0.bad_positions or f0.op in ("speed", "compare") or "select" in f0.kinds:
+            d.end()  # 新しい指示：会話をやめて、ふつうに読む
+            return None
+        self._human(e, text, source)
+        if getattr(f0, "repeat", None) or getattr(f0, "question", False):
+            # 繰り返し・疑問の形は、今の pre_check の答えのまま（量として使わない）
+            return self._dialog_out(e, text, source, f0, v.status if v.status != "ok" else "ask",
+                                    v.message or d.ask_move_message(), who="アプリ", choices=v.choices)
+        others = [r for r in f0.stop_reasons if r != ut.FRONT_BACK_MESSAGE]
+        if others:  # 承認・起動の言葉など
+            return self._dialog_out(e, text, source, f0, "stop", "。".join(others), who="アプリ")
+        rel = dg.find_relative_dir(text, f0)
+        if rel:  # 手前・右などは軸にしない。6つのボタンで聞く
+            d.relative = rel
+            return self._dialog_out(e, text, source, f0, "ask", dg.RELATIVE_ASK.format(rel=rel))
+        if f0.unknown_words:  # B1
+            return self._dialog_out(e, text, source, f0, "ask", ut.unknown_words_message(f0.unknown_words, "move"),
+                                    who="アプリ")
+        slots = dg.read_slots(f0)
+        if slots.problem:
+            return self._dialog_out(e, text, source, f0, "ask", slots.problem, who="アプリ")
+        if slots.amount is None and slots.axis is None and slots.sign is None:
+            return self._dialog_out(e, text, source, f0, "ask", dg.NOTHING_READ + d.ask_move_message())
+        return self._merge_slots(e, text, source, f0, slots.amount, slots.axis, slots.sign)
+
+    def _merge_slots(self, e: _Entry, text, source, f0, amount, axis, sign) -> dict:
+        d = e.dialog
+        if amount is not None:
+            d.amount = amount
+        problem = None
+        if sign is not None and d.sign is not None and sign != d.sign:
+            problem = dg.SIGN_CONFLICT
+        elif axis is not None and d.axis is not None and axis != d.axis:
+            problem = dg.AXIS_CONFLICT
+        if problem:  # 前の答えと食い違う：どちらも使わず、ボタンで選び直してもらう
+            d.axis = d.sign = None
+            d.turn += 1
+            return self._dialog_out(e, text, source, f0, "ask", problem)
+        d.axis = axis if axis is not None else d.axis
+        d.sign = sign if sign is not None else d.sign
+        if d.complete():
+            return self._run_canonical(e, source)
+        d.turn += 1
+        return self._dialog_out(e, text, source, f0, "ask", d.ask_move_message())
+
+    def _confirm_position(self, e: _Entry, text: str, source: str, f0, position: str) -> dict:
+        """人が選んだ位置（ボタンか短い肯定）。選んだだけで、ジョブ・承認は変えない。"""
+        s, d = e.session, e.dialog
+        cand = next((c for c in d.candidates if c.position == position), None)
+        r = s.select(position)
+        if r.status != "ok":
+            return self._dialog_out(e, text, source, f0, "stop", r.message, who="アプリ")
+        d.position = position
+        d.estimated = (None if cand is None or cand.confirmed_by_frame else
+                       {"position": position, "word": d.word, "label": dg.ESTIMATE_LABEL, "by": self._speaker()})
+        d.candidates = []
+        d.step = "ask_move"
+        if d.complete():
+            return self._run_canonical(e, source)
+        d.turn += 1
+        return self._dialog_out(e, text, source, f0, "ask", d.ask_move_message())
+
+    def _run_canonical(self, e: _Entry, source: str) -> dict:
+        """集めたことを決まった文にして、ふつうの指示と同じ流れに通す（ガードはすべてそのまま）。"""
+        d = e.dialog
+        text = dg.canonical_text(d.position, d.axis, d.sign, d.amount)
+        d.end()
+        out = self._instruction(e, text, source)
+        if out.get("candidate_made"):
+            d.say(self._speaker(), dg.DONE, "ok")
+        else:
+            d.say("アプリ", out.get("message") or "", out.get("status") or "stop")
+        out["dialog"] = True
+        return out
+
+    def choose(self, sid: object, choice: object, turn: object) -> dict:
+        """会話の選択肢のボタン。今の選択肢の番号（turn）と id が合うときだけ使う。承認・出力は呼ばない。"""
+        def run(e: _Entry) -> dict:
+            d = e.dialog
+            ids = {c["id"]: c["label"] for c in d.choices()}
+            if (d.step is None or isinstance(turn, bool) or not isinstance(turn, int) or turn != d.turn
+                    or not isinstance(choice, str) or choice not in ids):
+                e.session.log.append(("止めた理由", dg.STALE))
+                return {"ok": True, "status": "stop", "message": dg.STALE, "blocked_reason": None,
+                        "candidate_made": False, "choices": [], "dialog": True, "tool_calls": []}
+            self._cancel_approval(e, "新しい指示があったため")
+            label = ids[choice]
+            d.say("人", label, "human")
+            e.session.log.append(("選択", f"ボタン：{label}"))
+            if choice.startswith("pos:"):
+                return self._confirm_position(e, label, "text", None, choice[4:])
+            if choice == "other":
+                d.step, d.candidates = "pick", []
+                d.turn += 1
+                return self._dialog_out(e, label, "text", None, "ask", dg.PICK_PROMPT, who="アプリ")
+            direction = choice[4:]
+            return self._merge_slots(e, label, "text", None, None, direction[0], 1 if direction[1] == "+" else -1)
         return self._run(sid, run)
 
     def _dispatch(self, e: _Entry, heard: Reply, calls: list[dict]) -> Reply:
@@ -170,6 +399,17 @@ class WebFlow:
         def run(e: _Entry) -> dict:
             self._cancel_approval(e, "位置を選び直したため")
             r = e.session.select(position if isinstance(position, str) else "")
+            d = e.dialog
+            if r.status == "ok":
+                d.estimated = None  # 人が選び直した：推定の名前は使わない
+                if d.step is not None:
+                    # 会話の途中で人が位置を選んだ（「ほかの位置」のあとなど）：その位置で、方向と量を聞く
+                    d.say("人", f"{e.session.selected} を選びました", "human")
+                    d.position, d.candidates, d.step = e.session.selected, [], "ask_move"
+                    if d.complete():
+                        return self._run_canonical(e, "text")
+                    d.turn += 1
+                    return self._dialog_out(e, "", "text", None, "ask", d.ask_move_message())
             return {"ok": True, **self._reply(e, r)}
         return self._run(sid, run)
 
@@ -183,6 +423,8 @@ class WebFlow:
     def undo(self, sid: object) -> dict:
         def run(e: _Entry) -> dict:
             self._cancel_approval(e, "元に戻したため")
+            if e.dialog.step is not None:
+                e.dialog.end()
             r = e.session.undo()
             return {"ok": True, **self._reply(e, r)}
         return self._run(sid, run)
@@ -282,6 +524,8 @@ class WebFlow:
                 cand = None
             else:
                 cand = _comparison_dict(e.comparison[1], ch, s)
+                est = e.dialog.estimated
+                cand["estimated"] = est if est and est.get("position") == cand["target"].split()[0] else None
         approved = self._approved(e)
         return {
             "session_id": sid,
@@ -305,6 +549,26 @@ class WebFlow:
             "interpreter": {"kind": self.interpreter.kind, "model": self.interpreter.model,
                             "notice": self.interpreter.notice},
             "log": _log_entries(s.log),
+            "dialog": self._dialog_state(e),
+        }
+
+    def _dialog_state(self, e: _Entry) -> dict:
+        d = e.dialog
+        est = d.estimated if d.estimated and d.estimated.get("position") == e.session.selected else None
+        on = d.step is not None
+        return {
+            "step": d.step, "turn": d.turn,
+            "word": d.word if on else None, "relative": d.relative if on else None,
+            "candidates": [c.as_dict() for c in d.candidates] if d.step == "confirm_position" else [],
+            "choices": d.choices(),
+            "position": d.position if on else None,
+            "amount_mm": d.amount if on else None,
+            "direction": d.direction if on else None,
+            "estimated": est,  # 推定（未確定）。この画面の中だけ。保存しない
+            "speaker": self._speaker(),
+            "locator": {"kind": self.interpreter.kind,
+                        "label": getattr(self.interpreter, "locator_label", None) or self._speaker()},
+            "turns": list(d.turns),
         }
 
 

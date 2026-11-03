@@ -26,6 +26,8 @@ from . import utterance as ut
 Simulator = Callable[[jbi.Job, ut.ProposedChange, str], "jbi.ChangeProposal | None"]
 
 _NUM = jbi._NUM
+# 承認待ちの候補があるときの文。web/flow.py は、これを解釈の係（Claude）を呼ぶ前に返す（呼ばない）
+PENDING_MESSAGE = "承認待ちの変更候補があります。比べるか、元に戻してから指示してください"
 
 
 @dataclass(frozen=True)
@@ -116,6 +118,15 @@ class Session:
                             for label, text in choices)
         return self._reply(v.status, v.message, facts=facts, choices=choices)
 
+    def forget_question(self) -> None:
+        """聞き返しへの答えを待つのをやめる（会話の機能が自分で聞き返したとき。次の発話を前の発話に足さない）。"""
+        self._awaiting_answer = None
+
+    def pending_reply(self, facts: ut.UtteranceFacts | None) -> Reply:
+        """承認待ちの候補があるのに来た移動・速度の指示を、解釈の係を呼ばずに断る。"""
+        self._locked = True
+        return self._reply("stop", PENDING_MESSAGE, facts=facts)
+
     # ---- 操作 ----
     def select(self, position: str) -> Reply:
         name = ut.normalize_position(position) if isinstance(position, str) else None
@@ -141,7 +152,7 @@ class Session:
         except ValueError as e:
             return self._refuse("stop", f"{e}。この提案は使いません")
         if self.candidate is not None:
-            return self._refuse("stop", "承認待ちの変更候補があります。比べるか、元に戻してから指示してください")
+            return self._refuse("stop", PENDING_MESSAGE)
         v = ut.check_proposal(self.facts, changes, self.selected)
         if v.status != "ok":
             return self._refuse(v.status, v.message)

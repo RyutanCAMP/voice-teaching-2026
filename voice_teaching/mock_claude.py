@@ -46,3 +46,37 @@ def decide(facts: UtteranceFacts | None, selected: str | None) -> list[dict]:
         return [{"tool": "propose_change", "args": {
             "kind": "speed", "position": position, "percent": float(value)}}]
     return []
+
+
+# ---- 位置の候補（「置くところ」など）。決まった規則だけ（モック・テスト用）。本物の Claude の代わりに会話を試すため ----
+# 案A と同じ材料（命令の行と行番号）だけを見る。規則：
+#   置く側の言葉（置くところ・置き場所・置く位置・離すところ）：直線移動（MOVL）のすぐ後（次の移動命令より前）に DOUT … OFF がある位置
+#   取る側の言葉（取るところ・つかむところ）：同じく DOUT … ON がある位置
+# 根拠の行は、その MOVL の行から DOUT の行まで（5行まで）。DOUT・TIMER の意味は決めつけない（規則に合う行を返すだけ）。
+# 0件か4件以上なら、何も返さない（人が選ぶ）。返した答えは、本物の Claude と同じくプログラムが照合する（dialog.verify_candidates）。
+import re as _re
+
+_PICK_WORDS = ("取るところ", "つかむところ")
+_MOVL = _re.compile(r"^MOVL\s+(C[0-9]{5})\b")
+_ANY_MOVE = _re.compile(r"^(MOV[LJCS]|SMOV|IMOV)")
+_DOUT = _re.compile(r"^DOUT\s+OT#\([0-9]+\)\s+(ON|OFF)\s*$")
+
+
+def mock_locate(word: str, lines) -> list[dict]:
+    want = "ON" if word in _PICK_WORDS else "OFF"
+    lines = list(lines)
+    found: list[dict] = []
+    for i, (n, text) in enumerate(lines):
+        m = _MOVL.match(text)
+        if not m:
+            continue
+        ev = [n]
+        for n2, t2 in lines[i + 1:i + 5]:
+            if _ANY_MOVE.match(t2):
+                break
+            ev.append(n2)
+            d = _DOUT.match(t2)
+            if d and d.group(1) == want:
+                found.append({"position": m.group(1), "evidence_lines": ev, "rank": len(found) + 1})
+                break
+    return found if 1 <= len(found) <= 3 else []
