@@ -29,9 +29,7 @@ const state = {
   voiceState: "idle",   // 録音の状態（starting / listening / stopping / idle）
   voiceToken: null,     // 録音を始めたときのジョブ（session）と位置。違えば認識文を使わない
   voiceFinal: null,     // 最後に入力欄へ入れた認識文（直さずに送れば source=voice として記録）
-  live: false,          // マイク ON（Web会議のように、一度 ON にすると続けて話せる）
-  liveTimer: null,
-  liveAt: 0,            // マイクを ON にした・最後に話した時刻（長く放っておいたら OFF）
+  live: false,          // マイク ON（1回の発話の間だけ。話し終わると OFF）
   unknownWords: [],     // 最後の指示で、プログラムが読めなかった言葉（facts.unknown_words。表示で目立たせるだけ）
   needChrome: false,    // Chrome 以外で声を文字にできなかった（アドレスのコピーを目立たせる）
   talkFirst: false,     // 位置を選ばずに話す（「置くところを…」から Claude との会話を始める）
@@ -173,9 +171,8 @@ function applyLoad(res, fileName) {
 function announceSession() {
   window.dispatchEvent(new CustomEvent("vt:session", { detail: { sessionId: state.sessionId } }));
 }
-// 根拠の行を押したとき：その位置を図で光らせる（選択ではない）。聞き終わったら、マイク ON ならまた聞く
+// 根拠の行を押したとき：その位置を図で光らせる（選択ではない）
 window.addEventListener("vt:highlight", () => { if (state.view) renderFigures(); });
-window.addEventListener("vt:ask-done", () => { state.resumeArmed = true; resumeLive(); });
 
 $("file-input").addEventListener("change", (ev) => loadFile(ev.target.files[0]));
 
@@ -392,7 +389,6 @@ function renderSteps() {
   $("next-hint").hidden = !hint;
   if (primary) $(primary).classList.add("primary");
   renderHeard();
-  resumeLive();  // マイクが ON なら、入力欄が空のステップ3で、また聞き始める
 }
 
 $("text-input").addEventListener("input", renderSteps);
@@ -470,7 +466,6 @@ function renderChips() {
 
 function applyResult(res, showOk = true) {
   if (res.state) state.st = res.state;
-  state.resumeArmed = true;  // 結果が出た：マイクが ON なら、また聞き始めてよい
   state.dialogNotice = !!res.dialog;
   const talking = !!(state.st && state.st.dialog && state.st.dialog.step);
   if (res.dialog && res.ok !== false && !(res.choices && res.choices.length)
@@ -1533,6 +1528,7 @@ const failKind = (message) => (FAILS.find(([, head]) => (message || "").startsWi
 
 // 失敗したときに出す、次にすることの短い文
 function failText(kind, message) {
+  if (kind === "no-speech" || kind === "aborted") return "声を聞き取れませんでした。もう一度 🎤 を押して話してください";
   if (kind === "network") {
     return BROWSER === "other"
       ? "このブラウザーでは、声を文字にできませんでした。Google Chrome で開いてください（下のボタンでアドレスをコピー）"
@@ -1548,14 +1544,9 @@ function failText(kind, message) {
   return message;
 }
 
-// Web会議のように、マイクを一度 ON（state.live）にすると、続けて話せる：
-// 話し終わると認識文が入力欄に入り、録音は一時停止する（確かめて直してから「次へ」を押す）。
-// 結果が出て入力欄が空に戻り、ステップ3（音声で指示）にいれば、また聞き始める。
-// 声が無いまま止まったときは、マイク ON のまま聞き直す。通信の失敗は1回だけ聞き直す。
-// それ以外の失敗は、マイクを OFF にして、次にすることと文字の入力へ案内する。承認・出力・送信はここから呼ばない。
-state.netRetry = 0;
-state.quiet = 0;       // 声が無いまま止まって、続けて聞き直した回数
-const QUIET_MAX = 20;  // これを超えたら OFF にする（すぐに止まる失敗が続いても、聞き直しを繰り返さない）
+// マイクは1回の発話だけ（唐川さんの決定 11/3 夜）：🎤 を押す → 話す → 認識文が入力欄に入り、マイクは OFF。
+// 聞き取れなかった・通信の失敗のときも OFF にして、次にすることを出す。自動では、もう一度聞き始めない。
+// 次に話すときは、人がもう一度 🎤 を押す。承認・出力・送信はここから呼ばない。
 const voice = new SpeechInput(Recognition, {
   state: (value) => {
     state.voiceState = value;
@@ -1571,23 +1562,21 @@ const voice = new SpeechInput(Recognition, {
     state.voiceToken = null;
     // 録音を始めたときとジョブ・位置が違えば使わない
     if (!t || t.sessionId !== state.sessionId || t.selected !== (state.st ? state.st.selected : null)) {
+      state.live = false;  // 使わなかったときも、1回の発話で OFF
       showVoiceError("話している間に位置が変わったので、使いませんでした。もう一度どうぞ");
+      renderMic();
       return;
     }
     if ($("voice-to-ask") && $("voice-to-ask").checked && !$("ask-panel").hidden) {
       $("ask-input").value = text;  // 「Claude に聞く」欄に入れるだけ。自動では送らない
       window.dispatchEvent(new CustomEvent("vt:ask-voice", { detail: { text } }));  // 直さずに送れば source=voice
-      state.liveAt = Date.now();
-      state.netRetry = 0;
-      state.quiet = 0;
+      state.live = false;  // 1回の発話で OFF（次は人が 🎤 を押す）
       renderMic();
       return;
     }
     $("text-input").value = text;  // 入力欄に入れるだけ。自動では送らない
     state.voiceFinal = text;
-    state.liveAt = Date.now();
-    state.netRetry = 0;
-    state.quiet = 0;
+    state.live = false;  // 1回の発話で OFF（次は人が 🎤 を押す）
     state.needChrome = false;  // 声を文字にできた：Chrome の案内は要らない
     document.body.classList.remove("need-chrome");
     renderSteps();
@@ -1597,25 +1586,7 @@ const voice = new SpeechInput(Recognition, {
   error: (message) => {
     state.voiceToken = null;
     const kind = failKind(message);
-    // 声が無いまま止まった：マイク ON のまま、また聞く（長く使わなければ resumeLive が OFF にする）
-    const empty = !$("text-input").value.trim();
-    if (state.live && (kind === "no-speech" || kind === "aborted") && state.quiet < QUIET_MAX) {
-      state.quiet += 1;
-      state.resumeArmed = empty;  // 入力欄に文があれば一時停止のまま（「次へ」のあとに聞く）
-      resumeLive();
-      return;
-    }
-    // 通信の失敗：Chrome・Edge なら1回だけ聞き直す
-    if (state.live && kind === "network" && BROWSER !== "other" && state.netRetry < 1) {
-      state.netRetry += 1;
-      state.resumeArmed = empty;
-      if (empty) $("voice-status").textContent = "つながりにくいので、もう一度聞いています…";
-      resumeLive();
-      return;
-    }
-    state.quiet = 0;
-    state.live = false;  // それ以外は OFF にして、次にすることと文字の入力へ案内する
-    state.netRetry = 0;
+    state.live = false;  // どの失敗でも OFF（聞き直さない）。次にすることと文字の入力へ案内する
     showVoiceError(failText(kind, message));  // 固定の文。入力欄は変えない
     $("browser-note").hidden = BROWSER !== "other";
     // Chrome 以外で声を文字にできない：案内の文は1回だけ（上の文）にして、「アドレスをコピー」だけを目立たせる
@@ -1665,7 +1636,7 @@ function showVoiceError(message) {
   $("voice-error").hidden = false;
 }
 
-// マイクの ON／OFF を一目で分かるように（OFF・聞いています・一時停止）
+// マイクの ON／OFF を一目で分かるように（OFF・聞いています）
 function renderMic() {
   const rec = recording();
   const on = state.live || rec;
@@ -1673,9 +1644,9 @@ function renderMic() {
   $("mic-button").setAttribute("aria-pressed", String(on));
   $("mic-button").setAttribute("aria-label", on ? "マイクをOFFにする" : "マイクをONにする");
   if (rec) $("mic-label").replaceChildren(el("span", { class: "dot", "aria-hidden": "true" }, "●"), "聞いています");
-  else $("mic-label").textContent = state.live ? "一時停止中" : "マイク OFF";
+  else $("mic-label").textContent = "マイク OFF";
   // 長い説明は、小さな文字の行に分ける
-  $("mic-hint").textContent = !rec && state.live ? "マイクは ON のまま。「次へ」で送ると、また聞きます" : "";
+  $("mic-hint").textContent = "";
   $("mic-hint").hidden = !$("mic-hint").textContent;
 }
 
@@ -1691,30 +1662,7 @@ function startListening() {
   if (BROWSER !== "other") { state.needChrome = false; document.body.classList.remove("need-chrome"); }
   closeConfirm();
   state.voiceToken = { sessionId: state.sessionId, selected: state.st ? state.st.selected : null };
-  state.resumeArmed = false;
   voice.start(mode);
-}
-
-// マイクが ON のままなら、指示の結果が出て入力欄が空のときに、また聞き始める
-const LIVE_MAX_MS = 3 * 60 * 1000;  // マイク ON のまま、指示が無くても聞き続ける長さ
-
-function resumeLive() {
-  clearTimeout(state.liveTimer);
-  state.liveTimer = setTimeout(() => {
-    if (state.live && Date.now() - state.liveAt > LIVE_MAX_MS) {  // しばらく使っていなければ OFF にする
-      state.live = false;
-      $("voice-status").textContent = "しばらく使わなかったので、マイクを OFF にしました";
-      renderMic();
-      return;
-    }
-    if ($("text-input").value.trim()) {  // 入力欄に文がある：聞き直す約束を取り消す（消しても勝手に聞き始めない）
-      state.resumeArmed = false;
-      return;
-    }
-    if (!state.live || !state.resumeArmed || recording() || !Recognition || !voiceMode() || currentStep() !== 3
-        || !$("confirm-overlay").hidden || $("instruction-panel").hidden) return;
-    startListening();
-  }, 500);
 }
 
 function updateLocks() {
@@ -1729,7 +1677,7 @@ function updateLocks() {
   $("voice-position").disabled = rec;
   $("mic-button").disabled = rec || !loaded || !Recognition;
   $("voice-stop").disabled = !rec;
-  $("voice-cancel").disabled = !rec && !state.live;
+  $("voice-cancel").disabled = !rec;
   document.body.classList.toggle("recording", rec);
   if (state.st && state.view) {
     renderChips();
@@ -1739,7 +1687,6 @@ function updateLocks() {
   }
   renderSteps();
   renderMic();
-  if (!rec) resumeLive();
 }
 
 if (!Recognition) {
@@ -1766,21 +1713,13 @@ $("browser-info").textContent = "このブラウザー：" + (BRANDS.join("・")
 $("consent-text").textContent = "声を文字にするため、" + PROVIDER + "文字にします。このアプリは音声を保存しません。あとで詳細表示から変えられます。";
 
 function micOn() {
-  state.live = true;
-  state.liveAt = Date.now();
-  state.netRetry = 0;
-  state.quiet = 0;
+  state.live = true;  // この1回の発話の間だけ ON
   startListening();
   renderMic();
 }
 
 $("mic-button").addEventListener("click", () => {
   if (!state.sessionId || recording()) return;
-  if (state.live) {  // 一時停止中に押すと OFF
-    state.live = false;
-    updateLocks();
-    return;
-  }
   if (!voiceMode()) {  // 初めて：音声をどこで文字にするかを伝えて、同意をもらう（勝手に送らない）
     $("voice-consent").hidden = false;
     renderSteps();
@@ -1817,7 +1756,7 @@ $("copy-url").addEventListener("click", async () => {
     $("voice-status").textContent = "Chrome で " + url + " を開いてください";
   }
 });
-$("voice-stop").addEventListener("click", () => voice.stop());  // 話し終わった（マイクは ON のまま）
+$("voice-stop").addEventListener("click", () => voice.stop());  // 話し終わった（認識文が入ると、マイクは OFF）
 $("voice-cancel").addEventListener("click", () => {
   state.live = false;
   state.voiceToken = null;

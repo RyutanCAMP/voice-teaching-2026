@@ -114,14 +114,13 @@ def test_failure_never_switches_method():
     assert ".checked" not in err and "localStorage" not in err
 
 
-# ---- 3. Web会議のように：声が無ければ聞き直す、通信の失敗は1回だけ、Chrome 以外は Chrome へ ----
+# ---- 3. 失敗のあとは聞き直さずに OFF（11/3 夜の決定）、Chrome 以外は Chrome へ ----
 def test_quiet_and_network_retries_are_bounded():
+    # 11/3 夜の決定：聞き取れなかった・通信の失敗でも聞き直さない（必ず OFF。次は人が 🎤 を押す）
     v = voice()
     err = v[v.index("error: (message) =>"):v.index("// 「端末内のみ」で日本語")]
-    assert 'kind === "no-speech"' in err and "state.quiet < QUIET_MAX" in err
-    assert re.search(r"const QUIET_MAX = \d+;", v)
-    assert 'kind === "network" && BROWSER !== "other" && state.netRetry < 1' in err
-    assert "state.live = false;" in err  # それ以外は OFF
+    assert "QUIET_MAX" not in v and "netRetry" not in v
+    assert "state.live = false;" in err
 
 
 def test_failure_kinds_match_speech_js_messages():
