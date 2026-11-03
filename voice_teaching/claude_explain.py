@@ -819,6 +819,22 @@ class Explainer:
             problem = (None if shown is not None else
                        talk.reply_count_problem(data["reply"], allowed, from_to, places=places or None, strict_from_to=strict,
                                                 current_counts=rep_counts))
+            if problem is None and shown is None:
+                # 許可リスト：事実と合う言い方だけ（今の回数・変える回数・区間の位置の数・ジョブにある行番号）。ほかの数が残れば検証エラー
+                phrases = [f"{p}{u}" for p in places for u in ("か所", "カ所", "ヶ所", "ヵ所", "箇所", "個所")]
+                change_turn = record is not None and (intent == "change_request" or count is not None)
+                if change_turn and from_to is not None:
+                    a, b = from_to
+                    phrases += [f"{a}回から{b}回", f"{a}回から、{b}回", f"{b}回に", f"{b}回へ", f"{b}回目",
+                                f"{a}回のまま"]
+                    phrases += [f"{k}回{v}" for k in said_now for v in ("増や", "減ら", "足")]
+                elif change_turn:
+                    phrases += []  # 今の回数が決まらない：回数の言い方は許さない（strict）
+                else:
+                    phrases += [f"{c}{u}" for c in rep_counts for u in ("回", "度")]
+                lines = {d["line"] for d in (conv.facts or {}).get("instructions", [])}
+                if talk.reply_numbers_left(data["reply"], phrases, lines):
+                    problem = "numbers"
             if problem is not None and record is not None and (intent == "change_request" or count is not None):
                 record["mismatch"] = True  # 回数の食い違い（検証エラー）。Claude の文は使わない
             elif problem is not None:
