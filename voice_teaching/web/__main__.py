@@ -1,4 +1,5 @@
 """起動: python -m voice_teaching.web [--port 8765] [--updown-config records/updown.json] [--robot HC20DT]
+      [--env-file C:/アプリ/voice-teaching/.env] [--explain-model claude-sonnet-5-5]
 
 127.0.0.1 だけで待ち受ける。Chrome で表示された URL を開く。止めるときは Ctrl+C。
 シミュレーションモード：元のジョブは変えない。承認ボタンで承認した候補だけを、合成ジョブに限って
@@ -9,7 +10,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from .. import claude_interpreter, sim, updown
+from .. import claude_explain, claude_interpreter, sim, updown
 from .server import DEFAULT_PORT, make_server
 
 
@@ -20,13 +21,21 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--updown-config", default=str(updown.DEFAULT_PATH),
                     help="上下の向きの設定ファイル（既定 records/updown.json）")
     ap.add_argument("--robot", default=updown.DEFAULT_ROBOT, help="アプリで使うロボットの名前（設定と照合する。既定 HC20DT）")
+    ap.add_argument("--env-file", default=str(sim.REPO_ROOT / ".env"),
+                    help=".env の場所（既定はリポジトリ直下。worktree からは本体の .env を指定できる）")
+    ap.add_argument("--explain-model", default=None,
+                    help="「Claude に聞く（読み取りだけ）」のモデル（無ければ ANTHROPIC_MODEL、それも無ければ claude-sonnet-5-5）")
     args = ap.parse_args(argv)
-    # 任意：リポジトリ直下の .env から ANTHROPIC_API_KEY・ANTHROPIC_MODEL を読む（環境変数があればそちら）
-    if claude_interpreter.load_dotenv(sim.REPO_ROOT / ".env") == claude_interpreter.DOTENV_UNREADABLE:
+    # 任意：.env から ANTHROPIC_API_KEY・ANTHROPIC_MODEL を読む（環境変数があればそちら）
+    if claude_interpreter.load_dotenv(args.env_file) == claude_interpreter.DOTENV_UNREADABLE:
         print(claude_interpreter.DOTENV_UNREADABLE_MESSAGE, flush=True)
     interp = claude_interpreter.from_env()
-    srv = make_server(port=args.port, interpreter=interp, updown_config=args.updown_config, robot=args.robot)
+    explainer = claude_explain.Explainer.from_env(model=args.explain_model)
+    srv = make_server(port=args.port, interpreter=interp, updown_config=args.updown_config, robot=args.robot,
+                      explainer=explainer)
     print(f"解釈：{'本物の Claude（' + interp.model + '）' if interp.kind == 'claude' else '偽のClaude（モック）'}", flush=True)
+    print(f"Claude に聞く（読み取りだけ）：{'キーあり・' + explainer.model if explainer.has_key else 'APIキーが設定されていません'}",
+          flush=True)
     print(f"Chrome で開いてください: http://127.0.0.1:{srv.server_address[1]}/  （止めるときは Ctrl+C）", flush=True)
     try:
         srv.serve_forever()

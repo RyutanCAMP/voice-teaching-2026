@@ -19,13 +19,14 @@
 """
 from __future__ import annotations
 
+import hashlib
 import secrets
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .. import claude_interpreter, jbi, mock_claude, sim
+from .. import claude_explain, claude_interpreter, jbi, mock_claude, sim
 from .. import repeat_count as rc
 from .. import dialog as dg
 from .. import updown as ud
@@ -67,6 +68,7 @@ class _Entry:
     exported: str | None = None
     dialog: dg.Dialog = field(default_factory=dg.Dialog)  # Claude との会話の状態（メモリの中だけ。保存しない）
     frame: object | None = None                   # 案B：FRAME（まだ無い。あれば label・aliases で位置を決める）
+    explain: "claude_explain.Conversation | None" = None  # Claude に聞く（読み取りだけ）の会話。メモリの中だけ
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     # Session に渡すシミュレーション（実機用の検査に断られたときだけ呼ばれる）
@@ -92,7 +94,10 @@ class _Entry:
 
 class WebFlow:
     def __init__(self, max_sessions: int = MAX_SESSIONS, interpreter=None,
-                 updown_config: "str | Path | None | object" = USE_DEFAULT, robot: str = ud.DEFAULT_ROBOT):
+                 updown_config: "str | Path | None | object" = USE_DEFAULT, robot: str = ud.DEFAULT_ROBOT,
+                 explainer: "claude_explain.Explainer | None" = None):
+        # Claude に聞く係（読み取りだけ。/api/ask）。答えでジョブ・候補・承認は変えない
+        self.explainer = explainer if explainer is not None else claude_explain.Explainer.from_env()
         # 解釈の係：本物の Claude（ANTHROPIC_API_KEY があるとき）か、偽のClaude（モック）
         self.interpreter = interpreter if interpreter is not None else claude_interpreter.from_env()
         self.max_sessions = max_sessions
@@ -655,6 +660,33 @@ class WebFlow:
                                           f"{_updown_note(e.approval_updown)}"))
             return {"ok": True, "path": full, "file_name": Path(path).name}
         return self._run(sid, run)
+
+    # ---- Claude に聞く（読み取りだけ。docs/CLAUDE_API.md 8章） ----
+    def ask(self, sid: object, text: object = None, reset: object = False, info: object = False) -> dict:
+        """読み込んだジョブについて Claude に聞く。Session（候補・承認・選択・作業ログ）には触らない。
+        会話の文脈はこの画面の中だけ（保存しない）。ジョブか上下の向きの照合が変わったら、新しい会話にする。"""
+        with self._lock:
+            e = self._entries.get(sid) if isinstance(sid, str) else None
+        if e is None:
+            return {"ok": False, "error": NO_SESSION}
+        if info is True:
+            return {"ok": True, "status": "info", **self.explainer.info()}
+        notice = None
+        with e.lock:  # 状態は読むだけ。Claude を呼ぶ間はこの錠を持たない（ほかの操作を止めない）
+            s = e.session
+            st = s.updown_status()
+            key = (hashlib.sha256(s.original_bytes).hexdigest(), st.token)
+            if reset is True or e.explain is None or e.explain.key != key:
+                if e.explain is not None and e.explain.turns and reset is not True:
+                    notice = "ジョブか上下の向きの設定が変わったため、新しい会話にしました"
+                e.explain = claude_explain.Conversation.start(s.original_bytes, s.original, st)
+            conv = e.explain
+        if reset is True:
+            return {"ok": True, "status": "reset", **self.explainer.info()}
+        out = self.explainer.ask(conv, text)
+        if notice:
+            out["conversation_notice"] = notice
+        return out
 
     # ---- 内部 ----
     def _run(self, sid: object, fn) -> dict:

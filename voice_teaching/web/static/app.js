@@ -125,6 +125,7 @@ async function loadFile(f) {
 // 読み込みの結果を画面に出す（ファイルから読んでも、サンプルでも同じ）
 function applyLoad(res, fileName) {
   state.sessionId = null; state.view = null; state.st = null;
+  announceSession();
   closeConfirm();
   stopPlayback();
   if (!res.ok) {
@@ -154,7 +155,16 @@ function applyLoad(res, fileName) {
   document.body.classList.add("loaded");
   renderAll();
   updateLocks();
+  announceSession();
 }
+
+// 「Claude に聞く（読み取りだけ）」の欄（explain.js）に、今の画面の番号を知らせる。欄は答えを表示するだけ
+function announceSession() {
+  window.dispatchEvent(new CustomEvent("vt:session", { detail: { sessionId: state.sessionId } }));
+}
+// 根拠の行を押したとき：その位置を図で光らせる（選択ではない）。聞き終わったら、マイク ON ならまた聞く
+window.addEventListener("vt:highlight", () => { if (state.view) renderFigures(); });
+window.addEventListener("vt:ask-done", () => { state.resumeArmed = true; resumeLive(); });
 
 $("file-input").addEventListener("change", (ev) => loadFile(ev.target.files[0]));
 
@@ -932,7 +942,8 @@ function data3d() {
     stopped: !!(c && c.blocked_reason),  // 止まった候補：変更後をオレンジにしない
     blocked: Object.fromEntries(v.positions.filter((p) => !p.shift_check.ok).map((p) => [p.name, p.shift_check.reason])),
     // Claude（モック）が出した位置の候補（確かめている間だけ光らせる。選んではいない）
-    candidates: dialogStep() === "confirm_position" ? state.st.dialog.candidates.map((x) => x.position) : [],
+    candidates: dialogStep() === "confirm_position" ? state.st.dialog.candidates.map((x) => x.position)
+      : (window.vtAskHighlight || []),  // 「Claude に聞く」の根拠の行の位置（光らせるだけ。選択ではない）
   };
 }
 
@@ -1236,6 +1247,14 @@ const voice = new SpeechInput(Recognition, {
     // 録音を始めたときとジョブ・位置が違えば使わない
     if (!t || t.sessionId !== state.sessionId || t.selected !== (state.st ? state.st.selected : null)) {
       showVoiceError("話している間に位置が変わったので、使いませんでした。もう一度どうぞ");
+      return;
+    }
+    if ($("voice-to-ask") && $("voice-to-ask").checked && !$("ask-panel").hidden) {
+      $("ask-input").value = text;  // 「Claude に聞く」欄に入れるだけ。自動では送らない
+      state.liveAt = Date.now();
+      state.netRetry = 0;
+      state.quiet = 0;
+      renderMic();
       return;
     }
     $("text-input").value = text;  // 入力欄に入れるだけ。自動では送らない

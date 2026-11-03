@@ -36,6 +36,8 @@ _STATIC = {
     "/static/view3d.js": ("view3d.js", "text/javascript; charset=utf-8"),
     # 読めなかった言葉を目立たせる分け方・マイナスの表示（依存なし）
     "/static/highlight.js": ("highlight.js", "text/javascript; charset=utf-8"),
+    # Claude に聞く（読み取りだけ）の小さな欄
+    "/static/explain.js": ("explain.js", "text/javascript; charset=utf-8"),
 }
 # 「サンプルで試す」で読み込む、決まった1つの架空のジョブ。画面からは名前も場所も渡させない
 SAMPLE_JOB = Path(__file__).resolve().parents[2] / "samples" / "dummy" / "DEMO_C_PLACE.JBI"
@@ -162,6 +164,8 @@ class Handler(BaseHTTPRequestHandler):
             # 承認は画面の承認ボタンからだけ。/api/hear からは呼ばない
             "/api/approve": lambda r: flow.approve(r.get("session_id"), r.get("approver")),
             "/api/export": lambda r: flow.export(r.get("session_id")),
+            # Claude に聞く（読み取りだけ）。答えでジョブ・候補・承認は変わらない。キーは返さない
+            "/api/ask": lambda r: flow.ask(r.get("session_id"), r.get("text"), r.get("reset", False), r.get("info", False)),
         }
         fn = routes.get(path)
         if fn is None:
@@ -198,7 +202,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def make_server(host: str = HOST, port: int = DEFAULT_PORT, interpreter=None,
-                updown_config=USE_DEFAULT, robot: str = DEFAULT_ROBOT) -> ThreadingHTTPServer:
+                updown_config=USE_DEFAULT, robot: str = DEFAULT_ROBOT, explainer=None) -> ThreadingHTTPServer:
     """シミュレーション用の出力先は sim.DEFAULT_OUT_DIR（output/sim/）に固定。呼び出し側からは選べない。
 
     updown_config：上下の向きの設定ファイル（None なら設定なし＝未確認。渡さなければ flow.DEFAULT_UPDOWN_CONFIG）。robot：アプリで使うロボットの名前（照合で比べるだけ）。
@@ -207,5 +211,5 @@ def make_server(host: str = HOST, port: int = DEFAULT_PORT, interpreter=None,
         raise ValueError("127.0.0.1 以外では待ち受けません")
     srv = ThreadingHTTPServer((HOST, port), Handler)
     srv.daemon_threads = True
-    srv.flow = WebFlow(interpreter=interpreter, updown_config=updown_config, robot=robot)
+    srv.flow = WebFlow(interpreter=interpreter, updown_config=updown_config, robot=robot, explainer=explainer)
     return srv

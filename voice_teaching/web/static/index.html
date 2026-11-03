@@ -88,6 +88,24 @@
       </div>
     </div>
     <p class="fine figure-notes"><span id="play-note">点を命令の順に直線で結んだ目安です。ロボット本体の動きではありません。</span> <span id="view3d-note">3D はジョブの X・Y・Z をそのまま点で描いたもので、ロボット本体・関節は描いていません。動作や干渉を保証するシミュレーターではありません。</span> <span id="figure-note">この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。参考表示であり、実際のロボットの動きではありません。</span></p>
+    <!-- 図の下に置く（右側は今のステップのカードだけにする）。Claude に聞く（読み取りだけ）。答えでジョブ・変更候補・承認は変わらない。文は explain.js がテキストのノードで作る -->
+    <section id="ask-panel" class="card dialog" aria-label="Claude に聞く（読み取りだけ）" hidden>
+      <div class="dlg-head">
+        <span class="dlg-title">Claude に聞く（読み取りだけ）</span>
+        <span id="ask-model" class="dlg-engine"></span>
+      </div>
+      <p id="ask-nokey" class="warn" hidden></p>
+      <ol id="ask-turns" class="bubbles" aria-live="polite"></ol>
+      <form id="ask-form" class="text-form">
+        <label for="ask-input" class="sr-only">Claude に聞く文</label>
+        <input type="text" id="ask-input" maxlength="500" placeholder="このロボット、何をしている？" disabled>
+        <button type="submit" id="ask-send" disabled>聞く</button>
+      </form>
+      <label class="fine"><input type="checkbox" id="voice-to-ask"> 🎤 で聞き取った文を、この欄に入れる</label>
+      <p id="ask-usage" class="fine"></p>
+      <button type="button" id="ask-reset" class="link small" disabled>会話をやり直す</button>
+      <p class="fine">Claude は読み込んだ動作を説明するだけです。答えで、ジョブ・変更候補・承認は変わりません。変更は、プログラムの確認と承認ボタンを通して行います。根拠の行を押すと、図でその位置を光らせます（選択ではありません）。</p>
+    </section>
   </section>
 
   <!-- 右：今のステップの操作だけ -->
@@ -273,5 +291,6 @@
 </div><!-- /confirm-overlay -->
 
 <script type="module" src="/static/app.js"></script>
+<script type="module" src="/static/explain.js"></script>
 </body>
 </html>
