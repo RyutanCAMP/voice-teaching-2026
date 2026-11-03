@@ -355,8 +355,8 @@ def check_c026(browser, url, check, shots: Path | None) -> None:
         check(MOVJ_LABEL in j["title"] and MOVJ_LABEL not in l["title"],
               f"S-MOVJ 3D：MOVJ の区間に、マウスを重ねると「{MOVJ_LABEL}」が出る（{j['title']!r}）")
     lg = pg.inner_text("#legend-kinds") if pg.is_visible("#legend-kinds") else ""
-    check("MOVL：直線移動" in lg and "MOVJ：関節移動（通り道は表示していません）" in lg and pg.is_visible("#legend-movj"),
-          f"S-MOVJ：凡例に「MOVL：直線移動」「MOVJ：関節移動（通り道は表示していません）」を出す（{lg!r}）")
+    check("MOVL：直線移動" in lg and "MOVJ：関節移動（点線は順番だけ。実際の通り道ではありません）" in lg and pg.is_visible("#legend-movj"),
+          f"S-MOVJ：凡例に「MOVL：直線移動」「MOVJ：関節移動（点線は順番だけ。実際の通り道ではありません）」を出す（{lg!r}）")
     shot(pg, "C026_1280_a_movj_3d.png")
 
     def watch_playback(host_marker, seconds=14.0):
@@ -443,6 +443,10 @@ def check_c026(browser, url, check, shots: Path | None) -> None:
     check("C00005" in conf and m[3] < m[2] and pg.locator("#confirm-xyz .cand-big").count() == 0,
           f"S5：長い説明は見出しの下の小さな文（{m[3]:.0f}px < {m[2]:.0f}px）。表の上に同じ内容の大きな文字を出さない")
     check(pg.is_visible("#approve-button"), "S5：見出しを変えても、承認はボタンだけ（承認ボタンがある）")
+    # QA P2：確認済みの設定で作った候補：見出しの向きの名前と、確認した人・日時の1行（タッチ端末でも読めるように文で出す）
+    up = pg.inner_text("#confirm-updown") if pg.is_visible("#confirm-updown") else ""
+    check("（上へ）" in head and up.startswith("上下の向き：e2e（一時フォルダの仮の設定）さんが確認（") and up.endswith("）"),
+          f"QA P2：確認済みの候補の確認表示に「上下の向き：〇〇さんが確認（日時）」の1行を出す（{up!r}）")
     shot(pg, "C026_1280_d_confirm_heading.png")
     pg.close()
     pg = browser.new_page(viewport={"width": 1280, "height": 720})
@@ -481,7 +485,7 @@ def check_c026(browser, url, check, shots: Path | None) -> None:
     until(pg, lambda: pg.inner_text("#voice-position strong") == "C00005")
     check(pg.is_hidden("#updown-status"), "上下の向き：サーバーが返さないときは何も出さない")
     cases = [
-        ({"status": "unconfirmed", "message": "このジョブの上下の向きは確認されていません"}, "上下の向き：未確認"),
+        ({"status": "unconfirmed", "message": "このジョブの上下の向きは確認されていません"}, "上下の向き：未確認（Z＋・Z−で指示）"),
         ({"status": "confirmed", "confirmed_by": "唐川", "confirmed_at": "2026-11-03T14:00:00+09:00", "message": "", "fingerprint": "x"},
          "上下の向き：確認済み"),
         ({"status": "mismatch", "message": ""}, "上下の向き：確認したジョブと違います"),
@@ -905,8 +909,8 @@ def check_dialog(browser, check, shots: Path | None, errors: list, updown_config
         before = interp.decides
         r = pg.request.post(url + "api/hear", data={"session_id": sid, "text": "この位置を上に2mm", "source": "text"}).json()
         r2 = pg.request.post(url + "api/hear", data={"session_id": sid, "text": "置くところを上に2mm", "source": "text"}).json()
-        # 1つ目は承認したあと（CHECKER_026 S-msg：「承認した変更候補があります…」。承認は今どおり取り消す）、2つ目は承認前の文
-        check(r["status"] == "stop" and r["message"].startswith("承認した変更候補があります")
+        # 1つ目は承認したあと（CHECKER_026 S-msg：「新しい指示があったため、承認を取り消しました…」）、2つ目は承認前の文
+        check(r["status"] == "stop" and r["message"].startswith("新しい指示があったため、承認を取り消しました。変更候補は残っています")
               and r2["status"] == "stop" and r2["message"].startswith("承認待ちの変更候補があります")
               and interp.decides == before and interp.locates == 1,
               f"承認待ちの候補があるとき、新しい移動の指示は解釈の係を呼ばずに断る（{interp.decides - before}回）")
@@ -1148,6 +1152,30 @@ def check_updown_unconfirmed(browser, check, shots: Path | None, errors: list) -
         pg.wait_for_selector("#job-area:not([hidden])")
         pg.locator("#position-chips button", has_text="C00005").first.click()
         until(pg, lambda: pg.inner_text("#voice-position strong") == "C00005")
+        # QA P1-2：設定なしの画面の例文は、上下の言葉を使わない（軸と符号）。上下の向きの表示に次の行動を添える
+        ph = pg.get_attribute("#text-input", "placeholder") or ""
+        howto = pg.text_content("#howto-examples") or ""
+        helps = pg.text_content("#help-examples") or ""
+        lure = ("上に", "下に", "上へ", "下へ", "上方向", "下方向")
+        check(ph == "Zプラス方向に10mm" and not any(w in ph + howto + helps for w in lure),
+              f"上下の設定なし：入力欄・使い方・？の例文に上下の言葉を使わない（{ph!r}）")
+        check(pg.inner_text("#updown-status") == "上下の向き：未確認（Z＋・Z−で指示）",
+              f"上下の設定なし：「上下の向き：未確認（Z＋・Z−で指示）」と出す（{pg.inner_text('#updown-status')!r}）")
+        side = len("".join(pg.inner_text(".side").split()))
+        check(side <= 80, f"上下の設定なし：次にすることを足しても、音声のカードの右側の文字は80文字まで（{side}文字）")
+        pg.fill("#text-input", ph)
+        pg.click("#text-send")
+        until(pg, lambda: pg.is_enabled("#open-confirm"))
+        cv = pg.inner_text("#candidate-view")
+        check("Z方向に +10.000mm" in cv and "（上へ）" not in cv,
+              f"上下の設定なし：入力欄の例文をそのまま送ると候補になる（向きの名前は付けない）：{cv[:60]}")
+        pg.click("#open-confirm")
+        pg.wait_for_selector("#confirm-overlay:not([hidden])")
+        check(pg.is_hidden("#confirm-updown") and "（上へ）" not in pg.inner_text("#confirm-title"),
+              "上下の設定なし：確認表示に「〇〇さんが確認」の行と向きの名前を出さない")
+        pg.click("#confirm-close")
+        pg.click("#undo-button")
+        until(pg, lambda: not pg.is_enabled("#open-confirm"))
         pg.fill("#text-input", "3ミリ下げて")
         pg.click("#text-send")
         until(pg, lambda: pg.is_visible("#reply-message") and updown.MSG_UNCONFIRMED in pg.inner_text("#reply-message"))

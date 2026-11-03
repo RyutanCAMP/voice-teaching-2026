@@ -125,7 +125,7 @@ def test_screen_uses_segment_kind_not_only_solid():
 def test_legend_names_movl_and_movj():
     h = text("index.html")
     assert "MOVL：直線移動" in h
-    assert "MOVJ：関節移動（通り道は表示していません）" in h
+    assert "MOVJ：関節移動（点線は順番だけ。実際の通り道ではありません）" in h  # QA P2：点線が引かれていることと矛盾しない言い方
 
 
 def test_engineer_note_does_not_say_only_plain_movl_is_solid():

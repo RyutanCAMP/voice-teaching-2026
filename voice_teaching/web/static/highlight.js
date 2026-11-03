@@ -106,5 +106,31 @@ export function updownStatus(u) {
   }
   if (u.status === "mismatch") return { text: "上下の向き：確認したジョブと違います", tone: "warn", title };
   if (u.status === "changed") return { text: "上下の向き：設定が変わっています", tone: "warn", title };
-  return { text: "上下の向き：未確認", tone: "unconfirmed", title: u.status === "unconfirmed" ? title : "" };
+  return { text: "上下の向き：未確認（Z＋・Z−で指示）", tone: "unconfirmed", title: u.status === "unconfirmed" ? title : "" };
+}
+
+// 確認表示に出す、上下の向きを確認した人と日時の1行（確認済みのときだけ。ほかは ""）。u は候補を作ったときの照合の結果
+export function updownConfirmLine(u) {
+  if (!u || typeof u !== "object" || Array.isArray(u) || u.status !== "confirmed") return "";
+  const by = typeof u.confirmed_by === "string" && u.confirmed_by ? `${u.confirmed_by}さんが確認` : "確認済み";
+  const at = typeof u.confirmed_at === "string" && u.confirmed_at ? `（${shortTime(u.confirmed_at)}）` : "";
+  return `上下の向き：${by}${at}`;
+}
+
+// 話し方の例（入力欄の例文・使い方・？の小窓）。上下の向きが確認済みのときだけ「上に」「下に」を例に出す。
+// それ以外（未確認・不一致・変更済み・状態が無い）は、そのまま送れば候補になる軸と符号の例（CHECKER_026 M2、QA P1-2）
+export function speechExamples(u) {
+  const ok = !!u && typeof u === "object" && !Array.isArray(u) && u.status === "confirmed";
+  if (ok) {
+    return {
+      placeholder: "この位置を上に10mm",
+      howto: "話し方の例：「この位置を上に10mm」「この位置を下に5mm」「C00005をZプラス方向に10mm移動して」「C00004を選択して」「比較して」「元に戻して」",
+      help: ["「Y座標を3ミリ下げて」", "「Yのマイナス3ミリ」", "「この位置を上に10ミリ」"],
+    };
+  }
+  return {
+    placeholder: "Zプラス方向に10mm",
+    howto: "話し方の例：「この位置をZプラス方向に10mm」「Zのマイナス5ミリ」「C00005をZプラス方向に10mm移動して」「C00004を選択して」「比較して」「元に戻して」",
+    help: ["「Y座標を3ミリ下げて」", "「Yのマイナス3ミリ」", "「Zプラス方向に10ミリ」"],
+  };
 }

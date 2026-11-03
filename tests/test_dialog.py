@@ -169,7 +169,8 @@ def test_full_instruction_after_confirmation_makes_candidate_immediately():
     r = w.hear(sid, "はい")
     st = r["state"]
     assert r["candidate_made"] and st["candidate"]["target"] == "C00005 Z" and st["candidate"]["delta"] == "-3.000"
-    assert st["candidate"]["heard"] == "C00005をZのマイナス3ミリ"
+    # 方向を「下げて」から読んだので、決まった文も「下げて」のまま（上下の向きの照合をもう一度通す。fix/c026-r2 P0-1）
+    assert st["candidate"]["heard"] == "C00005を3ミリ下げて"
 
 
 # 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる

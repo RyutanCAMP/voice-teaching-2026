@@ -88,7 +88,7 @@ STRAY_SIGN = "プラス・マイナスがどこに付くか分かりません。
 TWO_SIGNS = "向きの指定が2つあります。どちらの向きか、もう一度指示してください"
 SIGN_NEEDS_AXIS = "プラス・マイナスは、軸と一緒に言うか（例：Yのマイナス3ミリ）、ボタンで方向を選んでください"
 # 会話が受け持つ聞き返し（これ以外の pre_check の止める・聞き返す理由は、会話にせずそのまま返す）
-_HANDLED_ASKS = ("何mm動かしますか？", "どの方向（X・Y・Z、または上げる・下げる）に動かしますか？")
+_HANDLED_ASKS = ("何mm動かしますか？", ut.AXIS_ASK, ut.AXIS_ASK_UPDOWN)
 
 
 # ---- 言葉を見つける ----
@@ -291,8 +291,14 @@ def fmt_amount(v: float) -> str:
     return text
 
 
-def canonical_text(position: str, axis: str, sign: int, amount: float) -> str:
-    """会話で集めたことから、今の流れに通す決まった指示の文を作る（例「C00005をYのマイナス3ミリ」）。"""
+def canonical_text(position: str, axis: str, sign: int, amount: float, vertical: bool = False) -> str:
+    """会話で集めたことから、今の流れに通す決まった指示の文を作る（例「C00005をYのマイナス3ミリ」）。
+
+    vertical：方向を「上に・下げて」から読んだ（Z）。そのときは「C00005を3ミリ下げて」のまま通し、上下の向きの照合を
+    ふつうの指示と同じくもう一度通す（会話の途中で設定が変わっても、Z の文字に書き換えて通さない。CHECKER_026 再修正 P0-1）。
+    """
+    if vertical and axis == "Z":
+        return f"{position}を{fmt_amount(amount)}ミリ{'上げて' if sign > 0 else '下げて'}"
     return f"{position}を{axis}の{'プラス' if sign > 0 else 'マイナス'}{fmt_amount(amount)}ミリ"
 
 
@@ -307,6 +313,7 @@ class Slots:
     sign: int | None = None
     problem: str | None = None
     stop: bool = False  # problem を「止めた」として返す（0mm）
+    vertical: bool = False  # 軸（Z）を「上に・下げて」から読んだ（上下の向きが確認済みのときだけ）
 
 
 def read_slots(facts: ut.UtteranceFacts, opening: bool = False, updown: "ud.UpdownStatus | None" = None) -> Slots:
@@ -339,9 +346,10 @@ def read_slots(facts: ut.UtteranceFacts, opening: bool = False, updown: "ud.Updo
         return Slots(problem=f"方向が2つ以上あります（{'・'.join(facts.axes)}）。推測しません。ボタンで1つ選んでください")
     if signs and not facts.axes:
         return Slots(problem=SIGN_NEEDS_AXIS)  # 軸の無い符号（「マイナス3mm」）でボタンを絞らない
+    axis = facts.axes[0] if facts.axes else None
     return Slots(amount=amount.value if amount is not None else None,
-                 axis=facts.axes[0] if facts.axes else None,
-                 sign=signs[0] if signs else None)
+                 axis=axis, sign=signs[0] if signs else None,
+                 vertical=bool(facts.vertical and axis == "Z" and "Z" not in facts.explicit_axes))
 
 
 # ---- 会話の状態（画面ごと・メモリの中だけ） ----
@@ -362,6 +370,8 @@ class Dialog:
     confirm_go: bool = False         # 手で選んだ位置で、方向と量がそろった：ボタン1つで確かめる
     # 確認済みの方向の名前（上下の向きの照合に通ったときだけ Z の 上・下）。web/flow.py が要求のたびに入れ直す
     direction_names: dict = field(default_factory=dict)
+    # 方向（Z）を「上に・下げて」から読んだ。最後の決まった文も「上げて・下げて」で作り、上下の向きの照合をもう一度通す
+    vertical: bool = False
 
     MAX_TURNS = 40
 
@@ -369,6 +379,7 @@ class Dialog:
         self.step, self.word, self.relative = None, word, relative
         self.candidates, self.position = [], None
         self.amount, self.axis, self.sign = slots.amount, slots.axis, slots.sign
+        self.vertical = slots.vertical
         self.turns = []
         self.proposal_mark, self.confirm_go = -1, False
 

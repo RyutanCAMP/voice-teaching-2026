@@ -29,14 +29,13 @@ from .. import claude_interpreter, jbi, mock_claude, sim
 from .. import dialog as dg
 from .. import updown as ud
 from .. import utterance as ut
-from ..session import APPROVED_PENDING_MESSAGE, PENDING_MESSAGE, Comparison, Reply, Session
+from ..session import APPROVED_PENDING_MESSAGE, NO_POSITION, PENDING_MESSAGE, Comparison, Reply, Session
 from . import api
 
 MAX_SESSIONS = 8
 MAX_TEXT = 500
 SOURCES = ("voice", "text")
 NO_SESSION = "このジョブの画面の情報がありません（時間が経って捨てたか、サーバーを起動し直しました）。ジョブを読み込み直してください"
-NO_POSITION = "位置が決まっていないため、変更の提案をしていません。位置を選ぶか、位置番号（C と5桁の数字）で言ってください"
 NOT_DECIDED = "指示から変更の内容を決められませんでした。位置番号・方向・量（mm）を、もう一度指示してください"
 APP_SPEAKER = "アプリ"  # プログラムの決まった文の話し手（Claude の文ではない）
 NOT_APPROVED = "承認されていないため、出力しません（承認は確認表示の承認ボタンで行います）"
@@ -61,6 +60,9 @@ class _Entry:
     approval: sim.Approval | None = None
     approved_candidate: object | None = None      # 承認したときの候補（同じものか確かめる）
     approval_updown: ud.UpdownStatus | None = None  # 承認したときの上下の向きの照合の結果
+    # 最後に承認を消した理由が、上下の向きの設定（照合の結果）の変更か。出力の断り文に使う（P2-3）。
+    # 承認したとき・ほかの理由で承認を消したとき・新しい指示・選び直し・元に戻すで False に戻す
+    updown_cancelled: bool = False
     exported: str | None = None
     dialog: dg.Dialog = field(default_factory=dg.Dialog)  # Claude との会話の状態（メモリの中だけ。保存しない）
     frame: object | None = None                   # 案B：FRAME（まだ無い。あれば label・aliases で位置を決める）
@@ -252,7 +254,7 @@ class WebFlow:
         fs = ut.read_utterance(dg.substitute_opening(text, word))
         if fs.unknown_words:  # B1：知らない言葉を捨てて読まない
             d.end(clear_estimate=False)
-            return self._dialog_out(e, text, source, f0, "ask", ut.unknown_words_message(fs.unknown_words, "move"),
+            return self._dialog_out(e, text, source, f0, "ask", ut.unknown_words_message(fs.unknown_words, "move", s.updown),
                                     who="アプリ")
         slots = dg.read_slots(fs, opening=True, updown=s.updown)
         if slots.problem:
@@ -260,8 +262,10 @@ class WebFlow:
             return self._dialog_out(e, text, source, f0, "stop" if slots.stop else "ask", slots.problem)
         d.estimated = None  # 新しい会話を始めた：前の推定は使わない
         d.amount, d.axis, d.sign = slots.amount, slots.axis, slots.sign
+        d.vertical = slots.vertical
         if rel:  # 向きの言葉だけ：方向は必ず6つのボタンで聞く（始めの発話からは決めない）
             d.axis = d.sign = None
+            d.vertical = False
         d.turn += 1
         return self._locate(e, text, source, f0, word)
 
@@ -354,6 +358,10 @@ class WebFlow:
         if d.confirm_go:  # 手で選んだ位置の確かめ：［go］のボタンのほかでは進めない
             return self._dialog_out(e, text, source, f0, v.status if v.status == "stop" else "ask",
                                     v.message if v.status == "stop" else dg.GO_BUTTON)
+        if getattr(f0, "shimasu_text", None) is not None and not f0.question:
+            # 「〜します」：ふつうの指示と同じく、選んでいる位置で外した文を確かめる（検査・上限まで通るときだけ2択）。
+            # ［変更したい］の文には、その位置番号を入れる（あとで別の位置を選んでも、その位置に当てない。P2-1）
+            v = e.session.check_shimasu(f0, ut.pre_check(f0, e.session.selected, e.session.updown))
         if getattr(f0, "repeat", None) or getattr(f0, "question", False) or getattr(f0, "shimasu_text", None) is not None:
             # 繰り返し・疑問の形・「〜します」は、今の pre_check の答えのまま（量として使わない）
             return self._dialog_out(e, text, source, f0, v.status if v.status != "ok" else "ask",
@@ -366,7 +374,7 @@ class WebFlow:
             d.relative = rel
             return self._dialog_out(e, text, source, f0, "ask", dg.RELATIVE_ASK.format(rel=rel))
         if f0.unknown_words:  # B1
-            return self._dialog_out(e, text, source, f0, "ask", ut.unknown_words_message(f0.unknown_words, "move"),
+            return self._dialog_out(e, text, source, f0, "ask", ut.unknown_words_message(f0.unknown_words, "move", e.session.updown),
                                     who="アプリ")
         if f0.place_ref:  # 答えの中の場所の言葉：会話をやめて、今の流れ（聞き返し）のまま
             d.end()
@@ -380,9 +388,9 @@ class WebFlow:
             return self._dialog_out(e, text, source, f0, "stop" if slots.stop else "ask", slots.problem)
         if slots.amount is None and slots.axis is None and slots.sign is None:
             return self._dialog_out(e, text, source, f0, "ask", dg.NOTHING_READ + d.ask_move_message())
-        return self._merge_slots(e, text, source, f0, slots.amount, slots.axis, slots.sign)
+        return self._merge_slots(e, text, source, f0, slots.amount, slots.axis, slots.sign, slots.vertical)
 
-    def _merge_slots(self, e: _Entry, text, source, f0, amount, axis, sign) -> dict:
+    def _merge_slots(self, e: _Entry, text, source, f0, amount, axis, sign, vertical: bool = False) -> dict:
         d = e.dialog
         d.confirm_go = False
         if amount is not None:
@@ -394,8 +402,12 @@ class WebFlow:
             problem = dg.AXIS_CONFLICT
         if problem:  # 前の答えと食い違う：どちらも使わず、ボタンで選び直してもらう
             d.axis = d.sign = None
+            d.vertical = False
             d.turn += 1
             return self._dialog_out(e, text, source, f0, "ask", problem)
+        if axis is not None:
+            # 軸を「上に・下げて」から読んだか（軸の文字・方向のボタンなら False）。前の答えと同じ軸なら、どちらかの印を残す
+            d.vertical = vertical or (d.vertical and d.axis == axis)
         d.axis = axis if axis is not None else d.axis
         d.sign = sign if sign is not None else d.sign
         if d.complete():
@@ -423,7 +435,7 @@ class WebFlow:
     def _run_canonical(self, e: _Entry, source: str) -> dict:
         """集めたことを決まった文にして、ふつうの指示と同じ流れに通す（ガードはすべてそのまま）。"""
         d = e.dialog
-        text = dg.canonical_text(d.position, d.axis, d.sign, d.amount)
+        text = dg.canonical_text(d.position, d.axis, d.sign, d.amount, vertical=d.vertical)
         est = d.estimated
         d.end()
         out = self._instruction(e, text, source)
@@ -575,6 +587,7 @@ class WebFlow:
                 return self._fail(e, str(ex))
             e.sim_proposal, e.approval, e.approved_candidate = sp, ap, ch
             e.approval_updown = st
+            e.updown_cancelled = False
             e.exported = None
             s.log.append(("承認", f"{ap.approved_by} さんが承認ボタンで承認しました（{ap.approved_at}）。{_updown_note(st)}"))
             return {"ok": True, "state": None}
@@ -584,7 +597,8 @@ class WebFlow:
     def export(self, sid: object) -> dict:
         def run(e: _Entry) -> dict:
             if not self._approved(e):
-                return self._fail(e, NOT_APPROVED)
+                # 上下の向きの設定が変わって承認を消した（間に状態の要求があっても）なら、その理由を出す
+                return self._fail(e, UPDOWN_CHANGED_EXPORT if e.updown_cancelled else NOT_APPROVED)
             if not self._updown_unchanged(e):  # 設定を読み直す。変わっていれば承認を消して断る
                 self._cancel_approval(e, UPDOWN_CHANGED_WHY)
                 return self._fail(e, UPDOWN_CHANGED_EXPORT)
@@ -637,7 +651,10 @@ class WebFlow:
         self._cancel_approval(e, "新しい指示があったため")
 
     def _cancel_approval(self, e: _Entry, why: str) -> None:
+        if why != UPDOWN_CHANGED_WHY:
+            e.updown_cancelled = False  # 新しい指示・選び直し・元に戻す：上下の文はもう出さない
         if e.approval is not None:
+            e.updown_cancelled = why == UPDOWN_CHANGED_WHY
             e.approval = e.sim_proposal = e.approved_candidate = e.approval_updown = None
             e.session.log.append(("承認", f"{why}、承認を取り消しました。もう一度確かめて、承認ボタンで承認してください"))
 
@@ -667,6 +684,12 @@ class WebFlow:
         st = s.updown_status()
         e.dialog.direction_names = st.direction_names
         same_updown = s.candidate_updown is not None and s.candidate_updown.token == st.token
+        if cand is not None:
+            # 候補の向きの名前（「（下へ）」）と、確認表示の「上下の向き：〇〇さんが確認」の1行は、候補を作ったときの照合の結果から。
+            # 今の照合の結果と違えば（設定が変わった）名前は付けない（承認もできない）
+            cu = s.candidate_updown
+            cand["direction_names"] = cu.direction_names if (cu is not None and same_updown) else {}
+            cand["updown"] = cu.as_state() if (cu is not None and same_updown) else None
         return {
             "session_id": sid,
             "mode": api.MODE,

@@ -66,7 +66,8 @@ def test_help_popover_content():
     head = h[:h.index("</header>")]
     assert head.index('id="help-button"') < head.index('id="engineer-toggle"')
     pop = re.search(r'<div id="help-pop".*?<!-- /help-pop -->', h, re.S).group(0)
-    for w in ["Y座標を3ミリ下げて", "Yのマイナス3ミリ", "この位置を上に10ミリ",
+    # 既定（上下の向きが未確認）の例は軸と符号（fix/c026-r2 QA P1-2）。確認済みの「この位置を上に10ミリ」は app.js が入れ直す
+    for w in ["Y座標を3ミリ下げて", "Yのマイナス3ミリ", "Zプラス方向に10ミリ",
               "一文字の『Yを…』は聞き違えやすいので、『Y座標を…』と言ってください",
               "話した文は欄に入るだけ。『次へ』で送ります",
               "聞き取った文がちがうときは、直してから送ってください",

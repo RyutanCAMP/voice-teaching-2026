@@ -36,8 +36,10 @@ _NUM = jbi._NUM
 PENDING_MESSAGE = "承認待ちの変更候補があります。比べるか、元に戻してから指示してください"
 # 承認したあとの候補があるときの文（CHECKER_026 S-msg）。新しい指示があると承認は今どおり取り消すので、そのことも書く。
 # web/flow.py が、承認していたときだけ Session.pending_message をこれにする
-APPROVED_PENDING_MESSAGE = ("承認した変更候補があります。新しい指示があったため、承認は取り消しました。"
+APPROVED_PENDING_MESSAGE = ("新しい指示があったため、承認を取り消しました。変更候補は残っています。"
                             "もう一度承認して出力するか、元に戻してから指示してください")
+# 位置が決まらない移動・速度の指示（web/flow.py も、解釈の係を呼ぶ前にこの文で聞き返す）
+NO_POSITION = "位置が決まっていないため、変更の提案をしていません。位置を選ぶか、位置番号（C と5桁の数字）で言ってください"
 
 
 @dataclass(frozen=True)
@@ -136,18 +138,21 @@ class Session:
         self.facts = facts
         self._locked = False
         self._log("発話", f"{'音声' if source == 'voice' else '文字'}：{text}")
-        v = ut.pre_check(facts, self.selected, self.updown_status())
+        st = self.updown_status()
+        v = ut.pre_check(facts, self.selected, st)
         if v.status == "ask" and facts.question and v.choices and facts.op in ("move", "speed"):
             v = self._check_question(facts, v)  # 疑問の形の確かめ（2026-11-03 夜）
-        shimasu = ut.is_shimasu_confirmation(v)
-        if shimasu and self.candidate is not None:
-            v = ut.Verdict("stop", self.pending_message)  # 「〜します」の確かめより先に、承認待ちの候補を知らせる
+        if ut.is_shimasu_confirmation(v):
+            v = self.check_shimasu(facts, v)  # 「〜します」：外した文が検査・上限まで通るときだけ2択（QA P1-1）
         if v.status != "ok":
             self._locked = True  # 聞き返し・止めた発話では、Claude が量を作って提案しても使わない
-        # 知らない言葉で聞き返したときは、次の発話を答えとして前の発話に足さない（言い直しを新しい指示として読む。
-        # 前の発話の残り「下げて」と合わせて、知らない言葉を捨てた候補にしない）。
-        # 「〜します」の2択のあとも足さない（「3mm」と答えても、確かめを飛ばして候補にしない。ボタンで選んでもらう）
-        self._awaiting_answer = facts if v.status == "ask" and not facts.unknown_words and not shimasu else None
+        # 次の発話を答えとして前の発話に足さない（言い直しを新しい指示として読む）のは、次のとき：
+        # - 知らない言葉で聞き返した（前の発話の残り「下げて」と合わせて、知らない言葉を捨てた候補にしない）
+        # - 「〜します」の発話（「3mm」と答えても、確かめを飛ばして候補にしない。ボタンで選んでもらう）
+        # - 上下の向きが確認できていない「上・下」で聞き返した（CHECKER_026 再修正 P0-1。「下げて」→「3ミリ」を Z− にしない）
+        updown_ask = facts.vertical and not st.confirmed
+        self._awaiting_answer = (facts if v.status == "ask" and not facts.unknown_words and facts.shimasu_text is None
+                                 and not updown_ask else None)
         choices = v.choices
         if self.selected is not None:
             # 選択肢の文には、聞き返したときの位置を必ず入れる（あとで別の位置を選んでも、その位置に当てない）。
@@ -156,6 +161,30 @@ class Session:
                                              or ut.read_utterance(text).place_ref) else f"{self.selected}を{text}")
                             for label, text in choices)
         return self._reply(v.status, v.message, facts=facts, choices=choices)
+
+    def check_shimasu(self, facts: ut.UtteranceFacts, v: ut.Verdict) -> ut.Verdict:
+        """「〜します」の2択（v）を出す前に、外した文がふつうの指示としてどうなるかを、候補を作らずに確かめる（QA P1-1）。
+
+        承認待ちの候補・位置が決まらない・実機用の検査（上限・0mm・位置がジョブに無い など）で断られるなら、その答えを返す
+        （2択で上書きしない）。疑問の形（_check_question）と違い、シミュレーションの参考の候補が作れても2択にしない
+        （「〜します」からは参考の候補も作らないため、断られた理由をそのまま知らせる）。
+        """
+        if not ut.is_shimasu_confirmation(v):
+            return v
+        if self.candidate is not None:
+            return ut.Verdict("stop", self.pending_message)  # 「〜します」の確かめより先に、承認待ちの候補を知らせる
+        position, value = facts.position or self.selected, facts.requested_value()
+        if position is None:
+            return ut.Verdict("ask", NO_POSITION)
+        if value is None or (facts.op == "move" and facts.axis is None) or facts.op not in ("move", "speed"):
+            return ut.Verdict("ask", ut.SHIMASU_RESTATE_MESSAGE)
+        p = (ut.ProposedChange(kind="shift", position=position, axis=facts.axis, delta_mm=float(value))
+             if facts.op == "move" else ut.ProposedChange(kind="speed", position=position, percent=float(value)))
+        try:
+            self._plan(p)  # 試すだけ（候補にしない）
+        except jbi.JbiError as e:
+            return ut.Verdict("stop", str(e))
+        return v
 
     def explain_only(self, text: str, source: str = "text") -> Reply:
         """［説明です］（「〜します」の2択）：何もしない。候補・選択中の位置・元のジョブは変えない（CHECKER_026 M3）。"""

@@ -23,10 +23,11 @@
     <button type="button" id="help-button" class="help-btn" aria-expanded="false" aria-controls="help-pop" aria-label="使い方" title="使い方">？</button>
     <div id="help-pop" class="help-pop" role="dialog" aria-label="使い方" hidden>
       <p class="help-head">たとえば、こう話します</p>
-      <ul class="help-examples">
+      <!-- 例は上下の向きの状態で変える（app.js が state.updown で入れ直す）。既定は未確認：上下の言葉を例に出さない -->
+      <ul class="help-examples" id="help-examples">
         <li>「Y座標を3ミリ下げて」</li>
         <li>「Yのマイナス3ミリ」</li>
-        <li>「この位置を上に10ミリ」</li>
+        <li>「Zプラス方向に10ミリ」</li>
       </ul>
       <p class="help-line">一文字の『Yを…』は聞き違えやすいので、『Y座標を…』と言ってください</p>
       <p class="help-line">話した文は欄に入るだけ。『次へ』で送ります</p>
@@ -75,7 +76,7 @@
         <!-- 区間の種類（CHECKER_026 S-MOVJ）。MOVJ・目安の区間は、そのジョブにあるときだけ出す -->
         <div id="legend-kinds" class="legend kinds" hidden>
           <span class="lg movl">MOVL：直線移動</span>
-          <span class="lg movj" id="legend-movj" hidden title="関節移動（MOVJ）：実際の通り道は直線ではありません">MOVJ：関節移動（通り道は表示していません）</span>
+          <span class="lg movj" id="legend-movj" hidden title="関節移動（MOVJ）：実際の通り道は直線ではありません">MOVJ：関節移動（点線は順番だけ。実際の通り道ではありません）</span>
           <span class="lg other" id="legend-other" hidden>破線：直線とは限りません（目安）</span>
         </div>
         <div id="legend" class="legend" hidden>
@@ -145,7 +146,7 @@
         <label for="text-input" id="heard-label" class="heard-label" hidden>聞き取った文（直せます）</label>
         <form id="text-form" class="text-form">
           <label for="text-input" class="sr-only">指示の文</label>
-          <input type="text" id="text-input" maxlength="500" placeholder="この位置を上に10mm" disabled>
+          <input type="text" id="text-input" maxlength="500" placeholder="Zプラス方向に10mm" disabled>
           <button type="submit" id="text-send" disabled>次へ</button>
         </form>
         <p class="fine">1回に動かせる量：<span id="max-shift-label"></span></p>
@@ -175,7 +176,7 @@
       <div>
         <h3>使い方</h3>
         <ul class="small">
-          <li>話し方の例：「この位置を上に10mm」「この位置を下に5mm」「C00005をZプラス方向に10mm移動して」「C00004を選択して」「比較して」「元に戻して」</li>
+          <li id="howto-examples">話し方の例：「この位置をZプラス方向に10mm」「Zのマイナス5ミリ」「C00005をZプラス方向に10mm移動して」「C00004を選択して」「比較して」「元に戻して」</li>
           <li>「少し動かして」のように量がはっきりしないときや、「右に」「左に」は聞き返します。</li>
           <li>話した文は入力欄に入るだけで、自動では送りません。直してから「次へ」を押せます。</li>
           <li>承認は確認表示の承認ボタンだけで行います。声や文字では承認しません。承認するまで、ジョブは変わりません。</li>
@@ -199,7 +200,7 @@
         <h3>図と再生</h3>
         <ul class="small">
           <li>図の線は命令の順に結んでいます。実線は MOVL（PL・CR なし、または PL=0）の直線移動の区間です。</li>
-          <li>細い灰色の点線は MOVJ（関節移動）の区間です。実際の通り道は直線ではなく、ジョブの点だけでは分からないため、表示していません。</li>
+          <li>細い灰色の点線は MOVJ（関節移動）の区間です。点線は命令の順番を示すだけで、実際の通り道ではありません（実際の通り道は直線ではなく、ジョブの点だけでは分かりません）。</li>
           <li>破線はそれ以外（MOVC・PL が 1 以上など）の区間で「目安」です。</li>
           <li>再生は、MOVL の区間だけ線の上を印が動きます。MOVJ と目安の区間では、印は線の上を動かず、終点へ移るだけです。腕の姿勢・関節の動き・速度・PL による角の丸め・待ち時間は再現していません。</li>
         </ul>
@@ -249,11 +250,13 @@
       <div id="confirm-figure" class="fig confirm-figure"></div>
       <div>
         <ul id="confirm-warnings" class="confirm-warnings" aria-label="この変更の注意"></ul>
+        <!-- 上下の向きを確認した人と日時（確認済みのときだけ。タッチ端末では説明を重ねて見られないため、文で出す） -->
+        <p id="confirm-updown" class="fine confirm-updown" hidden></p>
         <div id="confirm-xyz" class="confirm-xyz"></div>
         <div id="confirm-diff" class="diff"></div>
         <details class="fine"><summary>変わる命令の行</summary><ul id="confirm-affected" class="confirm-affected"></ul></details>
         <p class="fine">灰色＝変更前、オレンジ＝変更後。点を命令の順に直線で結んだ目安で、ロボット本体の動きではありません。ロボット本体・関節は描いていません。動作や干渉を保証するシミュレーターではありません。経路は人が確かめてください。</p>
-        <p id="confirm-movj-legend" class="fine movj-legend" hidden>細い灰色の点線＝関節移動（MOVJ）。実際の通り道は直線ではありません（表示していません）</p>
+        <p id="confirm-movj-legend" class="fine movj-legend" hidden>細い灰色の点線＝関節移動（MOVJ）。点線は命令の順番だけで、実際の通り道ではありません</p>
         <p id="confirm-stopped-legend" class="fine stopped-legend" hidden>灰色の点線＝止まった候補（承認できません）</p>
         <p class="fine confirm-figure-note">この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。参考表示であり、実際のロボットの動きではありません。</p>
         <p class="fine">シミュレーション用の確認です。実機用の出力・転送・ロボットの起動はしません。</p>

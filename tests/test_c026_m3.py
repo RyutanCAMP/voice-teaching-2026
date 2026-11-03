@@ -34,7 +34,7 @@ pytestmark = pytest.mark.usefixtures("updown_demo_c")
 LABELS = ["変更したい", "説明です"]
 TAIL = "それとも操作の説明でしょうか？"
 EXPLAIN_REPLY = "分かりました。変更はしません"
-APPROVED_PENDING = "承認した変更候補があります。"
+APPROVED_PENDING = "新しい指示があったため、承認を取り消しました。"  # fix/c026-r2 QA P2 で文を変えた
 PICK_AFTER_NEGATION = "分かりました。合っていなければ「ほかの位置」を押してください"
 
 
@@ -91,21 +91,28 @@ def test_shimasu_asks_two_choices_and_makes_no_candidate(text, plain, head, sour
     assert r["state"]["approval"] is None
 
 
+# ［変更したい］の文は、プログラムが読んだ facts から作る（fix/c026-r2 P2-2。位置を選んでいなければ位置番号は付けない）
+CHOICE_TEXT = {"3mm下げて動かします": "3ミリ下げて", "下に3mm移動します": "3ミリ下げて",
+               "Yのマイナス3ミリずらします": "Yのマイナス3ミリ", "下に3mm動かします。": "3ミリ下げて",
+               "C00004を3mm上げて移動します": "C00004を3ミリ上げて"}
+
+
 @pytest.mark.parametrize("text,plain,head", SHIMASU)
-def test_shimasu_facts_and_pre_check(text, plain, head):
+def test_shimasu_facts_and_pre_check(text, plain, head, updown_ok):
     f = ut.read_utterance(text)
     assert f.shimasu_text == plain
     assert f.raw == text
-    v = ut.pre_check(f)
+    v = ut.pre_check(f, None, updown_ok)  # 上・下を Z として読むのは確認済みのときだけ（fix/c026-r2）
     assert v.status == "ask" and [c[0] for c in v.choices] == LABELS
-    assert v.choices[0][1] == plain
+    assert v.choices[0][1] == CHOICE_TEXT[text]
+    assert ut.pre_check(f).message == ut.UPDOWN_UNSET_MESSAGE or not f.vertical  # 未確認なら2択にしない
 
 
-def test_shimasu_without_a_clear_phrase_uses_fixed_words():
-    # 量が無いなど、言い直しの文を作れないときは「この変更を」
+def test_shimasu_without_a_clear_phrase_asks_amount():
+    # 量も方向も無い「動かします」は、2択を出さずに、ふつうの指示と同じ聞き返し（fix/c026-r2 P2-2・QA P1-1）
     w, sid = new()
     r = w.hear(sid, "動かします")
-    assert r["status"] == "ask" and r["message"] == f"この変更をご希望ですか？ {TAIL}" and labels(r) == LABELS
+    assert r["status"] == "ask" and r["message"] == "何mm動かしますか？" and labels(r) == []
     assert cand(r) is None
 
 
@@ -113,7 +120,7 @@ def test_shimasu_choice_keeps_the_position_of_the_question():
     # 選択肢の文には、聞き返したときの位置を入れる（あとで別の位置を選んでも、その位置に当てない）
     w, sid = new(select="C00005")
     r = w.hear(sid, "Yのマイナス3ミリずらします")
-    assert r["choices"][0]["text"] == "C00005をYのマイナス3ミリずらして"
+    assert r["choices"][0]["text"] == "C00005をYのマイナス3ミリ"  # facts から作る（fix/c026-r2 P2-2）
     assert w.select(sid, "C00004")["status"] == "ok"
     r2 = press(w, sid, r, "変更したい")
     assert r2["status"] == "ok" and cand(r2) == ("C00005 Y", "-3.000")
@@ -164,11 +171,10 @@ def test_want_change_gives_the_same_result_as_the_plain_instruction(text):
 
 
 def test_want_change_still_hits_the_limit():
+    # 上限を超える「〜します」は、2択を出さずに上限の理由で止める（fix/c026-r2 QA P1-1）
     w, sid = new()
     r = w.hear(sid, "Yのマイナス25ミリずらします")
-    assert r["status"] == "ask" and labels(r) == LABELS and cand(r) is None
-    r2 = press(w, sid, r, "変更したい")
-    assert r2["status"] == "stop" and cand(r2) is None and "上限" in r2["message"]
+    assert r["status"] == "stop" and labels(r) == [] and cand(r) is None and "上限" in r["message"]
 
 
 # ======================================================================
@@ -223,9 +229,10 @@ def test_old_want_change_after_other_work_is_a_normal_instruction():
 
 def test_after_two_choices_an_answer_is_not_merged():
     # 2択のあとに「3mm」だけ言っても、前の発話と合わせて候補にしない（ボタンで選んでもらう）
+    # fix/c026-r2：量の無い「下に動かします」は2択にせず量を聞くが、「〜します」の発話には答えを足さない
     w, sid = new()
     r = w.hear(sid, "下に動かします")
-    assert labels(r) == LABELS
+    assert r["message"] == "何mm動かしますか？" and labels(r) == []
     r2 = w.hear(sid, "3mm")
     assert r2["status"] == "ask" and cand(r2) is None
 
@@ -306,16 +313,14 @@ def test_messages_have_no_forbidden_words():
     assert not ut.contains_forbidden(dg.PICK_AFTER_NEGATION)
 
 
-def test_place_word_with_shimasu_asks_two_choices_before_the_dialogue():
+def test_place_word_with_shimasu_asks_without_two_choices():
+    # fix/c026-r2 QA P1-1：場所の言葉の「〜します」は、外した文の答え（場所の言葉の聞き返し）をそのまま返す。2択にしない
     w, sid = new(select="C00001")
     r = w.hear(sid, "置くところを3mm下げて動かします")
-    assert r["status"] == "ask" and labels(r) == LABELS and cand(r) is None
-    assert r["state"]["dialog"]["step"] is None  # 会話（位置の候補）は、まだ始めない
-    # ［変更したい］の文に、選んでいる位置（C00001）を足さない（置くところがどの位置かは、会話で人が選ぶ）
-    assert r["choices"][0]["text"] == "置くところを3mm下げて"
-    r2 = press(w, sid, r, "変更したい")
-    assert r2["state"]["dialog"]["step"] in ("confirm_position", "pick") and cand(r2) is None
-    assert r2["state"]["selected"] == "C00001"
+    assert r["status"] == "ask" and labels(r) != LABELS and cand(r) is None and TAIL not in r["message"]
+    assert "「置くところ」" in r["message"]
+    assert r["state"]["dialog"]["step"] is None  # 会話（位置の候補）は始めない
+    assert r["state"]["selected"] == "C00001"
 
 
 def test_shimasu_in_dialogue_asks_two_choices_and_keeps_the_dialogue():
@@ -345,7 +350,7 @@ def test_s_msg_after_approval():
     assert "承認待ち" not in r["message"]
     assert r["tool_calls"] == [] and cand(r) == ("C00005 X", "+2.000")
     # 新しい指示があったので、承認は今どおり取り消す（文もそれを伝える）
-    assert r["state"]["approval"] is None and "承認は取り消しました" in r["message"]
+    assert r["state"]["approval"] is None and "承認を取り消しました" in r["message"]
 
 
 def test_s_msg_before_approval_is_unchanged():

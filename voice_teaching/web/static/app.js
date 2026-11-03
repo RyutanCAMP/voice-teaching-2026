@@ -11,7 +11,8 @@
 "use strict";
 import { SpeechInput } from "/static/speech.js";
 import { View3D } from "/static/view3d.js";
-import { splitUnknown, displayMinus, segmentLook, segmentTitle, confirmHeading, updownStatus } from "/static/highlight.js";
+import { splitUnknown, displayMinus, segmentLook, segmentTitle, confirmHeading, updownStatus, updownConfirmLine, speechExamples }
+  from "/static/highlight.js";
 
 const state = {
   sessionId: null,  // サーバーのメモリにある画面の状態の番号
@@ -216,6 +217,11 @@ function renderUpdown(u) {
   box.title = v ? v.title : "";
   box.dataset.tone = v ? v.tone : "";
   box.hidden = !v;
+  // 話し方の例：確認済みのときだけ上下の例。ほかは軸と符号の例（そのまま送れば候補になる文）
+  const ex = speechExamples(u);
+  $("text-input").placeholder = ex.placeholder;
+  $("howto-examples").textContent = ex.howto;
+  $("help-examples").replaceChildren(...ex.help.map((t) => el("li", {}, t)));
 }
 
 function renderState() {
@@ -615,7 +621,7 @@ function renderCandidate() {
   if (c.blocked_reason) parts.push(friendly("blocked", c.blocked_reason));
   parts.push(el("p", { class: "cand-pos" }, pos));
   if (c.estimated) parts.push(estimatedLine(c.estimated));
-  parts.push(el("p", { class: "cand-big" }, displayMinus(`${axis}方向に ${c.delta}mm`) + dirName(axis, c.delta)));
+  parts.push(el("p", { class: "cand-big" }, displayMinus(`${axis}方向に ${c.delta}mm`) + dirName(axis, c.delta, c.direction_names)));
   parts.push(changeLine(axis, c));
   if (c.heard) parts.push(el("p", { class: "cand-heard" }, "指示：「", ...heardNodes(c.heard), "」"));
   if (c.before_xyz) parts.push(xyzView(c));
@@ -634,9 +640,10 @@ function changeLine(axis, c) {
     el("span", { class: "arrow" }, "→"), el("span", { class: "to" }, displayMinus(c.after_value)));
 }
 
-// 確認済みの方向の名前（サーバーの direction_names。今は Z の 上・下 だけ）。未確認の軸には名前を付けない
-function dirName(axis, delta) {
-  const names = (state.st && state.st.direction_names) || {};
+// 確認済みの方向の名前（今は Z の 上・下 だけ）。未確認の軸には名前を付けない。
+// 候補の向きの名前は、候補を作ったときの照合の結果（サーバーの candidate.direction_names）から付ける（QA P2）
+function dirName(axis, delta, names) {
+  names = names || {};
   const n = names[axis] && names[axis][String(delta).trim().startsWith("-") ? "-" : "+"];
   return n ? `（${n}へ）` : "";
 }
@@ -644,7 +651,7 @@ function dirName(axis, delta) {
 // 変更前後の X・Y・Z（サーバーが読んだ値）。変わる軸を強調し、確認済みの向きの名前だけを添える
 function xyzView(c) {
   const axis = c.target.split(" ")[1];
-  const names = (state.st && state.st.direction_names) || {};
+  const names = c.direction_names || {};  // 候補を作ったときの照合の結果から（見出しと同じ）
   const head = (a) => {
     const n = names[a];
     return el("th", { class: a === axis ? "chg" : "" }, a, n ? el("span", { class: "dir" }, `＋${n["+"]}／−${n["-"]}`) : null);
@@ -685,7 +692,10 @@ function openConfirm() {
   stopPlayback();
   const cc = st.candidate, [, ax] = cc.target.split(" ");
   // 見出しは1行（CHECKER_026 S5）：「C00005 を Y −3mm 動かします」。数はサーバーの候補のデータのまま。長い説明は下の小さな文
-  $("confirm-title").textContent = confirmHeading(cc, cc.kind === "shift" ? dirName(ax, cc.delta) : "") || "確認";
+  $("confirm-title").textContent = confirmHeading(cc, cc.kind === "shift" ? dirName(ax, cc.delta, cc.direction_names) : "") || "確認";
+  const upLine = updownConfirmLine(cc.updown);
+  $("confirm-updown").textContent = upLine;
+  $("confirm-updown").hidden = !upLine;
   $("confirm-text").textContent = st.confirmation_text || "";
   // 止まった理由は確認の文に入っている。入っていないときだけ、ここに添える（理由は省略しない）
   const reason = st.blocked_reason && !(st.confirmation_text || "").includes(st.blocked_reason)
@@ -1114,7 +1124,7 @@ function startPlayback() {
 const HOLD_MS = 700;  // MOVJ・目安の区間で、印を消しておく時間（画面の上だけ。実際の動きとは関係ない）
 function playStatus(name, i, n, look) {
   const head = `${name}を再生中 ${i}/${n}`;
-  if (look.kind === "movj") return `${head}　MOVJ：関節移動（通り道は表示していません）`;
+  if (look.kind === "movj") return `${head}　MOVJ：関節移動（点線は順番だけ。実際の通り道ではありません）`;
   if (look.kind === "other") return `${head}　直線とは限らない区間（印は終点へ移ります）`;
   return head;
 }

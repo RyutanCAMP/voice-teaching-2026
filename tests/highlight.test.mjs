@@ -1,7 +1,7 @@
 // 読めなかった言葉（facts.unknown_words）を、聞き取った文の中で目立たせるための分け方（CHECKER_023 B1）。
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { splitUnknown, displayMinus, segmentLook, segmentTitle, trimDecimal, confirmHeading, updownStatus }
+import { splitUnknown, displayMinus, segmentLook, segmentTitle, trimDecimal, confirmHeading, updownStatus, updownConfirmLine, speechExamples }
   from '../voice_teaching/web/static/highlight.js';
 
 test('unknown words are split out in order', () => {
@@ -98,7 +98,7 @@ test('updownStatus: nothing when the server does not send it', () => {
   for (const u of [undefined, null, 'confirmed', 3, []]) assert.equal(updownStatus(u), null, String(u));
 });
 test('updownStatus: four states', () => {
-  assert.deepEqual(updownStatus({ status: 'unconfirmed' }), { text: '上下の向き：未確認', tone: 'unconfirmed', title: '' });
+  assert.deepEqual(updownStatus({ status: 'unconfirmed' }), { text: '上下の向き：未確認（Z＋・Z−で指示）', tone: 'unconfirmed', title: '' });
   assert.deepEqual(updownStatus({ status: 'confirmed', confirmed_by: '唐川', confirmed_at: '2026-11-03T14:00:00+09:00', message: 'FRAME の設定で確認' }),
     { text: '上下の向き：確認済み', tone: 'confirmed', title: '確認：唐川・11/3 14:00。FRAME の設定で確認' });
   assert.equal(updownStatus({ status: 'mismatch' }).text, '上下の向き：確認したジョブと違います');
@@ -113,6 +113,27 @@ test('updownStatus: confirmed with partial data, and unknown status is never sho
   assert.equal(updownStatus({ status: 'confirmed' }).text, '上下の向き：確認済み');
   assert.equal(updownStatus({ status: 'confirmed' }).title, '');
   for (const s of ['ok', 'CONFIRMED', undefined, '']) {
-    assert.deepEqual(updownStatus({ status: s, confirmed_by: '唐川' }), { text: '上下の向き：未確認', tone: 'unconfirmed', title: '' }, String(s));
+    assert.deepEqual(updownStatus({ status: s, confirmed_by: '唐川' }), { text: '上下の向き：未確認（Z＋・Z−で指示）', tone: 'unconfirmed', title: '' }, String(s));
   }
+});
+
+// ---- CHECKER_026 再修正（QA P1-2・P2） ----
+test('speechExamples: up/down examples only when confirmed', () => {
+  const lure = /上に|下に|上へ|下へ|上方向|下方向/;
+  for (const u of [undefined, null, {}, { status: 'unconfirmed' }, { status: 'mismatch' }, { status: 'changed' }, { status: 'confirmedx' }, []]) {
+    const ex = speechExamples(u);
+    assert.equal(ex.placeholder, 'Zプラス方向に10mm', JSON.stringify(u));
+    assert.ok(!lure.test(ex.placeholder) && !lure.test(ex.howto) && !ex.help.some((t) => lure.test(t)), JSON.stringify(u));
+  }
+  const ok = speechExamples({ status: 'confirmed' });
+  assert.equal(ok.placeholder, 'この位置を上に10mm');
+  assert.ok(ok.howto.includes('「この位置を上に10mm」'));
+});
+
+test('updownConfirmLine: one line only when confirmed', () => {
+  assert.equal(updownConfirmLine({ status: 'confirmed', confirmed_by: '唐川', confirmed_at: '2026-11-03T14:00:00+09:00' }),
+    '上下の向き：唐川さんが確認（11/3 14:00）');
+  assert.equal(updownConfirmLine({ status: 'confirmed' }), '上下の向き：確認済み');
+  for (const u of [undefined, null, [], { status: 'unconfirmed', confirmed_by: '唐川' }, { status: 'mismatch' }, { status: 'changed' }])
+    assert.equal(updownConfirmLine(u), '', JSON.stringify(u));
 });

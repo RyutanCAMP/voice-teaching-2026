@@ -31,8 +31,15 @@ KIND_ORDER = ("select", "move", "speed", "compare", "undo", "approve", "start")
 
 APPROVE_MESSAGE = "承認・書き出し・転送は、画面のボタンで行います。声や文字の指示では行いません"
 START_MESSAGE = "このアプリからはロボットを動かしません。ロボットはペンダントで選んで、人がスタートします"
+# 「右」「左」の案内。状態を知らずに出す固定の文（Claude の経路・提案の照らし合わせ）は、上下の言葉を例に出さない（CHECKER_026 M2）。
+# 上下の向きが確認済みのときだけ、pre_check が SIDE_MESSAGE_UPDOWN（「上げて」「下げて」の例つき）を出す
 SIDE_MESSAGE = ("「右」「左」は、専門家が枠の設定で軸を決めるまで使えません（軸が決まっていません）。"
-                "X・Y・Z の方向、または「上げて」「下げて」で指示してください")
+                "Zプラス・Yのマイナスのように、軸（X・Y・Z）と向きで指示してください")
+SIDE_MESSAGE_UPDOWN = ("「右」「左」は、専門家が枠の設定で軸を決めるまで使えません（軸が決まっていません）。"
+                       "X・Y・Z の方向、または「上げて」「下げて」で指示してください")
+# 方向を聞く文。確認済みのときだけ上げる・下げるを例に出す。dialog._HANDLED_ASKS も両方を見る
+AXIS_ASK = "どの方向（Zプラス・Yのマイナスのように、軸と向き）に動かしますか？"
+AXIS_ASK_UPDOWN = "どの方向（X・Y・Z、または上げる・下げる）に動かしますか？"
 FRONT_BACK_MESSAGE = "前・後ろの向きは、このアプリでは扱いません"
 
 
@@ -82,6 +89,9 @@ class UtteranceFacts:
     refers_to_selection: bool = False      # 「この位置」「ここ」など
     stray_signs: int = 0                   # 量にも軸にも付かなかった符号（＋・−・プラス・マイナス）の数
     vertical: bool = False                 # 「上げ・下げ・上に・下に」を Z（上下）として読んだ
+    # 軸の文字（X・Y・Z）ではっきり言った軸（「Zマイナス」「Zの」「Z座標」「Z方向」など）。上・下から補った Z は入れない。
+    # 上下の向きが確認済みでないときは、check_proposal が Z の提案をこの中に Z があるときだけ通す（最後の止め。CHECKER_026 M2）
+    explicit_axes: tuple[str, ...] = ()
     stop_reasons: tuple[str, ...] = ()
     # 読み取りで使わなかった言葉（つなぎの言葉の一覧 FILLER_WORDS にも無いもの）。
     # 移動・速度の指示で1つでもあれば聞き返す（「バイオ 3ミリ 下げて」を Z −3 にしない。docs/UNKNOWN_WORDS_PLAN.md）
@@ -152,6 +162,8 @@ _VAGUE = re.compile(r"そこそこ|半分|少し|すこし|ちょっと|ちょ�
 _AXIS_RE = re.compile(r"(?<![A-Z])([XYZ])\s?(マイナス|プラス|[+\-])?\s?(方向|軸|に|へ)")
 # 「Xマイナス5ミリ」「Y +3 mm」「X の -5ミリ」：軸のすぐ後（「の」をはさんでもよい）に符号と数字。符号は量の側（_SIGN_BEFORE）で読むので、ここでは軸だけ
 _AXIS_SIGNED_NUM = re.compile(r"(?<![A-Z])([XYZ])\s?(?:の\s?)?(?=(?:マイナス|プラス|[+\-])\s?[0-9])")
+# 文の終わりの「Zマイナス」「Zのプラス」「Z-」（数字が後に無い）：軸と向き（聞き返しへの答え「Zマイナス」→「3ミリ」のため）
+_AXIS_SIGN_END = re.compile(r"(?<![A-Z])([XYZ])\s?(?:の\s?)?(マイナス|プラス|[+\-])(?=[\s、。．.!！]*$)")
 # 単独の X・Y・Z（「Yを」「Yの」も、軸を言ったものとして読む。CHECKER_021 D1）
 _AXIS_WORD = re.compile(r"(?<![A-Z])([XYZ]{1,3})(?![A-Z])")
 # 座標の値の上げ下げ（「Y座標を3mm下げて」「Yの値を3mm減らして」）：その軸の値の増減として読む（2026-11-03 本人の判断）
@@ -541,7 +553,15 @@ def _read(raw: str, question: bool) -> UtteranceFacts:
     for m in _AXIS_SIGNED_NUM.finditer(rest_no_speed):
         if m.group(1) not in axes:
             axes.append(m.group(1))
+    if not is_speed:
+        for m in _AXIS_SIGN_END.finditer(rest_no_speed):
+            if not _NUM_RE.search(rest_no_speed[m.end():]):
+                if m.group(1) not in axes:
+                    axes.append(m.group(1))
+                axis_signs.append(_SIGN[m.group(2)])
+                placed_axis_signs += 1
     speed_signs: list[int] = []
+    explicit: list[str] = list(axes)  # ここまでは軸の文字で言った軸
     up, down = bool(_UP.search(rest)), bool(_DOWN.search(rest))
     coord = [] if is_speed else list(dict.fromkeys(m.group(1) for m in _COORD_VALUE.finditer(rest_no_speed)))
     vertical = False  # 「上げ・下げ・上に・下に」を Z（上下）として読んだ
@@ -553,6 +573,8 @@ def _read(raw: str, question: bool) -> UtteranceFacts:
         for a in coord:
             if a not in axes:
                 axes.append(a)
+            if a not in explicit:
+                explicit.append(a)
         axis_signs += [1] * bool(_VALUE_UP.search(rest_no_speed)) + [-1] * bool(_VALUE_DOWN.search(rest_no_speed))
         t_up, t_down = bool(_TOWARD_UP.search(rest)), bool(_TOWARD_DOWN.search(rest))
         if t_up or t_down:
@@ -571,6 +593,8 @@ def _read(raw: str, question: bool) -> UtteranceFacts:
             for a in m.group(1):  # 「XY」は X と Y
                 if a not in axes:
                     axes.append(a)
+                if a not in explicit:
+                    explicit.append(a)
     sides = tuple(dict.fromkeys(_SIDE.findall(rest)))
 
     kinds: set[str] = set()
@@ -620,7 +644,7 @@ def _read(raw: str, question: bool) -> UtteranceFacts:
         used_patterns += [_SPEED]
     else:
         # 速度の指示では、軸の言葉は読まない（使わない言葉として残す）
-        used_patterns += [_AXIS_RE, _AXIS_SIGNED_NUM, _AXIS_WORD, _AXIS_DIRECTION_WORD, _TOWARD_UP, _TOWARD_DOWN]
+        used_patterns += [_AXIS_RE, _AXIS_SIGNED_NUM, _AXIS_SIGN_END, _AXIS_WORD, _AXIS_DIRECTION_WORD, _TOWARD_UP, _TOWARD_DOWN]
         if coord:
             used_patterns += [_COORD_VALUE_WORD, _VALUE_UP, _VALUE_DOWN]
     for pat in used_patterns:
@@ -664,6 +688,7 @@ def _read(raw: str, question: bool) -> UtteranceFacts:
         refers_to_selection=bool(_THIS.search(rest)),
         stray_signs=len(_SIGN_TOKEN.findall(rest)) - sum(a.sign is not None for a in amounts) - placed_axis_signs,
         vertical=vertical,
+        explicit_axes=tuple(a for a in axes if a in explicit),
         stop_reasons=tuple(stops),
         unknown_words=unknown,
         negations=negations, undo_negations=undo_negations,
@@ -688,6 +713,8 @@ def combine_axes(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceF
     """量を聞き返した後に、上げ・下げだけの答え（「3mm下げて」）が来たとき：前の軸と合わせる（推測で Z だけにしない）。"""
     return replace(answer, raw=f"{previous.raw} ／ {answer.raw}", text=f"{previous.text} ／ {answer.text}",
                    axes=tuple(dict.fromkeys(previous.axes + answer.axes)),
+                   explicit_axes=tuple(dict.fromkeys(previous.explicit_axes + answer.explicit_axes)),
+                   vertical=previous.vertical or answer.vertical,
                    positions=answer.positions or previous.positions,
                    refers_to_selection=previous.refers_to_selection or answer.refers_to_selection,
                    unknown_words=tuple(dict.fromkeys(previous.unknown_words + answer.unknown_words)),
@@ -699,24 +726,33 @@ def combine_axes(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceF
 
 
 def merge_answer(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceFacts:
-    """聞き返しへの答え（操作の言葉が無い1文）を、前の発話で分かっていたことに足す。"""
+    """聞き返しへの答え（操作の言葉が無い1文）を、前の発話で分かっていたことに足す。
+
+    前の発話の事実（replace で全部の項目）から始めて、答えで変わる項目だけを書き換える。新しい項目を足しても、
+    黙って落とさない（CHECKER_026 再修正 P0-1：vertical を落として「下げて」→「3ミリ」が Z− になった）。
+    tests/test_c026_r2.py の test_p0_merge_answer_drops_no_field で、全部の項目を確かめる。
+    """
     has_amount_info = bool(answer.amounts or answer.unclear_amounts)
     loose = _SIGN_TOKEN.findall(answer.text)
     if (not has_amount_info and not answer.axes and len(loose) == 1 and answer.stray_signs == 1
             and previous.axes and not previous.axis_signs and previous.amount is not None
             and previous.amount.sign is None):
-        # 「プラスですか、マイナスですか？」への答え「マイナス」：前の発話の軸の向きにする
-        answer = replace(answer, axes=previous.axes, axis_signs=(_SIGN[loose[0]],), stray_signs=0)
-    return UtteranceFacts(
+        # 「プラスですか、マイナスですか？」への答え「マイナス」：前の発話の軸の向きにする（軸は前の発話のまま）
+        answer = replace(answer, axes=previous.axes, explicit_axes=previous.explicit_axes,
+                         vertical=previous.vertical, axis_signs=(_SIGN[loose[0]],), stray_signs=0)
+    return replace(
+        previous,
         raw=f"{previous.raw} ／ {answer.raw}",
         text=f"{previous.text} ／ {answer.text}",
-        kinds=previous.kinds,
         positions=answer.positions or previous.positions,
         bad_positions=answer.bad_positions if answer.positions or answer.bad_positions else previous.bad_positions,
         amounts=answer.amounts if has_amount_info else previous.amounts,
         unclear_amounts=answer.unclear_amounts if has_amount_info else previous.unclear_amounts,
         axes=answer.axes or previous.axes,
         axis_signs=answer.axis_signs if answer.axes else previous.axis_signs,
+        # 軸の文字で言った軸・上下から補った印は、どちらかにあれば残す（上下から補った Z を、確かめずに使わない）
+        explicit_axes=tuple(dict.fromkeys(previous.explicit_axes + answer.explicit_axes)),
+        vertical=previous.vertical or answer.vertical,
         sides=answer.sides or previous.sides,
         speed_signs=answer.speed_signs or previous.speed_signs,
         refers_to_selection=previous.refers_to_selection or answer.refers_to_selection,
@@ -726,6 +762,8 @@ def merge_answer(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceF
         unknown_words=tuple(dict.fromkeys(previous.unknown_words + answer.unknown_words)),
         negations=tuple(dict.fromkeys(previous.negations + answer.negations)),
         undo_negations=tuple(dict.fromkeys(previous.undo_negations + answer.undo_negations)),
+        # 答えと合わせた文から［変更したい］の2択は作らない（ボタンの文は1つの発話から作る）
+        shimasu_text=None,
         **_merged_extras(previous, answer),
     )
 
@@ -775,12 +813,16 @@ def _stop(msg: str) -> Verdict:
     return Verdict("stop", msg)
 
 
-def unknown_words_message(words: Sequence[str], op: str) -> str:
+def unknown_words_message(words: Sequence[str], op: str, updown: "ud.UpdownStatus | None" = None) -> str:
+    """知らない言葉の聞き返し。上下の向きが確認済みのときだけ「下に3ミリ」を例に出す（渡さなければ未確認として扱う）。"""
     quoted = "".join(f"「{w}」" for w in words)
     if op == "speed":
         return f"{quoted}が分かりませんでした。速度の向きと量を、もう一度言ってください（例：速度を10%下げて）"
+    if _updown(updown).confirmed:
+        return (f"{quoted}が分かりませんでした。軸（X・Y・Z）と向きと量を、もう一度言ってください"
+                "（例：Y座標を3ミリ下げて／下に3ミリ）")
     return (f"{quoted}が分かりませんでした。軸（X・Y・Z）と向きと量を、もう一度言ってください"
-            "（例：Y座標を3ミリ下げて／下に3ミリ）")
+            "（例：Zマイナス3ミリ／Yのプラス3ミリ）")
 
 
 QUESTION_RESTATE_MESSAGE = "質問の形の指示では変更しません。してほしいことを、もう一度言ってください"
@@ -808,37 +850,68 @@ def is_shimasu_confirmation(v: Verdict) -> bool:
 
 
 def _shimasu_what(facts: UtteranceFacts) -> str:
-    """「3mm下げる」「C00004を3mm上げる」「Yのマイナス方向に3mm動かす」。発話から決まらなければ「この」（固定の言い方）。
+    """「3mm下げる」「C00004を3mm上げる」「Yのマイナス方向に3mm動かす」「速度を10%下げる」。決まらなければ「この」（固定の言い方）。
 
     数字・軸・向きはプログラムが読んだもの（facts）から入れる。上下を軸に当てはめた言い方はしない（言った言葉の上げ・下げのまま）。
     """
     a = facts.amount
-    if (facts.op != "move" or a is None or a.unit != "mm" or facts.unclear_amounts or len(facts.axes) != 1
-            or len(facts.positions) > 1 or facts.sides or facts.relative_dir or facts.place_ref or facts.repeat
-            or facts.stray_signs or facts.unknown_words):
-        return SHIMASU_FIXED_WHAT
     value = facts.requested_value()
-    if value is None or value == 0:
+    if a is None or value is None or value == 0:
         return SHIMASU_FIXED_WHAT
     w, v = _where(facts), _num(a.value)
+    if facts.op == "speed" and a.unit == "%":
+        return f"{w}速度を{v}%{'上げる' if value > 0 else '下げる'}"
+    if facts.op != "move" or a.unit != "mm" or len(facts.axes) != 1:
+        return SHIMASU_FIXED_WHAT
     if facts.vertical:
         return f"{w}{v}mm{'上げる' if value > 0 else '下げる'}"
     return f"{w}{facts.axis}の{'プラス' if value > 0 else 'マイナス'}方向に{v}mm動かす"
 
 
-def _shimasu_check(facts: UtteranceFacts, v: Verdict) -> Verdict:
-    """言い終わりの「〜します」：候補にしない。変更の希望か、操作の説明かを2択で確かめる。
+def shimasu_request_text(facts: UtteranceFacts, selected: str | None = None) -> str | None:
+    """［変更したい］が送る指示の文。プログラムが読んだ facts から作る（言葉を足さない・推測しない）。作れなければ None。
 
-    止めるもの（打ち消し・繰り返し・承認や起動の言葉など）は選択肢なしで今どおり止める。知らない言葉は選択肢なしで聞き返す。
-    ［変更したい］は「〜します」を外した指示の文を、ふつうの指示として送る（確認・検査・上限・確認表示・承認ボタンを全部通る）。
+    - 位置：言った位置番号、無ければ選んでいる位置（あとで別の位置を選んでも、その位置に当てない）。どちらも無ければ付けない
+    - 上・下から読んだ Z は「3ミリ下げて」のまま（次の指示のときに、上下の向きの照合をもう一度通す。Z の文字に書き換えない）
+    - 軸の文字で言ったものは「Yのマイナス3ミリ」、速度は「C00005の速度を10%下げて」
     """
-    if v.status == "stop":
+    a = facts.amount
+    value = facts.requested_value()
+    if a is None or value is None or value == 0 or facts.place_ref or facts.unknown_words or facts.question:
+        return None
+    pos = facts.position or selected
+    v = _num(a.value)
+    if facts.op == "speed" and a.unit == "%":
+        return f"{pos + 'の' if pos else ''}速度を{v}%{'上げて' if value > 0 else '下げて'}"
+    if facts.op != "move" or a.unit != "mm" or len(facts.axes) != 1:
+        return None
+    head = f"{pos}を" if pos else ""
+    if facts.vertical:
+        return f"{head}{v}ミリ{'上げて' if value > 0 else '下げて'}"
+    return f"{head}{facts.axis}の{'プラス' if value > 0 else 'マイナス'}{v}ミリ"
+
+
+SHIMASU_RESTATE_MESSAGE = "「〜します」の言い方では変更しません。してほしいことを、もう一度言ってください"
+
+
+def _shimasu_check(facts: UtteranceFacts, v: Verdict, selected: str | None = None) -> Verdict:
+    """言い終わりの「〜します」：候補にしない。外した文がふつうの指示として通るとき（v が ok）だけ、
+    変更の希望か操作の説明かを2択で確かめる（CHECKER_026 M3、QA P1-1）。
+
+    外した文が止まる・聞き返すなら、その答え（具体的な理由）をそのまま返す（2択で上書きしない）。
+    上限・0mm・位置がジョブにあるかは Session.check_shimasu が続けて調べる（ここではジョブを知らない）。
+    ［変更したい］は facts から作った指示の文（shimasu_request_text）を、ふつうの指示として送る
+    （確認・検査・上限・確認表示・承認ボタンを全部通る）。
+    """
+    if v.status != "ok":
         return v
     if facts.unknown_words:
-        if v.status == "ask" and not v.choices:
-            return v
         return _ask(f"{''.join(f'「{w}」' for w in facts.unknown_words)}が分かりませんでした。もう一度指示してください")
-    t = facts.shimasu_text
+    if facts.requested_value() == 0:
+        return _stop("移動量が0のため、変更しません" if facts.op == "move" else "変更量が0のため、変更しません")
+    t = shimasu_request_text(facts, selected)
+    if t is None:
+        return _ask(SHIMASU_RESTATE_MESSAGE)
     return _ask(SHIMASU_ASK.format(what=_shimasu_what(facts)),
                 ((WANT_CHANGE_LABEL, t), (EXPLAIN_LABEL, EXPLAIN_CHOICE_TEXT)))
 
@@ -849,7 +922,7 @@ def pre_check(facts: UtteranceFacts, selected: str | None = None,
     updown：上下の向きの照合の結果（渡さなければ未確認として扱う）。"""
     v = _pre_check(facts, selected, updown)
     if facts.shimasu_text is not None and not facts.question:
-        return _shimasu_check(facts, v)
+        return _shimasu_check(facts, v, selected)
     if v.status != "ok" or not facts.question:
         return v
     # 疑問の形（「3mm下げて？」）：候補にせず、？を外した同じ指示でよいかを確かめる。選択肢はその文の1つだけ。
@@ -864,7 +937,7 @@ def pre_check(facts: UtteranceFacts, selected: str | None = None,
 
 def _place_rewrite(facts: UtteranceFacts, position: str) -> str | None:
     """「C00006の置くところを下に3mm」→「C00006を下に3mm」。場所の言葉を位置番号に置き換えた文。作れなければ None。"""
-    raw = facts.question_text or facts.raw
+    raw = facts.question_text or facts.shimasu_text or facts.raw
     i = raw.find(facts.place_ref) if facts.place_ref else -1
     if i < 0:
         return None
@@ -932,7 +1005,7 @@ def _pre_check_core(facts: UtteranceFacts, selected: str | None = None,
     op = facts.op
     if op in ("move", "speed") and facts.unknown_words:
         # 知らない言葉を捨てて、残りの言葉だけで候補にしない。選択肢も出さない（どれを出しても推測か、言葉を捨てることになる）
-        return _ask(unknown_words_message(facts.unknown_words, op))
+        return _ask(unknown_words_message(facts.unknown_words, op, st))
     if op in ("move", "speed") and facts.place_ref and not facts.sides:  # 右・左は下の SIDE_MESSAGE
         # 場所の言葉は、量・向きを聞く前に調べる（「置くところへ動かして」に「何mm？」と聞いて、続きの答えで別の位置の候補にしない）
         return _place_check(facts, selected)
@@ -946,7 +1019,7 @@ def _pre_check_core(facts: UtteranceFacts, selected: str | None = None,
                 return _ask(f"変更が{len(moves)}つ入っています（{listed}）。"
                             "1回に動かすのは1つの方向だけです。1つずつ指示してください")
         if facts.sides:
-            return _ask(SIDE_MESSAGE)
+            return _ask(SIDE_MESSAGE_UPDOWN if st.confirmed else SIDE_MESSAGE)
         if facts.vertical and len(facts.axes) > 1:
             other = "・".join(a for a in facts.axes if a != "Z")
             choices: tuple[tuple[str, str], ...] = ()
@@ -970,7 +1043,7 @@ def _pre_check_core(facts: UtteranceFacts, selected: str | None = None,
         if v is not OK:
             return v
         if not facts.axes:
-            return _ask("どの方向（X・Y・Z、または上げる・下げる）に動かしますか？")
+            return _ask(AXIS_ASK_UPDOWN if st.confirmed else AXIS_ASK)
         if len(facts.axes) > 1:
             return _ask("方向が2つ以上あります。1回の指示で動かすのは1つの方向だけです")
         if facts.sign_count() == 0:
@@ -1111,6 +1184,13 @@ def check_proposal(facts: UtteranceFacts, proposals: "ProposedChange | Sequence[
         return _ask(f"指示の位置（{expected}）と提案の位置（{p.position}）が違います。もう一度指示してください")
     said = facts.requested_value()
     if p.kind == "shift":
+        st = _updown(updown)
+        if p.axis not in facts.explicit_axes and not (p.axis == "Z" and facts.vertical and st.confirmed):
+            # 最後の止め（CHECKER_026 再修正 P0-1）：軸の文字で言っていない軸の提案は通さない。上・下から補った Z は、
+            # 上下の向きが確認済みのときだけ。pre_check をすり抜けても（答えと合わせたときに印を落としても）ここで止める
+            if p.axis == "Z" and not st.confirmed:
+                return _ask(st.message)
+            return _ask(f"指示の中に {p.axis} の軸の言葉がありません。軸と向きと量を、もう一度指示してください")
         if p.axis != facts.axis:
             return _ask(f"指示の方向（{facts.axis}）と提案の方向（{p.axis}）が違います。もう一度指示してください")
         if not math.isclose(p.delta_mm, said, abs_tol=1e-9):
