@@ -86,7 +86,8 @@ class UtteranceFacts:
     unknown_words: tuple[str, ...] = ()
     # 打ち消し・取り消し・言い直しの言葉（「下げないで」「駄目」「じゃなくて」）。移動・速度の指示にあれば止める（CHECKER_023A B6・B7）
     negations: tuple[str, ...] = ()
-    # 元に戻す言葉そのもの（「やめて」「取り消して」）の打ち消し。移動・速度と一緒のときだけ止める
+    # 元に戻す言葉そのもの（「やめて」「取り消して」）の打ち消し。「やめて」だけの元に戻す指示（_plain_undo）のときは空。
+    # 空でなければ、どの指示でも止める（「キャンセルはやめて」「C00004を選ぶのはやめて」）
     undo_negations: tuple[str, ...] = ()
 
     @property
@@ -202,7 +203,8 @@ AMOUNT_PREFIXES = ("あと", "もう")
 # 打ち消し・取り消し・言い直しの言葉。移動・速度の指示にあれば、知らない言葉より先に止める（CHECKER_023A B6・B7）
 NEGATION_WORDS = ("じゃなく", "じゃない", "ではなく", "でなく", "たくない", "なかっ", "ないで", "なくて", "ない", "なく",
                   "駄目", "だめ", "ダメ", "やめ", "禁止", "違う", "ちがう", "取り消し",
-                  "ません", "ずに", "ぬ", "なし", "不要", "ストップ", "中止", "いや", "嫌", "なよ", "んな", "いらない")
+                  "ません", "ずに", "ぬ", "なし", "不要", "ストップ", "中止", "いや", "嫌", "なよ", "んな", "いらない",
+                  "いいえ", "止めて", "待って", "結構です", "無し", "無理")
 # 一覧のほかに、決まった形で見つける打ち消し：文の終わりの「下げるな」「動かすな」、文の終わりの「下げず」、英字の「NG」
 NEGATION_MESSAGE = "{word}などの打ち消しの言葉があるため、変更しません。してほしいことだけを言ってください"
 
@@ -211,8 +213,16 @@ def _alt(words) -> str:
     return "|".join(re.escape(w) for w in sorted(words, key=len, reverse=True))
 
 
+def _fold_kana(text: str) -> str:
+    """カタカナをひらがなにする（打ち消しを、書き方によらず見つけるため。「やメて」「ダメ」「ストップ」）。字の数は変えない。"""
+    return "".join(chr(ord(c) - 0x60) if "ァ" <= c <= "ヶ" else c for c in text)
+
+
+_UNDO_FOLDED = re.compile(_fold_kana(_UNDO.pattern))
+
+
 _NEGATION_RE = re.compile(
-    f"(?:{_alt(NEGATION_WORDS)})"
+    f"(?:{_alt(dict.fromkeys(_fold_kana(w) for w in NEGATION_WORDS))})"
     r"|(?<=[るすく])な(?=[\s、。,.!！?？]*$)"   # 文の終わりの「下げるな」「動かすな」
     r"|(?<=[ぁ-ゖ])ず(?=[\s、。,.!！?？]*$)"    # 文の終わりの「下げず」「動かさず」
     r"|(?:(?<![A-Z])|(?<=MM))NG(?![A-Z])")  # 「3mmNG」は大文字にすると「3MMNG」
@@ -249,19 +259,42 @@ def _negation_words(text: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
     返す値：(打ち消し, 元に戻す言葉そのものの打ち消し)。「やめて」「取り消して」は元に戻す指示の言葉なので、
     ほかの打ち消しと分ける（移動・速度が無ければ、元に戻す指示として使う）。「元に戻さないで」の「ないで」は打ち消し。
     """
-    undo = [m.span() for m in _UNDO.finditer(text)]
+    folded = _fold_kana(text)
+    undo = [m.span() for m in _UNDO_FOLDED.finditer(folded)]
     out: list[str] = []
     of_undo: list[str] = []
-    for m in _NEGATION_RE.finditer(text):
+    for m in _NEGATION_RE.finditer(folded):
+        if _inside_katakana_word(text, m.start(), m.end()):
+            continue  # 「ワイヤー」の「イヤ」、「ダメージ」の「ダメ」は打ち消しではない
         start = m.start()
         while start > 0 and m.start() - start < 4 and ("ぁ" <= text[start - 1] <= "ゖ" or _script(text[start - 1]) == "kanji") \
                 and text[start - 1] not in PARTICLES and text[start - 2:start] != "とか":
             start -= 1
-        word = text[start:m.end()]
+        word = text[start:m.end()]  # 示すのは元の書き方
         target = of_undo if any(a < m.end() and m.start() < b for a, b in undo) else out
         if word not in target:
             target.append(word)
     return tuple(out), tuple(of_undo)
+
+
+def _inside_katakana_word(text: str, start: int, end: int) -> bool:
+    """見つけた所が全部カタカナで、前か後ろもカタカナ（長いカタカナの言葉の一部）か。"""
+    def kata(i: int) -> bool:
+        return 0 <= i < len(text) and _script(text[i]) == "kata"
+    return all(kata(i) for i in range(start, end)) and (kata(start - 1) or kata(end))
+
+
+def _plain_undo(text: str, kinds: set[str]) -> bool:
+    """「やめて」「元に戻して」「取り消して」「キャンセル」だけの、元に戻す指示か。
+
+    元に戻す言葉がちょうど1つ、ほかの操作（選択・比較・移動・速度）が無く、「〜のはやめて」「〜はやめて」の形でないとき。
+    「キャンセルはやめて」「元に戻すのはやめて」「C00004を選ぶのはやめて」は、元に戻す指示として使わない（止める）。
+    """
+    folded = _fold_kana(text)
+    found = list(_UNDO_FOLDED.finditer(folded))
+    if kinds != {"undo"} or len(found) != 1:
+        return False
+    return not folded[: found[0].start()].rstrip().endswith("は")
 
 
 def _script(ch: str) -> str:
@@ -482,6 +515,8 @@ def read_utterance(raw: str) -> UtteranceFacts:
             if w:
                 blank(m.end(), m.end() + w.end())
     negations, undo_negations = _negation_words(text)
+    if undo_negations and _plain_undo(text, kinds):
+        undo_negations = ()  # 元に戻す指示の言葉そのもの（「やめて」「取り消して」）は打ち消しにしない
     used_mask = [used[i] == " " and not text[i].isspace() for i in range(len(text))]
     unknown = _unknown_words("".join(used), used_mask, text)
 
@@ -592,10 +627,10 @@ def unknown_words_message(words: Sequence[str], op: str) -> str:
 
 def pre_check(facts: UtteranceFacts) -> Verdict:
     """Claude に頼らず、発話だけで止める・聞き返すことが決まるかを調べる。"""
-    found = facts.negations + (facts.undo_negations if ("move" in facts.kinds or "speed" in facts.kinds) else ())
+    found = facts.negations + facts.undo_negations
     if found:
         # 打ち消しの言葉を捨てて、言ったことと逆の操作にしない。選択・比較・元に戻すも含めて、いちばん先に止める（選択肢も出さない）。
-        # 移動・速度の無い「やめて」「取り消して」だけは、元に戻す指示として使う
+        # 「やめて」「元に戻して」「取り消して」「キャンセル」だけの指示は、元に戻す指示として使う（undo_negations が空）
         return _stop(NEGATION_MESSAGE.format(word="".join(f"「{w}」" for w in found)))
     if facts.stop_reasons:
         return _stop("。".join(facts.stop_reasons))

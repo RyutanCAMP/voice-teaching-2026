@@ -513,3 +513,41 @@ def test_negation_shown_word_is_not_cut():
 def test_question_mark_is_unchanged_for_now():
     # 「？」の扱いは唐川さんの判断待ち。今は今までどおり候補になる（変えていないことの記録）
     assert cand(hear("3mm下げて？")) == ("Z", "-3.000")
+
+
+# ---- 232bbb8 の差分の Safety レビュー（P2-1・P3-1〜P3-3）----
+@pytest.mark.parametrize("source", ["voice", "text"])
+@pytest.mark.parametrize("text", ["キャンセルはやめて", "元に戻すのはやめて", "取り消すのはやめて", "C00004を選ぶのはやめて",
+                                  "比較はやめて", "比較するのはやメて", "それはやめて"])
+def test_undo_word_that_negates_another_operation_stops(text, source):
+    # P2-1・P3-2：元に戻す言葉が、別の操作の打ち消しになっているときは、元に戻さずに止める
+    w, sid = flow_with_candidate(source)
+    r = w.hear(sid, text, source=source)
+    assert r["status"] == "stop" and "変更しません" in r["message"] and r["choices"] == [], (text, r.get("message"))
+    assert r["tool_calls"] == []
+    assert cand(r) == ("Z", "-3.000") and r["state"]["selected"] == "C00005"  # 候補と選択中の位置は変わらない
+    assert r["facts"]["undo_negations"]  # P3-1：応答の facts に入る
+
+
+@pytest.mark.parametrize("source", ["voice", "text"])
+@pytest.mark.parametrize("text", ["やめて", "元に戻して", "取り消して", "キャンセル", "キャンセルして"])
+def test_plain_undo_commands_still_undo(text, source):
+    w, sid = flow_with_candidate(source)
+    r = w.hear(sid, text, source=source)
+    assert r["status"] == "ok" and cand(r) is None and r["facts"]["undo_negations"] == []
+
+
+@pytest.mark.parametrize("source", ["voice", "text"])
+@pytest.mark.parametrize("text,word", [("いいえ", "いいえ"), ("下に3mm止めて", "止めて"), ("ちょっと待って", "待って"),
+                                       ("結構です", "結構です"), ("下に3mm無し", "無し"), ("無理", "無理")])
+def test_p3_3_more_negation_words(text, word, source):
+    w, sid = flow_with_candidate(source)
+    r = w.hear(sid, text, source=source)
+    assert r["status"] == "stop" and f"「{word}」" in r["message"] and cand(r) == ("Z", "-3.000")
+
+
+@pytest.mark.parametrize("text,word", [("ワイヤーを3mm下げて", "ワイヤー"), ("ダメージ下に3mm", "ダメージ")])
+def test_katakana_word_containing_negation_is_unknown_not_negation(text, word):
+    # 打ち消しはカタカナでも見つける（「やメて」「ダメ」）が、長いカタカナの言葉の一部（「ワイヤー」の「イヤ」）は打ち消しにしない
+    r = hear(text)
+    assert r["status"] == "ask" and f"「{word}」" in r["message"] and r["facts"]["negations"] == []
