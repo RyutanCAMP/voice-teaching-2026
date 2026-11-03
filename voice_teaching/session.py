@@ -105,7 +105,9 @@ class Session:
         self.facts = facts
         self._locked = False
         self._log("発話", f"{'音声' if source == 'voice' else '文字'}：{text}")
-        v = ut.pre_check(facts)
+        v = ut.pre_check(facts, self.selected)
+        if v.status == "ask" and facts.question and v.choices and facts.op in ("move", "speed"):
+            v = self._check_question(facts, v)  # 疑問の形の確かめ（2026-11-03 夜）
         if v.status != "ok":
             self._locked = True  # 聞き返し・止めた発話では、Claude が量を作って提案しても使わない
         # 知らない言葉で聞き返したときは、次の発話を答えとして前の発話に足さない（言い直しを新しい指示として読む。
@@ -126,6 +128,25 @@ class Session:
         """承認待ちの候補があるのに来た移動・速度の指示を、解釈の係を呼ばずに断る。"""
         self._locked = True
         return self._reply("stop", PENDING_MESSAGE, facts=facts)
+
+    def _check_question(self, facts: ut.UtteranceFacts, v: ut.Verdict) -> ut.Verdict:
+        """疑問の形の移動・速度（「5mm下げて？」）：確かめる前に、どうせ止まるものは今止める。候補は作らない。
+
+        承認待ちの候補があれば、その知らせ。量の上限・0 などで実機用の検査とシミュレーションの両方に断られるなら、その理由。
+        """
+        if self.candidate is not None:
+            return ut.Verdict("stop", PENDING_MESSAGE)
+        position, value = facts.position or self.selected, facts.requested_value()
+        if position is None or value is None or (facts.op == "move" and facts.axis is None):
+            return v  # 位置・量・軸が決まらなければ、確かめたあとの指示で聞き返す
+        p = (ut.ProposedChange(kind="shift", position=position, axis=facts.axis, delta_mm=float(value))
+             if facts.op == "move" else ut.ProposedChange(kind="speed", position=position, percent=float(value)))
+        try:
+            self._plan(p)  # 試すだけ（候補にしない）
+        except jbi.JbiError as e:
+            if self._simulate is None or self._simulate(self._job, p, str(e)) is None:
+                return ut.Verdict("stop", str(e))
+        return v
 
     # ---- 操作 ----
     def select(self, position: str) -> Reply:

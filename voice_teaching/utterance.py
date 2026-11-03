@@ -94,6 +94,7 @@ class UtteranceFacts:
     question_text: str | None = None       # ？・か を外した同じ指示（確かめる選択肢の文）。答えと合わせたときは None
     repeat: tuple[int | None, str] | None = None  # 繰り返し・往復 (回数, "ambiguous"／"times"／"round_trip")。候補にしない
     place_ref: str | None = None           # 「置くところ」などの場所の言葉（どの位置かはプログラムが決めない）
+    place_as_destination: bool = False     # 場所の言葉を行き先に使った（「置くところに」「置き場所へ」「置く位置まで」）
     relative_dir: tuple[str, ...] = ()     # 手前・奥・前・後ろ・右・左（軸には当てない。止める・聞き返す）
 
     @property
@@ -202,7 +203,11 @@ HESITATIONS = ("えーと", "ええと", "えっと", "あのー", "あの")    
 OPENERS = ("それでは", "じゃあ", "では", "まず")                             # 文の初め（読んだ言葉より前）に1つだけで
 FILLER_WORDS = PARTICLES + TE_FORMS + REQUESTS + POLITE_AFTER_TE + FINALS + HESITATIONS + OPENERS
 # 読み取りで使った動きの言葉のすぐ後の言い終わり（「下げる」「下げます」「ずらす」「移動させて」）。2026-11-03 シクロの判断
-VERB_ENDINGS = ("させて", "させ", "します", "ます", "です", "る", "す")  # 「動かします」「移動します」も（2026-11-03 夜）
+VERB_ENDINGS = ("させて", "させ", "ます", "です", "る", "す")
+# 「動かします」「移動します」「ずらします」の「します」（2026-11-03 夜）。ほかの動きの言葉の後（「下げします」）は使わない
+SHIMASU_AFTER = ("動か", "移動", "ずら")
+# 疑問の形のときだけ、元に戻す・比較・選択の言葉の後の「ます」「します」（「元に戻しますか」「比較しますか」）
+QUESTION_ONLY_ENDINGS = ("します", "ます")
 # 読んだ指示の後の、文の終わりの「です」（「下に3ミリです」「Xのマイナス5ミリです」。2026-11-03 夜）。文の途中・初めでは使わない
 SENTENCE_END_COPULA = ("です",)
 # 量のすぐ前の「あと」「もう」（「あと3mm下げて」。CHECKER_023A）。「もう少し」はあいまいな量として聞き返す
@@ -254,7 +259,9 @@ _AXIS_DIRECTION_WORD = re.compile(r"(?<![A-Z])[XYZ]\s?(?:の\s?)?(?:(?:マイナ
 # 「Y座標」「Yの値」「Y座標値」：座標の値の言葉（_COORD_VALUE で読んだときだけ取り除く）
 _COORD_VALUE_WORD = re.compile(r"(?<![A-Z])[XYZ]\s?(?:の\s?)?(?:座標値|座標|値)")
 _CONNECTOR = re.compile(r"そして|それから")  # 2つの変更の区切り（_SPLIT_MOVES）
-_VERB_TAIL = re.compile(f"(?<=上げ|下げ|増や|減ら|動か|ずら|寄せ|移動)(?:{_alt(VERB_ENDINGS)})")
+_VERB_TAIL = re.compile(f"(?<=上げ|下げ|増や|減ら|動か|ずら|寄せ|移動)(?:{_alt(VERB_ENDINGS)})"
+                        f"|(?<={'|'.join(SHIMASU_AFTER)})します")
+_QUESTION_VERB_TAIL = re.compile(f"(?<=戻|消|較|択)(?:{_alt(QUESTION_ONLY_ENDINGS)})")
 _AMOUNT_PREFIX = re.compile(f"(?:{_alt(AMOUNT_PREFIXES)})" + r"(?=\s?[0-9]+(?:\.[0-9]+)?\s?(?:MM|ミリ|%))")
 # 位置番号のすぐ後の「位置」（「C00005の位置を下に3mm」）。「この位置」「その位置」は _THIS で読む
 _POSITION_WORD = re.compile(r"^\s?(?:の\s?)?位置")
@@ -262,7 +269,7 @@ _POSITION_WORD = re.compile(r"^\s?(?:の\s?)?位置")
 _THIS_REPEAT = re.compile(r"(?:この位置|この点|この命令|ここ|その位置|その点|そこ){2,}")
 
 
-def _negation_words(text: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+def _negation_words(text: str, heard: str | None = None) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """打ち消しの言葉を、前の動きの言葉ごと取り出す（「下げないで」「駄目」）。取り除くことはしない。
 
     返す値：(打ち消し, 元に戻す言葉そのものの打ち消し)。「やめて」「取り消して」は元に戻す指示の言葉なので、
@@ -279,7 +286,7 @@ def _negation_words(text: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
         while start > 0 and m.start() - start < 4 and ("ぁ" <= text[start - 1] <= "ゖ" or _script(text[start - 1]) == "kanji") \
                 and text[start - 1] not in PARTICLES and text[start - 2:start] != "とか":
             start -= 1
-        word = text[start:m.end()]  # 示すのは元の書き方
+        word = (heard or text)[start:m.end()]  # 示すのは聞こえたとおりの書き方（「さげません」）
         target = of_undo if any(a < m.end() and m.start() < b for a, b in undo) else out
         if word not in target:
             target.append(word)
@@ -329,10 +336,15 @@ def _show(word: str) -> str:
     return visible if visible.strip() else "（見えない文字）"
 
 
-def _run_is_allowed(run: str, used_before: bool, used_after: bool, prev_char: str) -> bool:
+def _run_is_allowed(run: str, used_before: bool, used_after: bool, prev_char: str,
+                    after_verb_tail: bool = False, after_amount: bool = False) -> bool:
     """読み取りで使わなかった1つのひと続きが、決まった場所の、決まったつなぎの言葉か。"""
     if _HESITATION_RE.fullmatch(run):
         return True
+    if after_verb_tail:
+        return False  # 「下げます」「動かします」の後に重ねない（「しますです」「移動しますね」）
+    if run in SENTENCE_END_COPULA and not after_amount:
+        return False  # 文の終わりの「です」は量のすぐ後だけ（「下に3ミリです」）
     if not used_before:  # 読んだ言葉より前（文の初め）
         return bool(_OPENER_RE.fullmatch(run))
     tail = _TAIL_MID if used_after else _TAIL_END
@@ -344,7 +356,9 @@ def _run_is_allowed(run: str, used_before: bool, used_after: bool, prev_char: st
     return True
 
 
-def _unknown_words(residual: str, used_mask: Sequence[bool], source: str) -> tuple[str, ...]:
+def _unknown_words(residual: str, used_mask: Sequence[bool], source: str,
+                   verb_tail_ends: frozenset[int] = frozenset(), amount_ends: frozenset[int] = frozenset()
+                   ) -> tuple[str, ...]:
     """読み取りで使った部分を空白にした文から、知らない言葉を取り出す。
 
     residual：読み取りで使った部分を空白にした文。used_mask：その字を読み取りで使ったか。source：空白にする前の文。
@@ -356,7 +370,10 @@ def _unknown_words(residual: str, used_mask: Sequence[bool], source: str) -> tup
         before = any(used_mask[: m.start()])
         after = any(used_mask[m.end():])
         prev = source[m.start() - 1] if m.start() > 0 else ""
-        if _run_is_allowed(run, before, after, prev):
+        j = m.start()  # 前の読んだ言葉の終わり（間の空白は飛ばす：「3mm です」「下げます ね」）
+        while j > 0 and source[j - 1].isspace() and not used_mask[j - 1]:
+            j -= 1
+        if _run_is_allowed(run, before, after, prev, j in verb_tail_ends, j in amount_ends):
             continue
         # 示すときは、後ろの助詞などを外す（「バイオを」→「バイオ」）。外すと何も残らないときは、そのまま示す
         # 前の助詞・つなぎの言葉も外す（「をバイオ」→「バイオ」。ひらがなの言葉の途中では分けない）。
@@ -376,11 +393,19 @@ def _unknown_words(residual: str, used_mask: Sequence[bool], source: str) -> tup
 # 前がひらがなのときは、助詞のあとだけ（「ささげて」を読まない）
 _HIRA_VERB = re.compile(r"(?:(?<![ぁ-ゖ])|(?<=[をにへのではがとも]))(さげ|あげ)")
 # 疑問の形：文の終わりの ？・?、ひらがなのすぐ後の「か」（「下げますか」「3mmですか」）
-_QUESTION_END = re.compile(r"(?:(?<=[ぁ-ゖ])か)?[?？]*[\s　。．.!！]*$")
+QUESTION_MARKS = "?？﹖︖⁇‽❓❔⸮"
+
+
+def _is_question_mark(c: str) -> bool:
+    return c in QUESTION_MARKS or "?" in unicodedata.normalize("NFKC", c)
+
+
+_QUESTION_END = re.compile(f"(?:(?<=[ぁ-ゖ])か)?[{re.escape(QUESTION_MARKS)}]*[\\s　。．.!！]*$")
 # 繰り返し・往復（2026-11-03 夜）。「2往復」「2回の移動」ははっきりしたもの。「2回」「行き来」「繰り返し」はどちらか分からない
 _ROUND_TRIP = re.compile(r"(?:([0-9]+)\s?)?往復")
 _REPEAT_TIMES = re.compile(r"([0-9]+)\s?回の移動|繰り返しの移動")
-_REPEAT_AMBIGUOUS = re.compile(r"([0-9]+)\s?回|行き来|繰り返し|繰り返|くりかえし|くりかえ")
+# 「回転」「回目」は繰り返しではない。回数は2以上だけ（「1回」「もう1回」は知らない言葉として聞き返す）
+_REPEAT_AMBIGUOUS = re.compile(r"([0-9]+)\s?回(?!転|目)|行き来|繰り返し|繰り返|くりかえし|くりかえ")
 REPEAT_STOP_MESSAGE = "このアプリでは、動きの追加・繰り返しはできません。位置の修正だけです"
 # 場所の言葉（2026-11-03 夜）。どの位置かは決めない
 PLACE_WORDS = ("置くところ", "置き場所", "置く位置", "取るところ", "つかむところ", "離すところ")
@@ -391,23 +416,38 @@ _RELATIVE_DIR = re.compile(r"手前|後ろ|奥|(?<!変更)(?<!以)(?<!名)前|�
 
 def _repeat(text: str) -> tuple[tuple[int | None, str] | None, list[tuple[int, int]]]:
     """繰り返し・往復の言葉を読む。(回数, 種類) と、読んだ部分の位置。"""
-    for pat, kind in ((_ROUND_TRIP, "round_trip"), (_REPEAT_TIMES, "times"), (_REPEAT_AMBIGUOUS, "ambiguous")):
-        found = list(pat.finditer(text))
+    def counted(m: re.Match) -> bool:
+        return not (m.re is not _ROUND_TRIP and m.group(1) and int(m.group(1)) < 2)
+
+    pats = (_ROUND_TRIP, _REPEAT_TIMES, _REPEAT_AMBIGUOUS)
+    for pat, kind in zip(pats, ("round_trip", "times", "ambiguous")):
+        found = [m for m in pat.finditer(text) if counted(m)]
         if found:
             n = next((int(m.group(1)) for m in found if m.group(1)), None)
-            spans = [m.span() for p2 in (_ROUND_TRIP, _REPEAT_TIMES, _REPEAT_AMBIGUOUS) for m in p2.finditer(text)]
+            spans = [m.span() for p2 in pats for m in p2.finditer(text) if counted(m)]
             return (n, kind), spans
     return None, []
 
 
 def read_utterance(raw: str) -> UtteranceFacts:
     q = _QUESTION_END.search(raw)
-    if q is not None and ("か" in q.group(0) or "?" in q.group(0) or "？" in q.group(0)):
+    tail = q.group(0) if q else ""
+    at_end = "か" in tail or any(_is_question_mark(c) for c in tail)
+    plain = raw[: q.start()].rstrip() if at_end else raw
+    if any(_is_question_mark(c) for c in plain):
+        # 文の途中の疑問符（「3mm？下げて」）：黙って捨てない。疑問として、選択肢なしで言い直してもらう
+        f = _read("".join(" " if _is_question_mark(c) else c for c in plain), question=True)
+        return replace(f, raw=raw, question=True, question_text=None)
+    if at_end:
         # 疑問の形：？・か を外した文を読み、確かめるために印を付ける（候補にはしない。pre_check が確かめる）
-        plain = raw[: q.start()].rstrip()
-        f = read_utterance(plain)
-        return replace(f, raw=raw, question=True, question_text=plain if plain and not f.question else None)
-    text = _HIRA_VERB.sub(lambda m: {"さげ": "下げ", "あげ": "上げ"}[m.group(1)], _spoken(normalize(raw)))
+        f = _read(plain, question=True)
+        return replace(f, raw=raw, question=True, question_text=plain or None)
+    return _read(raw, question=False)
+
+
+def _read(raw: str, question: bool) -> UtteranceFacts:
+    heard = _spoken(normalize(raw))  # 聞こえたとおりの書き方（示すときに使う）
+    text = _HIRA_VERB.sub(lambda m: {"さげ": "下げ", "あげ": "上げ"}[m.group(1)], heard)  # 字の数は変えない
     # 位置番号（数字を量と読まないように、先に取り除く）
     positions: list[str] = []
     bad_positions: list[str] = []
@@ -528,10 +568,13 @@ def read_utterance(raw: str) -> UtteranceFacts:
         for i in range(start, end):
             used[i] = " "
 
+    amount_ends: set[int] = set()
     for m in _NUM_RE.finditer(rest):
         end = m.end()
         unit = _UNIT_AFTER.match(rest[end:]) or _OTHER_UNIT_AFTER.match(rest[end:])
         blank(m.start(), end + (unit.end() if unit else 0))
+        if unit is not None and _UNIT_AFTER.match(rest[end:]):
+            amount_ends.add(end + unit.end())
     # 「ここここ」のような繰り返しでない「この位置」「ここ」だけを、指す言葉として取り除く
     repeats = [m.span() for m in _THIS_REPEAT.finditer(rest)]
     for m in _THIS.finditer(rest):
@@ -549,9 +592,11 @@ def read_utterance(raw: str) -> UtteranceFacts:
     for pat in used_patterns:
         for m in pat.finditer(rest):
             blank(m.start(), m.end())
-    for m in _VERB_TAIL.finditer(rest):
+    verb_tail_ends: set[int] = set()
+    for m in list(_VERB_TAIL.finditer(rest)) + (list(_QUESTION_VERB_TAIL.finditer(rest)) if question else []):
         if used[m.start() - 1] == " ":  # 前の動きの言葉を読んだときだけ
             blank(m.start(), m.end())
+            verb_tail_ends.add(m.end())
     for m in _POS_RE.finditer(text):
         if len(m.group(1)) == 5:
             w = _POSITION_WORD.match(text[m.end():])
@@ -563,11 +608,14 @@ def read_utterance(raw: str) -> UtteranceFacts:
     place = _PLACE.search(rest)
     for m in _PLACE.finditer(rest):
         blank(m.start(), m.end())
-    negations, undo_negations = _negation_words(text)
+    # 場所の言葉を行き先に使った（「置くところに」「置き場所へ」「置く位置まで」）
+    place_dest = bool(place and re.match(r"\s?(?:に|へ|まで)", rest[place.end():]))
+    negations, undo_negations = _negation_words(text, heard)
     if undo_negations and _plain_undo(text, kinds):
         undo_negations = ()  # 元に戻す指示の言葉そのもの（「やめて」「取り消して」）は打ち消しにしない
     used_mask = [used[i] == " " and not text[i].isspace() for i in range(len(text))]
-    unknown = _unknown_words("".join(used), used_mask, text)
+    residual = "".join(" " if used[i] == " " else heard[i] for i in range(len(text)))  # 示すのは聞こえたとおり
+    unknown = _unknown_words(residual, used_mask, text, frozenset(verb_tail_ends), frozenset(amount_ends))
 
     return UtteranceFacts(
         raw=raw, text=text,
@@ -582,7 +630,7 @@ def read_utterance(raw: str) -> UtteranceFacts:
         stop_reasons=tuple(stops),
         unknown_words=unknown,
         negations=negations, undo_negations=undo_negations,
-        repeat=repeat, place_ref=place.group(0) if place else None,
+        repeat=repeat, place_ref=place.group(0) if place else None, place_as_destination=place_dest,
         relative_dir=tuple(dict.fromkeys(m.group(0) for m in _RELATIVE_DIR.finditer(rest))),
     )
 
@@ -594,6 +642,7 @@ def _merged_extras(previous: UtteranceFacts, answer: UtteranceFacts) -> dict:
         question=previous.question or answer.question, question_text=None,
         repeat=answer.repeat or previous.repeat,
         place_ref=answer.place_ref or previous.place_ref,
+        place_as_destination=answer.place_as_destination or previous.place_as_destination,
         relative_dir=tuple(dict.fromkeys(previous.relative_dir + answer.relative_dir)),
     )
 
@@ -692,9 +741,9 @@ def unknown_words_message(words: Sequence[str], op: str) -> str:
 QUESTION_RESTATE_MESSAGE = "質問の形の指示では変更しません。してほしいことを、もう一度言ってください"
 
 
-def pre_check(facts: UtteranceFacts) -> Verdict:
-    """Claude に頼らず、発話だけで止める・聞き返すことが決まるかを調べる。"""
-    v = _pre_check(facts)
+def pre_check(facts: UtteranceFacts, selected: str | None = None) -> Verdict:
+    """Claude に頼らず、発話だけで止める・聞き返すことが決まるかを調べる。selected：画面で選んでいる位置（文の案内だけに使う）。"""
+    v = _pre_check(facts, selected)
     if v.status != "ok" or not facts.question:
         return v
     # 疑問の形（「3mm下げて？」）：候補にせず、？を外した同じ指示でよいかを確かめる。選択肢はその文の1つだけ。
@@ -707,7 +756,45 @@ def pre_check(facts: UtteranceFacts) -> Verdict:
     return _ask(f"「{t}」でよいですか？", ((t, t),))
 
 
-def _pre_check(facts: UtteranceFacts) -> Verdict:
+def _place_rewrite(facts: UtteranceFacts, position: str) -> str | None:
+    """「C00006の置くところを下に3mm」→「C00006を下に3mm」。場所の言葉を位置番号に置き換えた文。作れなければ None。"""
+    raw = facts.question_text or facts.raw
+    i = raw.find(facts.place_ref) if facts.place_ref else -1
+    if i < 0:
+        return None
+    after = re.sub(r"^\s*(?:を|は|の)?\s*", "", raw[i + len(facts.place_ref):])
+    text = f"{position}を{after}"
+    f = read_utterance(text)
+    if f.unknown_words or f.negations or f.undo_negations or f.place_ref or f.question or f.op != facts.op:
+        return None
+    return text
+
+
+def _place_check(facts: UtteranceFacts, selected: str | None) -> Verdict:
+    """場所の言葉（「置くところ」）：どの位置かは、プログラムも Claude も決めない。"""
+    p = facts.place_ref
+    if facts.place_as_destination:
+        return _ask(f"「{p}」へ動かす指示は扱いません。位置を選んで、軸と向きと量で言ってください")
+    if facts.positions:
+        pos = facts.positions[0]
+        t = _place_rewrite(facts, pos)
+        msg = f"「{p}」が {pos} かどうかは確かめていません。{pos} でよいですか？"
+        return _ask(msg, ((t, t),) if t else ())
+    if selected:
+        t = _place_rewrite(facts, selected)
+        hint = f"「{t}」と言うか" if t else "位置番号を付けて言うか"
+        return _ask(f"「{p}」がどの位置か決まっていません。選んでいる {selected} のことなら{hint}、位置を選び直してください")
+    return _ask(f"「{p}」がどの位置か決まっていません。位置を選んでください")
+
+
+def _pre_check(facts: UtteranceFacts, selected: str | None = None) -> Verdict:
+    v = _pre_check_core(facts)
+    if v.status == "ok" and facts.op in ("move", "speed") and facts.place_ref:
+        return _place_check(facts, selected)
+    return v
+
+
+def _pre_check_core(facts: UtteranceFacts) -> Verdict:
     found = facts.negations + facts.undo_negations
     if found:
         # 打ち消しの言葉を捨てて、言ったことと逆の操作にしない。選択・比較・元に戻すも含めて、いちばん先に止める（選択肢も出さない）。
@@ -740,9 +827,6 @@ def _pre_check(facts: UtteranceFacts) -> Verdict:
     if op in ("move", "speed") and facts.unknown_words:
         # 知らない言葉を捨てて、残りの言葉だけで候補にしない。選択肢も出さない（どれを出しても推測か、言葉を捨てることになる）
         return _ask(unknown_words_message(facts.unknown_words, op))
-    if op in ("move", "speed") and facts.place_ref and not facts.positions and not facts.sides:  # 右・左は下の SIDE_MESSAGE
-        # 「置くところ」がどの位置かは、プログラムも Claude も決めない（対話の機能が来るまで、聞き返すだけ）
-        return _ask(f"「{facts.place_ref}」がどの位置か決まっていません。位置を選んでください")
     if op in ("move", "speed") and facts.stray_signs > 0:
         return _ask("プラス・マイナスがどこに付くか分かりません。「Xのマイナス5ミリ」のように、軸のすぐ後に言ってください")
     if op == "move":
@@ -894,7 +978,7 @@ def _fmt(x: float) -> str:
 def check_proposal(facts: UtteranceFacts, proposals: "ProposedChange | Sequence[ProposedChange]",
                    selected: str | None = None) -> Verdict:
     """提案を、発話から取り出した事実と照らし合わせる（受入テスト5・7・11・16）。"""
-    v = pre_check(facts)
+    v = pre_check(facts, selected)
     if v.status != "ok":
         return v
     plist = [proposals] if isinstance(proposals, ProposedChange) else list(proposals)
