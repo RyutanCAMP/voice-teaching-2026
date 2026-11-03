@@ -184,3 +184,12 @@ def test_approve_word_during_range_confirmation_explains_the_two_steps(tmp_path)
     r = w.talk(sid, "承認して", "voice")
     assert r["via"] == ["hear"] and r["hear"]["message"] == rc.RANGE_APPROVE_GUIDE
     assert r["state"]["repeat_range"]["turn"] == turn and r["state"]["candidate"] is None
+
+
+def test_question_after_approval_is_answered_without_cancelling(tmp_path):
+    w, f, sid = start(tmp_path, T.answer("同じ動きを2回くり返しています。" + T.ASKED, BLOCK), data=DEMO_C)
+    w.select(sid, "C00005")
+    w.talk(sid, "Zマイナス3ミリ")
+    w.approve(sid, "テスト")
+    r = w.talk(sid, "このロボット、何をしている？")
+    assert r["via"] == ["ask"] and r["state"]["approval"] is not None and not r["state"]["exported"]

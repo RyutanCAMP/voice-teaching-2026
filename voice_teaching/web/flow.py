@@ -42,6 +42,7 @@ STEP_F_RANGE_NOTE = ("範囲を確かめてください。［この範囲を繰�
                      "（承認は、そのあとの確認表示のボタンで行います）")
 # Step F：承認・出力・転送・起動など、ボタンだけで行う操作の言葉。会話の道（Claude）へは送らず、指示の道の決まった文で止める
 _BUTTON_ONLY_WORDS = re.compile(r"承認|出力|書き出|転送|送信|保存|起動|実行|スタート|エクスポート|ダウンロード|登録|上書き|確定")
+_QUESTION_WORDS = re.compile(r"[?？]|何|なに|どこ|どう|どれ|なぜ|教えて|説明")
 STEP_F_APPROVED_NEXT = "承認済みです。出力は画面の［シミュレーション用に出力］のボタンで行います（声や文字では出力しません）"
 SOURCES = ("voice", "text")
 NO_SESSION = "このジョブの画面の情報がありません（時間が経って捨てたか、サーバーを起動し直しました）。ジョブを読み込み直してください"
@@ -801,6 +802,8 @@ class WebFlow:
         if f.stop_reasons or _BUTTON_ONLY_WORDS.search(ut.normalize(text)):
             return "button"  # 承認・出力・起動など：状態を変えず（承認も取り消さず）、ボタンで行うことを伝えるだけ
         if approved and not change:
+            if f.question or _QUESTION_WORDS.search(ut.normalize(text)):
+                return "ask"  # 承認のあとの質問：説明だけ（読み取りだけ。承認は取り消さない）
             return "approved"  # 承認のあとの相づち（「はい」「OK」）：承認を取り消さず、次にすることを伝えるだけ
         if e.dialog.step is not None or s.repeat_range is not None:
             return "hear"  # 承認・起動などは今の決まった文で止める／会話・範囲の確認の続きは今の道で
