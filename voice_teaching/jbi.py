@@ -66,10 +66,11 @@ _KNOWN_INST_DIRECTIVES = {"DATE", "ATTR", "COMM"}
 # 相対ジョブの FRAME の行（CHECKER_027 X2。唐川さんの決定 2026-11-03）。認める形はこの1つだけ（斜線4本・値 ROBOT）。
 # 次のすべてを満たすときだけ「知らない指示行」にしない（_check_frame）：
 #   ///POSTYPE ROBOT と ///RECTAN がある、///ATTR に RJ がある、///USER が無い、
-#   FRAME の行は1回だけで、INST 部の指示行の並び（///ATTR の後、命令より前）にある
+#   FRAME の行は1回だけで、///ATTR の直後の行にある（実機で確かめた形だけ。唐川さんの決定 2026-11-03。ほかの場所は止める）
 # 斜線4本の意味は公開資料では未確認（ペンダントの表示では ROBOT 座標）。ほかの形は止める
 FRAME_ROBOT_LINE = "////FRAME ROBOT"
 _FRAME_PLACE = "扱えません：FRAME の行が、INST 部の指示行の並び（///ATTR の後、命令より前）にありません"
+_FRAME_NOT_AFTER_ATTR = "扱えません：FRAME の行が ///ATTR の直後の行にありません（実機で確かめた形だけを扱います）"
 _RJ_NO_FRAME = "相対ジョブ（RJ）ですが、座標系（FRAME）の行がありません"
 _FRAME_NO_RJ = "扱えません：///ATTR に RJ（相対ジョブ）がありません（///ATTR の行は1つだけを扱います）"
 # FRAME の行らしいもの（斜線の本数・大文字小文字・空白の違いも拾い、止める理由をはっきり出す）
@@ -603,6 +604,8 @@ def parse(text: str, encoding: str = "utf-8") -> Job:
                 frames.append((i, body, _FRAME_PLACE))
             elif not attr_args:
                 frames.append((i, body, "ATTR前"))
+            elif i == 0 or not _split_ending(lines[i - 1])[0].startswith("///ATTR"):
+                frames.append((i, body, _FRAME_NOT_AFTER_ATTR))  # ///ATTR の後でも、間に別の行があれば止める
             else:
                 frames.append((i, body, None))
             continue
