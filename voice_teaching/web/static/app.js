@@ -5,12 +5,13 @@
 // - 承認は確認表示の承認ボタンからだけ /api/approve を呼ぶ。指示の経路からは呼ばない。
 // - 出力ボタンは承認した後だけ使える。失敗を成功と表示しない。
 // - 図と再生は、命令の順に位置の点を直線で結んだ「経路の目安」。ロボット本体の動きではない。
+//   区間の種類（サーバーの kind）で描き分ける。MOVJ（関節移動）は直線移動のように見せず、再生の印も線の上を動かさない。
 // - 外部から何も読み込まない。サーバー（同じ 127.0.0.1）にだけ要求を送る。
 // - 画面は「説明が要らない」ことを目指す：右側には今のステップのカードだけ、目立たせる操作は1つだけ。
 "use strict";
 import { SpeechInput } from "/static/speech.js";
 import { View3D } from "/static/view3d.js";
-import { splitUnknown, displayMinus } from "/static/highlight.js";
+import { splitUnknown, displayMinus, segmentLook, segmentTitle, confirmHeading, updownStatus } from "/static/highlight.js";
 
 const state = {
   sessionId: null,  // サーバーのメモリにある画面の状態の番号
@@ -207,6 +208,16 @@ function renderAll() {
   renderState();
 }
 
+// 上下の向きの状態（サーバーの state.updown）。無いときは何も出さない。文は highlight.js の updownStatus が作る
+function renderUpdown(u) {
+  const box = $("updown-status");
+  const v = updownStatus(u);
+  box.textContent = v ? v.text : "";
+  box.title = v ? v.title : "";
+  box.dataset.tone = v ? v.tone : "";
+  box.hidden = !v;
+}
+
 function renderState() {
   const st = state.st;
   if (!st) return;
@@ -218,6 +229,7 @@ function renderState() {
   $("interp-badge").title = st.mock_notice;
   $("interp-badge").hidden = false;
   $("voice-position").replaceChildren(el("strong", {}, st.selected || "位置は未選択"), el("span", {}, st.selected ? "変える" : "選ぶ"));
+  renderUpdown(st.updown);
   $("out-dir").textContent = st.out_dir;
   renderChips();
   renderCandidate();
@@ -671,6 +683,9 @@ function openConfirm() {
   const st = state.st;
   if (!st || !st.candidate) return;
   stopPlayback();
+  const cc = st.candidate, [, ax] = cc.target.split(" ");
+  // 見出しは1行（CHECKER_026 S5）：「C00005 を Y −3mm 動かします」。数はサーバーの候補のデータのまま。長い説明は下の小さな文
+  $("confirm-title").textContent = confirmHeading(cc, cc.kind === "shift" ? dirName(ax, cc.delta) : "") || "確認";
   $("confirm-text").textContent = st.confirmation_text || "";
   // 止まった理由は確認の文に入っている。入っていないときだけ、ここに添える（理由は省略しない）
   const reason = st.blocked_reason && !(st.confirmation_text || "").includes(st.blocked_reason)
@@ -686,13 +701,12 @@ function openConfirm() {
   $("confirm-warnings").hidden = notes.length === 0;
   $("confirm-affected").replaceChildren(...st.candidate.affected.map((a) => el("li", {}, a)));
   $("confirm-diff").replaceChildren(diffView(st.candidate));
-  const cc = st.candidate, [, ax] = cc.target.split(" ");
-  $("confirm-xyz").replaceChildren(
-    el("p", { class: "cand-big" }, displayMinus(`${cc.target.split(" ")[0]}：${ax}方向に ${cc.delta}mm`) + dirName(ax, cc.delta)),
+  $("confirm-xyz").replaceChildren(  // 位置・軸・量は見出しに出したので、ここでは変わる値から
     changeLine(ax, cc),
     cc.heard ? el("p", { class: "cand-heard" }, "指示：「", ...heardNodes(cc.heard), "」",
       cc.estimated ? el("span", { class: "cand-est inline" }, `推定で選んだ位置（「${cc.estimated.word}」・${cc.estimated.label}）`) : null) : "",
     cc.before_xyz ? xyzView(cc) : "");
+  $("confirm-movj-legend").hidden = !hasKind("movj");
   if (state.view.positions.some((p) => p.xyz)) {
     confirm3d.reset();
     confirm3d.setData(data3d());
@@ -908,7 +922,18 @@ function renderFigures() {
   // 止まった候補：変更後の線は灰色の点線。凡例もそれに合わせる
   $("legend-after").hidden = !!(c && c.blocked_reason);
   $("legend-stopped").hidden = !(c && c.blocked_reason);
+  // 区間の種類の凡例（MOVJ・目安の区間は、そのジョブにあるときだけ）
+  $("legend-kinds").hidden = !hasKind("movl") && !hasKind("movj") && !hasKind("other");
+  $("legend-movj").hidden = !hasKind("movj");
+  $("legend-other").hidden = !hasKind("other");
   $("play-button").disabled = !state.view || state.view.segments.length === 0 || recording();
+}
+
+// 今の図（変更前と、変更候補の変更後）に、その種類の区間があるか。種類が分からない区間は "other" として数える
+function hasKind(kind) {
+  const c = state.st && state.st.candidate;
+  const segs = (state.view ? state.view.segments : []).concat(c && c.after_segments ? c.after_segments : []);
+  return segs.some((s) => segmentLook(s.kind).kind === kind);
 }
 
 // 図を描き、再生のために座標の変換を返す
@@ -941,14 +966,18 @@ function drawFigure(host, axA, axB, big) {
     for (const s of segs) {
       const p = at[s.from], q = at[s.to];
       if (!p || !q) continue;
+      // 区間の種類で描き分ける（MOVJ は細い灰色の点線。変更後の線は変更後の色で、点線の形だけ残す）
+      const look = segmentLook(s.kind);
+      const lw = width * look.width;
       const line = svgEl("line", { x1: sx(p.xyz[a]), y1: sy(p.xyz[b]), x2: sx(q.xyz[a]), y2: sy(q.xyz[b]),
-        stroke: color, "stroke-width": width, "stroke-linecap": "round" });
-      if (!s.solid) line.setAttribute("stroke-dasharray", "6 5");
+        stroke: look.color && key === "before" ? look.color : color, "stroke-width": lw, "stroke-linecap": "round",
+        class: `seg ${key} seg-${look.kind}`, "data-kind": look.kind });
+      if (look.dash) line.setAttribute("stroke-dasharray", look.dash);
       const t = svgEl("title", {});
-      t.textContent = `${s.line_no}行目 ${s.text}${s.solid ? "" : "（目安）"}`;
+      t.textContent = segmentTitle(s);
       line.append(t);
       svg.append(line);
-      segLines[key].push({ seg: s, line: line, width: width, from: [sx(p.xyz[a]), sy(p.xyz[b])], to: [sx(q.xyz[a]), sy(q.xyz[b])] });
+      segLines[key].push({ seg: s, look, line: line, width: lw, from: [sx(p.xyz[a]), sy(p.xyz[b])], to: [sx(q.xyz[a]), sy(q.xyz[b])] });
     }
   };
 
@@ -1034,7 +1063,7 @@ function startPlayback() {
   const c = state.st && state.st.candidate;
   const runs = [{ name: c ? "変更前" : "命令の順", list: fig.segLines.before, color: c ? "#6e6e73" : C_POINT }];
   if (c) runs.push({ name: "変更後", list: fig.segLines.after, color: C_AFTER });
-  const marker = svgEl("circle", { r: 9, fill: runs[0].color, stroke: "#fff", "stroke-width": 3 });
+  const marker = svgEl("circle", { r: 9, fill: runs[0].color, stroke: "#fff", "stroke-width": 3, class: "marker" });
   fig.svg.append(marker);
   const SPEED = 260;  // 画面の上の速さ（px/秒）。実際のロボットの速度とは関係ない
   let ri = 0, si = 0, t0 = null;
@@ -1055,16 +1084,23 @@ function startPlayback() {
     const s = run.list[si];
     if (t0 === null) {
       t0 = now;
-      s.line.setAttribute("stroke-width", "5");
-      $("play-status").textContent = `${run.name}を再生中 ${si + 1}/${run.list.length}`;
-      $("play-status").title = `${s.seg.line_no}行目 ${s.seg.text}`;
+      s.line.setAttribute("stroke-width", String(s.look.animate ? 5 : Math.max(s.width + 1.5, 3)));
+      $("play-status").textContent = playStatus(run.name, si + 1, run.list.length, s.look);
+      $("play-status").title = segmentTitle(s.seg);
       marker.setAttribute("fill", run.color);
     }
     const len = Math.hypot(s.to[0] - s.from[0], s.to[1] - s.from[1]);
-    const dur = Math.max(350, (len / SPEED) * 1000);
+    const dur = s.look.animate ? Math.max(350, (len / SPEED) * 1000) : HOLD_MS;
     const f = Math.min(1, (now - t0) / dur);
-    marker.setAttribute("cx", s.from[0] + (s.to[0] - s.from[0]) * f);
-    marker.setAttribute("cy", s.from[1] + (s.to[1] - s.from[1]) * f);
+    if (s.look.animate) {
+      marker.removeAttribute("visibility");
+      marker.setAttribute("cx", s.from[0] + (s.to[0] - s.from[0]) * f);
+      marker.setAttribute("cy", s.from[1] + (s.to[1] - s.from[1]) * f);
+    } else {
+      // MOVJ・目安の区間：印を線の上で動かさない。区間の間は印を消し、終わったら終点に置く
+      marker.setAttribute("visibility", "hidden");
+      if (f >= 1) { marker.setAttribute("cx", s.to[0]); marker.setAttribute("cy", s.to[1]); }
+    }
     if (f >= 1) {
       s.line.setAttribute("stroke-width", String(s.width));
       si++; t0 = null;
@@ -1074,7 +1110,16 @@ function startPlayback() {
   requestAnimationFrame(step);
 }
 
-// 3D の再生：命令の順（変更前 → 変更後）に、線の上を印が動く（ロボットの動きではない）
+// 再生の状態の文。MOVJ・目安の区間では、印が線の上を動かないことを添える
+const HOLD_MS = 700;  // MOVJ・目安の区間で、印を消しておく時間（画面の上だけ。実際の動きとは関係ない）
+function playStatus(name, i, n, look) {
+  const head = `${name}を再生中 ${i}/${n}`;
+  if (look.kind === "movj") return `${head}　MOVJ：関節移動（通り道は表示していません）`;
+  if (look.kind === "other") return `${head}　直線とは限らない区間（印は終点へ移ります）`;
+  return head;
+}
+
+// 3D の再生：命令の順（変更前 → 変更後）に、MOVL の区間だけ線の上を印が動く（ロボットの動きではない）
 function startPlayback3d() {
   const d = data3d();
   const runs = [{ name: d.after ? "変更前" : "命令の順", color: d.after ? "#6e6e73" : C_POINT, segments: d.segments, points: d.points }];
@@ -1082,8 +1127,8 @@ function startPlayback3d() {
   $("play-button").classList.add("playing");
   view3d.play(runs,
     (run, s) => {
-      $("play-status").textContent = `${run.name}を再生中 ${run.segments.indexOf(s) + 1}/${run.segments.length}`;
-      $("play-status").title = `${s.line_no}行目 ${s.text}`;  // 命令の行は、マウスを重ねたときだけ
+      $("play-status").textContent = playStatus(run.name, run.segments.indexOf(s) + 1, run.segments.length, segmentLook(s.kind));
+      $("play-status").title = segmentTitle(s);  // 命令の行は、マウスを重ねたときだけ
     },
     () => { $("play-status").textContent = "再生が終わりました"; $("play-button").classList.remove("playing"); });
 }

@@ -21,8 +21,12 @@ NOT_DRAWABLE = "ロボット座標でないため描けません"
 # いまはシミュレーションモードだけ。実機用モードは後で作る
 MODE = "simulation"
 
-# 図で実線にしてよい命令の形（これだけ。ほかは点線で「目安」）。jbi の許可リストと同じ形を、表示用に別に持つ
-_PLAIN_MOVL = re.compile(r"MOVL C\d{5} V=\d+(?:\.\d+)?")
+# 図の区間の種類（CHECKER_026 S-MOVJ）。jbi の許可リストと同じ形を、表示用に別に持つ
+# - "movl"：直線移動。「MOVL 位置 V=数値」と、ちょうど「 PL=0」が付いた形だけ（PL=0 は角を丸めないので直線）。図は実線
+# - "movj"：関節移動。実際の通り道はジョブの点だけでは分からない。直線移動のように見せない（細い灰色の点線・再生の印は動かさない）
+# - "other"：それ以外（MOVC・MOVS・PL>0・緩い書き方の PL・CR・知らない語など）。直線とは限らないので点線で「目安」
+_PLAIN_MOVL = re.compile(r"MOVL C\d{5} V=\d+(?:\.\d+)?(?: PL=0)?")
+_MOVJ = re.compile(r"MOVJ(?![A-Za-z0-9_])")
 # 移動命令（線をつなぐ・切るため。分からない移動は広めに拾って線を切る側にする）
 _ANY_MOVE = re.compile(r"(?<![A-Z0-9_])(MOV[LJCS]|SMOV[LJCS]|IMOV)(?![A-Z0-9_])", re.IGNORECASE)
 _FLOW = re.compile(r"(?<![A-Z0-9_])(JUMP|CALL|RET)(?![A-Z0-9_])", re.IGNORECASE)
@@ -59,8 +63,20 @@ def _check(fn) -> dict:
     return {"ok": True, "reason": ""}
 
 
+def _segment_kind(text: str) -> str:
+    """区間へ入る命令の行から、図の区間の種類を決める。分からないものは "other"（直線とは見せない側）。"""
+    if _PLAIN_MOVL.fullmatch(text):
+        return "movl"
+    if _MOVJ.match(text):
+        return "movj"
+    return "other"
+
+
 def _segments(job: jbi.Job) -> list[dict]:
-    """命令の順に、移動先の位置を線で結ぶ。描けない移動があれば線を切る（飛ばして結ばない）。"""
+    """命令の順に、移動先の位置を線で結ぶ。描けない移動があれば線を切る（飛ばして結ばない）。
+
+    kind は区間の種類（movl・movj・other）。solid は以前の形との互換のため残す（kind が movl のときだけ True）。
+    """
     out = []
     prev: jbi.Position | None = None
     for ins in job.instructions:
@@ -71,9 +87,10 @@ def _segments(job: jbi.Job) -> list[dict]:
             prev = None
             continue
         if prev is not None:
+            kind = _segment_kind(ins.text)
             out.append({
                 "from": prev.name, "to": p.name, "line_no": ins.index + 1, "text": ins.text,
-                "solid": bool(_PLAIN_MOVL.fullmatch(ins.text)),
+                "kind": kind, "solid": kind == "movl",
             })
         prev = p
     return out

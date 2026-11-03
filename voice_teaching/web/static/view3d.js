@@ -2,10 +2,12 @@
 // - 座標はジョブの位置の値（X・Y・Z、mm）をそのまま使う。作った座標・ロボット本体・関節は描かない。
 // - ドラッグで回転、ホイールで拡大・縮小、点を押して選ぶ、視点を戻す。重なって見える点は、押すと選び分けの一覧を出す。
 // - 経路は JOB の命令の順に点を直線で結んだ目安。再生は線の上を印が動くだけで、ロボットの動きではない。
+// - 区間の種類（kind）で描き分ける（highlight.js の segmentLook）。MOVJ（関節移動）は細い灰色の点線で、
+//   再生の印は MOVL の区間だけ線の上を動く。MOVJ・目安の区間では印を消し、終わったら終点に置く。
 // - 画面の上下は Z、奥行きは X・Y を回して見せる（表示の向きだけ。指示の方向の解釈には使わない）。
 // - 変更候補があるときは、動かす点に触れる区間（入る・出る）だけを変更後の色で描く。止まった候補は灰色の点線。
 "use strict";
-import { displayMinus } from "/static/highlight.js";
+import { displayMinus, segmentLook, segmentTitle } from "/static/highlight.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const DEFAULT_YAW = -0.75;    // 最初の向き（ラジアン）
@@ -13,6 +15,7 @@ const DEFAULT_PITCH = 0.42;
 const OVERLAP_PX = 6;         // この距離より近く見える点は、まとめて選び分ける
 const C_AFTER = "#ff6a1a", C_AFTER_TEXT = "#c4470a";
 const C_STOPPED = "#8e8e93";  // 止まった候補（承認できない）の変更後：オレンジにしない
+const HOLD_MS = 700;          // MOVJ・目安の区間で、印を消しておく時間（画面の上だけ。実際の動きとは関係ない）
 
 function svgEl(tag, attrs) {
   const e = document.createElementNS(SVG_NS, tag);
@@ -57,7 +60,7 @@ export class View3D {
     this._bind();
   }
 
-  // data: { points: [{name, xyz, line}], segments: [{from, to, line_no, text, solid}],
+  // data: { points: [{name, xyz, line}], segments: [{from, to, line_no, text, kind, solid}],
   //         after: null | { points, segments, moved }, selected }
   setData(data) {
     this.data = data;
@@ -111,12 +114,15 @@ export class View3D {
       const a = at[s.from], b = at[s.to];
       if (!a || !b) return;
       const p = this.project(a), q = this.project(b);
-      const line = svgEl("line", { x1: p[0], y1: p[1], x2: q[0], y2: q[1], stroke: color, "stroke-width": w,
-        "stroke-linecap": "round", class: "seg " + key, "data-from": s.from, "data-to": s.to });
-      if (!s.solid) line.setAttribute("stroke-dasharray", "6 5");
-      // 止まった候補は、目安の区間（6 5 の破線）と見分けられる細かい点線
+      const look = segmentLook(s.kind);
+      const playing = this.marker && this.marker.seg === s;  // 再生中の区間は少し太く
+      const line = svgEl("line", { x1: p[0], y1: p[1], x2: q[0], y2: q[1],
+        stroke: look.color && key === "before" ? look.color : color, "stroke-width": w * look.width + (playing ? 1.5 : 0),
+        "stroke-linecap": "round", class: `seg ${key} seg-${look.kind}`, "data-kind": look.kind, "data-from": s.from, "data-to": s.to });
+      if (look.dash) line.setAttribute("stroke-dasharray", look.dash);
+      // 止まった候補は、目安の区間（6 5 の破線）・MOVJ の点線と見分けられる細かい点線
       if (key === "after" && stopped) { line.setAttribute("stroke-dasharray", "0.5 7"); line.setAttribute("stroke-width", "4"); }
-      const t = svgEl("title", {}); t.textContent = `${s.line_no}行目 ${s.text}${s.solid ? "" : "（目安）"}`;
+      const t = svgEl("title", {}); t.textContent = segmentTitle(s);
       line.append(t);
       svg.append(line);
       lines[key].push(line);
@@ -195,7 +201,7 @@ export class View3D {
         this._inset(svg, p0.xyz, q.xyz, displayMinus(d.delta_label || ""), cAfter, cAfterText);
       }
     }
-    if (this.marker) {
+    if (this.marker && this.marker.xyz) {  // MOVJ・目安の区間の間は xyz が無い（印を出さない）
       const m = this.project(this.marker.xyz);
       svg.append(svgEl("circle", { cx: m[0], cy: m[1], r: 9, fill: this.marker.color, stroke: "#fff", "stroke-width": 3, class: "marker" }));
     }
@@ -394,10 +400,13 @@ export class View3D {
       if (i >= list.length) { this.marker = null; this.render(); onEnd && onEnd(); return; }
       const it = list[i];
       if (t0 === null) { t0 = now; onStep && onStep(it.run, it.s); }
+      const animate = segmentLook(it.s.kind).animate;
       const len = Math.hypot(it.b[0] - it.a[0], it.b[1] - it.a[1], it.b[2] - it.a[2]);
-      const dur = Math.max(350, (len / SPEED) * 1000);
+      const dur = animate ? Math.max(350, (len / SPEED) * 1000) : HOLD_MS;
       const f = Math.min(1, (now - t0) / dur);
-      this.marker = { color: it.run.color, xyz: [0, 1, 2].map((k) => it.a[k] + (it.b[k] - it.a[k]) * f) };
+      // MOVL の区間だけ線の上を動かす。MOVJ・目安の区間は、直線の上に印を置かない（区間の間は消す）
+      this.marker = { color: it.run.color, seg: it.s,
+        xyz: animate ? [0, 1, 2].map((k) => it.a[k] + (it.b[k] - it.a[k]) * f) : null };
       this.render();
       if (f >= 1) { i++; t0 = null; }
       requestAnimationFrame(step);

@@ -455,3 +455,41 @@ body:not(.in-dialog) .side > #dialog-panel { order: 1; }  /* 会話のあと（�
 /* 見出しへスクロールしたとき、上の帯（sticky）の下に隠れない（内部 QA fd8ec24 P3-E） */
 .side > * { scroll-margin-top: 84px; }
 @media (max-width: 600px) { .side > * { scroll-margin-top: 120px; } }
+/* ---- CHECKER_026 M1：狭い画面（600px 以下）で上の帯が横にはみ出さない ----
+   アプリ名・「シミュレーションモード」・解釈の印を1行に並べると、フォントによっては 390px を超える（Linux で 415px）。
+   狭い画面では、1行目＝アプリ名・使い方・詳細表示、2行目＝シミュレーションモード・解釈の印、3行目＝4ステップ にする。
+   文字の幅に余裕を持たせる（印は折り返せる・最大でも帯の幅まで） */
+.brand { min-width: 0; flex-wrap: wrap; row-gap: 4px; }
+@media (max-width: 600px) {
+  .top { row-gap: 8px; }
+  .brand { display: contents; }
+  .top h1 { order: 0; font-size: 16px; min-width: 0; }
+  .top .help-wrap { order: 1; }
+  .top #engineer-toggle { order: 2; }
+  .top::after { content: ""; order: 3; flex-basis: 100%; height: 0; margin-top: -8px; }  /* 1行目の終わりで必ず折り返す */
+  .top .mode-banner { order: 4; }
+  .top .interp-badge { order: 5; min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+  .top .mode-banner + .interp-badge { margin-left: -2px; }
+  .steps { order: 6; }
+  .top .mode-banner, .top .interp-badge { font-size: 11px; padding: 2px 9px; }
+  .side > * { scroll-margin-top: 150px; }
+}
+/* ---- CHECKER_026 S-MOVJ：区間の種類の凡例（線の見本は図と同じ形） ---- */
+.legend.kinds { flex-wrap: wrap; row-gap: 2px; column-gap: 14px; font-size: 12px; }
+.lg.movl::before { background: #c7cbd1; }
+.lg.movj::before { background: none; border-top: 2px dotted #8e8e96; height: 0; top: 8px; }
+.lg.other::before { background: none; border-top: 3px dashed #c7cbd1; height: 0; top: 8px; }
+.lg.movj { color: var(--text); }
+.movj-legend { color: #6e6e73; font-weight: 600; }
+/* ---- CHECKER_026 S5：確認表示の見出しは1行。長い説明（サーバーの確認の文）は下に小さく ---- */
+.confirm-title { font-size: 26px; font-weight: 700; line-height: 1.35; margin: 0 0 6px; font-variant-numeric: tabular-nums; }
+.confirm-text { font-size: 14px; font-weight: 400; line-height: 1.6; color: var(--sub); margin: 0 0 16px; }
+@media (max-width: 600px) { .confirm-title { font-size: 18px; } }
+/* ---- 上下の向きの状態（サーバーの state.updown があるときだけ。目立たせすぎない） ---- */
+.updown { margin: 4px 0 0; font-size: 12px; color: var(--sub); }
+.updown[data-tone="confirmed"] { color: #2f7d4f; }
+.updown[data-tone="warn"] { color: #b04a00; font-weight: 600; }
+/* CHECKER_026 M1：狭い画面の確認表示で、図・注意・差分が箱の幅を超えない（列を中身の最小幅で広げない） */
+@media (max-width: 1100px) { .confirm-grid { grid-template-columns: minmax(0, 1fr); } }
+.confirm-grid > * { min-width: 0; }
+.confirm-warnings li, .confirm-affected li { overflow-wrap: anywhere; }

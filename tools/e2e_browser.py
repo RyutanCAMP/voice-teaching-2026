@@ -246,6 +246,266 @@ def check_ux_polish(browser, url, check, shots: Path | None) -> None:
     pg.close()
 
 
+# ---- CHECKER_026：M1（狭い画面のはみ出し）・S-MOVJ（関節移動の区間）・S5（確認表示の見出し）・上下の向きの状態 ----
+# はみ出しの検査：横スクロールが無いだけでなく、見えている要素の右の端が「画面の幅 − 8px」の内側にあること。
+# 画面いっぱいの入れ物（左 0・右がちょうど画面の幅）だけは除く。さらに文字を広げた条件（letter-spacing）でも確かめる
+# （CHECKER_026 では Linux のフォントで 390px が 429px にはみ出した。Windows のフォントは境目で通っていた）
+OVERFLOW_JS = """(m) => {
+  const vw = document.documentElement.clientWidth, out = [];
+  for (const e of document.querySelectorAll('body *')) {
+    const r = e.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) continue;
+    const cs = getComputedStyle(e);
+    if (cs.visibility === 'hidden' || cs.position === 'absolute' && r.width <= 1) continue;  // 読み上げだけの文字（sr-only）
+    if (r.left >= -0.5 && r.right <= vw + 0.5 && r.width >= vw - 2) continue;  // 画面いっぱいの入れ物
+    if (r.right > vw - m + 0.5 || r.left < -0.5) {
+      const id = e.id ? '#' + e.id : e.tagName.toLowerCase() + (e.getAttribute('class') ? '.' + e.getAttribute('class').split(' ')[0] : '');
+      out.push(id + ' ' + Math.round(r.left) + '〜' + Math.round(r.right));
+    }
+  }
+  return { scroll: document.documentElement.scrollWidth, vw, out: out.slice(0, 8) };
+}"""
+WIDE_FONT_CSS = "body, body * { letter-spacing: 0.08em !important; }"
+MOVJ_LABEL = "関節移動（MOVJ）：実際の通り道は直線ではありません"
+
+
+def check_c026(browser, url, check, shots: Path | None) -> None:
+    def shot(page, name, full=False):
+        if shots is not None:
+            shots.mkdir(parents=True, exist_ok=True)
+            page.screenshot(path=str(shots / name), full_page=full)
+
+    def fits(page, what, margin=8):
+        r = page.evaluate(OVERFLOW_JS, margin)
+        check(r["scroll"] <= r["vw"] and not r["out"],
+              f"{what}：横にはみ出さず、右の端は画面の幅 − {margin}px の内側（{r['scroll']}/{r['vw']}・{r['out']}）")
+
+    def load(page, name):
+        page.set_input_files("#file-input", str(REPO / "samples/dummy" / name))
+        until(page, lambda: page.inner_text("#file-name") == name)
+        page.wait_for_timeout(200)
+
+    def to_candidate(page, position, text):
+        page.locator("#position-chips button", has_text=position).click()
+        until(page, lambda: page.inner_text("#voice-position strong") == position)
+        page.fill("#text-input", text)
+        page.click("#text-send")
+        until(page, lambda: page.get_attribute("#step-4", "aria-current") == "step")
+        page.wait_for_timeout(200)
+
+    # ---- M1：360px・390px（ふつうの文字と、広げた文字）・1280px ----
+    for w in (360, 390):
+        for wide in (False, True):
+            tag = f"{w}px" + ("・文字を広げた条件" if wide else "")
+            ctx = browser.new_context(viewport={"width": w, "height": 844}, bypass_csp=True)
+            pg = ctx.new_page()
+            pg.add_init_script(FAKE_RECOGNITION)
+            pg.goto(url)
+            if wide:
+                pg.add_style_tag(content=WIDE_FONT_CSS)
+            fits(pg, f"M1 {tag}：最初の画面")
+            pg.click("#sample-button")
+            pg.wait_for_selector("#job-area:not([hidden])")
+            pg.wait_for_timeout(200)
+            check(pg.is_visible("#interp-badge") and pg.is_visible("#mode-banner"),
+                  f"M1 {tag}：「シミュレーションモード」と解釈の印は、狭い画面でも見えている")
+            rows = pg.evaluate("""() => ['.top h1', '#mode-banner', '#interp-badge'].map(
+                (q) => Math.round(document.querySelector(q).getBoundingClientRect().top))""")
+            check(rows[1] > rows[0] + 10 and abs(rows[1] - rows[2]) <= 4,
+                  f"M1 {tag}：1行目はアプリ名、2行目に「シミュレーションモード」と解釈の印を並べる（上の端 {rows}）")
+            fits(pg, f"M1 {tag}：読み込んだあと")
+            if w == 390 and not wide:
+                shot(pg, "C026_390_a_loaded.png")
+            to_candidate(pg, "C00005", FAKE_TEXT)
+            fits(pg, f"M1 {tag}：変更候補のステップ")
+            pg.click("#open-confirm")
+            pg.wait_for_selector("#confirm-overlay:not([hidden])")
+            pg.wait_for_timeout(150)
+            fits(pg, f"M1 {tag}：確認表示")
+            if w == 390 and not wide:
+                shot(pg, "C026_390_b_confirm.png")
+            ctx.close()
+    pg = browser.new_page(viewport={"width": 1280, "height": 720})
+    pg.add_init_script(FAKE_RECOGNITION)
+    pg.goto(url)
+    pg.click("#sample-button")
+    pg.wait_for_selector("#job-area:not([hidden])")
+    pg.wait_for_timeout(200)
+    fits(pg, "M1 1280px：読み込んだあと")
+    hb = pg.locator(".top").bounding_box()
+    check(hb is not None and hb["height"] < 80, f"M1 1280px：上の帯は1行のまま（高さ {hb and round(hb['height'])}px）")
+    pg.close()
+
+    # ---- S-MOVJ：MOVJ の区間は MOVL と違う見た目・ラベル・再生の印は直線の上を動かない ----
+    pg = browser.new_page(viewport={"width": 1280, "height": 900})
+    pg.add_init_script(FAKE_RECOGNITION)
+    pg.goto(url)
+    load(pg, "PAT_MOVJ.JBI")
+    lines = pg.eval_on_selector_all("#fig-3d line.seg.before", """els => els.map(e => ({
+        kind: e.dataset.kind, cls: e.getAttribute('class'), dash: e.getAttribute('stroke-dasharray'),
+        stroke: e.getAttribute('stroke'), width: parseFloat(e.getAttribute('stroke-width')),
+        title: e.querySelector('title') ? e.querySelector('title').textContent : ''}))""")
+    movj = [x for x in lines if x["kind"] == "movj"]
+    movl = [x for x in lines if x["kind"] == "movl"]
+    check(len(movj) == 1 and len(movl) == 5, f"S-MOVJ 3D：PAT_MOVJ の区間は MOVJ 1本・MOVL 5本（{[x['kind'] for x in lines]}）")
+    if movj and movl:
+        j, l = movj[0], movl[0]
+        check("seg-movj" in j["cls"] and j["dash"] and not l["dash"] and j["stroke"] != l["stroke"] and j["width"] < l["width"],
+              f"S-MOVJ 3D：MOVJ は細い灰色の点線、MOVL は実線（MOVJ {j['dash']}・{j['stroke']}・{j['width']} ／ MOVL {l['dash']}・{l['stroke']}・{l['width']}）")
+        check(MOVJ_LABEL in j["title"] and MOVJ_LABEL not in l["title"],
+              f"S-MOVJ 3D：MOVJ の区間に、マウスを重ねると「{MOVJ_LABEL}」が出る（{j['title']!r}）")
+    lg = pg.inner_text("#legend-kinds") if pg.is_visible("#legend-kinds") else ""
+    check("MOVL：直線移動" in lg and "MOVJ：関節移動（通り道は表示していません）" in lg and pg.is_visible("#legend-movj"),
+          f"S-MOVJ：凡例に「MOVL：直線移動」「MOVJ：関節移動（通り道は表示していません）」を出す（{lg!r}）")
+    shot(pg, "C026_1280_a_movj_3d.png")
+
+    def watch_playback(host_marker, seconds=14.0):
+        """再生中の状態の文と、印（見えているか）を見続ける。[(文, 印が見えているか)]"""
+        seen = []
+        js = """(sel) => { const m = document.querySelector(sel);
+          const shown = !!m && m.getAttribute('visibility') !== 'hidden';
+          return [document.querySelector('#play-status').textContent, shown,
+                  document.querySelector('#play-button').classList.contains('playing')]; }"""
+        t = 0.0
+        while t < seconds:
+            s, shown, playing = pg.evaluate(js, host_marker)
+            seen.append((s, shown))
+            if not playing and t > 0.3:
+                break
+            pg.wait_for_timeout(25)
+            t += 0.025
+        return seen
+
+    pg.click("#play-button")
+    seen = watch_playback("#fig-3d circle.marker")
+    in_j = [shown for s, shown in seen if "MOVJ：関節移動" in s]
+    in_l = [shown for s, shown in seen if "再生中" in s and "MOVJ" not in s]
+    check(in_j and not any(in_j) and any(in_l),
+          f"S-MOVJ 3D 再生：MOVJ の区間では印を直線の上に出さない（MOVJ の間 {len(in_j)}回見て、印あり {sum(in_j)}回・MOVL の間 印あり {sum(in_l)}回）")
+    check(seen and seen[-1][0] == "再生が終わりました", f"S-MOVJ 3D 再生：最後まで再生する（{seen[-1][0] if seen else ''}）")
+
+    pg.click('.view-tab[data-view="xz"]')
+    pg.wait_for_timeout(150)
+    lines2 = pg.eval_on_selector_all("#fig-main line.seg.before", """els => els.map(e => ({
+        kind: e.dataset.kind, dash: e.getAttribute('stroke-dasharray'), stroke: e.getAttribute('stroke'),
+        width: parseFloat(e.getAttribute('stroke-width')), title: e.querySelector('title') ? e.querySelector('title').textContent : ''}))""")
+    j2 = [x for x in lines2 if x["kind"] == "movj"]
+    l2 = [x for x in lines2 if x["kind"] == "movl"]
+    check(len(j2) == 1 and l2 and j2[0]["dash"] and not l2[0]["dash"] and j2[0]["stroke"] != l2[0]["stroke"]
+          and j2[0]["width"] < l2[0]["width"] and MOVJ_LABEL in j2[0]["title"],
+          f"S-MOVJ 2D：X・Z の図でも、MOVJ は細い灰色の点線でラベルつき（{j2}）")
+    shot(pg, "C026_1280_b_movj_2d.png")
+    pg.click("#play-button")
+    seen = watch_playback("#fig-main circle.marker")
+    in_j = [shown for s, shown in seen if "MOVJ：関節移動" in s]
+    in_l = [shown for s, shown in seen if "再生中" in s and "MOVJ" not in s]
+    check(in_j and not any(in_j) and any(in_l),
+          f"S-MOVJ 2D 再生：MOVJ の区間では印を直線の上に出さない（MOVJ の間 {len(in_j)}回見て、印あり {sum(in_j)}回・MOVL の間 印あり {sum(in_l)}回）")
+
+    # 変更候補（C00003 は前後が MOVL）の確認表示：MOVJ の凡例を出す
+    pg.click('.view-tab[data-view="3d"]')
+    to_candidate(pg, "C00003", "Zプラス方向に5mm")
+    pg.click("#open-confirm")
+    pg.wait_for_selector("#confirm-overlay:not([hidden])")
+    pg.wait_for_timeout(150)
+    cj = pg.eval_on_selector_all("#confirm-figure line.seg[data-kind='movj']", "els => els.map(e => e.getAttribute('stroke-dasharray'))")
+    check(pg.is_visible("#confirm-movj-legend") and cj and all(cj),
+          f"S-MOVJ 確認表示：図の MOVJ の区間は点線で、凡例に関節移動の説明を出す（{cj}）")
+    shot(pg, "C026_1280_c_movj_confirm.png")
+    pg.close()
+
+    # MOVJ の無いジョブでは、MOVJ の凡例を出さない（PL=0 の MOVL は実線）
+    pg = browser.new_page(viewport={"width": 1280, "height": 900})
+    pg.goto(url)
+    load(pg, "PAT_PL0.JBI")
+    kinds = pg.eval_on_selector_all("#fig-3d line.seg.before", "els => els.map(e => [e.dataset.kind, e.getAttribute('stroke-dasharray')])")
+    check(kinds and all(k == "movl" and d is None for k, d in kinds) and pg.is_hidden("#legend-movj"),
+          f"S-MOVJ：PL=0 の MOVL は実線で、MOVJ の凡例は出さない（{kinds}）")
+    pg.close()
+
+    # ---- S5：確認表示の見出しは1行「C00005 を Z +10mm … 動かします」。同じ内容を大きな文字で繰り返さない ----
+    pg = browser.new_page(viewport={"width": 1280, "height": 720})
+    pg.add_init_script(FAKE_RECOGNITION)
+    pg.goto(url)
+    pg.click("#sample-button")
+    pg.wait_for_selector("#job-area:not([hidden])")
+    to_candidate(pg, "C00005", "Zプラス方向に10mm")
+    pg.click("#open-confirm")
+    pg.wait_for_selector("#confirm-overlay:not([hidden])")
+    pg.wait_for_timeout(150)
+    head = pg.inner_text("#confirm-title")
+    m = pg.evaluate("""() => { const h = document.querySelector('#confirm-title'), t = document.querySelector('#confirm-text');
+        const lh = parseFloat(getComputedStyle(h).lineHeight);
+        return [h.getBoundingClientRect().height, lh, parseFloat(getComputedStyle(h).fontSize), parseFloat(getComputedStyle(t).fontSize)]; }""")
+    check(head.startswith("C00005 を Z +10mm") and head.endswith("動かします") and "\n" not in head and m[0] < m[1] * 1.5,
+          f"S5：見出しは1行（{head!r}・高さ {m[0]:.0f}px・行の高さ {m[1]:.0f}px）")
+    conf = pg.inner_text("#confirm-text")
+    check("C00005" in conf and m[3] < m[2] and pg.locator("#confirm-xyz .cand-big").count() == 0,
+          f"S5：長い説明は見出しの下の小さな文（{m[3]:.0f}px < {m[2]:.0f}px）。表の上に同じ内容の大きな文字を出さない")
+    check(pg.is_visible("#approve-button"), "S5：見出しを変えても、承認はボタンだけ（承認ボタンがある）")
+    shot(pg, "C026_1280_d_confirm_heading.png")
+    pg.close()
+    pg = browser.new_page(viewport={"width": 1280, "height": 720})
+    pg.add_init_script(FAKE_RECOGNITION)
+    pg.goto(url)
+    pg.click("#sample-button")
+    pg.wait_for_selector("#job-area:not([hidden])")
+    to_candidate(pg, "C00000", "Zプラス方向に10mm")
+    pg.click("#open-confirm")
+    pg.wait_for_selector("#confirm-overlay:not([hidden])")
+    head = pg.inner_text("#confirm-title")
+    check(head.startswith("C00000 を Z +10mm") and head.endswith("動かす候補（承認できません）") and not pg.is_enabled("#approve-button"),
+          f"S5：止まった候補の見出しは「動かします」と言わない（{head!r}）")
+    pg.close()
+
+    # ---- 上下の向きの状態：サーバーの state.updown があるときだけ、位置の欄の近くに小さく出す ----
+    updown = {"value": None}
+
+    def add_updown(route):
+        res = route.fetch()
+        body = res.json()
+        if isinstance(body, dict) and isinstance(body.get("state"), dict):
+            if updown["value"] is None:
+                body["state"].pop("updown", None)  # 返さないサーバーの代わり（M2 と合わせたあとのサーバーは返す）
+            else:
+                body["state"]["updown"] = updown["value"]
+        route.fulfill(response=res, body=json.dumps(body, ensure_ascii=False),
+                      headers={**res.headers, "content-type": "application/json; charset=utf-8"})
+
+    pg = browser.new_page(viewport={"width": 1280, "height": 900})
+    pg.route("**/api/*", add_updown)
+    pg.goto(url)
+    pg.click("#sample-button")
+    pg.wait_for_selector("#job-area:not([hidden])")
+    pg.locator("#position-chips button", has_text="C00005").click()
+    until(pg, lambda: pg.inner_text("#voice-position strong") == "C00005")
+    check(pg.is_hidden("#updown-status"), "上下の向き：サーバーが返さないときは何も出さない")
+    cases = [
+        ({"status": "unconfirmed", "message": "このジョブの上下の向きは確認されていません"}, "上下の向き：未確認"),
+        ({"status": "confirmed", "confirmed_by": "唐川", "confirmed_at": "2026-11-03T14:00:00+09:00", "message": "", "fingerprint": "x"},
+         "上下の向き：確認済み"),
+        ({"status": "mismatch", "message": ""}, "上下の向き：確認したジョブと違います"),
+        ({"status": "changed", "message": ""}, "上下の向き：設定が変わっています"),
+    ]
+    pg.close()
+    for value, want in cases:
+        updown["value"] = value
+        pg = browser.new_page(viewport={"width": 1280, "height": 900})
+        pg.route("**/api/*", add_updown)
+        pg.goto(url)
+        pg.click("#sample-button")
+        pg.wait_for_selector("#job-area:not([hidden])")
+        pg.locator("#position-chips button", has_text="C00005").click()
+        until(pg, lambda: pg.inner_text("#voice-position strong") == "C00005")
+        got = pg.inner_text("#updown-status") if pg.is_visible("#updown-status") else ""
+        check(got == want, f"上下の向き：{value['status']} は「{want}」と出す（{got!r}）")
+        if value["status"] == "unconfirmed":
+            fs = pg.evaluate("() => parseFloat(getComputedStyle(document.querySelector('#updown-status')).fontSize)")
+            check(fs <= 13, f"上下の向き：目立たせすぎない（文字 {fs}px）")
+            shot(pg, "C026_1280_e_updown.png")
+        pg.close()
+
+
 def until(pg, cond, timeout_ms: int = 5000) -> None:
     """条件が成り立つまで待つ（画面の CSP が文字列の評価を禁じているので、Python 側で確かめる）。"""
     waited = 0
@@ -483,6 +743,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             pg4.close()
 
             check_ux_polish(b, url, check, shots)
+            check_c026(b, url, check, shots)
             check_dialog(b, check, shots, errors, updown_cfg["DEMO_C_PLACE.JBI"])
             check_updown_unconfirmed(b, check, shots, errors)
 

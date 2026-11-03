@@ -115,12 +115,15 @@ def test_segments_follow_instruction_order_and_mark_plain_movl_solid():
 
 
 def test_segments_with_pl_or_other_moves_are_dashed():
+    # CHECKER_026 S-MOVJ：ちょうど PL=0 の MOVL は直線なので実線（movl）。MOVJ は直線にしない（movj）。PL>0 は目安（other）
     data = (demo().replace(b"MOVL C00001 V=80.0", b"MOVL C00001 V=80.0 PL=0")
-            .replace(b"MOVL C00003 V=250.0", b"MOVJ C00003 VJ=50.00"))
+            .replace(b"MOVL C00003 V=250.0", b"MOVJ C00003 VJ=50.00")
+            .replace(b"MOVL C00005 V=80.0", b"MOVL C00005 V=80.0 PL=2"))
     segs = {s["to"]: s for s in api.job_view(data)["segments"]}
-    assert segs["C00001"]["solid"] is False
-    assert segs["C00003"]["solid"] is False
-    assert segs["C00004"]["solid"] is True
+    assert segs["C00001"]["solid"] is True and segs["C00001"]["kind"] == "movl"
+    assert segs["C00003"]["solid"] is False and segs["C00003"]["kind"] == "movj"
+    assert segs["C00004"]["solid"] is True and segs["C00004"]["kind"] == "movl"
+    assert segs["C00005"]["solid"] is False and segs["C00005"]["kind"] == "other"
 
 
 def test_segments_break_at_moves_without_drawable_position():
