@@ -108,3 +108,29 @@ def test_blocked_candidate_text_starts_with_reference_only():
 def test_ok_candidate_text_is_unchanged():
     r = hear(DEMO_C, "Zマイナス3ミリ")
     assert r["message"].startswith("位置 C00005 を Z方向に -3.000mm 動かします")
+
+
+# ---- P1-1：言い終わりの「〜ます」は、既定の確認ルール（11/3 17:14）どおり2択で確かめる（候補にしない） ----
+from voice_teaching import utterance as ut
+
+
+@pytest.mark.parametrize("said,restated", [
+    ("3mm下げます", "3mm下げて"), ("3mm上げます", "3mm上げて"),
+    ("3mm下げますね", "3mm下げて"), ("3mm下げますよ", "3mm下げて"), ("3ミリ下げておきます", "3ミリ下げて"),
+    ("Zマイナスに3mmずらします", None), ("Zマイナス3ミリ動かしますね", None),
+    ("Zマイナス3ミリにします", "Zマイナス3ミリ"), ("Zマイナス3ミリにしますね", "Zマイナス3ミリ"),
+])
+def test_masu_endings_are_confirmed_with_two_choices(said, restated):
+    f = ut.read_utterance(said)
+    assert f.shimasu_text is not None, said
+    if restated is not None:
+        assert f.shimasu_text == restated
+    r = hear(DEMO_C, said)
+    assert r["state"]["candidate"] is None and r["status"] == "ask"
+    assert "ご希望ですか" in r["message"] or "上下の向き" in r["message"], (said, r["message"])
+
+
+@pytest.mark.parametrize("said", ["3mm下げません", "下げます3mm", "3mm下げましたね", "3mm下げましょう"])
+def test_other_masu_forms_are_not_turned_into_requests(said):
+    # 打ち消し・文の途中の「ます」・過去・誘いは、指示として読まない（今まで通り：候補にしない）
+    assert hear(DEMO_C, said)["state"]["candidate"] is None

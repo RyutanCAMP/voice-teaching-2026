@@ -457,9 +457,12 @@ def _repeat(text: str) -> tuple[tuple[int | None, str] | None, list[tuple[int, i
 
 
 # 文の終わりの「動かします」「移動します」「ずらします」（後ろは句読点・空白だけ）。CHECKER_026 M3
-_SHIMASU_END = re.compile(rf"(?<={'|'.join(SHIMASU_AFTER)})します[\s　。．.!！]*$")
+# CHECKER_032 P1-1（唐川さん 11/3 夜）：言い終わりの「ね」「よ」（「下げますね」）・「〜ておきます」・「量＋にします」も、
+# 既定の確認ルール（11/3 17:14）どおり2択で確かめる（候補にしない）。「ません」「ました」「ましょう」は外さない（今まで通り）
+_SHIMASU_END = re.compile(rf"(?<={'|'.join(SHIMASU_AFTER)})します[ねよ]?[\s　。．.!！]*$")
 _SHIMASU_VERB = re.compile(f"(?:{'|'.join(SHIMASU_AFTER)})$")
-_MASU_END = re.compile(rf"(?<={'|'.join(MASU_AFTER)})ます[\s　。．.!！]*$")
+_MASU_END = re.compile(rf"(?<={'|'.join(MASU_AFTER)})(?:ておき)?ます[ねよ]?[\s　。．.!！]*$")
+_NI_SHIMASU_END = re.compile(r"([0-9０-９]+(?:[.．][0-9０-９]+)?\s*(?:mm|ＭＭ|MM|ｍｍ|ミリ))\s*にします[ねよ]?[\s　。．.!！]*$", re.I)
 
 
 def _strip_shimasu(text: str) -> str | None:
@@ -468,6 +471,9 @@ def _strip_shimasu(text: str) -> str | None:
     すぐ前が「て」の動きの言葉（「下げて動かします」）なら、後ろの「動かします」ごと外す。それ以外は「します」を「して」にする。
     言葉は足さない・変えない（外した文は、ふつうの指示と同じ検査を通る）。
     """
+    n = _NI_SHIMASU_END.search(text)
+    if n is not None:
+        return text[: n.end(1)]  # 「Zマイナス3ミリにします」→「Zマイナス3ミリ」（言葉は足さない）
     m = _SHIMASU_END.search(text)
     if m is None:
         m = _MASU_END.search(text)

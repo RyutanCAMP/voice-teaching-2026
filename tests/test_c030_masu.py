@@ -112,7 +112,7 @@ def test_masu_negation_stops(text, mode, source, make_updown, tmp_path):
 
 
 @pytest.mark.parametrize("source", SOURCES)
-@pytest.mark.parametrize("text", ["下げます3mm", "3mm下げますね", "3mm下げますです", "3mm下げます ね"])
+@pytest.mark.parametrize("text", ["下げます3mm", "3mm下げますです", "3mm下げます ね"])
 def test_masu_not_at_the_end_is_not_read(text, source, make_updown, tmp_path):
     # 文の終わりでない「ます」・言い終わりを重ねたものは、知らない言葉として聞き返す（候補にも2択にもしない）
     w, sid = flow("confirmed", make_updown, tmp_path)
