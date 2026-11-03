@@ -14,7 +14,9 @@ import binascii
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
+from pathlib import Path
 
+from .. import __version__
 from . import api
 from .flow import WebFlow
 
@@ -31,7 +33,12 @@ _STATIC = {
     "/static/speech.js": ("speech.js", "text/javascript; charset=utf-8"),
     # 3D の点と経路の表示（依存なし）
     "/static/view3d.js": ("view3d.js", "text/javascript; charset=utf-8"),
+    # 読めなかった言葉を目立たせる分け方・マイナスの表示（依存なし）
+    "/static/highlight.js": ("highlight.js", "text/javascript; charset=utf-8"),
 }
+# 「サンプルで試す」で読み込む、決まった1つの架空のジョブ。画面からは名前も場所も渡させない
+SAMPLE_JOB = Path(__file__).resolve().parents[2] / "samples" / "dummy" / "DEMO_C_PLACE.JBI"
+_VERSION_MARK = b"__VT_VERSION__"  # index.html の中の版の印（配信するときに __version__ を入れる）
 _CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
         "connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 
@@ -81,7 +88,10 @@ class Handler(BaseHTTPRequestHandler):
         entry = _STATIC.get(self.path.split("?", 1)[0])
         if entry is None:
             return self._error(404, "ありません")
-        self._send(200, _static_bytes(entry[0]), entry[1])
+        body = _static_bytes(entry[0])
+        if entry[0] == "index.html":
+            body = body.replace(_VERSION_MARK, __version__.encode("ascii"))
+        self._send(200, body, entry[1])
 
     # ---- POST ----
     def _read_body(self) -> bytes | None:
@@ -129,6 +139,16 @@ class Handler(BaseHTTPRequestHandler):
             body = self._read_body()
             if body is not None:
                 self._json(200, flow.load(body))
+            return True
+        if path == "/api/sample":
+            # 本文は読むだけで使わない（問い合わせの文字列も見ない）。決まった1つのファイルを、アップロードと同じ flow.load に渡す
+            if self._read_body() is not None:
+                try:
+                    data = SAMPLE_JOB.read_bytes()
+                except OSError:
+                    self._error(404, "サンプルのジョブが見つかりません")
+                else:
+                    self._json(200, flow.load(data))
             return True
         routes = {
             "/api/hear": lambda r: flow.hear(r.get("session_id"), r.get("text"), r.get("source", "text")),
