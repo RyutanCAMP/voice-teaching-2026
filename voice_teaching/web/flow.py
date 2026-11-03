@@ -33,6 +33,7 @@ SOURCES = ("voice", "text")
 NO_SESSION = "このジョブの画面の情報がありません（時間が経って捨てたか、サーバーを起動し直しました）。ジョブを読み込み直してください"
 NO_POSITION = "位置が決まっていないため、変更の提案をしていません。位置を選ぶか、位置番号（C と5桁の数字）で言ってください"
 NOT_DECIDED = "指示から変更の内容を決められませんでした。位置番号・方向・量（mm）を、もう一度指示してください"
+APP_SPEAKER = "アプリ"  # プログラムの決まった文の話し手（Claude の文ではない）
 NOT_APPROVED = "承認されていないため、出力しません（承認は確認表示の承認ボタンで行います）"
 
 
@@ -150,10 +151,14 @@ class WebFlow:
 
     def _dialog_out(self, e: _Entry, text: str, source: str, f0, status: str, message: str,
                     who: str | None = None, choices: tuple = ()) -> dict:
-        """会話の1回分の応答（ここでは候補を作らない）。会話の欄と作業ログに残す。"""
+        """会話の1回分の応答（ここでは候補を作らない）。会話の欄と作業ログに残す。
+
+        話し手の表示は正直に：プログラムの決まった文は「アプリ」。Claude（モック）の位置の候補を示す文だけを
+        who=self._speaker() で出す（_locate の最後だけ）。
+        """
         s = e.session
         s.forget_question()
-        e.dialog.say(who or self._speaker(), message, status)
+        e.dialog.say(who or APP_SPEAKER, message, status)
         s.log.append(({"ok": "結果", "ask": "聞き返し", "stop": "止めた理由"}[status], message))
         return {"ok": True, "heard": text, "source": source, "facts": _facts(f0), "tool_calls": [], "dialog": True,
                 "status": status, "message": message, "blocked_reason": None, "candidate_made": False,
@@ -225,7 +230,9 @@ class WebFlow:
         d.step = "confirm_position"
         msg = (dg.ASK_ONE.format(word=word, pos=d.candidates[0].position) if len(d.candidates) == 1
                else dg.ASK_MANY.format(word=word, n=len(d.candidates)))
-        return self._dialog_out(e, text, source, f0, "ask", msg)
+        # Claude（モック）の位置の候補を示す文だけは、その話し手として出す。FRAME で決まったものは「アプリ」
+        who = APP_SPEAKER if d.candidates[0].confirmed_by_frame else self._speaker()
+        return self._dialog_out(e, text, source, f0, "ask", msg, who=who)
 
     def _dialog_turn(self, e: _Entry, text: str, source: str, f0) -> dict | None:
         """会話の途中の発話。None を返したら、会話をやめて、ふつうの指示として読む。"""
@@ -323,7 +330,7 @@ class WebFlow:
         d.end()
         out = self._instruction(e, text, source)
         if out.get("candidate_made"):
-            d.say(self._speaker(), dg.DONE, "ok")
+            d.say(APP_SPEAKER, dg.DONE, "ok")  # 決まった文（プログラム）
         else:
             d.say("アプリ", out.get("message") or "", out.get("status") or "stop")
         out["dialog"] = True

@@ -790,3 +790,66 @@ def test_dialog_ui_only_posts_choices_and_never_approves():
         assert f'id="{i}"' in html, i
     for w in ASSERTIVE:
         assert w not in html.split('id="dialog-panel"')[1].split("</section>")[0], w
+
+
+# ======================================================================
+# 13. 話し手の表示は正直に（2026-11-03 夜 リードの決定）：Claude（モック）と出すのは、位置の候補を示す文だけ。
+#     プログラムの決まった文（方向と量の問い・「変更前後を表示します」・照合や手動の選択の案内など）は「アプリ」
+# ======================================================================
+def _ai_turns(state):
+    return [t for t in state["dialog"]["turns"] if t["who"] in ("Claude", dg.MOCK_SPEAKER)]
+
+
+def _is_locate_proposal(text):
+    import re
+    return bool(re.fullmatch(r"「.+」は C\d{5} のことでしょうか？", text) or re.fullmatch(r"「.+」の候補が \d+つあります。どれですか？", text))
+
+
+@pytest.mark.parametrize("interp", ["mock", "claude"])
+def test_template_turns_are_never_labelled_claude(interp):
+    if interp == "mock":
+        w, sid = start(select="C00001")
+    else:
+        w, sid, _ = claude_flow(resp(tool_use("propose_target", GOOD)))  # 方向のボタンの前まで（偽の応答は1つだけ）
+    states = []
+    r = w.hear(sid, OPENING); states.append(r["state"])
+    r = w.hear(sid, "OK"); states.append(r["state"])           # 承認の言葉（止める）
+    r = w.hear(sid, "そうじゃなくて"); states.append(r["state"])  # 打ち消し
+    r = w.hear(sid, "えーと"); states.append(r["state"])        # その他
+    r = w.hear(sid, "そうそう"); states.append(r["state"])
+    r = w.hear(sid, "手前に3mm"); states.append(r["state"])
+    r = w.hear(sid, "3mm"); states.append(r["state"])
+    if interp == "mock":
+        r = choose(w, sid, r, "dir:Y-"); states.append(r["state"])
+        assert r["state"]["candidate"] is not None
+    final = states[-1]
+    ai = _ai_turns(final)
+    assert ai, "位置の候補の文は Claude（モック）として出す"
+    for t in ai:
+        assert _is_locate_proposal(t["text"]), t
+    texts_by_app = [t["text"] for t in final["dialog"]["turns"] if t["who"] == "アプリ"]
+    assert any(x.startswith("どちらの方向") for x in texts_by_app)
+    if interp == "mock":
+        assert final["dialog"]["turns"][-1] == {"who": "アプリ", "text": dg.DONE, "kind": "ok"}
+
+
+def test_fallback_and_pick_guidance_are_app():
+    w, sid = start(FixedLocator([]), select="C00001")
+    r = w.hear(sid, OPENING)
+    assert _ai_turns(r["state"]) == [] and r["state"]["dialog"]["turns"][-1]["who"] == "アプリ"
+    w, sid = start(data=NOT_SYNTH)
+    r = w.hear(sid, OPENING)
+    assert _ai_turns(r["state"]) == []
+
+
+def test_frame_confirmed_candidate_is_app(counting):
+    w, sid = start(counting)
+    w._entries[sid].frame = {"positions": {"C00005": {"label": "置き場所", "aliases": ["置くところ"]}}}
+    r = w.hear(sid, OPENING)
+    assert _ai_turns(r["state"]) == []
+
+
+def test_ui_labels_bubbles_from_server_who_only():
+    js = (STATIC / "app.js").read_text(encoding="utf-8")
+    part = js[js.index("function renderDialog()"):js.index("// ---- 4. 変更候補")]
+    assert 't.who' in part and '"Claude"' not in part  # 画面で話し手を決めない（サーバーの who をそのまま出す）

@@ -582,6 +582,8 @@ def check_dialog(browser, check, shots: Path | None, errors: list) -> None:
               f"会話：「そうそう」で C00005 を選び、方向と量を聞く（手前は軸にしない）：{last_said(pg)}")
         check(labels(pg) == ["X＋", "X−", "Y＋", "Y−", "Z＋（上）", "Z−（下）"],
               f"会話：方向は X・Y・Z の＋−の6つのボタン：{labels(pg)}")
+        check(bubbles(pg)[-1][0] == "アプリ" and [w for w, _ in bubbles(pg)].count("モック（テスト用）") == 1,
+              f"会話：方向と量の問いは決まった文なので「アプリ」。モックと出すのは位置の候補の文だけ：{[w for w, _ in bubbles(pg)]}")
         check(pg.is_visible("#dialog-estimated") and "推定（未確定）" in pg.inner_text("#dialog-estimated"),
               "会話：選んだ位置に「推定（未確定）」と残す")
         shot(pg, "d2_ask_move.png")
@@ -599,8 +601,9 @@ def check_dialog(browser, check, shots: Path | None, errors: list) -> None:
         cv = pg.inner_text("#candidate-view")
         check("Y方向に −3.000mm" in cv and "C00005をYのマイナス3ミリ" in cv and "推定（未確定）" in cv,
               f"会話：ボタンで方向を選ぶと、決まった文を今の流れに通して変更の候補になる：{cv[:80]}")
-        check(pg.is_visible("#dialog-panel") and last_said(pg).startswith("変更前後を表示します。これでよろしいですか？"),
-              "会話：最後に「変更前後を表示します。これでよろしいですか？」")
+        check(pg.is_visible("#dialog-panel") and last_said(pg).startswith("変更前後を表示します。これでよろしいですか？")
+              and bubbles(pg)[-1][0] == "アプリ",
+              "会話：最後に「変更前後を表示します。これでよろしいですか？」（プログラムの決まった文なので話し手は「アプリ」）")
         check(interp.decides == 1, f"会話：変更の解釈は1回だけ（{interp.decides}）")
         pg.wait_for_timeout(300)
         shot(pg, "d4_candidate.png")
