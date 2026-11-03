@@ -1,0 +1,216 @@
+"""2026-11-03 夜の唐川さんの決定（docs/UNKNOWN_WORDS_PLAN.md 7章）。実装より先に書いた。
+
+1. 疑問の形（「3mm下げて？」「下に3mmですか」）は候補にしない。「「…」でよいですか？」と、？を外した同じ指示の選択肢を1つだけ出す
+2. 「動かします」「移動します」「下げます」、読んだ指示の後の文の終わりの「です」、ひらがなの「さげて」「あげて」を読む
+5. 繰り返し・往復（「2回移動させて」「2往復」「行き来」「繰り返し」）は候補にしない。最後は必ず止める
+6. 「置くところ」などの場所の言葉は facts.place_ref。位置番号が無ければ聞き返す
+7. 手前・奥・前・後ろ・右・左は今までどおり止める・聞き返す。facts.relative_dir に出す
+8. 「少し」「ちょっと」はあいまいな量のまま
+"""
+from pathlib import Path
+
+import pytest
+
+from voice_teaching import utterance as ut
+from voice_teaching.web.flow import WebFlow
+
+DEMO_C = (Path(__file__).resolve().parent.parent / "samples" / "dummy" / "DEMO_C_PLACE.JBI").read_bytes()
+SOURCES = ["voice", "text"]
+REPEAT_STOP = "このアプリでは、動きの追加・繰り返しはできません。位置の修正だけです"
+
+
+def new():
+    w = WebFlow()
+    sid = w.load(DEMO_C)["session_id"]
+    w.select(sid, "C00005")
+    return w, sid
+
+
+def hear(text, source="voice"):
+    w, sid = new()
+    return w.hear(sid, text, source=source)
+
+
+def cand(r):
+    c = r["state"]["candidate"]
+    return (c["target"].split()[1], c["delta"]) if c else None
+
+
+# ---- 1. 疑問の形 ----
+@pytest.mark.parametrize("source", SOURCES)
+@pytest.mark.parametrize("text,plain", [
+    ("3mm下げて？", "3mm下げて"), ("3mm下げて?", "3mm下げて"), ("下に3mmですか", "下に3mmです"),
+    ("Y座標を3mm下げますか", "Y座標を3mm下げます"), ("下に3mm？", "下に3mm"), ("下に3mmですか？", "下に3mmです"),
+])
+def test_question_asks_for_confirmation_with_one_choice(text, plain, source):
+    w, sid = new()
+    r = w.hear(sid, text, source=source)
+    assert r["status"] == "ask" and cand(r) is None, (text, r.get("message"))
+    assert r["message"] == f"「{plain}」でよいですか？"
+    assert len(r["choices"]) == 1
+    choice = r["choices"][0]["text"]
+    assert "？" not in choice and "?" not in choice and not choice.endswith("か")
+    f = ut.read_utterance(choice)
+    assert f.unknown_words == () and f.negations == () and not f.question
+    # 押すと、その文を指示として送る。ふつうの流れ（候補→確認表示→承認ボタン）。承認はされない
+    r2 = w.hear(sid, choice, source="text")
+    assert r2["status"] == "ok" and cand(r2) is not None and r2["state"]["approval"] is None
+
+
+@pytest.mark.parametrize("source", SOURCES)
+@pytest.mark.parametrize("text", ["下げないの？", "3mm下げないの？", "Y座標を3mm下げないですか", "下に3mmはだめ？"])
+def test_negated_question_is_a_negation_stop(text, source):
+    r = hear(text, source)
+    assert r["status"] == "stop" and cand(r) is None and r["choices"] == [] and "変更しません" in r["message"]
+
+
+@pytest.mark.parametrize("source", SOURCES)
+@pytest.mark.parametrize("text", ["バイオ3mm下げて？", "バイオを下に3mmですか", "比較バイオして？", "ワイざひょうを3mm下げて？"])
+def test_question_with_unknown_words_has_no_choice(text, source):
+    r = hear(text, source)
+    assert r["status"] == "ask" and cand(r) is None and r["choices"] == []
+    assert "分かりませんでした" in r["message"]
+
+
+@pytest.mark.parametrize("source", SOURCES)
+def test_question_that_needs_other_question_keeps_program_choices(source):
+    # 「Yを3mm下げて？」は D1 の2択（プログラムが作る選択肢）。候補にはしない
+    r = hear("Yを3mm下げて？", source)
+    assert r["status"] == "ask" and cand(r) is None
+    assert [c["label"] for c in r["choices"]] == ["Y座標を −3mm", "下方向へ 3mm"]
+
+
+def test_question_facts():
+    f = ut.read_utterance("3mm下げて？")
+    assert f.question is True and f.question_text == "3mm下げて"
+    f = ut.read_utterance("3mm下げて")
+    assert f.question is False and f.question_text is None
+
+
+# ---- 2. 言い終わり・ひらがなの上げ下げ ----
+@pytest.mark.parametrize("source", SOURCES)
+@pytest.mark.parametrize("text,want", [
+    ("下に3mm動かします", ("Z", "-3.000")), ("下に3mm移動します", ("Z", "-3.000")), ("3mm下げます", ("Z", "-3.000")),
+    ("下に3ミリです", ("Z", "-3.000")), ("Xのマイナス5ミリです", ("X", "-5.000")),
+    ("3mmさげて", ("Z", "-3.000")), ("3mmあげて", ("Z", "+3.000")), ("Y座標を 3 ミリ さげて", ("Y", "-3.000")),
+    ("Y座標を3mmあげてください", ("Y", "+3.000")), ("えーとさげて3mm", ("Z", "-3.000")),
+])
+def test_allowed_endings_and_hiragana_verbs(text, want, source):
+    r = hear(text, source)
+    assert r["status"] == "ok" and cand(r) == want, (text, r.get("message"))
+
+
+@pytest.mark.parametrize("source", SOURCES)
+@pytest.mark.parametrize("text,status", [
+    ("さげないで", "stop"), ("3mmさげないで", "stop"), ("下に3mm動かしません", "stop"), ("3mm下げませんです", "stop"),
+    ("3mmですか", "ask"), ("さげてはだめ", "stop"), ("3mmさげてはだめ", "stop"), ("3mmあげないで", "stop"),
+    ("3mmです", "ask"), ("バイオです下に3mm", "ask"), ("バイオ3mmです", "ask"), ("下にですバイオ3mm", "ask"),
+    ("ささげて3mm", "ask"), ("ですです下に3mm", "ask"),
+])
+def test_endings_do_not_open_holes(text, status, source):
+    r = hear(text, source)
+    assert r["status"] == status and cand(r) is None, (text, r["status"], r.get("message"))
+
+
+def test_hiragana_verb_is_read_without_guessing_an_axis():
+    # 「さげて」は「下げて」と同じ。軸は足さない（Y を推測しない）
+    f = ut.read_utterance("3mmさげて")
+    assert f.axes == ("Z",) and f.vertical
+    f = ut.read_utterance("ワイ 3mmさげて")
+    assert ut.pre_check(f).status == "ask"  # D1 の2択（Y と上下）。片方に決めない
+
+
+def test_wai_zahyou_still_asks_without_choices():
+    r = hear("ワイざひょうを3mm下げて")
+    assert r["status"] == "ask" and r["choices"] == [] and "「ざひょう」" in r["message"]
+
+
+@pytest.mark.parametrize("text", ["キャンセルはやめて", "元に戻すのはやめて"])
+def test_complex_negation_still_stops(text):
+    assert hear(text)["status"] == "stop"
+
+
+# ---- 5. 繰り返し・往復 ----
+@pytest.mark.parametrize("source", SOURCES)
+@pytest.mark.parametrize("text,count", [
+    ("C00001からC00002を2回移動させて", 2), ("2回移動させて", 2), ("3回下に3mm", 3), ("行き来させて", None),
+    ("繰り返し動かして", None), ("C00001とC00002を行き来", None),
+])
+def test_ambiguous_repeat_asks_with_two_program_choices_then_stops(text, count, source):
+    w, sid = new()
+    r = w.hear(sid, text, source=source)
+    assert r["status"] == "ask" and cand(r) is None, (text, r.get("message"))
+    assert len(r["choices"]) == 2
+    n = f"{count}" if count else ""
+    assert [c["label"] for c in r["choices"]] == ([f"{n}回の移動", f"{n}往復"] if count else ["繰り返しの移動", "往復"])
+    for c in r["choices"]:
+        w2, sid2 = new()
+        w2.hear(sid2, text, source=source)
+        r2 = w2.hear(sid2, c["text"], source="text")
+        assert r2["status"] == "stop" and cand(r2) is None and r2["message"] == REPEAT_STOP, (c, r2.get("message"))
+
+
+@pytest.mark.parametrize("source", SOURCES)
+@pytest.mark.parametrize("text", ["2往復", "C00001とC00002を2往復させて", "往復させて", "2回の移動", "繰り返しの移動",
+                                  "2往復しないで"])
+def test_explicit_repeat_stops(text, source):
+    r = hear(text, source)
+    assert r["status"] == "stop" and cand(r) is None and r["choices"] == []
+    if "ないで" not in text:
+        assert r["message"] == REPEAT_STOP
+
+
+def test_repeat_facts():
+    assert ut.read_utterance("2回移動させて").repeat == (2, "ambiguous")
+    assert ut.read_utterance("2往復").repeat == (2, "round_trip")
+    assert ut.read_utterance("2回の移動").repeat == (2, "times")
+    assert ut.read_utterance("行き来させて").repeat == (None, "ambiguous")
+    assert ut.read_utterance("下に3mm").repeat is None
+
+
+# ---- 6. 場所の言葉 ----
+@pytest.mark.parametrize("source", SOURCES)
+@pytest.mark.parametrize("phrase", ["置くところ", "置き場所", "置く位置", "取るところ", "つかむところ", "離すところ"])
+def test_place_ref_without_position_asks(phrase, source):
+    r = hear(f"{phrase}を下に3mm", source)
+    assert r["status"] == "ask" and cand(r) is None and r["choices"] == []
+    assert r["message"] == f"「{phrase}」がどの位置か決まっていません。位置を選んでください"
+    f = ut.read_utterance(f"{phrase}を下に3mm")
+    assert f.place_ref == phrase and phrase not in f.unknown_words
+
+
+def test_place_ref_with_position_number_is_read_normally():
+    r = hear("C00005の置くところを下に3mm")
+    assert r["status"] == "ok" and cand(r) == ("Z", "-3.000")
+    assert ut.read_utterance("下に3mm").place_ref is None
+
+
+def test_place_ref_with_unknown_word_still_asks_unknown():
+    r = hear("置くところをバイオ3mm下げて")
+    assert r["status"] == "ask" and "「バイオ」" in r["message"]
+
+
+# ---- 7. 向きの言葉 ----
+@pytest.mark.parametrize("source", SOURCES)
+@pytest.mark.parametrize("text,word,status", [
+    ("手前に3mm", "手前", "stop"), ("奥に3mm", "奥", "stop"), ("前に3mm", "前", "stop"), ("後ろに3mm", "後ろ", "stop"),
+    ("右に3mm", "右", "ask"), ("左に3mm", "左", "ask"),
+])
+def test_relative_direction_is_exposed_but_never_mapped(text, word, status, source):
+    r = hear(text, source)
+    assert r["status"] == status and cand(r) is None
+    assert ut.read_utterance(text).relative_dir == (word,)
+    assert r["facts"]["relative_dir"] == [word]
+
+
+# ---- 8. あいまいな量 ----
+@pytest.mark.parametrize("text", ["少し下げて", "ちょっと下げて", "下に少し", "下にちょっと"])
+def test_vague_amount_still_asks(text):
+    r = hear(text)
+    assert r["status"] == "ask" and cand(r) is None and "量がはっきりしません" in r["message"]
+
+
+def test_new_facts_are_in_the_response():
+    r = hear("3mm下げて？")
+    for k in ("question", "question_text", "repeat", "place_ref", "relative_dir"):
+        assert k in r["facts"], k

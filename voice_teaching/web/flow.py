@@ -349,7 +349,11 @@ def _facts(f: ut.UtteranceFacts | None) -> dict | None:
         "stop_reasons": list(f.stop_reasons),
         "unknown_words": list(f.unknown_words),  # 読み取りで使わなかった言葉（移動・速度の指示なら聞き返す）
         "negations": list(f.negations),  # 打ち消しの言葉（あれば止める）
-        "undo_negations": list(f.undo_negations),  # 元に戻す言葉の打ち消し（「キャンセルはやめて」など。あれば止める）
+        "undo_negations": list(f.undo_negations),
+        # 2026-11-03 夜の決定（docs/UNKNOWN_WORDS_PLAN.md 7章）
+        "question": f.question, "question_text": f.question_text,
+        "repeat": list(f.repeat) if f.repeat else None,
+        "place_ref": f.place_ref, "relative_dir": list(f.relative_dir),  # 元に戻す言葉の打ち消し（「キャンセルはやめて」など。あれば止める）
     }
 
 
