@@ -25,7 +25,7 @@ python -m voice_teaching.web --port 0   # 空いているポートで起動（�
 
 ## 本物の Claude を有効にする
 
-1. `python -m pip install -r requirements.txt`（`anthropic` が入ります。MIT License）
+1. `python -m pip install -r requirements.txt`（`anthropic` が入ります。Apache License 2.0）
 2. リポジトリ直下に `.env` を作り、次を書く（`.env` は `.gitignore` で除外済み。コミットしない）。
    ```
    ANTHROPIC_API_KEY=（本人のキー）

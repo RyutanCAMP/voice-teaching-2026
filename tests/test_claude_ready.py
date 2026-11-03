@@ -414,7 +414,7 @@ def test_check_call_refuses_without_key(tmp_path, no_client):
 
 def test_check_call_refuses_with_unusable_key(tmp_path, no_client):
     made = []
-    code, out = run_check(["--call"], {"ANTHROPIC_API_KEY": "ここに自分のAPIキーを入れる"}, input_text="yes",
+    code, out = run_check(["--call", "--env", str(tmp_path / ".env")], {"ANTHROPIC_API_KEY": "ここに自分のAPIキーを入れる"}, input_text="yes",
                           make_interpreter=lambda k, m: made.append(1))
     assert code != 0 and made == [] and "実行しません" in out
 
@@ -447,7 +447,7 @@ def test_check_call_with_fake_client_runs_one_request_through_check(tmp_path, no
 
 def test_check_call_failure_shows_guidance_only(tmp_path, no_client):
     c = client(exc=RuntimeError(f"raw {KEY}"))
-    code, out = run_check(["--call"], {"ANTHROPIC_API_KEY": KEY}, input_text="yes",
+    code, out = run_check(["--call", "--env", str(tmp_path / ".env")], {"ANTHROPIC_API_KEY": KEY}, input_text="yes",
                           make_interpreter=lambda k, m: ci.ClaudeInterpreter(k, m, client=c))
     assert code != 0 and ci.FAILED in out and KEY not in out and "raw" not in out
 
@@ -455,3 +455,128 @@ def test_check_call_failure_shows_guidance_only(tmp_path, no_client):
 def test_env_files_stay_ignored():
     gi = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert ".env" in gi and ".env.*" in gi and "!.env.example" in gi
+
+
+# ======================================================================
+# 内部レビュー（QA・Safety の CONDITIONAL PASS）の指摘
+# ======================================================================
+# QA P2-2：思わぬ形でも、決まった文（FAILED）で止める。生の例外を外に出さない
+@pytest.mark.parametrize("response", [
+    resp(tool_use("propose_position", prop(amount=10 ** 400))),   # math.isfinite が OverflowError
+    resp(tool_use("propose_position", prop(amount=-(10 ** 400)))),
+    NS(stop_reason="tool_use", content=5),                        # 並びでない content（TypeError）
+    NS(stop_reason="tool_use", content=[5, None]),
+    NS(stop_reason="tool_use", content="tool_use"),
+    NS(stop_reason="tool_use", content=[NS(type="tool_use", name="propose_position", input=object())]),
+])
+def test_unexpected_shapes_give_fixed_message_only(response):
+    with pytest.raises(ci.InterpreterError) as e:
+        decide(response)
+    assert str(e.value) == ci.FAILED
+    assert e.value.__cause__ is None and (e.value.__context__ is None or e.value.__suppress_context__)
+
+
+class _ExplodingResponse:
+    @property
+    def stop_reason(self):
+        raise RuntimeError(f"raw {KEY}")
+
+
+def test_response_attribute_errors_give_fixed_message_only():
+    with pytest.raises(ci.InterpreterError) as e:
+        decide(_ExplodingResponse())
+    assert str(e.value) == ci.FAILED and KEY not in str(e.value)
+
+
+def test_huge_amount_in_flow_stops_without_candidate():
+    c = client(resp(tool_use("propose_position", prop(amount=10 ** 400))))
+    w = WebFlow(interpreter=ci.ClaudeInterpreter(KEY, client=c))
+    sid = w.load(DEMO)["session_id"]
+    w.select(sid, "C00004")
+    r = w.hear(sid, UP10)
+    assert r["status"] == "stop" and r["message"] == ci.FAILED and r["state"]["candidate"] is None
+
+
+# Safety P3-1：料金の確かめは、いつも入力が要る（--yes は無い）
+def test_check_has_no_yes_flag(tmp_path, no_client):
+    with pytest.raises(SystemExit):
+        claude_check.main(["--call", "--yes", "--env", str(tmp_path / ".env")], env={"ANTHROPIC_API_KEY": KEY},
+                          out=io.StringIO(), input_fn=lambda _p: "yes", make_interpreter=lambda k, m: 1 / 0)
+
+
+# Safety P3-2：MAX_RETRIES=1 なので、SDK が最大1回やり直す（最大2回送る）ことを書く
+def test_cost_warning_mentions_retry():
+    assert ci.MAX_RETRIES == 1
+    assert "SDK が最大1回やり直します" in claude_check.COST_WARNING
+    doc = (ROOT / "docs" / "CLAUDE_API.md").read_text(encoding="utf-8")
+    assert "SDK が最大1回やり直します" in doc and "--yes" not in doc
+
+
+# QA P3-3：.env は UTF-8（BOM つきも可）。読めなければ落ちずに「キーなし」とし、点検で知らせる
+def test_load_dotenv_accepts_bom(tmp_path):
+    p = tmp_path / ".env"
+    p.write_bytes(f"ANTHROPIC_API_KEY={KEY}\n".encode("utf-8-sig"))
+    env = {}
+    assert ci.load_dotenv(p, env) == ci.DOTENV_OK
+    assert env == {"ANTHROPIC_API_KEY": KEY}
+
+
+def test_load_dotenv_shift_jis_is_treated_as_no_key(tmp_path):
+    p = tmp_path / ".env"
+    p.write_bytes(f"# 自分のキー\nANTHROPIC_API_KEY={KEY}\n".encode("cp932"))
+    env = {}
+    assert ci.load_dotenv(p, env) == ci.DOTENV_UNREADABLE
+    assert env == {} and ci.from_env(env).kind == "mock"
+    assert ci.load_dotenv(tmp_path / "none.env", {}) == ci.DOTENV_MISSING
+
+
+def test_check_reports_unreadable_dotenv(tmp_path, no_client):
+    p = tmp_path / ".env"
+    p.write_bytes(f"# 自分のキー\nANTHROPIC_API_KEY={KEY}\n".encode("cp932"))
+    code, out = run_check(["--env", str(p)], {})
+    assert "ANTHROPIC_API_KEY：なし" in out and ".env を読めません（UTF-8 で保存してください）" in out
+    assert KEY not in out
+    code, out = run_check(["--call", "--env", str(p)], {}, input_text="yes", make_interpreter=lambda k, m: 1 / 0)
+    assert code != 0 and "実行しません" in out
+
+
+def test_check_reads_bom_dotenv(tmp_path, no_client):
+    p = tmp_path / ".env"
+    p.write_bytes(f"ANTHROPIC_API_KEY={KEY}\n".encode("utf-8-sig"))
+    code, out = run_check(["--env", str(p)], {})
+    assert "ANTHROPIC_API_KEY：あり（.env）" in out and KEY not in out
+
+
+# QA P3-5：モデル名は決まった形だけ。違えば決まった文で止め、生の値は表示しない
+@pytest.mark.parametrize("model", ["claude-opus-5-5", "claude-sonnet-5-5", "claude-3.5-x"])
+def test_model_name_pattern_accepts(model):
+    assert ci.model_is_valid(model)
+    assert ci.from_env({"ANTHROPIC_API_KEY": KEY, "ANTHROPIC_MODEL": model}).model == model
+
+
+BAD_MODELS = ["gpt-4o", "Claude-Opus", "claude-", "claude-opus 5", "claude-opus-5-5\n", "claude-ｏｐｕｓ",
+              "claude-" + "a" * 61, "<script>claude-x", "claude-opus/../x"]
+
+
+@pytest.mark.parametrize("model", BAD_MODELS)
+def test_bad_model_name_refused_without_showing_it(model):
+    sent = client(resp(tool_use("propose_position", prop())))
+    it = ci.ClaudeInterpreter(KEY, model=model, client=sent)
+    assert not ci.model_is_valid(model)
+    with pytest.raises(ci.InterpreterError) as e:
+        it.decide(u.read_utterance(UP10), "C00004", NAMES)
+    assert str(e.value) == ci.MODEL_INVALID and sent.messages.calls == []
+    w = WebFlow(interpreter=it)
+    st = w.load(DEMO)["state"]
+    shown = json.dumps(st, ensure_ascii=False) + it.notice + repr(it)
+    assert model not in shown and model.strip() not in shown
+
+
+@pytest.mark.parametrize("model", ["gpt-4o", "<script>claude-x", "claude-opus 5"])
+def test_check_refuses_bad_model_without_showing_it(tmp_path, no_client, model):
+    code, out = run_check(["--env", str(tmp_path / ".env")], {"ANTHROPIC_API_KEY": KEY, "ANTHROPIC_MODEL": model})
+    assert model not in out and "ANTHROPIC_MODEL の書き方が正しくありません" in out
+    code, out = run_check(["--call", "--env", str(tmp_path / ".env")],
+                          {"ANTHROPIC_API_KEY": KEY, "ANTHROPIC_MODEL": model}, input_text="yes",
+                          make_interpreter=lambda k, m: 1 / 0)
+    assert code != 0 and "実行しません" in out and model not in out

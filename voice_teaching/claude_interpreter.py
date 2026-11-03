@@ -39,6 +39,9 @@ AUTH = "Claude に接続できません。APIキーを確認してください�
 MODEL_NOT_FOUND = "Claude のモデルが見つかりません。モデル名（ANTHROPIC_MODEL）を確認してください。変更候補は作りません"
 BUSY = "Claude が混み合っています。少し待ってから、もう一度指示してください。変更候補は作りません"
 NETWORK = "Claude のネットワークにつながりません。インターネットの接続を確認してください。変更候補は作りません"
+MODEL_INVALID = ("Claude のモデル名（ANTHROPIC_MODEL）の書き方が正しくありません（docs/CLAUDE_API.md を見てください）。"
+                 "変更候補は作りません")
+MODEL_HIDDEN = "モデル名が正しくありません"  # 正しくないモデル名は画面・ログに出さず、この文に置き換える
 REJECTED = ("Claude が、送った内容を受け付けませんでした（アプリの送り方の問題かもしれません）。"
             "変更候補は作りません")
 ASK_FIXED = ("Claude が、対象・方向・量を確かめたいと返しました。"
@@ -57,6 +60,12 @@ SYSTEM = (
 )
 
 _POS = re.compile(r"C\d{5}")
+_MODEL = re.compile(r"claude-[a-z0-9.-]{1,60}")
+
+DOTENV_OK = "ok"
+DOTENV_MISSING = "missing"
+DOTENV_UNREADABLE = "unreadable"
+DOTENV_UNREADABLE_MESSAGE = ".env を読めません（UTF-8 で保存してください）。キーは無いものとして扱います"
 DIRECTIONS = ("上", "下", "右", "左", "X+", "X-", "Y+", "Y-", "Z+", "Z-")
 _AXIS_DIR = {"上": ("Z", 1), "下": ("Z", -1), "X+": ("X", 1), "X-": ("X", -1),
              "Y+": ("Y", 1), "Y-": ("Y", -1), "Z+": ("Z", 1), "Z-": ("Z", -1)}
@@ -93,6 +102,11 @@ def error_message(ex: BaseException) -> str:
     if names & _REJECTED_ERRORS or status in (400, 413, 422):
         return REJECTED
     return FAILED
+
+
+def model_is_valid(model: object) -> bool:
+    """モデル名が決まった形（claude- ＋英小文字・数字・点・ハイフン 1〜60字）か。"""
+    return isinstance(model, str) and _MODEL.fullmatch(model) is not None
 
 
 def key_is_usable(key: str) -> bool:
@@ -145,14 +159,21 @@ class ClaudeInterpreter:
         self._client = client
         self._key = api_key
         self._sdk = sdk
-        self.model = model
-        self.notice = (f"本物の Claude（{model}）で解釈します。送るのは、指示の文・選んでいる位置番号・"
-                       "位置番号の一覧だけです（ジョブの中身・座標値は送りません）")
+        self._model_ok = model_is_valid(model)
+        self._model = model
+        self.model = model if self._model_ok else MODEL_HIDDEN
+        if self._model_ok:
+            self.notice = (f"本物の Claude（{model}）で解釈します。送るのは、指示の文・選んでいる位置番号・"
+                           "位置番号の一覧だけです（ジョブの中身・座標値は送りません）")
+        else:
+            self.notice = "本物の Claude を使う設定ですが、" + MODEL_INVALID
 
     def __repr__(self) -> str:  # キーを表示しない
         return f"ClaudeInterpreter(model={self.model!r})"
 
     def _get_client(self):
+        if not self._model_ok:
+            raise InterpreterError(MODEL_INVALID)  # 送る前に止める。生の値は出さない
         if self._client is None:
             if not key_is_usable(self._key):
                 raise InterpreterError(AUTH)  # 送る前に止める（見本の文のまま、全角・空白が入っている など）
@@ -178,13 +199,23 @@ class ClaudeInterpreter:
         names = [p for p in positions if _POS.fullmatch(p)]
         client = self._get_client()
         try:
-            response = client.messages.create(**build_request(self.model, facts.raw, selected, names))
+            response = client.messages.create(**build_request(self._model, facts.raw, selected, names))
         except Exception as ex:
             raise InterpreterError(error_message(ex)) from None
         return _convert(response, names)
 
 
 def _convert(response, names: Sequence[str]) -> list[dict]:
+    """応答を道具の呼び出しにする。思わぬ形（大きすぎる数・並びでない content など）も、決まった文で止める。"""
+    try:
+        return _convert_checked(response, names)
+    except InterpreterError:
+        raise
+    except Exception:
+        raise InterpreterError(FAILED) from None
+
+
+def _convert_checked(response, names: Sequence[str]) -> list[dict]:
     stop = getattr(response, "stop_reason", None)
     if stop == "refusal":
         raise InterpreterError(REFUSED)
@@ -236,18 +267,25 @@ def from_env(env: Mapping[str, str] | None = None) -> "ClaudeInterpreter | MockI
     return ClaudeInterpreter(key, model)
 
 
-def load_dotenv(path, env: dict | None = None) -> None:
-    """.env から ANTHROPIC_API_KEY と ANTHROPIC_MODEL だけを読む（環境変数が既にあればそちらを使う）。"""
+def load_dotenv(path, env: dict | None = None) -> str:
+    """.env から ANTHROPIC_API_KEY と ANTHROPIC_MODEL だけを読む（環境変数が既にあればそちらを使う）。
+
+    UTF-8（BOM つきも可）で読む。読めない（Shift_JIS など）ときは何も入れず（キーなし）、DOTENV_UNREADABLE を返す。
+    """
     env = os.environ if env is None else env
     try:
-        lines = open(path, encoding="utf-8").read().splitlines()
-    except OSError:
-        return
+        with open(path, encoding="utf-8-sig") as f:
+            lines = f.read().splitlines()
+    except FileNotFoundError:
+        return DOTENV_MISSING
+    except (OSError, UnicodeError):
+        return DOTENV_UNREADABLE
     for line in lines:
         k, sep, v = line.strip().partition("=")
         k, v = k.strip(), v.strip().strip('"').strip("'")
         if sep and k in ("ANTHROPIC_API_KEY", "ANTHROPIC_MODEL") and v and not env.get(k):
             env[k] = v
+    return DOTENV_OK
 
 
 Interpreter = Callable[..., list]
