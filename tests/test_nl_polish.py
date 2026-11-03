@@ -174,14 +174,17 @@ def test_repeat_facts():
 def test_place_ref_without_position_asks(phrase, source):
     r = hear(f"{phrase}を下に3mm", source)
     assert r["status"] == "ask" and cand(r) is None and r["choices"] == []
-    assert r["message"] == f"「{phrase}」がどの位置か決まっていません。位置を選んでください"
+    # 位置を選んでいるときの文（QA P3-4 で変えた。選んでいる位置を自動では使わない）
+    assert r["message"] == (f"「{phrase}」がどの位置か決まっていません。選んでいる C00005 のことなら"
+                            "「C00005を下に3mm」と言うか、位置を選び直してください")
     f = ut.read_utterance(f"{phrase}を下に3mm")
     assert f.place_ref == phrase and phrase not in f.unknown_words
 
 
-def test_place_ref_with_position_number_is_read_normally():
+def test_place_ref_with_position_number_is_confirmed_not_trusted():
+    # Safety P3-4 で変えた：位置番号があっても、場所の言葉がその位置かは確かめる（候補にしない）
     r = hear("C00005の置くところを下に3mm")
-    assert r["status"] == "ok" and cand(r) == ("Z", "-3.000")
+    assert r["status"] == "ask" and cand(r) is None and [c["text"] for c in r["choices"]] == ["C00005を下に3mm"]
     assert ut.read_utterance("下に3mm").place_ref is None
 
 
@@ -214,3 +217,191 @@ def test_new_facts_are_in_the_response():
     r = hear("3mm下げて？")
     for k in ("question", "question_text", "repeat", "place_ref", "relative_dir"):
         assert k in r["facts"], k
+
+
+# ==== 3b4cac1 の内部レビュー（Safety・QA）への修正。実装より先に書いた ====
+PENDING = "承認待ちの変更候補があります"
+
+
+def with_candidate(source):
+    w, sid = new()
+    r = w.hear(sid, "下に3mm", source=source)
+    assert cand(r) == ("Z", "-3.000")
+    return w, sid
+
+
+@pytest.mark.parametrize("source", SOURCES)
+@pytest.mark.parametrize("text", ["5mm下げて？", "Y座標を5mm下げますか", "下に5mmですか"])
+def test_s_p2_1_question_with_pending_candidate_returns_pending_message(text, source):
+    w, sid = with_candidate(source)
+    r = w.hear(sid, text, source=source)
+    assert r["status"] == "stop" and r["message"].startswith(PENDING) and r["choices"] == []
+    assert cand(r) == ("Z", "-3.000")
+
+
+@pytest.mark.parametrize("source", SOURCES)
+@pytest.mark.parametrize("text,word", [("下に999999ミリ？", "上限"), ("下に20.001ミリ？", "上限"), ("下に0mm？", "0")])
+def test_s_p3_1_question_that_would_stop_stops_now(text, word, source):
+    r = hear(text, source)
+    assert r["status"] == "stop" and cand(r) is None and r["choices"] == [] and word in r["message"], r.get("message")
+    assert "でよいですか" not in r["message"]
+
+
+@pytest.mark.parametrize("source", SOURCES)
+def test_s_p3_1_question_within_limit_still_confirms(source):
+    r = hear("下に20ミリ？", source)
+    assert r["status"] == "ask" and r["message"] == "「下に20ミリ」でよいですか？" and len(r["choices"]) == 1
+
+
+# ---- QA P2-1：変異 M2・M3・M7・M8 など ----
+@pytest.mark.parametrize("source", SOURCES)
+@pytest.mark.parametrize("text", ["下にです3mm", "です下に3mm", "3mmです下げて", "3mm移動してあげて", "3mm動かしてさげて",
+                                  "3mmしてあげて"])
+def test_qa_p2_1_mid_desu_and_te_hiragana_verbs_ask(text, source):
+    r = hear(text, source)
+    assert r["status"] == "ask" and cand(r) is None, (text, r.get("message"))
+
+
+@pytest.mark.parametrize("source", SOURCES)
+@pytest.mark.parametrize("first", ["下げて？", "2回下げて"])
+def test_qa_p2_1_answer_keeps_question_and_repeat(first, source):
+    w, sid = new()
+    r1 = w.hear(sid, first, source=source)
+    assert r1["status"] == "ask"
+    r2 = w.hear(sid, "3ミリ", source=source)
+    assert r2["status"] in ("ask", "stop") and cand(r2) is None, r2.get("message")
+
+
+# ---- QA P2-3：どの操作でも、疑問の形は同じように確かめる ----
+@pytest.mark.parametrize("source", SOURCES)
+@pytest.mark.parametrize("text,plain", [("元に戻しますか", "元に戻します"), ("取り消しますか", "取り消します"),
+                                        ("元に戻して？", "元に戻して"), ("比較して？", "比較して"),
+                                        ("比較しますか", "比較します"), ("C00004を選択しますか", "C00004を選択します")])
+def test_qa_p2_3_question_for_every_operation(text, plain, source):
+    w, sid = with_candidate(source)
+    r = w.hear(sid, text, source=source)
+    assert r["status"] == "ask" and r["message"] == f"「{plain}」でよいですか？" and len(r["choices"]) == 1
+    assert r["tool_calls"] == [] and cand(r) == ("Z", "-3.000") and r["state"]["selected"] == "C00005"
+
+
+def test_qa_p2_3_undo_question_choice_undoes():
+    w, sid = with_candidate("voice")
+    r = w.hear(sid, "元に戻しますか", source="voice")
+    r2 = w.hear(sid, r["choices"][0]["text"], source="text")
+    assert r2["status"] == "ok" and cand(r2) is None
+
+
+@pytest.mark.parametrize("text", ["元に戻します", "下げします", "3mm下げします"])
+def test_qa_p2_3_shimasu_is_not_allowed_outside(text):
+    f = ut.read_utterance(text)
+    if f.op == "move":
+        assert ut.pre_check(f).status == "ask"
+
+
+# ---- QA P2-4：疑問符のゆれ・文の途中の疑問符 ----
+@pytest.mark.parametrize("mark", ["？", "?", "﹖", "⁇", "‽", "❓", "︖"])
+def test_qa_p2_4_question_mark_variants(mark):
+    r = hear(f"3mm下げて{mark}")
+    assert r["status"] == "ask" and cand(r) is None and r["message"] == "「3mm下げて」でよいですか？"
+
+
+@pytest.mark.parametrize("source", SOURCES)
+@pytest.mark.parametrize("text", ["？3mm下げて", "3mm？下げて", "3mm下げて？ね", "下に⁇3mm", "下‽に3mm"])
+def test_qa_p2_4_question_mark_in_the_middle(text, source):
+    r = hear(text, source)
+    assert r["status"] == "ask" and cand(r) is None and r["choices"] == [], (text, r.get("message"))
+
+
+# ---- Safety P3-2：示す言葉は聞こえたとおり ----
+@pytest.mark.parametrize("text,shown", [("3mmさげません", "さげません"), ("3mmあげないで", "あげないで"),
+                                        ("さげてはだめ", "だめ")])
+def test_s_p3_2_shown_words_are_as_heard(text, shown):
+    r = hear(text)
+    assert r["status"] == "stop" and f"「{shown}」" in r["message"]
+    assert "下げ" not in r["message"].split("など")[0] and "上げ" not in r["message"].split("など")[0]
+
+
+def test_s_p3_2_unknown_shown_as_heard():
+    r = hear("3mmさげてあげて")
+    assert r["status"] == "ask" and "あげて」" in r["message"] and "上げ" not in r["message"].split("が分かりません")[0]
+
+
+# ---- Safety P3-3・QA P3-2：言い終わりを重ねない ----
+@pytest.mark.parametrize("source", SOURCES)
+@pytest.mark.parametrize("text", ["下に3mm動かしますです", "下に3mm移動しますです", "3mm下げるですか", "下に3mm移動しますね",
+                                  "3mm下げします", "下に3mm動かしますね", "3mm下げますです", "3mm下げるです"])
+def test_s_p3_3_no_stacked_endings(text, source):
+    r = hear(text, source)
+    assert r["status"] == "ask" and cand(r) is None, (text, r.get("message"))
+
+
+@pytest.mark.parametrize("text", ["下に3mmずらします", "下に3mm動かします", "下に3mm移動します", "3mm下げます"])
+def test_s_p3_3_single_endings_still_work(text):
+    assert cand(hear(text)) == ("Z", "-3.000")
+
+
+# ---- Safety P3-4：場所の言葉と位置番号 ----
+@pytest.mark.parametrize("source", SOURCES)
+def test_s_p3_4_place_ref_with_position_is_confirmed(source):
+    w, sid = new()
+    r = w.hear(sid, "C00006の置くところを下に3mm", source=source)
+    assert r["status"] == "ask" and cand(r) is None
+    assert r["message"] == "「置くところ」が C00006 かどうかは確かめていません。C00006 でよいですか？"
+    assert [c["text"] for c in r["choices"]] == ["C00006を下に3mm"]
+    r2 = w.hear(sid, r["choices"][0]["text"], source="text")
+    assert r2["status"] == "ok" and r2["state"]["candidate"]["target"] == "C00006 Z"
+
+
+@pytest.mark.parametrize("source", SOURCES)
+@pytest.mark.parametrize("text", ["C00005を置くところに3mm下げて", "C00005を置き場所へ3mm", "C00005を置く位置まで下げて"])
+def test_s_p3_4_place_as_destination_asks_without_choice(text, source):
+    r = hear(text, source)
+    assert r["status"] == "ask" and cand(r) is None and r["choices"] == [], (text, r.get("message"))
+
+
+# ---- Safety P3-7・QA P3-1：繰り返しは2回以上・往復・行き来・繰り返しだけ ----
+@pytest.mark.parametrize("text", ["2回下げて", "２回下げて", "3回下に3mm"])
+def test_repeat_counts_two_or_more(text):
+    r = hear(text)
+    assert r["status"] == "ask" and len(r["choices"]) == 2
+
+
+@pytest.mark.parametrize("source", SOURCES)
+@pytest.mark.parametrize("text", ["2回転させて", "2回目を下に3mm", "1回下げて", "もう1回下に3mm", "1回の移動"])
+def test_not_repeat_is_unknown(text, source):
+    r = hear(text, source)
+    assert r["status"] == "ask" and cand(r) is None and r["choices"] == [], (text, r.get("message"))
+    assert ut.read_utterance(text).repeat is None
+
+
+# ---- QA P3-4：選んでいる位置があるときの場所の言葉の文 ----
+def test_qa_p3_4_place_ref_message_mentions_selection():
+    r = hear("置くところを下に3mm")
+    assert r["status"] == "ask" and r["choices"] == [] and cand(r) is None
+    assert r["message"] == ("「置くところ」がどの位置か決まっていません。選んでいる C00005 のことなら"
+                            "「C00005を下に3mm」と言うか、位置を選び直してください")
+
+
+def test_qa_p3_4_place_ref_message_without_selection():
+    w = WebFlow()
+    sid = w.load(DEMO_C)["session_id"]
+    r = w.hear(sid, "置くところを下に3mm")
+    assert r["message"] == "「置くところ」がどの位置か決まっていません。位置を選んでください"
+
+
+@pytest.mark.parametrize("text,want", [("下に3mm です", ("Z", "-3.000")), ("下に3ミリ です", ("Z", "-3.000"))])
+def test_desu_after_amount_with_space(text, want):
+    assert cand(hear(text)) == want
+
+
+@pytest.mark.parametrize("text", ["3mm下げます ね", "下に3mm動かします です"])
+def test_no_stacking_with_space(text):
+    r = hear(text)
+    assert r["status"] == "ask" and cand(r) is None
+
+
+@pytest.mark.parametrize("text", ["3mm下にです", "Y座標をです3mm下げて", "下げてです3mm"])
+def test_desu_only_right_after_an_amount(text):
+    # 「です」は量のすぐ後の文の終わりだけ（読んだ言葉の後でも、量の後でなければ聞き返す）
+    r = hear(text)
+    assert r["status"] == "ask" and cand(r) is None, (text, r.get("message"))
