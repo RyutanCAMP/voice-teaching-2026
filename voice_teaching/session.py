@@ -91,6 +91,9 @@ class Session:
         self._candidate_position: str | None = None
         self.facts: ut.UtteranceFacts | None = None
         self._awaiting_answer: ut.UtteranceFacts | None = None
+        # 上下の案内で聞き返した直後の印（その時の照合の結果, 上下の言葉）。次の1回の答え（「3ミリ」）に案内を返すためだけ
+        self._updown_followup: tuple[ud.UpdownStatus, str] | None = None
+        self._candidate_value_change = False  # 候補が「Z座標を3mm下げて」のような軸の値の増減の指示から来たか
         self._locked = False
         self.log: list[tuple[str, str]] = []
         # 承認待ちの候補があるときの文。web/flow.py が承認の有無で選ぶ（承認は Session の外にある）
@@ -129,6 +132,7 @@ class Session:
             return self.explain_only(text, source)
         facts = ut.read_utterance(text)
         prev = self._awaiting_answer
+        followup, self._updown_followup = self._updown_followup, None
         if prev is not None and not facts.kinds:
             facts = ut.merge_answer(prev, facts)
         elif (prev is not None and prev.op == "move" and prev.amount is None and not prev.unclear_amounts
@@ -144,6 +148,9 @@ class Session:
             v = self._check_question(facts, v)  # 疑問の形の確かめ（2026-11-03 夜）
         if ut.is_shimasu_confirmation(v):
             v = self.check_shimasu(facts, v)  # 「〜します」：外した文が検査・上限まで通るときだけ2択（QA P1-1）
+        if followup is not None and v.status == "ask" and not facts.kinds and not facts.unknown_words:
+            # 上下の案内のすぐあとの「3ミリ」：前の発話とはつながない。次にどう言えばよいかを案内する（CHECKER_028 D）
+            v = ut.Verdict("ask", ut.updown_followup_message(*followup))
         if v.status != "ok":
             self._locked = True  # 聞き返し・止めた発話では、Claude が量を作って提案しても使わない
         # 次の発話を答えとして前の発話に足さない（言い直しを新しい指示として読む）のは、次のとき：
@@ -153,14 +160,18 @@ class Session:
         updown_ask = facts.vertical and not st.confirmed
         self._awaiting_answer = (facts if v.status == "ask" and not facts.unknown_words and facts.shimasu_text is None
                                  and not updown_ask else None)
-        choices = v.choices
-        if self.selected is not None:
-            # 選択肢の文には、聞き返したときの位置を必ず入れる（あとで別の位置を選んでも、その位置に当てない）。
-            # ［説明です］（何もしない）と、場所の言葉の入った文（位置は会話で人が選ぶ）には足さない
-            choices = tuple((label, text if (ut.normalize_position(text[:6]) or ut.is_explain_choice(text)
-                                             or ut.read_utterance(text).place_ref) else f"{self.selected}を{text}")
-                            for label, text in choices)
-        return self._reply(v.status, v.message, facts=facts, choices=choices)
+        if updown_ask and v.status == "ask":
+            self._updown_followup = (st, ut.updown_word(facts))
+        return self._reply(v.status, v.message, facts=facts, choices=self.pin_choices(v.choices))
+
+    def pin_choices(self, choices: Sequence[tuple[str, str]]) -> tuple[tuple[str, str], ...]:
+        """選択肢の文に、聞き返したときの選んでいる位置を入れる（あとで別の位置を選んでも、その位置に当てない）。
+        ［説明です］（何もしない）と、場所の言葉の入った文（位置は会話で人が選ぶ）には足さない。"""
+        if self.selected is None:
+            return tuple(choices)
+        return tuple((label, text if (ut.normalize_position(text[:6]) or ut.is_explain_choice(text)
+                                      or ut.read_utterance(text).place_ref) else f"{self.selected}を{text}")
+                     for label, text in choices)
 
     def check_shimasu(self, facts: ut.UtteranceFacts, v: ut.Verdict) -> ut.Verdict:
         """「〜します」の2択（v）を出す前に、外した文がふつうの指示としてどうなるかを、候補を作らずに確かめる（QA P1-1）。
@@ -188,13 +199,15 @@ class Session:
 
     def explain_only(self, text: str, source: str = "text") -> Reply:
         """［説明です］（「〜します」の2択）：何もしない。候補・選択中の位置・元のジョブは変えない（CHECKER_026 M3）。"""
-        self._awaiting_answer = None
+        self.forget_question()
         self._log("発話", f"{'音声' if source == 'voice' else '文字'}：{text}")
         return self._reply("ok", ut.EXPLAIN_REPLY)
 
     def forget_question(self) -> None:
-        """聞き返しへの答えを待つのをやめる（会話の機能が自分で聞き返したとき。次の発話を前の発話に足さない）。"""
+        """聞き返しへの答えを待つのをやめる（会話の機能が自分で聞き返したとき・選び直し・元に戻す・承認の取り消し。
+        次の発話を前の発話に足さない）。未確定の状態（答えを待つ発話・上下の案内の印）を全部捨てる。"""
         self._awaiting_answer = None
+        self._updown_followup = None
 
     def pending_reply(self, facts: ut.UtteranceFacts | None) -> Reply:
         """承認待ちの候補があるのに来た移動・速度の指示を、解釈の係を呼ばずに断る。"""
@@ -228,6 +241,7 @@ class Session:
         if name not in self._job.positions:
             return self._reply("stop", f"位置 {name} はこのジョブにありません")
         self.selected = name
+        self.forget_question()  # 位置の選び直し：前の聞き返しの答えを、この位置に当てない（CHECKER_028 A）
         msg = f"位置 {name} を選びました"
         if self.candidate is not None and self._candidate_position != name:
             self._discard()
@@ -263,6 +277,7 @@ class Session:
         return self._reply("ok", c.confirmation, comparison=c, blocked_reason=c.blocked_reason)
 
     def undo(self) -> Reply:
+        self.forget_question()  # 元に戻す・キャンセル：未確定の聞き返しも捨てる（CHECKER_028 A）
         if self.candidate is None:
             return self._reply("ok", "元に戻す変更候補はありません。元のジョブはそのままです")
         self._discard()
@@ -317,6 +332,9 @@ class Session:
         self.candidate_utterance = self.facts.raw if self.facts is not None else None
         self.candidate_blocked_reason = blocked
         self.candidate_updown = self.updown  # この候補を作ったときの上下の向きの照合（propose で読み直したもの）
+        f = self.facts
+        self._candidate_value_change = bool(p.kind == "shift" and f is not None and p.axis in f.value_axes
+                                            and not f.vertical)
         self._candidate_position = p.position
         self.selected = p.position
         self._locked = True  # 1つの発話で作る候補は1つだけ
@@ -333,6 +351,7 @@ class Session:
         self.candidate_utterance = None
         self.candidate_blocked_reason = None
         self.candidate_updown = None
+        self._candidate_value_change = False
         self._candidate_position = None
 
     def _comparison(self) -> Comparison:
@@ -342,7 +361,13 @@ class Session:
         delta_text = f"{'+' if delta >= 0 else ''}{delta}"
         if ch.kind == "shift":
             pos, axis = ch.target.split()
-            text = (f"位置 {pos} を {axis}方向に {delta_text}mm 動かします（{axis}：{before} → {after}）。"
+            if self._candidate_value_change:
+                # 「Z座標を3mm下げて」：軸の値の増減として書く。物理の上下（下へ・上へ）とは書かない（CHECKER_028 K2）
+                size = format(abs(delta).normalize(), "f")
+                head = f"位置 {pos} の {axis} の値を {size}mm {'増やします' if delta > 0 else '減らします'}"
+            else:
+                head = f"位置 {pos} を {axis}方向に {delta_text}mm 動かします"
+            text = (f"{head}（{axis}：{before} → {after}）。"
                     "この位置へ入る移動と、この位置から出る移動の通り道も変わります。")
         else:
             text = f"{ch.target}の速度を V={before} から V={after} に変えます。"

@@ -382,7 +382,8 @@ class WebFlow:
         if f0.kinds and not dg.handled_by_dialogue(f0, e.session.updown):
             # 会話が受け持たない理由（2つの操作・D1 の2つの読み方・上下の向きが未確認 など）：今の pre_check の答えをそのまま返す
             v = ut.pre_check(f0, None, e.session.updown)
-            return self._dialog_out(e, text, source, f0, v.status, v.message, choices=v.choices)
+            # 選択肢（D1 など）の文には、選んでいる位置を入れる（あとで別の位置を選んでも、その位置に当てない）
+            return self._dialog_out(e, text, source, f0, v.status, v.message, choices=e.session.pin_choices(v.choices))
         slots = dg.read_slots(f0, updown=e.session.updown)
         if slots.problem:
             return self._dialog_out(e, text, source, f0, "stop" if slots.stop else "ask", slots.problem)
@@ -522,9 +523,17 @@ class WebFlow:
             d = e.dialog
             if r.status == "ok":
                 d.estimated = None  # 人が選び直した：推定の名前は使わない
-                if d.step is not None:
+                if d.step == "pick":  # 「ほかの位置」のあとの手で選ぶ段：選んだ位置で続ける
                     d.say("人", f"{e.session.selected} を選びました", "human")
                     return self._dialog_pick(e)
+                if d.step is not None:
+                    # 位置の候補の確かめ・方向と量を聞いている段での選び直し：会話をやめる。持っていた量・方向を
+                    # 別の位置に当てない（CHECKER_028 A）
+                    d.say("人", f"{e.session.selected} を選びました", "human")
+                    d.end()
+                    d.amount = d.axis = d.sign = None
+                    d.vertical = False
+                    r = Reply("ok", dg.ENDED_RESELECT + r.message)
             return {"ok": True, **self._reply(e, r)}
         return self._run(sid, run)
 
@@ -654,6 +663,7 @@ class WebFlow:
         if why != UPDOWN_CHANGED_WHY:
             e.updown_cancelled = False  # 新しい指示・選び直し・元に戻す：上下の文はもう出さない
         if e.approval is not None:
+            e.session.forget_question()  # 承認の取り消し：未確定の聞き返しも捨てる（CHECKER_028 A）
             e.updown_cancelled = why == UPDOWN_CHANGED_WHY
             e.approval = e.sim_proposal = e.approved_candidate = e.approval_updown = None
             e.session.log.append(("承認", f"{why}、承認を取り消しました。もう一度確かめて、承認ボタンで承認してください"))

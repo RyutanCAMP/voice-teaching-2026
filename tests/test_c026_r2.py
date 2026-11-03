@@ -120,7 +120,9 @@ def test_p0_answer_after_updown_ask_is_read_as_new_instruction(kind, make_updown
     w, sid, msg = start(kind, make_updown, tmp_path)
     w.hear(sid, "下げて")
     r = w.hear(sid, "3ミリ")
-    assert r["status"] == "ask" and r["message"] == "何をするか分かりませんでした。もう一度指示してください"
+    # CHECKER_028 D：つながないのは今どおり。文は、次にどう言えばよいかの案内にした
+    assert r["status"] == "ask" and r["message"] == ut.updown_followup_message(
+        w._entries[sid].session.updown, "下げて") and cand(r) is None
     assert r["state"]["facts"]["text"] == "3ミリ"
 
 

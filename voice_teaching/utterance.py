@@ -832,6 +832,27 @@ def unknown_words_message(words: Sequence[str], op: str, updown: "ud.UpdownStatu
             "（例：Zマイナス3ミリ／Yのプラス3ミリ）")
 
 
+_UPDOWN_WORD = re.compile(r"上げ|下げ|上に|下に|上へ|下へ|上方向|下方向")
+_FOLLOWUP_HEAD = {ud.MISMATCH: "このジョブは上下の向きを確認したジョブと違うため",
+                  ud.CHANGED: "上下の向きの設定が、確認したあとで変わっているため"}
+
+
+def updown_word(facts: UtteranceFacts) -> str:
+    """発話の中の上下の言葉（「下げて」「上に」）。示すためだけ。見つからなければ「上」「下」。"""
+    m = _UPDOWN_WORD.search(facts.text)
+    if m is None:
+        return "上」「下"
+    return {"上げ": "上げて", "下げ": "下げて"}.get(m.group(0), m.group(0))
+
+
+def updown_followup_message(updown: "ud.UpdownStatus | None", word: str) -> str:
+    """上下の案内で聞き返したすぐあとの答え（「3ミリ」）への案内。前の発話とはつながない。状態ごとに文を変える。"""
+    st = _updown(updown)
+    head = _FOLLOWUP_HEAD.get(st.status, "上下の向きが確認されていないため")
+    return (f"{head}、「{word}」は使えません。「Zプラス3ミリ」「Zマイナス3ミリ」のように、"
+            "軸と向きと量を一緒に言ってください")
+
+
 QUESTION_RESTATE_MESSAGE = "質問の形の指示では変更しません。してほしいことを、もう一度言ってください"
 
 # 言い終わりの「〜します」の確かめ（CHECKER_026 M3。唐川さんの判断 2026-11-03 13:27）
@@ -1027,11 +1048,16 @@ def _pre_check_core(facts: UtteranceFacts, selected: str | None = None,
                             "1回に動かすのは1つの方向だけです。1つずつ指示してください")
         if facts.sides:
             return _ask(SIDE_MESSAGE_UPDOWN if st.confirmed else SIDE_MESSAGE)
-        if facts.vertical and len(facts.axes) > 1:
-            other = "・".join(a for a in facts.axes if a != "Z")
+        # 「Zを3mm下げて」（Z の文字＋上げ・下げ。「座標」「値」が無い）：Z の値の増減か、上下の指示か決まらない。
+        # 上下の向きが確認済みでも聞き返す（唐川さんの決定 2026-11-03。D1 と同じ形）
+        bare_z = is_bare_z_updown(facts)
+        if facts.vertical and (len(facts.axes) > 1 or bare_z):
+            others = [a for a in facts.axes if a != "Z"]
+            other = "・".join(others) if others else "Z"
             choices: tuple[tuple[str, str], ...] = ()
             a = facts.amount
-            if (len(facts.axes) == 2 and len(facts.axis_signs) == 1 and a is not None and a.sign is None
+            shape = (len(facts.axes) == 2 and bool(others)) or (bare_z and len(facts.axes) == 1)
+            if (shape and len(facts.axis_signs) == 1 and a is not None and a.sign is None
                     and a.unit == "mm" and not facts.unclear_amounts):
                 sign, v, w = facts.axis_signs[0], _num(a.value), _where(facts)
                 up = sign > 0
@@ -1040,6 +1066,9 @@ def _pre_check_core(facts: UtteranceFacts, selected: str | None = None,
                     choices += ((f"{'上' if up else '下'}方向へ {v}mm", f"{w}{'上' if up else '下'}に{v}mm"),)
             if not st.confirmed:
                 return _ask(f"{other} の値を変えるなら「{other}座標を…上げて／下げて」と言ってください。" + st.message, choices)
+            if bare_z:
+                return _ask("Z の値を変える指示と、上げ・下げ（上下）の指示の2つの読み方があります。"
+                            "Z の値なら「Z座標を…上げて／下げて」、上下なら「上に…／下に…」のように言ってください", choices)
             return _ask(f"{other} と、上げ・下げ（上下＝Z）の2つの読み方があります。"
                         f"{other} の値なら「{other}座標を…上げて／下げて」、上下なら「上に…／下に…」のように言ってください",
                         choices)
@@ -1165,14 +1194,52 @@ def _fmt(x: float) -> str:
     return f"{x:+g}"
 
 
+def is_bare_z_updown(facts: UtteranceFacts) -> bool:
+    """「Zを3mm下げて」の形：Z を軸の文字で言い、上げ・下げ（上下の言葉）もあり、「Z座標」「Zの値」ではない。"""
+    return facts.vertical and "Z" in facts.explicit_axes and "Z" not in facts.value_axes
+
+
+def axis_source_gate(facts: UtteranceFacts, proposal: "ProposedChange",
+                     updown: "ud.UpdownStatus | None" = None) -> Verdict:
+    """最後の関門（CHECKER_028 K1）：候補を作る直前に、提案の軸の「出どころ」を発話の事実で確かめる。
+
+    Session.propose → check_proposal の始めの1か所だけで呼ぶ（会話・ボタン・合わせた答え・Claude の答え・M3 の［変更したい］・
+    疑問の選択肢・D1 の選択肢のどれも、この経路を通る。tests/test_c028_p0.py で固定する）。
+    - 発話に無い軸の提案は通さない
+    - 上下の言葉から来た Z（vertical）は、上下の向きが確認済みのときだけ。「Zを3mm下げて」（座標・値の無い Z と上下の言葉）は通さない
+    - 上下の言葉からでない Z は、軸の文字（explicit_axes。「Zマイナス」「Z座標」「Zの値」）で言ったときだけ
+    """
+    p = proposal
+    if not isinstance(p, ProposedChange) or p.kind != "shift" or p.axis is None:
+        return OK
+    st = _updown(updown)
+    if p.axis not in facts.axes:
+        return _ask(f"指示の中に {p.axis} の軸の言葉がありません。軸と向きと量を、もう一度指示してください")
+    vertical_z = facts.vertical and p.axis == "Z"
+    if vertical_z and is_bare_z_updown(facts):
+        return _ask("Z の値を変える指示か、上げ・下げ（上下）の指示か決まりません。"
+                    "Z の値なら「Z座標を…上げて／下げて」と言ってください")
+    if vertical_z and not st.confirmed:
+        return _ask(st.message)
+    if p.axis not in facts.explicit_axes and not vertical_z:
+        if p.axis == "Z" and not st.confirmed:
+            return _ask(st.message)
+        return _ask(f"指示の中に {p.axis} の軸の言葉がありません。軸と向きと量を、もう一度指示してください")
+    return OK
+
+
 def check_proposal(facts: UtteranceFacts, proposals: "ProposedChange | Sequence[ProposedChange]",
                    selected: str | None = None, updown: "ud.UpdownStatus | None" = None) -> Verdict:
     """提案を、発話から取り出した事実と照らし合わせる（受入テスト5・7・11・16）。
-    上下の向きが確認済みでなければ、上・下から Z を作った発話（facts.vertical）の提案は pre_check で通さない。"""
+    上下の向きが確認済みでなければ、上・下から Z を作った発話（facts.vertical）の提案は通さない。
+    最後の関門 axis_source_gate で、どの提案も軸の出どころを必ず確かめる（CHECKER_028 K1）。"""
+    plist = [proposals] if isinstance(proposals, ProposedChange) else list(proposals)
+    # 最後の関門（ここ1か所）。どの提案も必ず通す。断る文は、もっと具体的な理由（打ち消し・知らない言葉・種類や位置や量の
+    # 食い違いなど）があればそちらを先に返し、無ければ関門の理由を返す（どちらでも候補は作らない。OK を返すのは関門のあとだけ）
+    gates = [axis_source_gate(facts, one, updown) for one in plist]
     v = pre_check(facts, selected, updown)
     if v.status != "ok":
         return v
-    plist = [proposals] if isinstance(proposals, ProposedChange) else list(proposals)
     if len(plist) != 1:
         return _ask("1回の提案で変えるのは1つの位置、または1つの命令だけです。1つずつ指示してください")
     p = plist[0]
@@ -1191,13 +1258,6 @@ def check_proposal(facts: UtteranceFacts, proposals: "ProposedChange | Sequence[
         return _ask(f"指示の位置（{expected}）と提案の位置（{p.position}）が違います。もう一度指示してください")
     said = facts.requested_value()
     if p.kind == "shift":
-        st = _updown(updown)
-        if p.axis not in facts.explicit_axes and not (p.axis == "Z" and facts.vertical and st.confirmed):
-            # 最後の止め（CHECKER_026 再修正 P0-1）：軸の文字で言っていない軸の提案は通さない。上・下から補った Z は、
-            # 上下の向きが確認済みのときだけ。pre_check をすり抜けても（答えと合わせたときに印を落としても）ここで止める
-            if p.axis == "Z" and not st.confirmed:
-                return _ask(st.message)
-            return _ask(f"指示の中に {p.axis} の軸の言葉がありません。軸と向きと量を、もう一度指示してください")
         if p.axis != facts.axis:
             return _ask(f"指示の方向（{facts.axis}）と提案の方向（{p.axis}）が違います。もう一度指示してください")
         if not math.isclose(p.delta_mm, said, abs_tol=1e-9):
@@ -1205,6 +1265,9 @@ def check_proposal(facts: UtteranceFacts, proposals: "ProposedChange | Sequence[
     else:
         if not math.isclose(p.percent, said, abs_tol=1e-9):
             return _ask(f"指示の量（{_fmt(said)}%）と提案の量（{_fmt(p.percent)}%）が違います。もう一度、量を指示してください")
+    for gate in gates:  # 最後の関門の結果。ここまでの照らし合わせに通っても、関門に断られたら通さない
+        if gate.status != "ok":
+            return gate
     return OK
 
 
