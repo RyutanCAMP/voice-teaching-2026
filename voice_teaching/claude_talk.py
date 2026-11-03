@@ -451,6 +451,10 @@ _REPLY_POSITION = re.compile(r"C\s?([0-9]{5})(?![0-9])", re.I)
 _UNITS = r"回|度|周|サイクル|往復|セット|か所|カ所|ヶ所|ヵ所|箇所|個所|つ|個|行目|行|秒|分|時間|ミリ|みり|mm|粍|センチ|cm|メートル|%|％|倍"
 _KANJI_RUN = re.compile(rf"[〇一二三四五六七八九十百千]+(?=\s*(?:{_UNITS}))")
 _DIGITS = {"〇": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+# 数字を使わない回数の言い方（三たび・さんかい・three times など）：数として扱う（内部 Safety 7af2288 P2-2）
+_WORDY_COUNT = re.compile(r"(?:いっ|に|さん|よん|ご|ろっ|なな|はっ|きゅう|じゅっ|じっ)かい|[一二三四五六七八九十]+たび"
+                          r"|[壱弐参]+\s*(?:回|度|たび)"
+                          r"|(?<![A-Za-z])(?:once|twice|thrice|times?)(?![A-Za-z])|[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]", re.I)
 _LINE_RANGE = re.compile(r"([0-9]+)\s*[〜~～\-ー]\s*([0-9]+)\s*行目")
 _LINE_ONE = re.compile(r"([0-9]+)\s*行目")
 
@@ -475,13 +479,15 @@ def _with_digits(text: str) -> str:
 
 def reply_numbers_left(text: str, phrases: list[str], lines: set[int] | None = None) -> bool:
     """許した言い方（phrases：「2回から3回」「3か所」など）と、ジョブにある行番号（lines）を除いても数が残るか。"""
+    if _WORDY_COUNT.search(text):
+        return True  # 数字を使わない回数の言い方は、事実と照らし合わせられないので出さない
     t = re.sub(r"\s+", "", _with_digits(text))
     t = _REPLY_POSITION.sub(" ", t)  # 位置番号は別に確かめる（reply_unknown_positions）
     known = set(lines or ())
     t = _LINE_RANGE.sub(lambda m: " " if {int(m.group(1)), int(m.group(2))} <= known else m.group(0), t)
     t = _LINE_ONE.sub(lambda m: " " if int(m.group(1)) in known else m.group(0), t)
     for ph in sorted(set(phrases), key=len, reverse=True):
-        t = t.replace(re.sub(r"\s+", "", ph), " ")
+        t = t.replace(re.sub(r"\s+", "", ph), " ", 1)  # 許した言い方は1回だけ（同じ言い方を使い回して別の事実を言わせない）
     return bool(re.search(r"[0-9]", t))
 
 

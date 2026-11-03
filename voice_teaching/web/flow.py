@@ -41,7 +41,8 @@ MAX_TEXT = 500
 STEP_F_RANGE_NOTE = ("範囲を確かめてください。［この範囲を繰り返す］を押すと、変更の候補になります"
                      "（承認は、そのあとの確認表示のボタンで行います）")
 # Step F：承認・出力・転送・起動など、ボタンだけで行う操作の言葉。会話の道（Claude）へは送らず、指示の道の決まった文で止める
-_BUTTON_ONLY_WORDS = re.compile(r"承認|出力|書き出|転送|送信|保存|起動|実行|スタート")
+_BUTTON_ONLY_WORDS = re.compile(r"承認|出力|書き出|転送|送信|保存|起動|実行|スタート|エクスポート|ダウンロード|登録|上書き|確定")
+STEP_F_APPROVED_NEXT = "承認済みです。出力は画面の［シミュレーション用に出力］のボタンで行います（声や文字では出力しません）"
 SOURCES = ("voice", "text")
 NO_SESSION = "このジョブの画面の情報がありません（時間が経って捨てたか、サーバーを起動し直しました）。ジョブを読み込み直してください"
 NOT_DECIDED = "指示から変更の内容を決められませんでした。位置番号・方向・量（mm）を、もう一度指示してください"
@@ -755,11 +756,14 @@ class WebFlow:
             route = self._talk_route(e, text)
         ask_out = hear_out = None
         via: list[str] = []
-        if route == "button":
+        if route in ("button", "approved"):
+            f0 = ut.read_utterance(text)
+            msg = (STEP_F_APPROVED_NEXT if route == "approved"
+                   else ("。".join(f0.stop_reasons) if f0.stop_reasons else ut.APPROVE_MESSAGE))
             with e.lock:
                 e.session.log.append(("発話", f"{'音声' if source == 'voice' else '文字'}：{text}"))
-                e.session.log.append(("止めた理由", ut.APPROVE_MESSAGE))
-            hear_out = {"ok": True, "status": "stop", "message": ut.APPROVE_MESSAGE, "heard": text, "source": source}
+                e.session.log.append(("止めた理由", msg))
+            hear_out = {"ok": True, "status": "stop", "message": msg, "heard": text, "source": source}
             via.append("button")
         elif route == "hear":
             hear_out = self.hear(sid, text, source)
@@ -788,13 +792,20 @@ class WebFlow:
         """振り分け（決定論）："hear"（指示の道）・"count"（回数の変更の希望）・"ask"（会話の道）。"""
         s = e.session
         f = ut.read_utterance(text)
-        if not f.stop_reasons and _BUTTON_ONLY_WORDS.search(ut.normalize(text)):
-            return "button"  # 出力・保存など：状態を変えず、ボタンで行うことを伝えるだけ
-        if f.stop_reasons or e.dialog.step is not None or s.repeat_range is not None:
+        count = talk.read_count(text, talk.repeat_blocks(s.original), e.talk.last_evidence)
+        change = bool(set(f.kinds) & {"move", "speed", "select", "undo", "compare"} or f.axes or f.amounts or f.positions
+                      or f.place_ref or count is not None or rc.is_repeat_request(text))
+        approved = self._approved(e)
+        if not approved and (e.dialog.step is not None or s.repeat_range is not None):
+            return "hear"  # 会話・範囲の確認の続き（「承認」と言ったときの2段階の案内も、今の道が出す）
+        if f.stop_reasons or _BUTTON_ONLY_WORDS.search(ut.normalize(text)):
+            return "button"  # 承認・出力・起動など：状態を変えず（承認も取り消さず）、ボタンで行うことを伝えるだけ
+        if approved and not change:
+            return "approved"  # 承認のあとの相づち（「はい」「OK」）：承認を取り消さず、次にすることを伝えるだけ
+        if e.dialog.step is not None or s.repeat_range is not None:
             return "hear"  # 承認・起動などは今の決まった文で止める／会話・範囲の確認の続きは今の道で
         if e.talk.pending is not None:
             return "ask"  # 「どの動きのことですか？」の途中（ボタンで確かめる）
-        count = talk.read_count(text, talk.repeat_blocks(s.original), e.talk.last_evidence)
         if count is not None:
             return "count"
         if rc.is_repeat_request(text) or f.kinds or f.axes or f.positions or f.amounts or f.place_ref or f.shimasu_text:
