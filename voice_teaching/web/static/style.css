@@ -116,7 +116,7 @@ svg text { font-size: 12px; user-select: none; }
 svg text.axis { fill: #a1a1a6; font-size: 11px; }
 svg .pt { cursor: pointer; }
 svg .pt:hover circle:last-of-type { r: 8; }
-.play-row { display: flex; align-items: center; gap: 14px; margin-top: 6px; }
+.play-row { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
 button.play { width: 44px; height: 44px; padding: 0; font-size: 16px; flex: none; }
 button.play.playing { background: var(--text); color: #fff; }
 .play-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -512,3 +512,73 @@ body:not(.in-dialog) .side > #dialog-panel { order: 1; }  /* 会話のあと（�
 
 /* 実機の JOB：変更案の確認のみ（出力できない）。承認できない赤い帯とは別の、落ち着いた青の帯 */
 .review-only { margin: 0 0 12px; padding: 10px 14px; border-radius: 10px; background: #eef4ff; color: #0b4cb3; font-weight: 600; font-size: 14px; }
+/* ---- 再生の「いま」と操作（feat/demo-3d）。図の上に重ねる。安全の表示（帯・注意・承認ボタン）には重ねない ---- */
+.fig-wrap { position: relative; }
+.play-now {
+  flex: 1 1 auto; min-width: 0; pointer-events: none;
+  background: #f7f7f9; border-left: 5px solid #6e6e73; border-radius: 10px; padding: 5px 12px;
+  display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 10px; row-gap: 0;
+}
+.stage-head:has(#play-now:not([hidden])) .file-name { display: none; }
+.play-now.after { border-left-color: var(--accent); }
+.now-head { display: flex; align-items: baseline; gap: 6px; }
+.now-run { font-size: 13px; font-weight: 600; color: var(--sub); }
+.now-count { font-size: 22px; font-weight: 800; color: #6e6e73; line-height: 1.1; }
+.now-count.after { color: #c4470a; }
+.now-line { font-family: "SF Mono", Consolas, "MS Gothic", monospace; font-size: 16px; font-weight: 700; color: var(--text); line-height: 1.4; overflow-wrap: anywhere; }
+.now-cycle { display: inline-block; margin-left: 8px; padding: 0 8px; border-radius: 999px; background: #ececf0; font-family: inherit; font-size: 15px; }
+.now-cycle.added { background: var(--accent); color: #fff; }
+.now-note { font-size: 13px; font-weight: 600; color: #6e6e73; }
+.play-controls, .play-compare { display: flex; gap: 6px; flex-wrap: wrap; flex: none; }
+.play-row .play-status { flex: 1 1 0; min-width: 0; font-size: 14px; font-weight: 600; color: var(--text); }
+.play-row .play-compare { margin-left: auto; }
+.play-controls button, .play-compare button { padding: 6px 12px; }
+.play-compare button { border: 2px solid #d1d1d6; font-weight: 600; }
+.play-compare #play-after { border-color: var(--accent); color: #c4470a; }
+.play-compare button.on { background: var(--text); color: #fff; border-color: var(--text); }
+.play-text { flex-direction: row; flex-wrap: wrap; column-gap: 18px; row-gap: 0; margin-top: 4px; }
+svg .dest-mark { pointer-events: none; }
+@media (max-width: 600px) {
+  .play-now { flex-basis: 100%; order: 3; padding: 4px 8px; }
+  .now-count { font-size: 18px; }
+  .now-line { font-size: 13px; }
+  .now-cycle { font-size: 12px; }
+  .now-note { font-size: 11px; }
+  .play-row { flex-wrap: wrap; row-gap: 6px; }
+  .play-row .play-status { flex-basis: 100%; order: 5; white-space: normal; }
+  .play-row .play-compare { margin-left: 0; }
+}
+/* 「いま」の表示が長くても、図の向きのボタンは縮めない */
+.stage-head .view-tabs { flex: none; }
+.view-tab { white-space: nowrap; }
+
+/* ---- 動きの並びのカード（回数の変更の候補があるときだけ）。大きな数（1・2・3）は、比較の再生で通った回 ---- */
+.play-seq {
+  /* 1280px で1行に収まるよう、すき間は小さめ */
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 8px; row-gap: 2px;
+  margin-top: 6px; padding: 6px 12px; border-radius: 12px; background: #f7f7f9;
+}
+.seq-side { font-size: 13px; font-weight: 700; color: #6e6e73; white-space: nowrap; }
+.seq-side.after { color: #c4470a; }
+.seq-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
+.seq-chip { font-size: 12px; padding: 3px 7px; border-radius: 8px; background: #fff; border: 1px solid #d1d1d6; white-space: nowrap; }
+.seq-arrow { border: none; background: none; padding: 0 1px; color: #8e8e93; }
+.seq-name { border: none; background: none; padding: 0 2px; font-weight: 700; font-family: "SF Mono", Consolas, "MS Gothic", monospace; }
+.seq-cycle { font-size: 15px; font-weight: 700; padding: 1px 8px; border-color: #a1a6ad; }
+.seq-cycle.added { border: 2px solid var(--accent); color: #c4470a; background: #fff3eb; }
+.seq-chip.now { background: var(--text); color: #fff; border-color: var(--text); }
+.seq-cycle.added.now { background: var(--accent); color: #fff; border-color: var(--accent); }
+.seq-tally { font-size: 30px; font-weight: 800; line-height: 1; color: #6e6e73; white-space: nowrap; min-width: 2ch; text-align: right; }
+.tally-n.added { color: var(--accent); }
+.tally-dot { font-weight: 400; color: #a1a1a6; }
+.seq-summary { grid-column: 1 / -1; margin: 0; font-size: 12px; color: var(--sub); }
+.now-cycle { font-size: 17px; }
+@media (max-width: 600px) {
+  .play-seq { grid-template-columns: minmax(0, 1fr) auto; }
+  .seq-side { grid-column: 1 / -1; }
+  .seq-tally { font-size: 24px; }
+}
+/* 背の低い画面で動きの並びを出すときは、図を少し小さくして、図の注意まで1画面に収める（注意は隠さない） */
+@media (max-height: 800px) and (min-width: 601px) {
+  .stage:has(#play-seq:not([hidden])) .fig-3d svg, .stage:has(#play-seq:not([hidden])) .fig-main svg { max-height: calc(50vh - 62px); }
+}

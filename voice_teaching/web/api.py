@@ -137,6 +137,11 @@ def job_view(data: bytes) -> dict:
         return {"ok": False, "error": str(e)}
     positions = _positions(job)
     segments = _segments(job)
+    blocks = job.find_repeat_blocks()
+    if len(blocks) == 1:
+        # 数えられる区間がちょうど1つのときだけ、線に「何回目の区間か」（cycle。区間の外は None）を付ける。
+        # 再生の「（2回目）」の表示に使うだけ（変更はしない）。区間が無い・2つ以上のときは付けない
+        segments = [{**seg, "cycle": blocks[0].cycle_of(seg["line_no"] - 1)} for seg in segments]
     drawable = [p for p in positions if p["xyz"] is not None]
     if not drawable:
         figure_message = f"どの位置も{NOT_DRAWABLE}。"
@@ -169,7 +174,7 @@ def job_view(data: bytes) -> dict:
         "max_shift_label": _max_shift_label(),
         # 2回以上続けて書かれた区間（回数の変更の対象になり得るもの。図の「×2」の印に使うだけ。変更はしない）
         "repeat_blocks": [{"target": b.target, "positions": list(b.positions), "count": b.count}
-                          for b in job.find_repeat_blocks()],
+                          for b in blocks],
     }
 
 

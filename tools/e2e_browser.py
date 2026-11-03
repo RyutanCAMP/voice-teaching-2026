@@ -814,6 +814,451 @@ def check_repeat(browser, url, check, shots: Path | None, out: Path, errors: lis
     ctx.close()
 
 
+def check_demo3d(browser, url, check, shots: Path | None, errors: list) -> None:
+    """再生の表示（feat/demo-3d）：図の上の「いま：24行目 MOVL C00001 V=150.0（2回目）」、MOVJ の区間の文、
+    一時停止・続ける・1つ進む・止める、回数の変更の候補があるときだけの［変更前を再生］［変更後を再生］
+    （変更前は2回目まで・変更後は3回目＝足した分まで光らせる）。候補が無い・位置の移動の候補では比較を出さない。
+    1280px・390px で、はみ出さない・安全の表示（承認ボタン・注意）を隠さない。"""
+    def shot(page, name):
+        if shots is not None:
+            shots.mkdir(parents=True, exist_ok=True)
+            page.screenshot(path=str(shots / name))
+
+    def watch(page, sel):
+        page.on("console", lambda m: errors.append(f"console {m.type}: {m.text}") if m.type == "error" else None)
+        page.on("pageerror", lambda e: errors.append(f"pageerror（{sel}）: {e}"))
+
+    def now(page):
+        return page.inner_text("#play-now") if page.is_visible("#play-now") else ""
+
+    def collect(page, until_end=True, timeout=40000, on_text=None):
+        """再生が終わるまで、図の上の「いま」の文と、そのときの図の様子を集める。"""
+        seen = []
+        waited = 0
+        while waited < timeout:
+            info = page.evaluate("""() => {
+              const n = document.querySelector('#play-now');
+              const svg = document.querySelector('#fig-3d svg');
+              return { text: n && !n.hidden ? n.innerText : '',
+                       added: !!document.querySelector('#play-now .now-cycle.added'),
+                       marker: svg ? svg.querySelectorAll('circle.marker').length : 0,
+                       dest: document.querySelectorAll('.dest-mark').length,
+                       glow: svg ? svg.querySelectorAll('line.seg-glow').length : 0,
+                       after: svg ? svg.querySelectorAll('line.seg.after').length : 0,
+                       status: document.querySelector('#play-status').textContent,
+                       tally: document.querySelector('#seq-tally').textContent,
+                       side: document.querySelector('#play-seq').hidden ? '' : document.querySelector('#seq-side').textContent,
+                       nowChip: [...document.querySelectorAll('#seq-chips .seq-chip.now')].map((e) => e.textContent).join(' ') }; }""")
+            if info["text"] and (not seen or seen[-1]["text"] != info["text"] or seen[-1]["marker"] != info["marker"]
+                                 or seen[-1]["tally"] != info["tally"]):
+                seen.append(info)
+                if on_text:
+                    on_text(info)
+            if until_end and info["status"] == "再生が終わりました":
+                break
+            page.wait_for_timeout(30)
+            waited += 30
+        return seen
+
+    def load_repeat(page, threed=True):
+        page.set_input_files("#file-input", str(REPO / "samples/dummy/DEMO_BUTTON_REPEAT.JBI"))
+        page.wait_for_selector("#job-area:not([hidden])")
+        if threed:
+            page.click('.view-tab[data-view="3d"]')
+
+    def to_repeat_candidate(page):
+        page.locator("#position-chips button", has_text="C00001").first.click()
+        until(page, lambda: page.inner_text("#voice-position strong") == "C00001")
+        page.fill("#text-input", REPEAT_SAY)
+        page.click("#text-send")
+        page.wait_for_selector("#range-yes")
+        page.click("#range-yes")
+        until(page, lambda: page.get_attribute("#step-4", "aria-current") == "step")
+        page.wait_for_timeout(200)
+
+    def boxes_overlap(page, a, b):
+        return page.evaluate("""([a, b]) => {
+          const x = document.querySelector(a), y = document.querySelector(b);
+          if (!x || !y) return false;
+          const r = x.getBoundingClientRect(), s = y.getBoundingClientRect();
+          if (!r.width || !s.width) return false;
+          return r.left < s.right && r.right > s.left && r.top < s.bottom && r.bottom > s.top; }""", [a, b])
+
+    banned = ("安全です", "当たります", "干渉します", "当たりません", "秒", "サイクルの時間")
+
+    # ---- 1280×720：候補が無いときの再生（命令の順）。行番号・命令の行・何回目・MOVJ の文 ----
+    pg = browser.new_page(viewport={"width": 1280, "height": 720})
+    watch(pg, "再生の表示")
+    pg.add_init_script(FAKE_RECOGNITION)
+    pg.goto(url)
+    load_repeat(pg)
+    check(pg.is_hidden("#play-compare") and pg.is_hidden("#play-now") and pg.is_hidden("#play-seq"),
+          "再生の表示：候補が無いときは［変更前を再生］［変更後を再生］を出さない（「いま」の表示も再生の前は出さない）")
+    check(pg.is_enabled("#play-step") and not pg.is_enabled("#play-pause") and not pg.is_enabled("#play-stop"),
+          "再生の表示：再生の前は「1つ進む」だけ使える（一時停止・止めるは押せない）")
+    shot_done = []
+
+    def shot_2nd(info):
+        if "2回目" in info["text"] and info["marker"] and not shot_done:
+            shot(pg, "D1_1280_playing_2nd.png")
+            shot_done.append(1)
+    pg.click("#play-button")
+    seen = collect(pg, on_text=shot_2nd)
+    texts = [s["text"] for s in seen]
+    joined = " / ".join(dict.fromkeys(t.replace("\n", " ") for t in texts))
+    check(any("いま：21行目 MOVL C00001 V=150.0" in t and "1回目" in t for t in texts)
+          and any("いま：24行目 MOVL C00001 V=150.0" in t and "2回目" in t for t in texts),
+          f"再生の表示：図の上に行番号・命令の行・何回目を出す：{joined[:220]}")
+    check(not any("3回目" in t for t in texts), "再生の表示：今のジョブの再生には3回目が無い")
+    movj = [s for s in seen if "MOVJ C00004" in s["text"]]
+    check(bool(movj) and all("関節移動：通り道は表示していません" in s["text"] for s in movj)
+          and all(s["marker"] == 0 for s in movj),
+          f"再生の表示：MOVJ の区間では「関節移動：通り道は表示していません」と出し、印を直線の上に出さない（{len(movj)}回見た）")
+    check(all(s["dest"] == 1 for s in seen), "再生の表示：再生中は、行き先の点の上に小さな印を1つ出す")
+    check(not any(w in t for t in texts for w in banned), "再生の表示：時間・安全や距離を断定する言葉を出さない")
+    check(pg.is_hidden("#play-now") and pg.locator(".dest-mark").count() == 0, "再生の表示：終わると「いま」と点の印を消す")
+
+    # 一時停止・続ける・止める
+    pg.click("#play-button")
+    until(pg, lambda: "22行目" in now(pg), timeout_ms=10000)
+    pg.click("#play-pause")
+    a = now(pg)
+    pg.wait_for_timeout(900)
+    check(pg.inner_text("#play-pause") == "続ける" and now(pg) == a and a != "",
+          f"再生の表示：一時停止すると、その場で止まる（{a.splitlines()[0] if a else ''}）")
+    pg.click("#play-pause")
+    until(pg, lambda: now(pg) != a, timeout_ms=10000)
+    check(pg.inner_text("#play-pause") == "一時停止", "再生の表示：「続ける」で続きから動く")
+    pg.click("#play-stop")
+    check(pg.is_hidden("#play-now") and pg.locator("#fig-3d circle.marker").count() == 0
+          and pg.inner_text("#play-status") == "再生を止めました", "再生の表示：「止める」で印と「いま」を消す")
+
+    # 1つ進む：止まっているところから、1回押すごとに1区間
+    pg.click("#play-step")
+    t1 = now(pg)
+    pg.click("#play-step")
+    t2 = now(pg)
+    pg.wait_for_timeout(900)
+    check("いま：21行目" in t1 and "いま：22行目" in t2 and now(pg) == t2
+          and pg.locator("#fig-3d circle.marker").count() == 1,
+          f"再生の表示：「1つ進む」は1回押すごとに1区間ずつ（{t1.splitlines()[-1] if t1 else ''} → {t2.splitlines()[-1] if t2 else ''}）")
+    shot(pg, "D2_1280_step.png")
+    pg.click("#play-stop")
+    pg.close()
+
+    # ---- 位置の移動の候補（DEMO_C_PLACE）：比較の再生は出さない ----
+    pg = browser.new_page(viewport={"width": 1280, "height": 720})
+    watch(pg, "再生の表示・位置の移動")
+    pg.add_init_script(FAKE_RECOGNITION)
+    pg.goto(url)
+    pg.set_input_files("#file-input", str(REPO / "samples/dummy/DEMO_C_PLACE.JBI"))
+    pg.wait_for_selector("#job-area:not([hidden])")
+    pg.locator("#position-chips button", has_text="C00005").click()
+    until(pg, lambda: pg.inner_text("#voice-position strong") == "C00005")
+    pg.fill("#text-input", "Zプラス方向に10mm")
+    pg.click("#text-send")
+    until(pg, lambda: pg.get_attribute("#step-4", "aria-current") == "step")
+    pg.wait_for_timeout(300)
+    check(pg.is_hidden("#play-compare") and pg.is_hidden("#play-seq"),
+          "再生の表示：位置の移動の候補では、回数の比較の再生と動きの並びを出さない")
+    until(pg, lambda: "いま：" in now(pg), timeout_ms=5000)
+    check("×" not in now(pg) and "回目" not in now(pg), f"再生の表示：位置の移動の候補の再生では、回数を出さない：{now(pg)[:60]}")
+    pg.close()
+
+    # ---- 1280×720：回数の変更の候補。変更前は2回目まで、変更後は3回目（足した分）まで ----
+    pg = browser.new_page(viewport={"width": 1280, "height": 720})
+    watch(pg, "再生の表示・比較")
+    pg.add_init_script(FAKE_RECOGNITION)
+    pg.goto(url)
+    load_repeat(pg)
+    to_repeat_candidate(pg)
+    check(pg.is_visible("#play-compare") and pg.inner_text("#play-before") == "変更前を再生"
+          and pg.inner_text("#play-after") == "変更後を再生", "比較の再生：回数の変更の候補では［変更前を再生］［変更後を再生］を出す")
+    pg.click("#play-stop")  # 候補ができたときの再生を止める（止まっているときの並びは変更後）
+    chips = pg.eval_on_selector_all("#seq-chips .seq-chip", "els => els.map(e => [e.textContent, e.className])")
+    texts_c = [c[0] for c in chips]
+    check(texts_c == ["C00000（区間の前）", "→", "C00001〜C00003", "①", "②", "③ 追加", "→", "C00004（区間の後）"]
+          and "added" in chips[5][1] and not any("added" in c[1] for c in chips[:5])
+          and pg.inner_text("#seq-side") == "変更後 ×3",
+          f"動きの並び：［C00000（区間の前）］→ 区間 ①②③（③は追加・変更後の色）→［C00004（区間の後）］：{texts_c}")
+    check(not any("待機" in t for t in texts_c), "動きの並び：位置の意味（待機など）を決めつけない")
+    tops = pg.eval_on_selector_all("#seq-chips .seq-chip", "els => els.map(e => Math.round(e.getBoundingClientRect().top))")
+    check(max(tops) - min(tops) < 12, f"動きの並び：1280px で1行に並ぶ（行の上の端 {sorted(set(tops))}）")
+    check(pg.inner_text("#seq-summary") == "足した行：3行（直線移動だけ）。新しい位置はありません",
+          f"動きの並び：差分の要約（数はプログラム）：{pg.inner_text('#seq-summary')}")
+    pg.click("#play-before")
+    before = collect(pg)
+    tb = [s["tally"] for s in before]
+    check(before[-1]["tally"] == "1・2" and not any("3" in t for t in tb) and all(s["side"] == "変更前 ×2" for s in before)
+          and any(s["nowChip"] == "②" for s in before),
+          f"比較の再生：変更前は区間を通るたびに「1・2」と数え、並びは ①② だけ：{list(dict.fromkeys(tb))}")
+    bt = [s["text"] for s in before]
+    check(bool(bt) and all(t.startswith("変更前") and "×2" in t for t in bt)
+          and any("2回目" in t for t in bt) and not any("3回目" in t for t in bt) and not any("変更後" in t for t in bt),
+          f"比較の再生：［変更前を再生］は変更前だけ・×2・2回目まで：{' / '.join(dict.fromkeys(t.replace(chr(10), ' ') for t in bt))[:200]}")
+    check(all(s["after"] == 0 for s in before), "比較の再生：変更前の再生の間は、足した回の線を重ねない")
+    shot_done = []
+
+    def shot_3rd(info):
+        if info["added"] and info["marker"] and not shot_done:
+            shot(pg, "D3_1280_compare_after_3rd.png")
+            shot_done.append(info)
+    def shot_3rd_seq(info):
+        shot_3rd(info)
+        if info["added"] and info["marker"] and info["nowChip"] == "③ 追加" and not shot_seq:
+            shot(pg, "D6_1280x720_seq_after_3rd.png")
+            fit = pg.evaluate("""() => { const f = document.querySelector('.foot').getBoundingClientRect().top;
+              const b = (s) => document.querySelector(s).getBoundingClientRect();
+              return [f, b('#fig-3d svg').top, b('#play-seq').bottom, b('#play-compare').bottom, b('#figure-note').bottom,
+                      window.scrollY]; }""")
+            shot_seq.append(fit)
+    shot_seq = []
+    pg.evaluate("window.scrollTo(0, 0)")
+    pg.click("#play-after")
+    after = collect(pg, on_text=shot_3rd_seq)
+    ta = [s["tally"] for s in after]
+    check(after[-1]["tally"] == "1・2・3" and pg.inner_text("#seq-tally .tally-n.added") == "3"
+          and all(s["side"] == "変更後 ×3" for s in after),
+          f"比較の再生：変更後は「1・2・3」と数え、3 だけ変更後の色：{list(dict.fromkeys(ta))}")
+    fit = shot_seq[0] if shot_seq else None
+    check(fit is not None and fit[5] == 0 and fit[1] >= 0 and max(fit[2], fit[3], fit[4]) <= fit[0],
+          f"1280×720：スクロールせずに、3D・動きの並び・比較のボタン・図の注意が1画面に収まる（下の帯の上 {fit and round(fit[0])}px・"
+          f"並び {fit and round(fit[2])}px・比較 {fit and round(fit[3])}px・注意 {fit and round(fit[4])}px）")
+    at = [s["text"] for s in after]
+    third = [s for s in after if "3回目" in s["text"]]
+    check(bool(at) and all(t.startswith("変更後") and "×3" in t for t in at) and not any("変更前" in t for t in at),
+          "比較の再生：［変更後を再生］は変更後だけ・×3")
+    check(bool(third) and all("3回目（足した分）" in s["text"] and s["added"] for s in third)
+          and any("いま：27行目 MOVL C00001 V=150.0" in s["text"] for s in third)
+          and not any("（足した分）" in s["text"] for s in after if "3回目" not in s["text"]),
+          f"比較の再生：変更後の3回目だけを「3回目（足した分）」と出す（{len(third)}回見た）")
+    check(any(s["glow"] == 1 for s in third if s["marker"]) and all(s["glow"] == 0 for s in after if "3回目" not in s["text"]),
+          "比較の再生：3回目の区間の線を変更後の色で光らせる（ほかの回では光らせない）")
+    check(any("MOVJ C00004" in t and "30行目" in t and "関節移動：通り道は表示していません" in t for t in at),
+          "比較の再生：変更後の MOVJ は 30行目（3行足したあとの行番号。サーバーの線のまま）")
+    check(not any(w in t for t in bt + at for w in banned), "比較の再生：時間・安全や距離を断定する言葉を出さない")
+    tabs = pg.locator(".view-tab").first.bounding_box()
+    check(tabs is not None and tabs["height"] < 40, f"比較の再生：「いま」の表示が出ても、図の向きのボタンは1行のまま（高さ {tabs and round(tabs['height'])}px）")
+    check(not boxes_overlap(pg, "#play-now", "#fig-3d svg") and not boxes_overlap(pg, "#play-now", ".view-tabs"),
+          "比較の再生：「いま」の表示は図の上の帯に出し、図（点・回数の窓）と図の向きのボタンに重ねない")
+    # 再生しながらでも、安全の表示（候補の注意・確認して承認へ）は隠さない
+    pg.click("#play-after")
+    until(pg, lambda: "変更後" in now(pg), timeout_ms=5000)
+    check(not boxes_overlap(pg, "#play-now", "#candidate-panel") and not boxes_overlap(pg, ".play-row", "#candidate-panel")
+          and pg.is_visible("#open-confirm"), "比較の再生：再生の表示・ボタンは、候補のカード（注意・確認して承認へ）に重ならない")
+    pg.click("#open-confirm")
+    pg.wait_for_selector("#confirm-overlay:not([hidden])")
+    pg.wait_for_timeout(200)
+    ab = pg.locator("#approve-button").bounding_box()
+    check(pg.is_visible("#approve-button") and pg.is_visible("#confirm-warnings")
+          and ab is not None and ab["y"] + ab["height"] <= 720,
+          "比較の再生：確認表示の承認ボタン・注意は、そのまま見える（再生の表示は確認表示に出ない）")
+    check(not pg.locator("#confirm-overlay #play-now").count(), "比較の再生：確認表示の中に再生の表示を入れない")
+    pg.close()
+
+    # ---- 2D（Y・Z）でも、変更後の3回目を足した分として出す ----
+    pg = browser.new_page(viewport={"width": 1280, "height": 900})
+    watch(pg, "再生の表示・比較 2D")
+    pg.add_init_script(FAKE_RECOGNITION)
+    pg.goto(url)
+    load_repeat(pg, threed=False)
+    pg.click('.view-tab[data-view="yz"]')
+    to_repeat_candidate(pg)
+    pg.click("#play-after")
+    after2 = collect(pg)
+    check(any("3回目（足した分）" in s["text"] for s in after2) and not any("変更前" in s["text"] for s in after2),
+          "比較の再生 2D：変更後だけを再生し、3回目を足した分として出す")
+    pg.close()
+
+    # ---- 390px：候補が無い再生・比較の再生。横にはみ出さない・図に重ねない ----
+    ctx = browser.new_context(viewport={"width": 390, "height": 844})
+    pg = ctx.new_page()
+    watch(pg, "再生の表示・390px")
+    pg.add_init_script(FAKE_RECOGNITION)
+    pg.goto(url)
+    load_repeat(pg)
+    pg.click("#play-button")
+    until(pg, lambda: "2回目" in now(pg), timeout_ms=15000)
+    pg.evaluate("""() => { const h = document.querySelector('.top').getBoundingClientRect().height;
+      const y = document.querySelector('#figure-panel').getBoundingClientRect().top + window.scrollY - h - 8;
+      window.scrollTo(0, Math.max(0, y)); }""")
+    pg.wait_for_timeout(100)
+    shot(pg, "D4_390_playing.png")
+    r = pg.evaluate("() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]")
+    check(r[0] <= r[1], f"再生の表示 390px：横にはみ出さない（{r}）")
+    check(not boxes_overlap(pg, "#play-now", "#fig-3d svg") and not boxes_overlap(pg, ".play-row", "#fig-3d svg"),
+          "再生の表示 390px：「いま」の表示（図の上）と再生のボタン（図の下）は、図に重ねない（点を隠さない）")
+    pg.click("#play-stop")
+    to_repeat_candidate(pg)
+    pg.click("#play-after")
+    until(pg, lambda: "3回目（足した分）" in now(pg), timeout_ms=30000)
+    pg.evaluate("""() => { const h = document.querySelector('.top').getBoundingClientRect().height;
+      const y = document.querySelector('#figure-panel').getBoundingClientRect().top + window.scrollY - h - 8;
+      window.scrollTo(0, Math.max(0, y)); }""")
+    pg.wait_for_timeout(100)
+    shot(pg, "D5_390_compare_after_3rd.png")
+    r = pg.evaluate("() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]")
+    check(r[0] <= r[1] and pg.is_visible("#play-compare"), f"比較の再生 390px：横にはみ出さない（{r}）")
+    check(svg_text_outside(pg, "#fig-3d") == [], f"比較の再生 390px：回数の印の文字が図からはみ出さない：{svg_text_outside(pg, '#fig-3d')}")
+    ctx.close()
+
+
+def controls_over_figure_text(page, fig="#fig-3d"):
+    """再生の操作の段（▶・一時停止・比較のボタン）が、図の中の文字（点の名前・回数の印など）や図そのものに重なっているもの。"""
+    return page.evaluate("""(fig) => {
+      const svg = document.querySelector(fig + ' svg');
+      if (!svg) return ['svg なし'];
+      const hit = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+      const btns = [...document.querySelectorAll('.play-row button')].filter((b) => b.offsetParent)
+        .map((b) => [b.textContent, b.getBoundingClientRect()]);
+      const out = [];
+      const s = svg.getBoundingClientRect();
+      for (const [n, r] of btns) {
+        if (hit(r, s)) out.push(n + ' ↔ 図');
+        for (const t of svg.querySelectorAll('text')) {
+          // 図の枠の外の文字は描かれない（切れる）ので、図の枠の中の部分だけで比べる
+          const b = t.getBoundingClientRect();
+          const q = { left: Math.max(b.left, s.left), right: Math.min(b.right, s.right),
+                      top: Math.max(b.top, s.top), bottom: Math.min(b.bottom, s.bottom) };
+          if (q.right > q.left && q.bottom > q.top && hit(r, q)) out.push(n + ' ↔ ' + t.textContent);
+        }
+      }
+      return out; }""", fig)
+
+
+def check_demo3d_qa(browser, url, check, shots: Path | None, errors: list) -> None:
+    """QA の指摘（feat/demo-3d f61bfd1）の直し：操作ボタンは図の外、一時停止中の文、終わったあとの「1つ進む」、
+    描ける区間が無いとき、2D の変更後の再生の線、止まった回数の変更の候補では比較と並びを出さない。"""
+    def watch(page, sel):
+        page.on("console", lambda m: errors.append(f"console {m.type}: {m.text}") if m.type == "error" else None)
+        page.on("pageerror", lambda e: errors.append(f"pageerror（{sel}）: {e}"))
+
+    def now(page):
+        return page.inner_text("#play-now") if page.is_visible("#play-now") else ""
+
+    def to_repeat(page, threed=True, size=(1280, 720)):
+        page.set_input_files("#file-input", str(REPO / "samples/dummy/DEMO_BUTTON_REPEAT.JBI"))
+        page.wait_for_selector("#job-area:not([hidden])")
+        page.click('.view-tab[data-view="%s"]' % ("3d" if threed else "yz"))
+        page.locator("#position-chips button", has_text="C00001").first.click()
+        until(page, lambda: page.inner_text("#voice-position strong") == "C00001")
+        page.fill("#text-input", REPEAT_SAY)
+        page.click("#text-send")
+        page.wait_for_selector("#range-yes")
+        page.click("#range-yes")
+        until(page, lambda: page.get_attribute("#step-4", "aria-current") == "step")
+        page.wait_for_timeout(200)
+
+    # P1：操作ボタンは図の中の文字（点の名前・回数の印）と重ならない（1280×720・1280×900・390px）
+    for w, h in ((1280, 720), (1280, 900), (390, 844)):
+        ctx = browser.new_context(viewport={"width": w, "height": h})
+        pg = ctx.new_page()
+        watch(pg, f"QA {w}×{h}")
+        pg.add_init_script(FAKE_RECOGNITION)
+        pg.goto(url)
+        to_repeat(pg)
+        pg.click("#play-after")
+        until(pg, lambda: "3回目" in now(pg), timeout_ms=30000)
+        bad = controls_over_figure_text(pg)
+        check(bad == [], f"QA P1 {w}×{h}：再生の操作ボタンは図の外に置き、図の中の文字（点の名前・回数の印）に重ならない：{bad[:4]}")
+        label = pg.text_content("#fig-3d text.repeat-label") or ""
+        check("×2 → ×3" in label, f"QA P1 {w}×{h}：3D の回数の印は「×2 → ×3」まで見える：{label}")
+        st = pg.inner_text("#play-status")
+        check(st.startswith("変更後：3回目を再生中") and "/" not in st,
+              f"QA P2-2 {w}×{h}：状態の文は「変更後：3回目を再生中」（区間の番号は出さない）：{st}")
+        check(pg.locator("#fig-3d text.cycle-label").count() == 0, f"QA P2-2 {w}×{h}：印の横の「3回目」は出さない（帯と並びに出す）")
+        ctx.close()
+
+    pg = browser.new_page(viewport={"width": 1280, "height": 900})
+    watch(pg, "QA 一時停止・終わり")
+    pg.add_init_script(FAKE_RECOGNITION)
+    pg.goto(url)
+    pg.set_input_files("#file-input", str(REPO / "samples/dummy/DEMO_BUTTON_REPEAT.JBI"))
+    pg.wait_for_selector("#job-area:not([hidden])")
+    pg.click('.view-tab[data-view="3d"]')
+    bad = controls_over_figure_text(pg)
+    check(bad == [], f"QA P1 1280×900：候補が無いときも、操作ボタンは図の文字に重ならない：{bad[:4]}")
+    # P2-3：一時停止中・1つ進むで止めたときは「（一時停止中）」
+    pg.click("#play-button")
+    until(pg, lambda: "22行目" in now(pg), timeout_ms=10000)
+    pg.click("#play-pause")
+    st = pg.inner_text("#play-status")
+    check("（一時停止中）" in st and "再生中" not in st, f"QA P2-3：一時停止中の状態の文：{st}")
+    pg.click("#play-step")
+    st = pg.inner_text("#play-status")
+    check("（一時停止中）" in st and "再生中" not in st, f"QA P2-3：1つ進むで止めたときの状態の文：{st}")
+    pg.click("#play-pause")
+    st = pg.inner_text("#play-status")
+    check("を再生中" in st, f"QA P2-3：続けると「再生中」に戻る：{st}")
+    # P2-4：終わったあと「1つ進む」で、はじめから1区間ずつ
+    until(pg, lambda: pg.inner_text("#play-status") == "再生が終わりました", timeout_ms=30000)
+    check(pg.is_enabled("#play-step"), "QA P2-4：終わったあとも「1つ進む」を押せる")
+    pg.click("#play-step")
+    check("いま：21行目" in now(pg) and "（一時停止中）" in pg.inner_text("#play-status"),
+          f"QA P2-4：終わったあとの「1つ進む」は、はじめの区間から：{now(pg).splitlines()[0] if now(pg) else ''}")
+    pg.close()
+
+    # P2-5：3D で描ける区間が0件（線の行き先の点が図に無い。画面の受け取るデータだけを差し替える）
+    pg = browser.new_page(viewport={"width": 1280, "height": 900})
+    watch(pg, "QA 区間0件")
+    pg.add_init_script(FAKE_RECOGNITION)
+
+    def no_drawable(route):
+        res = route.fetch()
+        body = res.json()
+        if body.get("view"):
+            for seg in body["view"]["segments"]:
+                seg["from"] = "C99999"  # 図に無い点（3D では描けない）
+        route.fulfill(response=res, body=json.dumps(body, ensure_ascii=False),
+                      headers={**res.headers, "content-type": "application/json; charset=utf-8"})
+    pg.route("**/api/load", no_drawable)
+    pg.goto(url)
+    pg.set_input_files("#file-input", str(REPO / "samples/dummy/DEMO_BUTTON_REPEAT.JBI"))
+    pg.wait_for_selector("#job-area:not([hidden])")
+    pg.click('.view-tab[data-view="3d"]')
+    pg.click("#play-button")
+    pg.wait_for_timeout(300)
+    check("playing" not in (pg.get_attribute("#play-button", "class") or "")
+          and pg.inner_text("#play-status") == "図に描ける区間が無いため、再生できません" and pg.is_hidden("#play-now"),
+          f"QA P2-5：描ける区間が0件なら、▶ を再生中の見た目のまま残さない：{pg.inner_text('#play-status')}")
+    pg.close()
+
+    # P2-6：2D の変更後の再生で、1回目・2回目の線も（再生している間）見える
+    pg = browser.new_page(viewport={"width": 1280, "height": 900})
+    watch(pg, "QA 2D 変更後")
+    pg.add_init_script(FAKE_RECOGNITION)
+    pg.goto(url)
+    to_repeat(pg, threed=False)
+    pg.click("#play-after")
+    until(pg, lambda: "1回目" in now(pg) and "22行目" in now(pg), timeout_ms=15000)
+    strokes = pg.eval_on_selector_all("#fig-main line.seg.after", "els => els.filter(e => e.getAttribute('stroke-width') === '5').map(e => e.getAttribute('stroke'))")
+    check(strokes and all(s != "transparent" for s in strokes), f"QA P2-6：2D の変更後の再生で、1回目の線も見える（{strokes}）")
+    until(pg, lambda: pg.inner_text("#play-status") == "再生が終わりました", timeout_ms=30000)
+    left = pg.eval_on_selector_all("#fig-main line.seg.after", "els => els.filter(e => e.getAttribute('stroke') === '#6e6e73').length")
+    check(left == 0, f"QA P2-6：再生が終わると、変更前と同じ線は元どおり（重ねて描かない。残り {left}本）")
+    pg.close()
+
+    # P2-7：止まった回数の変更の候補（blocked_reason あり）では、比較のボタンと並びのカードを出さない
+    pg = browser.new_page(viewport={"width": 1280, "height": 900})
+    watch(pg, "QA 止まった回数の候補")
+    pg.add_init_script(FAKE_RECOGNITION)
+
+    def blocked(route):
+        res = route.fetch()
+        body = res.json()
+        c = (body.get("state") or {}).get("candidate")
+        if c:
+            c["blocked_reason"] = "e2e の確かめ用に、止まった候補として表示します"
+        route.fulfill(response=res, body=json.dumps(body, ensure_ascii=False),
+                      headers={**res.headers, "content-type": "application/json; charset=utf-8"})
+    pg.route("**/api/repeat", blocked)
+    pg.goto(url)
+    to_repeat(pg)
+    check(pg.is_hidden("#play-compare") and pg.is_hidden("#play-seq"),
+          "QA P2-7：止まった回数の変更の候補では、比較の再生と動きの並びを出さない")
+    pg.close()
+
+
 def until(pg, cond, timeout_ms: int = 5000) -> None:
     """条件が成り立つまで待つ（画面の CSP が文字列の評価を禁じているので、Python 側で確かめる）。"""
     waited = 0
@@ -953,6 +1398,9 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check_four_steps(b, url, check, shots)
             # 作業の回数を変える（2回 → 3回。docs/REPEAT_COUNT_DESIGN.md）
             check_repeat(b, url, check, shots, out, errors)
+            # 再生の表示（いま：何行目・何回目）と、回数の変更の比較の再生（feat/demo-3d）
+            check_demo3d(b, url, check, shots, errors)
+            check_demo3d_qa(b, url, check, shots, errors)
 
             # Chrome 以外（ChatGPT のアプリの中のブラウザーなど）：Chrome で開くよう案内し、通信の失敗は聞き直さない
             pg3 = b.new_page()

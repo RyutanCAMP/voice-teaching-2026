@@ -11,8 +11,9 @@
 "use strict";
 import { SpeechInput } from "/static/speech.js";
 import { View3D } from "/static/view3d.js";
+import { Player } from "/static/player.js";
 import { splitUnknown, displayMinus, segmentLook, segmentTitle, confirmHeading, updownStatus, updownConfirmLine, updownDetail,
-  speechExamples, repeatCountLabel, cycleStatus } from "/static/highlight.js";
+  speechExamples, repeatCountLabel, cycleStatus, nowPlaying, nowText, sequenceChips, tallyParts } from "/static/highlight.js";
 
 const state = {
   sessionId: null,  // サーバーのメモリにある画面の状態の番号
@@ -20,6 +21,10 @@ const state = {
   st: null,         // サーバーの画面の状態（state）
   figView: "yz",    // 大きく出す図の向き（xy / xz / yz）
   playToken: 0,     // 再生を止めるための番号（描き直すと増やす）
+  player: null,     // 今の再生（player.js。3D は view3d.player、2D は player2d）
+  player2d: null,
+  playWhich: "both",  // 再生しているもの（both：変更前 → 変更後・before・after）
+  tally: { run: "", max: 0 },  // 比較の再生で、今の再生が通った区間の回（「1・2・3」）
   pickAgain: false, // 位置を選び直している（図で重なった点も、位置のボタンで選べるように）
   voiceState: "idle",   // 録音の状態（starting / listening / stopping / idle）
   voiceToken: null,     // 録音を始めたときのジョブ（session）と位置。違えば認識文を使わない
@@ -1054,7 +1059,9 @@ function renderFigures() {
   $("fig-3d").hidden = !is3d;
   $("fig-main").hidden = is3d;
   $("view-reset").hidden = !is3d || !view3d.changed();  // 回した・拡大したときだけ出す
-  if (is3d) view3d.setData(data3d());
+  // 回数の変更の比較（動きの並びのカードを出すとき）は、区間の点に寄せて大きく見せる（表示の向き・大きさだけ）
+  const rc = repeatCompare();
+  if (is3d) view3d.setData({ ...data3d(), focus: rc && rc.sequence ? rc.repeat.positions : null });
   else drawFigure($("fig-main"), ...VIEWS[state.figView === "3d" ? bestView(state.view.positions) : state.figView], true);
   drawFigure($("fig-xy"), "X", "Y", false);
   drawFigure($("fig-xz"), "X", "Z", false);
@@ -1068,7 +1075,7 @@ function renderFigures() {
   $("legend-kinds").hidden = !hasKind("movl") && !hasKind("movj") && !hasKind("other");
   $("legend-movj").hidden = !hasKind("movj");
   $("legend-other").hidden = !hasKind("other");
-  $("play-button").disabled = !state.view || state.view.segments.length === 0 || recording();
+  renderPlayButtons();
 }
 
 // 今の図（変更前と、変更候補の変更後）に、その種類の区間があるか。種類が分からない区間は "other" として数える
@@ -1187,98 +1194,282 @@ function drawFigure(host, axA, axB, big) {
 }
 
 // ---- 経路の再生：JOB の命令の順（view.segments、変更後は after_segments）に、点を直線で動かす目安 ----
+// 進め方は player.js（止める・続ける・1つ進む・はじめから）。図の上に「いま：24行目 MOVL C00001 V=150.0（2回目）」を出す。
+// 回数の変更の候補があるときだけ［変更前を再生］［変更後を再生］を出す（変更前は2回目まで、変更後は3回目＝足した分まで）。
+// 表示はサーバーの区間の線（line_no・text・kind・cycle）と候補の回数だけから作る。時間・関節の通り道は出さない
 function stopPlayback() {
   state.playToken++;
+  if (state.player2d) { const p = state.player2d; state.player2d = null; p.stop(); }
+  state.player = null;
   $("play-status").textContent = "";
   $("play-button").classList.remove("playing");
   view3d.stop();
+  renderNow(null);
+  state.tally = { run: "", max: 0 };
+  state.statusBase = "";
+  renderSequence("after", null);
+  renderPlayButtons();
 }
 
-function startPlayback() {
-  if (!state.view || recording()) return;
-  stopPlayback();
-  if (!$("fig-3d").hidden) return startPlayback3d();
-  const token = state.playToken;
-  const fig = drawFigure($("fig-main"), ...VIEWS[state.figView === "3d" ? bestView(state.view.positions) : state.figView], true);
-  if (!fig) return;
-  $("play-button").classList.add("playing");
+// 動きの並びのカード（回数の変更の候補があるときだけ）。side：before・after。active：今の区間の回（無ければ null）
+function renderSequence(side, active, activeSide = "") {
+  const rep = repeatCompare();
+  const box = $("play-seq");
+  const seq = rep && rep.sequence;
+  const chips = seq ? sequenceChips(seq, side) : [];
+  if (!chips.length) { box.hidden = true; return; }
+  $("seq-side").textContent = side === "before" ? `変更前 ×${rep.repeat.before_count}` : `変更後 ×${rep.repeat.after_count}`;
+  $("seq-side").classList.toggle("after", side !== "before");
+  $("seq-chips").replaceChildren(...chips.map((c) => {
+    const cls = ["seq-chip", `seq-${c.kind}`];
+    if (c.added) cls.push("added");
+    if (c.kind === "cycle" && c.n === active) cls.push("now");
+    if ((c.kind === "entry" || c.kind === "exit") && c.kind === activeSide) cls.push("now");
+    const e = el("span", { class: cls.join(" ") }, c.text);
+    if (c.title) e.title = c.title;
+    return e;
+  }));
+  const t = state.tally;
+  const parts = t.run === side ? tallyParts(t.max, side === "after" ? seq.added : []) : [];
+  const tally = [];
+  parts.forEach((x, k) => {
+    if (k) tally.push(el("span", { class: "tally-dot" }, "・"));
+    tally.push(el("span", { class: "tally-n" + (x.added ? " added" : "") }, x.text));
+  });
+  $("seq-tally").replaceChildren(...tally);
+  $("seq-summary").textContent = seq.summary || "";
+  box.hidden = false;
+}
+
+// 回数の変更の候補（承認できるもの）があるか。比較の再生はこのときだけ出す
+function repeatCompare() {
   const c = state.st && state.st.candidate;
-  const runs = [{ name: c ? "変更前" : "命令の順", list: fig.segLines.before, color: c ? "#6e6e73" : C_POINT }];
-  if (c) runs.push({ name: "変更後", list: fig.segLines.after, color: C_AFTER });
-  const marker = svgEl("circle", { r: 9, fill: runs[0].color, stroke: "#fff", "stroke-width": 3, class: "marker" });
-  fig.svg.append(marker);
+  return c && c.kind === "repeat" && !c.blocked_reason && c.repeat && Array.isArray(c.after_segments) ? c : null;
+}
+
+// 再生する runs の名前・回数（変更前 ×2・変更後 ×3）。which：both（変更前 → 変更後）・before・after
+function playRuns(which, segsBefore, segsAfter) {
+  const c = state.st && state.st.candidate;
+  const rep = repeatCompare();
+  // 変更後の線が無い（候補が無い。3D では変更後の点も無い候補）ときは、今までどおり「命令の順」だけ
+  if (!c || segsAfter == null) return [{ name: "命令の順", key: "", color: C_POINT, segments: segsBefore, count: null, added: null }];
+  const added = rep && rep.repeat.after_count > rep.repeat.before_count ? rep.repeat.after_count : null;
+  const w = rep ? which : "both";  // 比較の再生は回数の変更の候補のときだけ
+  const runs = [];
+  if (w !== "after") runs.push({ name: "変更前", key: "before", color: "#6e6e73", segments: segsBefore,
+    count: rep ? rep.repeat.before_count : null, added: null });
+  if (w !== "before") runs.push({ name: "変更後", key: "after", color: C_AFTER, segments: segsAfter,
+    count: rep ? rep.repeat.after_count : null, added });
+  return runs;
+}
+
+// 一時停止中・1つ進むで止めているときは「を再生中」を「（一時停止中）」にする
+function showStatus() {
+  const base = state.statusBase || "";
+  const p = state.player;
+  $("play-status").textContent = p && p.state === "paused" ? base.replace("を再生中", "（一時停止中）") : base;
+}
+
+function onPlayStep(run, seg, i, n) {
+  state.statusBase = playStatus(run.name, i, n, segmentLook(seg.kind), seg);
+  showStatus();
+  $("play-status").title = segmentTitle(seg);  // 命令の行は、マウスを重ねたときだけ
+  renderNow(nowPlaying(seg, { run: run.name === "命令の順" ? "" : run.name, count: run.count, added: run.added }), run.color);
+  // 動きの並び：今の区間の回を光らせ、通った回を「1・2・3」と数える（サーバーの seg.cycle のまま）
+  if (run.key === "before" || run.key === "after") {
+    if (state.tally.run !== run.key) state.tally = { run: run.key, max: 0 };
+    const n = Number.isInteger(seg.cycle) ? seg.cycle : null;
+    if (n && n > state.tally.max) state.tally.max = n;
+    const seq = repeatCompare() && repeatCompare().sequence;
+    const side = seq && seq[run.key];
+    const at = n ? "" : side && side.exit && seg.to === side.exit.position && state.tally.max > 0 ? "exit"
+      : side && side.entry && seg.to === side.entry.position ? "entry" : "";
+    renderSequence(run.key, n, at);
+  }
+}
+
+function onPlayEnd() {
+  state.statusBase = "再生が終わりました";
+  $("play-status").textContent = "再生が終わりました";
+  if (state.tally.run) renderSequence(state.tally.run, null);  // 数えた「1・2・3」は残す（次の再生・止めるで消す）
+  $("play-button").classList.remove("playing");
+  renderNow(null);
+  renderPlayButtons();
+}
+
+// 図の上の「いま」の表示。文字はテキストのノードとして入れる（CSP のため大きさは CSS のクラス）
+function renderNow(n, color) {
+  const box = $("play-now");
+  if (!n) { box.hidden = true; box.replaceChildren(); box.title = ""; return; }
+  const head = [];
+  if (n.run) head.push(el("span", { class: "now-run" }, n.run));
+  if (n.count) head.push(el("span", { class: "now-count" + (n.run === "変更後" ? " after" : "") }, n.count));
+  const parts = [];
+  if (head.length) parts.push(el("div", { class: "now-head" }, ...head));
+  const line = el("div", { class: "now-line" }, n.line);
+  if (n.cycle) line.append(el("span", { class: "now-cycle" + (n.added ? " added" : "") }, n.cycle));
+  parts.push(line);
+  if (n.note) parts.push(el("div", { class: "now-note" }, n.note));
+  box.replaceChildren(...parts);
+  box.title = nowText(n);
+  box.classList.toggle("after", color === C_AFTER);
+  box.hidden = false;
+}
+
+// 再生のボタンの状態（使える・押せない・比較のボタンを出すか）
+function renderPlayButtons() {
+  const rec = recording();
+  const none = !state.view || state.view.segments.length === 0 || rec;
+  const p = state.player;
+  const live = !!p && (p.state === "playing" || p.state === "paused");
+  $("play-button").disabled = none;
+  $("play-pause").disabled = none || !live;
+  $("play-pause").textContent = p && p.state === "paused" ? "続ける" : "一時停止";
+  $("play-step").disabled = none;  // 終わったあとは、はじめから1区間ずつ
+  $("play-stop").disabled = none || !live;
+  const rep = repeatCompare();
+  $("play-compare").hidden = !rep;
+  $("play-before").disabled = none;
+  $("play-after").disabled = none;
+  for (const [id, w] of [["play-before", "before"], ["play-after", "after"]]) {
+    const on = live && state.playWhich === w;
+    $(id).classList.toggle("on", on);
+    $(id).setAttribute("aria-pressed", String(on));
+  }
+}
+
+// 再生を作る（start=false なら作るだけ。「1つ進む」から始めるとき）
+function startPlayback(which = "both", start = true) {
+  if (!state.view || recording()) return null;
+  stopPlayback();
+  state.playWhich = typeof which === "string" ? which : "both";
+  const p = !$("fig-3d").hidden ? startPlayback3d(state.playWhich, start) : startPlayback2d(state.playWhich, start);
+  state.player = p;
+  if (p && p.items.length === 0) {
+    // 図に描ける区間が1つも無い：すぐ終わる（再生中の見た目を残さない）
+    p.stop();
+    state.player = null;
+    $("play-button").classList.remove("playing");
+    $("play-status").textContent = "図に描ける区間が無いため、再生できません";
+    renderPlayButtons();
+    return null;
+  }
+  if (p && start) $("play-button").classList.add("playing");
+  renderPlayButtons();
+  return p;
+}
+
+function startPlayback2d(which, start) {
+  const fig = drawFigure($("fig-main"), ...VIEWS[state.figView === "3d" ? bestView(state.view.positions) : state.figView], true);
+  if (!fig) return null;
+  const c = state.st && state.st.candidate;
+  const runs = playRuns(which, fig.segLines.before, c ? fig.segLines.after : null);
+  const marker = svgEl("circle", { r: 9, fill: runs[0].color, stroke: "#fff", "stroke-width": 3, class: "marker", visibility: "hidden" });
+  const dest = svgEl("path", { d: "M -7 -25 L 7 -25 L 0 -14 Z", stroke: "#fff", "stroke-width": 1.5, class: "dest-mark", visibility: "hidden" });
+  fig.svg.append(dest, marker);
+  const items = runs.flatMap((run) => run.segments.map((s, k) => ({ run, s, k })));
   const SPEED = 260;  // 画面の上の速さ（px/秒）。実際のロボットの速度とは関係ない
-  let ri = 0, si = 0, t0 = null;
-  const step = (now) => {
-    if (token !== state.playToken) { marker.remove(); return; }
-    const run = runs[ri];
-    if (!run || si >= run.list.length) {
-      ri++; si = 0; t0 = null;
-      if (ri >= runs.length) {
-        $("play-status").textContent = "再生が終わりました";
-        $("play-button").classList.remove("playing");
-        marker.remove();
-        return;
+  let cur = null;
+  const p = new Player(items, {
+    duration: (it) => {
+      const s = it.s;
+      return s.look.animate ? Math.max(350, (Math.hypot(s.to[0] - s.from[0], s.to[1] - s.from[1]) / SPEED) * 1000) : HOLD_MS;
+    },
+    onStep: (it) => {
+      if (cur) {
+        cur.s.line.setAttribute("stroke-width", String(cur.s.width));
+        if (cur.restore) cur.s.line.setAttribute("stroke", cur.restore);
       }
-      requestAnimationFrame(step);
-      return;
-    }
-    const s = run.list[si];
-    if (t0 === null) {
-      t0 = now;
+      cur = it;
+      const s = it.s;
+      // 変更後の線のうち、変更前と同じで透明にしてある線（回数の変更の1回目・2回目など）は、再生している間だけ灰色で見せる
+      if (s.line.getAttribute("stroke") === "transparent" && !(it.run.added && s.seg.cycle === it.run.added)) {
+        it.restore = "transparent";
+        s.line.setAttribute("stroke", "#6e6e73");
+      }
       s.line.setAttribute("stroke-width", String(s.look.animate ? 5 : Math.max(s.width + 1.5, 3)));
-      $("play-status").textContent = playStatus(run.name, si + 1, run.list.length, s.look, s.seg);
-      $("play-status").title = segmentTitle(s.seg);
-      marker.setAttribute("fill", run.color);
-    }
-    const len = Math.hypot(s.to[0] - s.from[0], s.to[1] - s.from[1]);
-    const dur = s.look.animate ? Math.max(350, (len / SPEED) * 1000) : HOLD_MS;
-    const f = Math.min(1, (now - t0) / dur);
-    if (s.look.animate) {
-      marker.removeAttribute("visibility");
-      marker.setAttribute("cx", s.from[0] + (s.to[0] - s.from[0]) * f);
-      marker.setAttribute("cy", s.from[1] + (s.to[1] - s.from[1]) * f);
-    } else {
-      // MOVJ・目安の区間：印を線の上で動かさない。区間の間は印を消し、終わったら終点に置く
-      marker.setAttribute("visibility", "hidden");
-      if (f >= 1) { marker.setAttribute("cx", s.to[0]); marker.setAttribute("cy", s.to[1]); }
-    }
-    if (f >= 1) {
-      s.line.setAttribute("stroke-width", String(s.width));
-      si++; t0 = null;
-    }
-    requestAnimationFrame(step);
-  };
-  requestAnimationFrame(step);
+      marker.setAttribute("fill", it.run.color);
+      dest.setAttribute("fill", it.run.color);
+      dest.setAttribute("transform", `translate(${s.to[0]} ${s.to[1]})`);
+      dest.removeAttribute("visibility");
+      // 回数の変更の比較：変更後の再生で、足した回の線は変更後の色で光らせる
+      if (it.run.added && s.seg.cycle === it.run.added) s.line.setAttribute("stroke", C_AFTER);
+      onPlayStep(it.run, s.seg, it.k + 1, it.run.segments.length);
+    },
+    onFrame: (it, f) => {
+      if (!it) { marker.remove(); dest.remove(); return; }
+      const s = it.s;
+      if (s.look.animate) {
+        marker.removeAttribute("visibility");
+        marker.setAttribute("cx", s.from[0] + (s.to[0] - s.from[0]) * f);
+        marker.setAttribute("cy", s.from[1] + (s.to[1] - s.from[1]) * f);
+      } else {
+        // MOVJ・目安の区間：印を線の上で動かさない。区間の間は印を消し、終わったら終点に置く
+        marker.setAttribute("visibility", "hidden");
+        if (f >= 1) { marker.setAttribute("cx", s.to[0]); marker.setAttribute("cy", s.to[1]); }
+      }
+    },
+    onEnd: () => {
+      if (cur) {
+        cur.s.line.setAttribute("stroke-width", String(cur.s.width));
+        if (cur.restore) cur.s.line.setAttribute("stroke", cur.restore);
+      }
+      marker.remove(); dest.remove();
+      if (state.player2d === p) onPlayEnd();
+    },
+  });
+  state.player2d = p;
+  if (start) p.play();
+  return p;
 }
 
 // 再生の状態の文。MOVJ・目安の区間では、印が線の上を動かないことを添える
 const HOLD_MS = 700;  // MOVJ・目安の区間で、印を消しておく時間（画面の上だけ。実際の動きとは関係ない）
 function playStatus(name, i, n, look, seg) {
-  // 回数の変更の候補では、区間の線ごとに「2回目」と数える（サーバーの seg.cycle）
+  // 回数の変更の候補では「変更後：3回目を再生中」（サーバーの seg.cycle）。区間の番号（7/10）は回数と紛れるので出さない
   const c = state.st && state.st.candidate;
-  const cyc = c && c.kind === "repeat" ? cycleStatus(seg, c.target) : "";
-  const head = `${name}を再生中 ${i}/${n}` + (cyc ? `　${cyc}` : "");
+  const rep = c && c.kind === "repeat";
+  const cyc = rep ? cycleStatus(seg, c.target) : "";
+  const head = rep ? (cyc ? `${name}：${cyc.replace(/（.*$/, "")}を再生中` : `${name}を再生中`) : `${name}を再生中 ${i}/${n}`;
   if (look.kind === "movj") return `${head}　MOVJ：関節移動（点線は順番だけ。実際の通り道ではありません）`;
   if (look.kind === "other") return `${head}　直線とは限らない区間（印は終点へ移ります）`;
   return head;
 }
 
 // 3D の再生：命令の順（変更前 → 変更後）に、MOVL の区間だけ線の上を印が動く（ロボットの動きではない）
-function startPlayback3d() {
+function startPlayback3d(which, start) {
   const d = data3d();
-  const runs = [{ name: d.after ? "変更前" : "命令の順", color: d.after ? "#6e6e73" : C_POINT, segments: d.segments, points: d.points }];
-  if (d.after) runs.push({ name: "変更後", color: C_AFTER, segments: d.after.segments, points: d.after.points });
-  $("play-button").classList.add("playing");
-  view3d.play(runs,
-    (run, s) => {
-      $("play-status").textContent = playStatus(run.name, run.segments.indexOf(s) + 1, run.segments.length, segmentLook(s.kind), s);
-      $("play-status").title = segmentTitle(s);  // 命令の行は、マウスを重ねたときだけ
-    },
-    () => { $("play-status").textContent = "再生が終わりました"; $("play-button").classList.remove("playing"); });
+  const runs = playRuns(which, d.segments, d.after ? d.after.segments : null)
+    .map((r) => ({ ...r, points: r.key === "after" ? d.after.points : d.points }));
+  return view3d.play(runs,
+    (run, s) => onPlayStep(run, s, run.segments.indexOf(s) + 1, run.segments.length),
+    () => { if (state.player && view3d.player === state.player) onPlayEnd(); }, start);
 }
 
-$("play-button").addEventListener("click", startPlayback);
+$("play-button").addEventListener("click", () => startPlayback("both"));
+$("play-before").addEventListener("click", () => startPlayback("before"));
+$("play-after").addEventListener("click", () => startPlayback("after"));
+$("play-pause").addEventListener("click", () => {
+  const p = state.player;
+  if (!p) return;
+  if (p.state === "playing") { p.pause(); $("play-button").classList.remove("playing"); }
+  else if (p.state === "paused") { p.play(); $("play-button").classList.add("playing"); }
+  showStatus();
+  renderPlayButtons();
+});
+$("play-step").addEventListener("click", () => {
+  let p = state.player;
+  if (!p || p.state === "stopped" || p.state === "ended") p = startPlayback(state.playWhich || "both", false);
+  if (!p) return;
+  p.step();
+  $("play-button").classList.remove("playing");
+  showStatus();
+  renderPlayButtons();
+});
+$("play-stop").addEventListener("click", () => {
+  stopPlayback();
+  $("play-status").textContent = "再生を止めました";
+});
 
 // ---- 音声入力（speech.js）。認識した文は入力欄に入れるだけ。承認・出力・送信は呼ばない ----
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1497,7 +1688,7 @@ function updateLocks() {
     renderChips();
     renderCandidate();
     renderApproval();
-    $("play-button").disabled = state.view.segments.length === 0 || rec;
+    renderPlayButtons();
   }
   renderSteps();
   renderMic();

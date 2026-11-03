@@ -8,8 +8,11 @@
 // - 変更候補があるときは、動かす点に触れる区間（入る・出る）だけを変更後の色で描く。止まった候補は灰色の点線。
 // - 回数の変更の候補（data.repeat）：区間の近くに「×2 → ×3」の印。足した回の線（元からある線と同じ線）を変更後の色で重ねる。
 //   再生では、区間の線（サーバーの seg.cycle）ごとに「2回目」を印の横に出す。新しい点・新しい線は描かない
+// - 再生（player.js）：止める・続ける・1つ進む・はじめから。再生中は、その区間の行き先の点の上に小さな印（▼）を出す
+//   （MOVJ でも点の上だけ。線の上は動かさない）。回数の変更の比較では、変更前の再生の間は足した回の線を重ねない
 "use strict";
 import { displayMinus, segmentLook, segmentTitle } from "/static/highlight.js";
+import { Player } from "/static/player.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const DEFAULT_YAW = -0.75;    // 最初の向き（ラジアン）
@@ -58,7 +61,7 @@ export class View3D {
     this.data = null;
     this.yaw = DEFAULT_YAW; this.pitch = DEFAULT_PITCH; this.zoom = 1;
     this.marker = null;      // 再生の印（世界座標）
-    this.playToken = 0;
+    this.player = null;      // 再生の進め方（player.js）
     this.chooser = null;
     host.classList.add("view3d");
     this._bind();
@@ -74,6 +77,16 @@ export class View3D {
     this.center = [0, 1, 2].map((k) => (lo[k] + hi[k]) / 2);
     this.lo = lo; this.hi = hi;
     this.span = Math.max(Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]), 1);
+    // data.focus（位置の名前）：その点を図の中央に大きく見せる（回数の変更の比較で、区間の3点を見分けやすく）。
+    // 表示の向き・大きさだけ。座標は変えない。区間の外の点は図の外に出ることがある（動きの並びのカードに番号を出す）
+    const fp = (data.focus || []).map((n) => data.points.find((p) => p.name === n)).filter((p) => p && p.xyz);
+    if (fp.length >= 2) {
+      const flo = [0, 1, 2].map((k) => Math.min(...fp.map((p) => p.xyz[k])));
+      const fhi = [0, 1, 2].map((k) => Math.max(...fp.map((p) => p.xyz[k])));
+      this.center = [0, 1, 2].map((k) => (flo[k] + fhi[k]) / 2);
+      const fspan = Math.hypot(fhi[0] - flo[0], fhi[1] - flo[1], fhi[2] - flo[2]);
+      this.span = Math.max(fspan * 1.8, this.span * 0.5, 1);
+    }
     this.render();
   }
 
@@ -139,8 +152,13 @@ export class View3D {
     // 変更後は、動かす点に触れる区間だけ（ほかの区間は変更前と同じ線なので描き直さない）
     if (c && !d.repeat) for (const s of c.segments) if (s.from === c.moved || s.to === c.moved) seg(s, c.points, cAfter, 3, "after");
     // 回数の変更：足した回の線だけを変更後の色で重ねる（元からある線と同じ線。新しい線は無い）
-    if (c && d.repeat && d.repeat.after > d.repeat.before) {
-      for (const s of c.segments) if (s.cycle === d.repeat.after) seg(s, c.points, cAfter, 3, "after");
+    // 再生で変更前を見せている間は重ねない（変更前は2回目まで）。変更後の再生で今の線は、光の輪を付けて太く
+    if (c && d.repeat && d.repeat.after > d.repeat.before && !(this.marker && this.marker.runKey === "before")) {
+      for (const s of c.segments) {
+        if (s.cycle !== d.repeat.after) continue;
+        if (this.marker && this.marker.seg === s) this._glow(svg, s, c.points, cAfter);
+        seg(s, c.points, cAfter, 3, "after");
+      }
     }
     this.lines = lines;
 
@@ -214,15 +232,11 @@ export class View3D {
       }
     }
     if (d.repeat) this._repeatMark(svg, d, labelBoxes, cAfterText);
+    if (this.marker && this.marker.dest) this._destMark(svg, this.marker.dest, this.marker.color);
     if (this.marker && this.marker.xyz) {  // MOVJ・目安の区間の間は xyz が無い（印を出さない）
       const m = this.project(this.marker.xyz);
       svg.append(svgEl("circle", { cx: m[0], cy: m[1], r: 9, fill: this.marker.color, stroke: "#fff", "stroke-width": 3, class: "marker" }));
-      const n = this.marker.seg && this.marker.seg.cycle;
-      if (d.repeat && Number.isInteger(n)) {  // 回数の変更：再生中の区間が何回目か
-        const t = svgEl("text", { x: m[0] - 14, y: m[1] + 26, "text-anchor": "end", fill: this.marker.color, "font-weight": "700", class: "cycle-label" });
-        t.textContent = `${n}回目`;
-        svg.append(t);
-      }
+      // 何回目かは図の上の帯（いま：…）と動きの並びに出す（印の横には出さない。重複を減らす）
     }
     this.host.querySelector("svg")?.remove();
     this.host.prepend(svg);
@@ -272,6 +286,22 @@ export class View3D {
       g.append(now);
     }
     svg.append(g);
+  }
+
+  // 再生中の区間の行き先の点の上の小さな印（▼）。点の上だけに出す（線の上は動かさない。MOVJ でも同じ）
+  _destMark(svg, xyz, color) {
+    const [x, y] = this.project(xyz);
+    svg.append(svgEl("path", { d: `M ${x - 7} ${y - 25} L ${x + 7} ${y - 25} L ${x} ${y - 14} Z`, fill: color,
+      stroke: "#fff", "stroke-width": 1.5, class: "dest-mark" }));
+  }
+
+  // 変更後の再生で、足した回の今の線に付ける光の輪（線の下に太く薄く）
+  _glow(svg, s, pts, color) {
+    const at = Object.fromEntries(pts.map((p) => [p.name, p.xyz]));
+    if (!at[s.from] || !at[s.to]) return;
+    const p = this.project(at[s.from]), q = this.project(at[s.to]);
+    svg.append(svgEl("line", { x1: p[0], y1: p[1], x2: q[0], y2: q[1], stroke: color, "stroke-width": 14,
+      "stroke-opacity": 0.28, "stroke-linecap": "round", class: "seg-glow" }));
   }
 
   // 拡大の窓：変更前（灰）と変更後（オレンジ）を大きくして並べる。小さな変更も見えるように
@@ -442,39 +472,43 @@ export class View3D {
     document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") this.closeChooser(); });
   }
 
-  // ---- 経路の再生：runs = [{name, color, segments, points}]。onStep(run, seg) で今の命令の行を知らせる ----
+  // ---- 経路の再生：runs = [{name, key, color, segments, points}]。onStep(run, seg) で今の命令の行を知らせる ----
+  // play は Player を返す（止める・続ける・1つ進む・はじめからは、呼ぶ側が Player に頼む）。start=false なら作るだけ
   stop() {
-    this.playToken++;
+    if (this.player) this.player.stop();
+    this.player = null;
     this.marker = null;
     this.render();
   }
 
-  play(runs, onStep, onEnd) {
+  play(runs, onStep, onEnd, start = true) {
     this.stop();
-    const token = this.playToken;
     const SPEED = this.span * 0.9;  // 世界座標の速さ（mm/秒の目安。実際のロボットの速度とは関係ない）
     const list = [];
     for (const run of runs) {
       const at = Object.fromEntries(run.points.map((p) => [p.name, p.xyz]));
       for (const s of run.segments) if (at[s.from] && at[s.to]) list.push({ run, s, a: at[s.from], b: at[s.to] });
     }
-    let i = 0, t0 = null;
-    const step = (now) => {
-      if (token !== this.playToken) return;
-      if (i >= list.length) { this.marker = null; this.render(); onEnd && onEnd(); return; }
-      const it = list[i];
-      if (t0 === null) { t0 = now; onStep && onStep(it.run, it.s); }
-      const animate = segmentLook(it.s.kind).animate;
-      const len = Math.hypot(it.b[0] - it.a[0], it.b[1] - it.a[1], it.b[2] - it.a[2]);
-      const dur = animate ? Math.max(350, (len / SPEED) * 1000) : HOLD_MS;
-      const f = Math.min(1, (now - t0) / dur);
+    const player = new Player(list, {
+      duration: (it) => {
+        const len = Math.hypot(it.b[0] - it.a[0], it.b[1] - it.a[1], it.b[2] - it.a[2]);
+        return segmentLook(it.s.kind).animate ? Math.max(350, (len / SPEED) * 1000) : HOLD_MS;
+      },
+      onStep: (it) => onStep && onStep(it.run, it.s),
       // MOVL の区間だけ線の上を動かす。MOVJ・目安の区間は、直線の上に印を置かない（区間の間は消す）
-      this.marker = { color: it.run.color, seg: it.s,
-        xyz: animate ? [0, 1, 2].map((k) => it.a[k] + (it.b[k] - it.a[k]) * f) : null };
-      this.render();
-      if (f >= 1) { i++; t0 = null; }
-      requestAnimationFrame(step);
-    };
-    requestAnimationFrame(step);
+      onFrame: (it, f) => {
+        if (this.player !== player) return;
+        this.marker = it ? { color: it.run.color, seg: it.s, runKey: it.run.key || "", dest: it.b,
+          xyz: segmentLook(it.s.kind).animate ? [0, 1, 2].map((k) => it.a[k] + (it.b[k] - it.a[k]) * f) : null } : null;
+        this.render();
+      },
+      onEnd: () => {
+        if (this.player !== player) return;
+        this.marker = null; this.render(); onEnd && onEnd();
+      },
+    });
+    this.player = player;
+    if (start) player.play();
+    return player;
   }
 }

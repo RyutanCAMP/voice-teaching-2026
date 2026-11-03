@@ -171,3 +171,70 @@ export function speechExamples(u) {
     help: ["「Y座標を3ミリ下げて」", "「Yのマイナス3ミリ」", "「Zプラス方向に10ミリ」"],
   };
 }
+
+// ---- 再生の「いま」の表示（feat/demo-3d）：「いま：24行目 MOVL C00001 V=150.0（2回目）」 ----
+// サーバーの区間の線（line_no・text・kind・cycle）の文字のまま。数は計算しない。時間・関節の通り道は出さない。
+// opts.run：「変更前」「変更後」など。opts.count：その再生の回数（×2 など。回数の変更のときだけ）。
+// opts.added：足した回の番号（変更後の再生の 3 など）。その回の線だけ「（足した分）」と出す
+export const NOW_MOVJ_NOTE = "関節移動：通り道は表示していません";
+export const NOW_OTHER_NOTE = "直線とは限らない区間：印は終点へ移ります";
+export function nowPlaying(seg, opts = {}) {
+  if (!seg || typeof seg !== "object" || !Number.isInteger(seg.line_no) || seg.line_no < 1
+    || typeof seg.text !== "string") return null;
+  const o = opts || {};
+  const n = seg.cycle;
+  const ok = Number.isInteger(n) && n >= 1;
+  const added = ok && Number.isInteger(o.added) && n === o.added;
+  const kind = segmentLook(seg.kind).kind;
+  return {
+    run: typeof o.run === "string" ? o.run : "",
+    count: o.count != null && o.count !== "" ? `×${o.count}` : "",
+    line: `いま：${seg.line_no}行目 ${seg.text}`,
+    cycle: ok ? `${n}回目${added ? "（足した分）" : ""}` : "",
+    added,
+    note: kind === "movj" ? NOW_MOVJ_NOTE : kind === "other" ? NOW_OTHER_NOTE : "",
+  };
+}
+
+// 読み上げ・title 用の1行（画面は nowPlaying の部品を分けて大きさを変えて出す）
+export function nowText(n) {
+  if (!n) return "";
+  const head = [n.run, n.count].filter((x) => x).join(" ");
+  const cyc = n.cycle ? (n.cycle.endsWith("）") ? `　${n.cycle}` : `（${n.cycle}）`) : "";
+  return [head, n.line + cyc, n.note].filter((x) => x).join("　");
+}
+
+// ---- 動きの並びのカード（台本 Ver.6.1 Scene 3-3）：［C00000（区間の前）］→［名前］①②③ 追加 →［C00004（区間の後）］ ----
+// サーバーの candidate.sequence（変更前後のジョブと区間から作ったもの）のまま。位置の意味（待機など）は決めつけない。
+// seq.name は区間の名前（今は C00001〜C00003。人が教えた意味の名前を、あとで差し込める）
+function circled(n) {
+  return n >= 1 && n <= 20 ? String.fromCharCode(0x2460 + n - 1) : `(${n})`;
+}
+function sideChip(kind, m, word) {
+  if (!m || typeof m !== "object" || typeof m.position !== "string") return null;
+  return { kind, text: `${m.position}（${word}）`, title: Number.isInteger(m.line_no) ? `${m.line_no}行目 ${m.text ?? ""}` : "" };
+}
+export function sequenceChips(seq, side) {
+  if (!seq || typeof seq !== "object") return [];
+  const s = seq[side];
+  if (!s || typeof s !== "object" || !Array.isArray(s.cycles) || !s.cycles.every((n) => Number.isInteger(n) && n >= 1)) return [];
+  const added = Array.isArray(seq.added) ? seq.added : [];
+  const out = [];
+  const entry = sideChip("entry", s.entry, "区間の前");
+  if (entry) out.push(entry, { kind: "arrow", text: "→" });
+  out.push({ kind: "name", text: String(seq.name || seq.target || "") });
+  for (const n of s.cycles) {
+    const a = added.includes(n);
+    out.push({ kind: "cycle", n, text: circled(n) + (a ? " 追加" : ""), added: a });
+  }
+  const exit = sideChip("exit", s.exit, "区間の後");
+  if (exit) out.push({ kind: "arrow", text: "→" }, exit);
+  return out;
+}
+
+// 比較の再生で、区間を通った回を大きく数える（変更前「1・2」、変更後「1・2・3」）。足した回の番号は印を付ける
+export function tallyParts(max, added) {
+  if (!Number.isInteger(max) || max < 1) return [];
+  const a = Array.isArray(added) ? added : [];
+  return Array.from({ length: max }, (_, k) => ({ text: String(k + 1), added: a.includes(k + 1) }));
+}

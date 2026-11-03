@@ -36,6 +36,7 @@ _STATIC = {
     "/static/view3d.js": ("view3d.js", "text/javascript; charset=utf-8"),
     # 読めなかった言葉を目立たせる分け方・マイナスの表示（依存なし）
     "/static/highlight.js": ("highlight.js", "text/javascript; charset=utf-8"),
+    "/static/player.js": ("player.js", "text/javascript; charset=utf-8"),
 }
 # 「サンプルで試す」で読み込む、決まった1つの架空のジョブ。画面からは名前も場所も渡させない
 SAMPLE_JOB = Path(__file__).resolve().parents[2] / "samples" / "dummy" / "DEMO_C_PLACE.JBI"

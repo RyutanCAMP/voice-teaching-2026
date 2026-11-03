@@ -913,6 +913,40 @@ def _with_cycles(segments: list[dict], block: "jbi.RepeatBlock") -> list[dict]:
     return [{**seg, "cycle": block.cycle_of(seg["line_no"] - 1)} for seg in segments]
 
 
+def _beside_block(job: jbi.Job, block: "jbi.RepeatBlock") -> tuple[dict | None, dict | None]:
+    """区間のすぐ前の移動と、すぐ後の移動（行き先の位置・行番号・命令の行。ジョブの行のまま）。無ければ None。"""
+    moves = [i for i in job.instructions if api._is_move(i) and i.position]
+    pick = lambda i: {"position": i.position, "line_no": i.index + 1, "text": i.text}  # noqa: E731
+    entry = next((pick(i) for i in reversed(moves) if i.index < block.first_line), None)
+    exit_ = next((pick(i) for i in moves if i.index >= block.end_line), None)
+    return entry, exit_
+
+
+def _repeat_sequence(original: jbi.Job, ch: "jbi.RepeatProposal") -> dict:
+    """動きの並びのカード（［C00000（区間の前）］→［①］［②］［③ 追加］→［C00004（区間の後）］）と差分の要約の材料。
+    すべて変更前後のジョブと区間（RepeatBlock）から作る。位置の意味（待機など）は決めつけない。
+    name は区間の名前（今は target と同じ。人が教えた意味の名前を、あとで差し込めるように別に持つ）。"""
+    def side(job: jbi.Job, block: "jbi.RepeatBlock") -> dict:
+        entry, exit_ = _beside_block(job, block)
+        return {"cycles": list(range(1, block.count + 1)), "entry": entry, "exit": exit_}
+    by_line = {i.index: i for i in ch.new_job.instructions}
+    added_ins = [by_line.get(n) for n, _ in ch.added]
+    if any(i is None for i in added_ins):
+        added_ins = []  # 足した行が命令として読めない（ありえないはず）：要約は出さない
+    parts = []
+    if added_ins:
+        only_movl = all(i.command == "MOVL" for i in added_ins)
+        parts.append(f"足した行：{len(added_ins)}行" + ("（直線移動だけ）" if only_movl else ""))
+        if set(ch.new_job.positions) == set(original.positions):
+            parts.append("新しい位置はありません")
+    return {
+        "target": ch.target, "name": ch.target,
+        "before": side(original, ch.block), "after": side(ch.new_job, ch.new_block),
+        "added": list(range(ch.before_count + 1, ch.after_count + 1)),
+        "summary": "。".join(parts),
+    }
+
+
 def _comparison_dict(c: Comparison, ch: jbi.ChangeProposal, s) -> dict:
     if ch.kind == "repeat":
         after, before = api.figure_data(ch.new_job), api.figure_data(s.original)
@@ -929,6 +963,7 @@ def _comparison_dict(c: Comparison, ch: jbi.ChangeProposal, s) -> dict:
             "before_segments": _with_cycles(before["segments"], ch.block),
             "after_segments": _with_cycles(after["segments"], ch.new_block),
             "after_positions": after["positions"], "moved": None, "before_xyz": None, "after_xyz": None,
+            "sequence": _repeat_sequence(s.original, ch),  # 動きの並びのカード・差分の要約（feat/demo-3d）
         }
     d = {
         "kind": c.kind, "target": c.target, "line_no": c.line_number,

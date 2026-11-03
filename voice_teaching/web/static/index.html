@@ -59,6 +59,8 @@
   <section id="figure-panel" class="stage" aria-label="位置の図">
     <div class="stage-head">
       <span id="file-name" class="file-name"></span>
+      <!-- 再生中の「いま：24行目 MOVL C00001 V=150.0（2回目）」。サーバーの区間の線の文字だけ。図の点に重ねない（図の上の帯に出す） -->
+      <div id="play-now" class="play-now" aria-live="polite" hidden></div>
       <button type="button" id="view-reset" class="link small" hidden>視点を戻す</button>
       <div class="view-tabs" role="tablist" aria-label="図の向き">
         <button type="button" class="view-tab" data-view="3d" role="tab" title="ドラッグで回す・ホイールで拡大縮小">3D</button>
@@ -70,23 +72,43 @@
     <!-- 上下の向きの、ロボット名と確認した人・日時（CHECKER_030 S30-1）。マウスを重ねなくても常に見せる。文は highlight.js の updownDetail -->
     <p id="updown-detail" class="updown updown-detail" hidden></p>
     <p id="figure-message" class="warn" hidden></p>
-    <div id="fig-3d" class="fig fig-main fig-3d"></div>
-    <div id="fig-main" class="fig fig-main"></div>
+    <div class="fig-wrap">
+      <div id="fig-3d" class="fig fig-main fig-3d"></div>
+      <div id="fig-main" class="fig fig-main"></div>
+    </div>
+    <!-- 再生の操作は図の外（図の下の段）。図の中の文字（点の名前・回数の印）を隠さない。比べる再生は、回数の変更の候補があるときだけ -->
     <div class="play-row">
-      <button type="button" id="play-button" class="play" disabled aria-label="経路を再生">▶</button>
-      <div class="play-text">
-        <!-- 区間の種類（CHECKER_026 S-MOVJ）。MOVJ・目安の区間は、そのジョブにあるときだけ出す -->
-        <div id="legend-kinds" class="legend kinds" hidden>
-          <span class="lg movl">MOVL：直線移動</span>
-          <span class="lg movj" id="legend-movj" hidden title="関節移動（MOVJ）：実際の通り道は直線ではありません">MOVJ：関節移動（点線は順番だけ。実際の通り道ではありません）</span>
-          <span class="lg other" id="legend-other" hidden>破線：直線とは限りません（目安）</span>
-        </div>
-        <div id="legend" class="legend" hidden>
-          <span class="lg before">変更前</span>
-          <span class="lg after" id="legend-after">変更後</span>
-          <span class="lg stopped" id="legend-stopped" hidden>灰色の点線＝止まった候補（承認できません）</span>
-        </div>
-        <span id="play-status" class="play-status" aria-live="polite"></span>
+      <button type="button" id="play-button" class="play" disabled aria-label="はじめから再生" title="はじめから再生">▶</button>
+      <div class="play-controls" role="group" aria-label="再生の操作">
+        <button type="button" id="play-pause" class="small" disabled>一時停止</button>
+        <button type="button" id="play-step" class="small" disabled title="今の区間を終わりまで進めて止める（終わったあとは、はじめから）">1つ進む</button>
+        <button type="button" id="play-stop" class="small" disabled>止める</button>
+      </div>
+      <span id="play-status" class="play-status" aria-live="polite"></span>
+      <!-- 回数の変更の候補があるときだけ出す（候補が無ければ出さない） -->
+      <div id="play-compare" class="play-compare" role="group" aria-label="変更前と変更後を比べる" hidden>
+        <button type="button" id="play-before" class="small" aria-pressed="false">変更前を再生</button>
+        <button type="button" id="play-after" class="small" aria-pressed="false">変更後を再生</button>
+      </div>
+    </div>
+    <!-- 動きの並び（回数の変更の候補があるときだけ）。区間の前後は位置の番号だけ（意味は決めつけない）。数はサーバーのまま -->
+    <div id="play-seq" class="play-seq" hidden>
+      <span id="seq-side" class="seq-side"></span>
+      <div id="seq-chips" class="seq-chips"></div>
+      <div id="seq-tally" class="seq-tally" aria-live="polite"></div>
+      <p id="seq-summary" class="seq-summary"></p>
+    </div>
+    <div class="play-text">
+      <!-- 区間の種類（CHECKER_026 S-MOVJ）。MOVJ・目安の区間は、そのジョブにあるときだけ出す -->
+      <div id="legend-kinds" class="legend kinds" hidden>
+        <span class="lg movl">MOVL：直線移動</span>
+        <span class="lg movj" id="legend-movj" hidden title="関節移動（MOVJ）：実際の通り道は直線ではありません">MOVJ：関節移動（点線は順番だけ。実際の通り道ではありません）</span>
+        <span class="lg other" id="legend-other" hidden>破線：直線とは限りません（目安）</span>
+      </div>
+      <div id="legend" class="legend" hidden>
+        <span class="lg before">変更前</span>
+        <span class="lg after" id="legend-after">変更後</span>
+        <span class="lg stopped" id="legend-stopped" hidden>灰色の点線＝止まった候補（承認できません）</span>
       </div>
     </div>
     <p class="fine figure-notes"><span id="play-note">点を命令の順に直線で結んだ目安です。ロボット本体の動きではありません。</span> <span id="view3d-note">3D はジョブの X・Y・Z をそのまま点で描いたもので、ロボット本体・関節は描いていません。動作や干渉を保証するシミュレーターではありません。</span> <span id="figure-note">この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。参考表示であり、実際のロボットの動きではありません。</span></p>
