@@ -464,6 +464,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             pg4.close()
 
             check_ux_polish(b, url, check, shots)
+            check_dialog(b, check, shots, errors)
 
             # SpeechRecognition が無いブラウザー
             pg2 = b.new_page()
@@ -480,6 +481,224 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
         srv.server_close()
     check(not errors, f"画面のエラー：{errors or 'なし'}")
     return fails
+
+
+class CountingInterpreter:
+    """モックを包み、解釈の係が呼ばれた回数を数える（会話の確認用。本物の Claude は呼ばない）。"""
+
+    def __init__(self):
+        from voice_teaching.claude_interpreter import MockInterpreter
+        self.inner = MockInterpreter()
+        self.kind, self.model, self.notice = self.inner.kind, self.inner.model, self.inner.notice
+        self.locator_label = self.inner.locator_label
+        self.decides = 0
+        self.locates = 0
+
+    def decide(self, *a, **k):
+        self.decides += 1
+        return self.inner.decide(*a, **k)
+
+    def locate(self, *a, **k):
+        self.locates += 1
+        return self.inner.locate(*a, **k)
+
+
+def check_dialog(browser, check, shots: Path | None, errors: list) -> None:
+    """Claude との会話（モック）：唐川さんの会話・くり返しの2択・6つの方向・承認待ちの候補・途中の打ち消し・合成でないジョブ。
+
+    この確認だけ、呼ばれた回数を数える解釈の係でサーバーを別に立てる（本物の Claude は呼ばない）。
+    """
+    import base64
+
+    from voice_teaching.web import server
+
+    interp = CountingInterpreter()
+    srv = server.make_server(port=0, interpreter=interp)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+
+    def shot(page, name):
+        if shots is not None:
+            shots.mkdir(parents=True, exist_ok=True)
+            page.screenshot(path=str(shots / name))
+
+    def send(page, text):
+        page.fill("#text-input", text)
+        page.click("#text-send")
+
+    def bubbles(page):
+        return page.eval_on_selector_all("#dialog-turns li", "els => els.map(e => [e.querySelector('.who').textContent, e.querySelector('.said').textContent])")
+
+    def labels(page):
+        return [t.strip() for t in page.locator("#dialog-choices button").all_inner_texts()]
+
+    def last_said(page):
+        b = bubbles(page)
+        return b[-1][1] if b else ""
+
+    def watch(page):
+        page.on("pageerror", lambda e: errors.append(f"pageerror（会話）: {e}"))
+        page.on("console", lambda m: errors.append(f"console（会話） {m.type}: {m.text}") if m.type == "error" else None)
+
+    try:
+        # ---- 1. 唐川さんの会話：置くところ → そうそう → 3mm → 方向のボタン → 確認表示 → ボタンの承認 ----
+        ctx = browser.new_context(viewport={"width": 1280, "height": 720}, bypass_csp=True)
+        pg = ctx.new_page()
+        watch(pg)
+        pg.add_init_script(FAKE_RECOGNITION)
+        pg.goto(url)
+        pg.click("#sample-button")
+        pg.wait_for_selector("#job-area:not([hidden])")
+        check(pg.is_visible("#talk-first"), "会話：ステップ2に「位置を選ばずに話す」がある")
+        pg.click("#talk-first")
+        until(pg, lambda: pg.get_attribute("#step-3", "aria-current") == "step")
+        check(pg.inner_text("#voice-position strong") == "位置は未選択" and pg.is_hidden("#dialog-panel"),
+              "会話：位置を選ばずにステップ3へ進める（会話の欄は、まだ出さない）")
+        send(pg, "置くところを少し手前にして")
+        until(pg, lambda: pg.is_visible("#dialog-panel") and len(bubbles(pg)) >= 2)
+        b = bubbles(pg)
+        ev = pg.inner_text("#dialog-evidence")
+        check(b[0] == ["人", "置くところを少し手前にして"] and b[1] == ["モック（テスト用）", "「置くところ」は C00005 のことでしょうか？"],
+              f"会話：人の吹き出しと、モックの問いかけ（位置の候補）：{b}")
+        check("モック（テスト用）" in pg.inner_text("#dialog-engine") and "本物の Claude ではありません" in pg.inner_text("#dialog-engine"),
+              f"会話：モックであることを、会話の欄にはっきり出す：{pg.inner_text('#dialog-engine')}")
+        check("30行目 MOVL C00005 V=50.0 PL=0" in ev and "31行目 TIMER T=3.00" in ev and "（待つ）" in ev
+              and "32行目 DOUT OT#(1) OFF" in ev and "（信号を切る）" in ev and "推定・未確定" in ev
+              and "離す" not in ev and "つかむ" not in ev,
+              "会話：根拠のカードは、プログラムが命令の行から作った文（待つ・信号を切る。意味は断定しない）")
+        check(labels(pg) == ["C00005 です", "ほかの位置"], f"会話：選択肢は［C00005 です］［ほかの位置］：{labels(pg)}")
+        check(pg.locator('#fig-3d g.pt3.cand[data-names~="C00005"] circle.cand-ring').count() == 1
+              and pg.locator("#fig-3d g.pt3.cand").count() == 1,
+              "会話：3D で候補の点（C00005）だけを輪で光らせる（選んではいない）")
+        check(pg.get_attribute("#step-3", "aria-current") == "step" and pg.is_hidden("#reply-message")
+              and pg.inner_text("#next-action") == "この位置で合っていますか？",
+              "会話：まだ変更の候補は無い（ステップ3）。見出しは「この位置で合っていますか？」")
+        check(interp.locates == 1 and interp.decides == 0, f"会話：位置の候補を1回だけ頼む（{interp.locates}・{interp.decides}）")
+        shot(pg, "d1_locate.png")
+
+        send(pg, "そうそう")
+        until(pg, lambda: pg.inner_text("#voice-position strong") == "C00005")
+        check(last_said(pg).startswith("どちらの方向（X・Y・Z の＋−）に、何mm動かしますか？") and "「手前」" in last_said(pg),
+              f"会話：「そうそう」で C00005 を選び、方向と量を聞く（手前は軸にしない）：{last_said(pg)}")
+        check(labels(pg) == ["X＋", "X−", "Y＋", "Y−", "Z＋（上）", "Z−（下）"],
+              f"会話：方向は X・Y・Z の＋−の6つのボタン：{labels(pg)}")
+        check(pg.is_visible("#dialog-estimated") and "推定（未確定）" in pg.inner_text("#dialog-estimated"),
+              "会話：選んだ位置に「推定（未確定）」と残す")
+        shot(pg, "d2_ask_move.png")
+
+        send(pg, "3mm")
+        until(pg, lambda: labels(pg) and labels(pg)[0] == "X＋ 3mm")
+        check(labels(pg) == ["X＋ 3mm", "X− 3mm", "Y＋ 3mm", "Y− 3mm", "Z＋（上）3mm", "Z−（下）3mm"]
+              and "3mm ですね" in last_said(pg) and pg.get_attribute("#step-3", "aria-current") == "step",
+              f"会話：「3mm」のあとも方向が無いので、量つきの6つのボタンで聞く：{labels(pg)}")
+        check(interp.decides == 0, "会話：方向が決まるまで、変更は頼まない")
+        shot(pg, "d3_amount.png")
+
+        pg.locator("#dialog-choices button", has_text="Y− 3mm").click()
+        until(pg, lambda: pg.get_attribute("#step-4", "aria-current") == "step")
+        cv = pg.inner_text("#candidate-view")
+        check("Y方向に −3.000mm" in cv and "C00005をYのマイナス3ミリ" in cv and "推定（未確定）" in cv,
+              f"会話：ボタンで方向を選ぶと、決まった文を今の流れに通して変更の候補になる：{cv[:80]}")
+        check(pg.is_visible("#dialog-panel") and last_said(pg).startswith("変更前後を表示します。これでよろしいですか？"),
+              "会話：最後に「変更前後を表示します。これでよろしいですか？」")
+        check(interp.decides == 1, f"会話：変更の解釈は1回だけ（{interp.decides}）")
+        pg.wait_for_timeout(300)
+        shot(pg, "d4_candidate.png")
+        pg.click("#open-confirm")
+        pg.wait_for_selector("#confirm-overlay:not([hidden])")
+        check("推定で選んだ位置：C00005" in pg.inner_text("#confirm-xyz") and pg.is_visible("#approve-button"),
+              "会話：確認表示にも「推定で選んだ位置」を出す。承認は確認表示のボタンだけ")
+        shot(pg, "d5_confirm.png")
+        pg.fill("#approver-name", "テスト")
+        pg.click("#approve-button")
+        until(pg, lambda: pg.is_visible("#approval-status"))
+        check(True, "会話：承認ボタンで承認できる（声では承認しない）")
+
+        # 承認待ち（承認済み・未出力）の候補がある間：新しい移動の指示は、解釈の係を呼ぶ前に断る
+        sid = next(iter(srv.flow._entries))
+        before = interp.decides
+        r = pg.request.post(url + "api/hear", data={"session_id": sid, "text": "この位置を上に2mm", "source": "text"}).json()
+        r2 = pg.request.post(url + "api/hear", data={"session_id": sid, "text": "置くところを上に2mm", "source": "text"}).json()
+        check(r["status"] == "stop" and r["message"].startswith("承認待ちの変更候補があります")
+              and r2["status"] == "stop" and r2["message"].startswith("承認待ちの変更候補があります")
+              and interp.decides == before and interp.locates == 1,
+              f"承認待ちの候補があるとき、新しい移動の指示は解釈の係を呼ばずに断る（{interp.decides - before}回）")
+        ctx.close()
+
+        # ---- 2. 途中の打ち消し（「そうじゃなくて」）→ 止まって同じ所。ほかの位置 → 手で選ぶ → 6つの方向 ----
+        pg = browser.new_page(viewport={"width": 1280, "height": 720})
+        watch(pg)
+        pg.add_init_script(FAKE_RECOGNITION)
+        pg.goto(url)
+        pg.click("#sample-button")
+        pg.wait_for_selector("#job-area:not([hidden])")
+        pg.click("#talk-first")
+        send(pg, "置くところを少し手前にして")
+        until(pg, lambda: labels(pg) == ["C00005 です", "ほかの位置"])
+        send(pg, "そうじゃなくて")
+        until(pg, lambda: "打ち消し" in last_said(pg))
+        check(pg.inner_text("#voice-position strong") == "位置は未選択" and labels(pg) == ["C00005 です", "ほかの位置"]
+              and pg.get_attribute("#step-3", "aria-current") == "step",
+              "会話：途中の「そうじゃなくて」は止まり、位置は選ばれず、同じ問いのまま")
+        shot(pg, "d6_negation.png")
+        pg.locator("#dialog-choices button", has_text="ほかの位置").click()
+        until(pg, lambda: pg.get_attribute("#step-2", "aria-current") == "step")
+        check(pg.inner_text("#next-action") == "位置を選んでください" and pg.is_visible("#dialog-panel"),
+              "会話：［ほかの位置］で、手で位置を選ぶステップに戻る")
+        pg.locator("#position-chips button", has_text="C00004").click()
+        until(pg, lambda: pg.inner_text("#voice-position strong") == "C00004")
+        check(labels(pg) == ["X＋", "X−", "Y＋", "Y−", "Z＋（上）", "Z−（下）"] and pg.is_hidden("#dialog-estimated"),
+              f"会話：手で選んだ位置でも、方向は6つのボタン（推定の印は付けない）：{labels(pg)}")
+        send(pg, "右に3mm")
+        until(pg, lambda: "「右」が X・Y・Z のどれに当たるか" in last_said(pg))
+        check(pg.get_attribute("#step-3", "aria-current") == "step" and len(labels(pg)) == 6,
+              "会話：「右に3mm」は軸にしない（6つのボタンで聞き直す）")
+        shot(pg, "d7_six_directions.png")
+        pg.close()
+
+        # ---- 3. くり返しの2択（「2回」）→ どちらでも、動きは足せないと伝える。候補なし・解釈の係も呼ばない ----
+        pg = browser.new_page(viewport={"width": 1280, "height": 720})
+        watch(pg)
+        pg.add_init_script(FAKE_RECOGNITION)
+        pg.goto(url)
+        pg.click("#sample-button")
+        pg.wait_for_selector("#job-area:not([hidden])")
+        pg.locator("#position-chips button", has_text="C00001").click()
+        until(pg, lambda: pg.inner_text("#voice-position strong") == "C00001")
+        before = (interp.decides, interp.locates)
+        send(pg, "C00001からC00002を2回移動させて")
+        until(pg, lambda: pg.is_visible("#reply-message button.choice"))
+        rc = [t.strip() for t in pg.locator("#reply-message button.choice").all_inner_texts()]
+        check(rc == ["2回の移動", "2往復"], f"くり返し：「2回」は［2回の移動］［2往復］で聞く：{rc}")
+        shot(pg, "d8_repeat.png")
+        pg.locator("#reply-message button.choice", has_text="2往復").click()
+        until(pg, lambda: "動きの追加・繰り返しはできません" in pg.inner_text("#reply-message"))
+        check(pg.get_attribute("#step-3", "aria-current") == "step" and (interp.decides, interp.locates) == before,
+              "くり返し：どちらを選んでも、動きは足せないと伝える（候補なし・解釈の係を呼ばない）")
+        pg.close()
+
+        # ---- 4. 合成でないジョブ：Claude（モック）に頼まず、手で選んでもらう ----
+        ctx = browser.new_context(viewport={"width": 1280, "height": 720}, bypass_csp=True)
+        pg = ctx.new_page()
+        watch(pg)
+        pg.add_init_script(FAKE_RECOGNITION)
+        pg.goto(url)
+        data = (REPO / "samples/dummy/DEMO_C_PLACE.JBI").read_bytes().replace(b"NOT A REAL ROBOT JOB", b"NOT A REAL ROBOT JOB.")
+        dt = pg.evaluate_handle(DROP_FILE, ["MY_JOB.JBI", base64.b64encode(data).decode("ascii")])
+        pg.dispatch_event("#drop-zone", "drop", {"dataTransfer": dt})
+        pg.wait_for_selector("#job-area:not([hidden])")
+        pg.click("#talk-first")
+        before = interp.locates
+        send(pg, "置くところを少し手前にして")
+        until(pg, lambda: pg.get_attribute("#step-2", "aria-current") == "step" and pg.is_visible("#dialog-panel"))
+        check("架空のサンプルではない" in last_said(pg) and interp.locates == before
+              and pg.inner_text("#next-action") == "位置を選んでください" and pg.is_hidden("#candidate-panel"),
+              f"合成でないジョブ：中身を送らず（呼ばない）、位置を手で選んでもらう：{last_said(pg)[:40]}")
+        shot(pg, "d9_not_synthetic.png")
+        ctx.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
 
 
 DROP_FILE = """

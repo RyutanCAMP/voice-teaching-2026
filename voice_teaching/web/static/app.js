@@ -27,6 +27,7 @@ const state = {
   liveAt: 0,            // マイクを ON にした・最後に話した時刻（長く放っておいたら OFF）
   unknownWords: [],     // 最後の指示で、プログラムが読めなかった言葉（facts.unknown_words。表示で目立たせるだけ）
   needChrome: false,    // Chrome 以外で声を文字にできなかった（アドレスのコピーを目立たせる）
+  talkFirst: false,     // 位置を選ばずに話す（「置くところを…」から Claude との会話を始める）
 };
 const SAMPLE_NAME = "DEMO_C_PLACE.JBI";  // 「サンプルで試す」で読む架空のジョブ（サーバーが決まった1つを読む）
 
@@ -141,6 +142,7 @@ function applyLoad(res, fileName) {
   state.st = res.state;
   state.figView = res.view.positions.some((p) => p.xyz) ? "3d" : bestView(res.view.positions);
   state.pickAgain = false;
+  state.talkFirst = false;
   $("heard-text").textContent = "（まだありません）";
   $("facts-view").textContent = "（まだありません）";
   $("reply-message").hidden = true;
@@ -213,7 +215,7 @@ function renderState() {
   $("interp-badge").classList.toggle("claude", claude);
   $("interp-badge").title = st.mock_notice;
   $("interp-badge").hidden = false;
-  $("voice-position").replaceChildren(el("strong", {}, st.selected || ""), el("span", {}, "変える"));
+  $("voice-position").replaceChildren(el("strong", {}, st.selected || "位置は未選択"), el("span", {}, st.selected ? "変える" : "選ぶ"));
   $("out-dir").textContent = st.out_dir;
   renderChips();
   renderCandidate();
@@ -229,8 +231,17 @@ function currentStep() {
   const st = state.st;
   if (!state.sessionId || !st) return 1;
   if (st.candidate) return 4;
-  if (!st.selected || state.pickAgain) return 2;
+  const ds = dialogStep();
+  if (ds === "pick" || state.pickAgain) return 2;  // 会話の途中でも、位置は人が選ぶ
+  if (ds === "confirm_position" || ds === "ask_move") return 3;
+  if (!st.selected && !state.talkFirst) return 2;
   return 3;
+}
+
+// 会話の今の段（サーバーの state.dialog.step）。無ければ null
+function dialogStep() {
+  const d = state.st && state.st.dialog;
+  return d && d.step ? d.step : null;
 }
 
 function voiceMode() {
@@ -251,6 +262,7 @@ function renderSteps() {
   for (const [n, id] of Object.entries(cards)) {
     $(id).hidden = Number(n) !== step;
   }
+  renderDialog();
   // 次に押すものを1つだけ目立たせる
   for (const id of ["drop-zone", "mic-button", "voice-stop", "consent-yes", "text-send", "open-confirm", "undo-button", "export-button", "copy-url"]) {
     $(id).classList.remove("primary");
@@ -261,7 +273,13 @@ function renderSteps() {
     text = "JOBファイルをドロップしてください";
     primary = "drop-zone";
   } else if (step === 2) {
-    text = "点か番号を押してください";
+    text = dialogStep() === "pick" ? "位置を選んでください" : "点か番号を押してください";
+  } else if (step === 3 && dialogStep()) {
+    // Claude との会話の途中：選択肢はどれも同じ重さ（目立たせない）。声でも答えられる
+    text = dialogStep() === "confirm_position" ? "この位置で合っていますか？" : "方向と量を教えてください";
+    if (recording()) primary = "voice-stop";
+    else if ($("text-input").value.trim()) primary = "text-send";
+    else if (!st.dialog.choices.length) primary = $("voice-controls").hidden ? "text-send" : "mic-button";
   } else if (step === 3) {
     // 聞き返しの間は、見出しも聞き返しに合わせる（選択肢があれば「どちらですか？」）
     const reply = $("reply-message");
@@ -342,6 +360,13 @@ $("voice-position").addEventListener("click", () => {
   state.pickAgain = true;
   renderSteps();
 });
+// 位置を選ばずに話す（「置くところを少し手前にして」から、Claude との会話を始める）
+$("talk-first").addEventListener("click", () => {
+  if (recording()) return;
+  state.talkFirst = true;
+  state.pickAgain = false;
+  renderSteps();
+});
 
 // ---- 詳細表示（同じ画面の中で開く・閉じる） ----
 $("engineer-toggle").addEventListener("click", () => {
@@ -379,7 +404,11 @@ function renderChips() {
 function applyResult(res, showOk = true) {
   if (res.state) state.st = res.state;
   state.resumeArmed = true;  // 結果が出た：マイクが ON なら、また聞き始めてよい
-  if (res.ok === false) {
+  if (res.dialog && res.ok !== false && !(res.choices && res.choices.length)) {
+    // 会話の1回分：文は会話のカード（吹き出し）に出す。下の返事の欄には重ねて出さない
+    $("reply-message").hidden = true;
+    $("reply-message").replaceChildren();
+  } else if (res.ok === false) {
     showReply("stop", res.error || "理由が分かりません");
   } else if (res.status && res.status !== "ok") {
     showReply(res.status, res.message, res.choices);
@@ -469,6 +498,71 @@ function renderFacts(f) {
     ...rows.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)])));
 }
 
+// ---- Claude との会話（吹き出し・位置の候補の根拠・選択肢）。文はすべてテキストのノードで作る（HTML の文字列は使わない） ----
+// 位置の候補・根拠の行・選択肢・決まった文は、サーバーのプログラムが作ったもの。Claude の文はそのまま出さない。
+// 選択肢を押すと /api/dialog に id と今の番号（turn）を送るだけ。承認・出力は呼ばない（承認は確認表示のボタンだけ）。
+function estimatedLine(est) {
+  return el("p", { class: "cand-est" }, `推定で選んだ位置：${est.position}（「${est.word}」・${est.label}）`);
+}
+
+function renderDialog() {
+  const st = state.st;
+  const d = st && st.dialog;
+  const panel = $("dialog-panel");
+  const step = currentStep();
+  // 会話の途中は、会話のカードを見出しのすぐ下に出し、マイクの欄を小さくする（表示だけ）
+  document.body.classList.toggle("in-dialog", !!(d && d.step) && step !== 4 && step !== 1);
+  $("talk-first").hidden = !!(d && d.step);  // 会話の途中（手で選ぶ段など）は出さない
+  // 会話の途中（ステップ2〜3）と、会話のあとに候補ができたとき（ステップ4）だけ出す
+  if (!d || !d.turns.length || step === 1 || (!d.step && step !== 4)) {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  panel.classList.toggle("done", !d.step);
+  // 会話が終わって候補ができたあとは、最後のやり取りだけを小さく残す
+  const turns = d.step ? d.turns.slice(-6) : d.turns.slice(-2);
+  const mock = d.locator.kind !== "claude";
+  $("dialog-engine").textContent = mock ? "モック（テスト用）・本物の Claude ではありません" : d.locator.label;
+  $("dialog-engine").classList.toggle("mock", mock);
+  $("dialog-turns").replaceChildren(...turns.map((t) => {
+    const cls = t.who === "人" ? "human" : t.who === "アプリ" ? "app" : "ai";
+    return el("li", { class: "bubble " + cls + (t.kind === "stop" ? " stop" : "") },
+      el("span", { class: "who" }, t.who), el("span", { class: "said" }, t.text));
+  }));
+  const list = $("dialog-turns");
+  list.scrollTop = list.scrollHeight;
+  // 位置の候補の根拠（プログラムが命令の行から作った文）
+  $("dialog-evidence").replaceChildren(...(d.step === "confirm_position" ? d.candidates : []).map((c) => {
+    const tag = c.confirmed_by_frame ? "FRAME の名前（確定）" : mock ? "モックの規則による推定・未確定" : "Claude の推定・未確定";
+    return el("div", { class: "ev-card" },
+      el("p", { class: "ev-head" }, `「${d.word}」の候補（${tag}）`),
+      el("p", { class: "ev-pos" }, c.position),
+      el("ul", { class: "ev-lines" }, ...c.evidence.map((x) =>
+        el("li", {}, el("code", {}, `${x.line_no}行目 ${x.text}`), x.note ? el("span", { class: "ev-note" }, `（${x.note}）`) : null))));
+  }));
+  $("dialog-estimated").hidden = !d.estimated || !d.step;
+  $("dialog-estimated").textContent = d.estimated
+    ? `推定で選んだ位置：${d.estimated.position}（「${d.estimated.word}」・${d.estimated.label}）` : "";
+  // 選択肢（プログラムが作ったもの。どれも同じ重さ）
+  $("dialog-choices").replaceChildren(...d.choices.map((c) => {
+    const b = el("button", { type: "button", class: "choice dlg", "data-id": c.id }, c.label);
+    b.disabled = recording();
+    b.addEventListener("click", () => chooseDialog(c.id, d.turn));
+    return b;
+  }));
+  $("dialog-choices").hidden = !d.choices.length;
+  $("dialog-note").hidden = !d.step;
+}
+
+async function chooseDialog(id, turn) {
+  if (!state.sessionId || recording()) return;
+  for (const x of $("dialog-choices").querySelectorAll("button")) x.disabled = true;  // 2回押しても1回だけ送る
+  const res = await postJson("/api/dialog", { session_id: state.sessionId, choice: id, turn: turn });
+  applyResult(res, false);
+  if (res.candidate_made && state.st && state.st.candidate) startPlayback();
+}
+
 // ---- 4. 変更候補（要点だけをカードに。詳しくは詳細表示） ----
 function renderCandidate() {
   const st = state.st;
@@ -486,6 +580,7 @@ function renderCandidate() {
   const parts = [];
   if (c.blocked_reason) parts.push(friendly("blocked", c.blocked_reason));
   parts.push(el("p", { class: "cand-pos" }, pos));
+  if (c.estimated) parts.push(estimatedLine(c.estimated));
   parts.push(el("p", { class: "cand-big" }, displayMinus(`${axis}方向に ${c.delta}mm`) + dirName(axis, c.delta)));
   parts.push(changeLine(axis, c));
   if (c.heard) parts.push(el("p", { class: "cand-heard" }, "指示：「", ...heardNodes(c.heard), "」"));
@@ -574,6 +669,7 @@ function openConfirm() {
     el("p", { class: "cand-big" }, displayMinus(`${cc.target.split(" ")[0]}：${ax}方向に ${cc.delta}mm`) + dirName(ax, cc.delta)),
     changeLine(ax, cc),
     cc.heard ? el("p", { class: "cand-heard" }, "指示：「", ...heardNodes(cc.heard), "」") : "",
+    cc.estimated ? estimatedLine(cc.estimated) : "",
     cc.before_xyz ? xyzView(cc) : "");
   if (state.view.positions.some((p) => p.xyz)) {
     confirm3d.reset();
@@ -764,6 +860,8 @@ function data3d() {
     delta_label: c ? `${c.target.split(" ")[1]} ${c.delta}mm` : "",
     stopped: !!(c && c.blocked_reason),  // 止まった候補：変更後をオレンジにしない
     blocked: Object.fromEntries(v.positions.filter((p) => !p.shift_check.ok).map((p) => [p.name, p.shift_check.reason])),
+    // Claude（モック）が出した位置の候補（確かめている間だけ光らせる。選んではいない）
+    candidates: dialogStep() === "confirm_position" ? state.st.dialog.candidates.map((x) => x.position) : [],
   };
 }
 

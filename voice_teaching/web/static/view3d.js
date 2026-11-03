@@ -147,6 +147,12 @@ export class View3D {
         "stroke-width": 1, "stroke-dasharray": "2 3" }), svg.firstChild.nextSibling);
       el.append(svgEl("circle", { cx: x, cy: y, r: 16, fill: "transparent" }));  // 押しやすい大きさ
       if (sel) el.append(svgEl("circle", { cx: x, cy: y, r: 12, fill: "rgba(10,132,255,0.15)", stroke: "#0a84ff", "stroke-width": 2 }));
+      // 会話で Claude（モック）が出した位置の候補：選んではいないので、選んだ点（青）と違う色の点線の輪で示す
+      if (g.names.some((n) => (d.candidates || []).includes(n))) {
+        el.classList.add("cand");
+        el.append(svgEl("circle", { cx: x, cy: y, r: 19, fill: "rgba(94,92,230,0.10)", stroke: "#5e5ce6",
+          "stroke-width": 2.5, "stroke-dasharray": "5 4", class: "cand-ring" }));
+      }
       el.append(svgEl("circle", { cx: x, cy: y, r: 6, fill: isMoved ? "#a1a6ad" : (sel ? "#0a84ff" : "#1d1d1f") }));
       // 動かす点の名前は、変更後の点の横に1つだけ出す（変更前の名前と重ならないように）
       const shownNames = isMoved && c ? g.names.filter((n) => n !== moved) : g.names;

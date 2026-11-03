@@ -770,3 +770,23 @@ def test_http_dialog_route(tmp_path, monkeypatch):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+# ======================================================================
+# 12. 画面（JS・HTML）：会話のボタンは /api/dialog だけ。承認は呼ばない。文はテキストのノード
+# ======================================================================
+STATIC = ROOT / "voice_teaching" / "web" / "static"
+
+
+def test_dialog_ui_only_posts_choices_and_never_approves():
+    js = (STATIC / "app.js").read_text(encoding="utf-8")
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    assert js.count('"/api/dialog"') == 1
+    part = js[js.index("function renderDialog()"):js.index("// ---- 4. 変更候補")]
+    for w in ("/api/approve", "/api/export", "innerHTML", "insertAdjacentHTML", "outerHTML"):
+        assert w not in part, w
+    assert "モック（テスト用）" in part  # モックのときは、本物の Claude ではないと出す
+    for i in ("dialog-panel", "dialog-turns", "dialog-evidence", "dialog-choices", "dialog-engine", "talk-first"):
+        assert f'id="{i}"' in html, i
+    for w in ASSERTIVE:
+        assert w not in html.split('id="dialog-panel"')[1].split("</section>")[0], w
