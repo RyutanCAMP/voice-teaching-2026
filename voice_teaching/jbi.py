@@ -460,11 +460,10 @@ class Job:
 
 # ---- 作業の回数の変更（docs/REPEAT_COUNT_DESIGN.md） ----
 # 区間（1サイクル）がジョブの中に続けてそのまま N 回書かれている形だけを数える。JUMP・ラベル・カウンタの繰り返しは扱わない。
-# 今が2回以上のときだけ、+1 回、合計 1〜5 回（デモの範囲）。足すのは最後の回の直後に1回分（1回目と同じバイト列）だけ。
-# 減らす変更は、このプロトタイプでは扱わない（唐川さんの決定 2026-11-03）。
+# このプロトタイプでは、今が2回の区間を合計3回にする変更だけを扱う（CURRENT_DECISIONS・唐川さんの決定 2026-11-03）。
+# 足すのは最後の回の直後に1回分（1回目と同じバイト列）だけ。減らす変更は扱わない。
+# 将来、ほかの回数を扱うときは、専門家の枠で上限を決める（今は決めていないので止める）。
 # 変えるのは INST 部の命令の行の並びだけ（位置の値・ヘッダー・ほかの行は変えない。新しい位置は作らない）
-REPEAT_MIN_TOTAL = 1
-REPEAT_MAX_TOTAL = 5
 REPEAT_NOT_SAFETY = "検査を通ったことは、物理的な安全の保証ではありません"
 REPEAT_WARNINGS_ADD = (
     "同じ動きを1回ぶん足します。新しい位置・新しい移動の線は作りません",
@@ -475,6 +474,8 @@ REPEAT_WARNINGS_ADD = (
 REPEAT_SCOPE_NOTE = ("繰り返すのは移動の行だけです。信号（DOUT）や待ち時間（TIMER）を含む作業は、"
                      "このプロトタイプでは対象外です")
 REPEAT_DECREASE_MESSAGE = "減らす変更は、このプロトタイプでは扱いません"
+REPEAT_ONLY_MESSAGE = "このプロトタイプでは、2回から3回への変更だけを扱います"
+REPEAT_FROM, REPEAT_TO = 2, 3  # 扱う変更（今の回数 → 合計の回数）。これだけ
 _POS_NAME = re.compile(r"C[0-9]{5}")
 
 
@@ -529,9 +530,6 @@ def repeat_count_problem(current: int, total: object, target: str) -> str | None
     """今の回数 current から合計 total 回にしてよいか。だめなら理由の文、よければ None。"""
     if isinstance(total, bool) or not isinstance(total, int):
         return "回数が整数で決まっていないため、変更しません"
-    if not REPEAT_MIN_TOTAL <= total <= REPEAT_MAX_TOTAL:
-        return (f"合計の回数は {REPEAT_MIN_TOTAL}〜{REPEAT_MAX_TOTAL} 回だけを扱います（デモの範囲）。"
-                f"{total}回にはしません")
     if total == current:
         return f"{target} は今 {current} 回で、同じ回数のため、変更しません"
     if total < current:
@@ -539,8 +537,8 @@ def repeat_count_problem(current: int, total: object, target: str) -> str | None
     if current < 2:
         return (f"{target} は今 {current} 回です。回数は、今が2回以上のときだけ変えます"
                 "（1回から増やすと、区間と区間のつなぎの、新しい移動の線ができるため）。変更しません")
-    if total != current + 1:
-        return f"回数は1回ずつ（今の {current} 回から {current + 1}回）だけ増やします。{total}回にはしません"
+    if (current, total) != (REPEAT_FROM, REPEAT_TO):
+        return f"{target} は今 {current} 回です。{REPEAT_ONLY_MESSAGE}。{total}回にはしません"
     return None
 
 

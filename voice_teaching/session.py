@@ -271,12 +271,12 @@ class Session:
             return self._reply("ask", rc.add_message(target, n, k), facts=facts, choices=choices)
         total = n + 1 if req.one_more else req.total
         if req.said_count is not None and req.said_count != n:
-            # 言った今の回数がジョブと違う：言った向きが増やす向きで、押せば候補になるものだけを出す。無ければ止める
-            if total > req.said_count and ok(n + 1):
+            # 言った今の回数がジョブと違う（S-P2-1）：言った目標が、この区間で押せば先に進む回数のときだけ、その1択で聞く。
+            # 言った目標と違う回数は選択肢に出さない。ほかは止める（どう答えても止まるので聞き返さない）
+            if ok(total):
                 return self._reply("ask", rc.mismatch_message(target, n), facts=facts,
-                                   choices=((f"合計{n + 1}回にする", rc.canonical(start, end, n, n + 1)),))
-            why = jbi.REPEAT_DECREASE_MESSAGE if total < req.said_count else (
-                jbi.repeat_count_problem(n, total, target) or jbi.repeat_count_problem(n, n + 1, target) or "")
+                                   choices=((f"合計{total}回にする", rc.canonical(start, end, n, total)),))
+            why = jbi.REPEAT_DECREASE_MESSAGE if total < req.said_count else jbi.REPEAT_ONLY_MESSAGE
             return stop(f"このジョブでは、{target} は今 {n} 回です。{why}")
         why = jbi.repeat_count_problem(n, total, target)
         if why is not None:
@@ -288,14 +288,32 @@ class Session:
         self._range_turn += 1
         texts = tuple(_strip_ending(x) for x in block.cycle_lines)
         first, last = block.first_line + 1, block.first_line + block.cycle_len
+        side = self._side_lines(block)  # 区間のすぐ前後の DOUT・TIMER など（繰り返さない行。S-P2-4）
+        side_note = (f"区間のすぐ前・後ろに信号（DOUT）や待ち時間（TIMER）の行があります"
+                     f"（{'・'.join(f'{i}行目「{t}」' for i, t in side)}）。それらは繰り返しません") if side else None
         self.repeat_range = {
             "turn": self._range_turn, "start": start, "end": end, "target": target, "total": total, "count": n,
             "positions": list(block.positions), "cycle_lines": list(texts),
             "line_nos": list(range(first, last + 1)),
             "block_line_nos": list(range(first, block.end_line + 1)),
+            "cycles": _cycles(block),  # 各回の (最初の行, 最後の行)。1 から
             "yes_label": rc.RANGE_YES_LABEL, "no_label": rc.RANGE_NO_LABEL, "note": jbi.REPEAT_SCOPE_NOTE,
+            "side_note": side_note, "heading": rc.RANGE_HEADING,
         }
-        return self._reply("ask", rc.range_message(first, last, texts, n, block.end_line, total), facts=facts)
+        msg = rc.range_message(_cycles(block), texts, total)
+        return self._reply("ask", f"{msg}。{side_note}" if side_note else msg, facts=facts)
+
+    def _side_lines(self, block: "jbi.RepeatBlock") -> list[tuple[int, str]]:
+        """区間のすぐ前・すぐ後ろに続く DOUT・TIMER の行（1 から数えた行番号, 行）。繰り返さないことを知らせるため。"""
+        by = {ins.index: ins for ins in self._job.instructions}
+        out: list[tuple[int, str]] = []
+        for start, step in ((block.first_line - 1, -1), (block.end_line, 1)):
+            i, found = start, []
+            while 0 <= i < len(self._job.lines) and i in by and by[i].command in ("DOUT", "TIMER"):
+                found.append((i + 1, by[i].text))
+                i += step
+            out += sorted(found)
+        return out
 
     def forget_range(self) -> None:
         """範囲の確認を捨てる（新しい指示・位置の選び直し・元に戻す）。古いボタンを押しても候補にならない。"""
@@ -331,6 +349,7 @@ class Session:
 
     def explain_only(self, text: str, source: str = "text") -> Reply:
         """［説明です］（「〜します」の2択）：何もしない。候補・選択中の位置・元のジョブは変えない（CHECKER_026 M3）。"""
+        self.forget_range()  # 新しい操作：回数の変更の範囲の確認は捨てる（S-P2-2）
         self.forget_question()
         self._log("発話", f"{'音声' if source == 'voice' else '文字'}：{text}")
         return self._reply("ok", ut.EXPLAIN_REPLY)
@@ -367,6 +386,7 @@ class Session:
 
     # ---- 操作 ----
     def select(self, position: str) -> Reply:
+        self.forget_range()  # 位置の選択（ジョブに無い位置・形の違う番号を含む）：範囲の確認は捨てる（S-P2-2）
         name = ut.normalize_position(position) if isinstance(position, str) else None
         if name is None:
             return self._reply("stop", "位置番号の形が分かりません。C と5桁の数字で指定してください")
@@ -404,6 +424,7 @@ class Session:
         return self._accept(p, change, None)
 
     def compare(self) -> Reply:
+        self.forget_range()  # 比べる：新しい操作なので、範囲の確認は捨てる（S-P2-2）
         if self.candidate is None:
             return self._reply("stop", "比べる変更候補がありません")
         c = self._comparison()
@@ -531,6 +552,12 @@ class Session:
         self.log.append((kind, text))
 
 
+def _cycles(block: "jbi.RepeatBlock") -> list[tuple[int, int]]:
+    """各回の (最初の行, 最後の行)。1 から数える。"""
+    size = block.cycle_len
+    return [(block.first_line + k * size + 1, block.first_line + (k + 1) * size) for k in range(block.count)]
+
+
 def _strip_ending(line: str) -> str:
     return line.rstrip("\r\n")
 
@@ -540,7 +567,8 @@ def _repeat_comparison(ch: "jbi.RepeatProposal") -> Comparison:
     head = f"{ch.target} の作業を {ch.before_count}回 → {ch.after_count}回 にします"
     diff = tuple(("+", i + 1, t) for i, t in ch.added) + tuple(("-", i + 1, t) for i, t in ch.removed)
     how = "同じ動きを1回ぶん足します（新しい位置・新しい移動の線は作りません）。"
-    text = f"{head}。{how}これでいいですか？ 承認は画面のボタンで行います"
+    where = rc.ranges_text(_cycles(ch.block), tuple(_strip_ending(x) for x in ch.block.cycle_lines))
+    text = f"{head}（変更前の範囲 {where}）。{how}これでいいですか？ 承認は画面のボタンで行います"
     return Comparison(
         kind="repeat", target=ch.target, line_number=ch.line_index + 1, before_line="", after_line="",
         before_value=str(ch.before_count), after_value=str(ch.after_count),

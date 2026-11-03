@@ -343,6 +343,10 @@ function renderSteps() {
   } else {
     text = "出力しました";
   }
+  if (step === 3 && st && st.repeat_range && !recording() && !dialogStep()) {
+    text = st.repeat_range.heading;  // 回数の変更の範囲の確認：ボタン2つは同じ重さ（目立たせるボタンを作らない）
+    primary = null;
+  }
   $("next-action").textContent = text;
   if (primary) $(primary).classList.add("primary");
   renderHeard();
@@ -450,7 +454,6 @@ function applyResult(res, showOk = true) {
 function renderRepeatRange() {
   const rr = state.st && state.st.repeat_range;
   const box = $("reply-message");
-  for (const x of box.querySelectorAll(".range-choices, .range-note")) x.remove();
   if (!rr || box.hidden) return;
   const row = el("div", { class: "choices range-choices" });
   const send = async (choice) => {
@@ -466,8 +469,25 @@ function renderRepeatRange() {
   yes.addEventListener("click", () => send("yes"));
   no.addEventListener("click", () => send("no"));
   row.append(yes, no);
-  box.append(el("p", { class: "fine range-note" }, rr.note), row);
-  renderSteps();  // 見出し（どちらですか？）を、ボタンに合わせる
+  // デモで目に留まるように：見出し「この範囲を繰り返しますか？」、範囲（行番号と命令の行）を大きく、対象外の文は下に小さく。
+  // 文字・数はすべてサーバーの state.repeat_range のまま（ここでは作らない）。CSP のため大きさは CSSOM で入れる
+  const big = (node, px, weight) => { node.style.fontSize = `${px}px`; if (weight) node.style.fontWeight = weight; return node; };
+  const first = rr.line_nos[0], last = rr.line_nos[rr.line_nos.length - 1];
+  const blockLast = rr.block_line_nos[rr.block_line_nos.length - 1];
+  const parts = [
+    big(el("strong", { class: "range-head" }, rr.heading), 20, "700"),
+    big(el("p", { class: "range-where" }, `${rr.target}　1回目：${first}〜${last}行目`), 18, "700"),
+    el("div", { class: "diff range-lines" }, ...rr.cycle_lines.map((t, i) => big(el("div", {}, `${first + i}行目  ${t}`), 15))),
+    // 2回目以降の範囲と、全体の範囲（数・行番号はサーバーのもの）
+    ...rr.cycles.slice(1).map(([a, b], k) => big(el("p", { class: "range-cycle" }, `${k + 2}回目：${a}〜${b}行目`), 16, "600")),
+    big(el("p", { class: "range-all" }, `全体：${first}〜${blockLast}行目（${rr.count}回）`), 16, "600"),
+    big(el("p", { class: "range-count" }, `今は${rr.count}回続けて書かれています。合計${rr.total}回にします`), 15),
+  ];
+  if (rr.side_note) parts.push(el("p", { class: "range-side" }, rr.side_note));
+  parts.push(el("p", { class: "fine range-note" }, rr.note), row);
+  box.className = "reply ask range-ask";
+  box.replaceChildren(...parts);
+  renderSteps();  // 見出しを、ボタンに合わせる
 }
 
 function showReply(status, message, choices) {

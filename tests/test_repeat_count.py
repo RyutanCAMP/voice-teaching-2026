@@ -3,7 +3,7 @@
 設計は docs/REPEAT_COUNT_DESIGN.md。デモ用ジョブは samples/dummy/DEMO_BUTTON_REPEAT.JBI（架空のジョブ）。
 - 区間がジョブの中に続けてそのまま N 回書かれている形だけを数える。JUMP・ラベル・カウンタは扱わない
 - 区間の中は「MOVL 位置 V=数値」（PL なし、またはちょうど PL=0。速度 0 は不可）だけ。ほかの行があれば止める
-- 今が2回以上・+1 回・合計1〜5回だけ。減らす変更は扱わない（唐川さんの決定 2026-11-03）
+- 今が2回の区間を合計3回にする変更だけ（CURRENT_DECISIONS）。減らす変更は扱わない（唐川さんの決定 2026-11-03）
 - 繰り返す範囲は、人がボタン（［この範囲を繰り返す］）で確定してから候補にする。声の「はい」では確定しない
 - 承認は画面のボタンだけ。出力は合成ジョブだけ。元のジョブは変えない
 - 検査を通ったことは、物理的な安全の保証ではない
@@ -174,8 +174,8 @@ def test_two_to_three_adds_exactly_one_cycle_after_the_last():
 
 
 @pytest.mark.parametrize("total,word", [
-    (2, "同じ"), (1, "減らす変更は、このプロトタイプでは扱いません"), (4, "1回ずつ"), (6, "1〜5"), (0, "1〜5"),
-    (-1, "1〜5"), (99, "1〜5"),
+    (2, "同じ"), (1, "減らす変更は、このプロトタイプでは扱いません"), (0, "減らす変更"), (-1, "減らす変更"),
+    (4, "このプロトタイプでは、2回から3回への変更だけを扱います"), (5, "このプロトタイプでは、2回から3回への変更だけを扱います"), (6, "このプロトタイプでは、2回から3回への変更だけを扱います"), (99, "このプロトタイプでは、2回から3回への変更だけを扱います"),
 ])
 def test_bad_totals_are_refused(total, word):
     with pytest.raises(jbi.JbiError) as e:
@@ -205,14 +205,18 @@ def test_one_cycle_cannot_become_two():
     assert one.find_repeat_blocks() == []
 
 
-def test_up_to_five_and_five_is_the_top():
-    job = demo_job()
-    for n in (3, 4, 5):
-        job = job.plan_repeat("C00001", "C00003", n).new_job
-    assert job.find_repeat("C00001", "C00003").count == 5
+@pytest.mark.parametrize("cycles,total", [(3, 4), (4, 5), (3, 5)])
+def test_only_two_to_three_is_handled(cycles, total):
+    # S-P1-1：今が3回・4回のジョブ（テストの中で作る）で「3回から4回」「4回から5回」は止める
+    ls = lines(DEMO)
+    job = jbi.parse_bytes(b"".join(ls[:END] + CYCLE * (cycles - 2) + ls[END:]))
+    assert job.find_repeat("C00001", "C00003").count == cycles
     with pytest.raises(jbi.JbiError) as e:
-        job.plan_repeat("C00001", "C00003", 6)
-    assert "1〜5" in str(e.value)
+        job.plan_repeat("C00001", "C00003", total)
+    assert "このプロトタイプでは、2回から3回への変更だけを扱います" in str(e.value)
+    w, sid = start(data=job.render_bytes())
+    r = w.hear(sid, rc.canonical("C00001", "C00003", cycles, total))
+    assert r["status"] == "stop" and r["choices"] == [] and rng(r) is None and "このプロトタイプでは、2回から3回への変更だけを扱います" in r["message"]
 
 
 # ======================================================================
@@ -367,10 +371,13 @@ def test_range_is_shown_then_button_makes_the_candidate(counting):
     assert rr["line_nos"] == [FIRST + 1, FIRST + 2, FIRST + 3] and rr["block_line_nos"] == list(range(FIRST + 1, END + 1))
     assert rr["count"] == 2 and rr["total"] == 3
     assert (rr["yes_label"], rr["no_label"]) == ("この範囲を繰り返す", "違う") and rr["note"] == SCOPE
-    assert r["message"] == (f"この範囲（{FIRST + 1}〜{FIRST + 3}行目：MOVL C00001 V=150.0・MOVL C00002 V=30.0・"
-                            f"MOVL C00003 V=150.0）を繰り返しますか？ 今は2回続けて書かれています（{FIRST + 1}〜{END}行目）。合計3回にします")
+    ranges = (f"1回目：{FIRST + 1}〜{FIRST + 3}行目（MOVL C00001 V=150.0・MOVL C00002 V=30.0・MOVL C00003 V=150.0）"
+              f"／2回目：{FIRST + 4}〜{END}行目／全体：{FIRST + 1}〜{END}行目（2回）")
+    assert [list(x) for x in rr["cycles"]] == [[FIRST + 1, FIRST + 3], [FIRST + 4, END]]
+    assert r["message"] == f"この範囲（{ranges}）を繰り返しますか？ 今は2回続けて書かれています。合計3回にします"
     r2 = w.repeat_choose(sid, "yes", rr["turn"])
     assert r2["candidate_made"] and cand(r2)["kind"] == "repeat" and rng(r2) is None and counting.decides == 0
+    assert f"変更前の範囲 {ranges}" in r2["state"]["confirmation_text"]  # 確認表示にも、1回目・2回目・全体の範囲
 
 
 @pytest.mark.parametrize("word", ["はい", "そうそう", "この範囲を繰り返す", "OK", "うん"])
@@ -392,18 +399,26 @@ def test_no_button_does_nothing():
     assert w.repeat_choose(sid, "yes", rng(r)["turn"])["status"] == "stop"
 
 
-@pytest.mark.parametrize("act", ["select", "undo", "hear", "dialog"])
+@pytest.mark.parametrize("act", ["select", "select_missing", "undo", "hear", "dialog", "compare", "explain"])
 def test_range_is_dropped_by_other_actions(act):
+    # S-P2-2：新しい操作（比べる・［説明です］・ジョブに無い位置の選択も含む）では、範囲の確認を捨てる
     w, sid = start()
     turn = rng(w.hear(sid, SAY))["turn"]
     if act == "select":
         w.select(sid, "C00002")
+    elif act == "select_missing":
+        assert w.select(sid, "C00099")["status"] == "stop"
     elif act == "undo":
         w.undo(sid)
     elif act == "hear":
         w.hear(sid, "比較して")
+    elif act == "compare":
+        w.compare(sid)
+    elif act == "explain":
+        w.hear(sid, ut.EXPLAIN_CHOICE_TEXT)
     else:
         w.choose(sid, "other", 0)
+    assert w.state(sid)["state"]["repeat_range"] is None
     r = w.repeat_choose(sid, "yes", turn)
     assert r["status"] == "stop" and cand(r) is None
 
@@ -587,11 +602,22 @@ def test_repeat_approval_refuses_when_the_rebuilt_bytes_differ(monkeypatch):
 
 # ---- 聞き返し・止める（P1-2・Safety P2-1・P2-2：押せば必ず止まる・逆向きの選択肢は出さない） ----
 def test_said_count_differs_from_the_job(counting):
+    # S-P2-1：目標が3回で、今の回数の言い違いだけなら［合計3回にする］の1択
     w, sid = start(counting)
-    r = w.hear(sid, "C00001からC00003の作業を3回から4回にして")
+    r = w.hear(sid, "C00001からC00003の作業を1回から3回にして")
     assert r["status"] == "ask" and cand(r) is None and counting.decides == 0
     assert r["message"] == "このジョブでは、C00001〜C00003 は今 2 回です。何回にしますか？"
-    assert [c["text"] for c in r["choices"]] == [SAY]
+    assert [(c["label"], c["text"]) for c in r["choices"]] == [("合計3回にする", SAY)]
+
+
+@pytest.mark.parametrize("text", ["C00001からC00003の作業を1回から2回にして", "C00001からC00003の作業を5回から6回にして",
+                                  "C00001からC00003の作業を3回から4回にして"])
+def test_said_count_and_target_both_differ_stop_without_choices(text):
+    # S-P2-1：言った目標と違う回数は選択肢に出さない。目標が3でなければ止める
+    w, sid = start()
+    r = w.hear(sid, text)
+    assert r["status"] == "stop" and r["choices"] == [] and rng(r) is None and "今 2 回" in r["message"]
+    assert "このプロトタイプでは、2回から3回への変更だけを扱います" in r["message"]
 
 
 @pytest.mark.parametrize("text", ["C00001からC00003の作業を3回から2回にして", "C00001からC00003の作業を2回から1回にして",
@@ -627,11 +653,12 @@ def test_add_words_with_no_working_choice_stop(text):
 
 @pytest.mark.parametrize("text,word", [
     ("C00001からC00003の作業を2回から2回にして", "同じ"),
-    ("C00001からC00003の作業を2回から6回にして", "1〜5"),
-    ("C00001からC00003の作業を2回から0回にして", "1〜5"),
-    ("C00001からC00003の作業を2回から4回にして", "1回ずつ"),
+    ("C00001からC00003の作業を2回から6回にして", "このプロトタイプでは、2回から3回への変更だけを扱います"),
+    ("C00001からC00003の作業を2回から0回にして", "減らす変更"),
+    ("C00001からC00003の作業を2回から4回にして", "このプロトタイプでは、2回から3回への変更だけを扱います"),
     ("C00001〜C00003を2回にして", "同じ"),
-    ("C00001〜C00003を6回にして", "1〜5"),
+    ("C00001〜C00003を6回にして", "このプロトタイプでは、2回から3回への変更だけを扱います"),
+    ("C00001〜C00003を4回にして", "このプロトタイプでは、2回から3回への変更だけを扱います"),
     ("C00001からC00009の作業を2回から3回にして", "ありません"),
 ])
 def test_refused_counts_stop_without_choices(text, word, counting):
@@ -649,10 +676,10 @@ def test_one_cycle_job_stops_without_dead_end_choices(text):
     assert r["status"] == "stop" and r["choices"] == [] and cand(r) is None and rng(r) is None, r["message"]
 
 
-def test_said_one_to_two_on_the_demo_offers_only_three():
+def test_said_one_to_two_on_the_demo_stops():
     w, sid = start()
     r = w.hear(sid, "C00001からC00003の作業を1回から2回にして")
-    assert r["status"] == "ask" and "今 2 回" in r["message"] and [c["text"] for c in r["choices"]] == [SAY]
+    assert r["status"] == "stop" and "今 2 回" in r["message"] and r["choices"] == []
 
 
 def test_job_reason_stop_adds_the_scope_note():
@@ -827,3 +854,25 @@ def test_repeat_diff_check_accepts_only_one_cycle_inserted():
     assert sim._repeat_diff_ok(DEMO, new, END + 1, cyc, added=True) is False
     assert sim._repeat_diff_ok(DEMO, new + b"NOP\r\n", END, cyc, added=True) is False
     assert sim._repeat_diff_ok(DEMO.replace(b"V=150.0", b"V=151.0", 1), new, END, cyc, added=True) is False
+
+
+# ---- S-P2-4：区間のすぐ前後の DOUT・TIMER は繰り返さないことを、その行があるときだけ範囲の確認に書く ----
+def test_side_lines_are_named_in_the_range_ask():
+    data = insert_after(DEMO, END, b"TIMER T=0.50\r\n")
+    data = insert_after(data, FIRST, b"DOUT OT#(1) ON\r\n")
+    w, sid = start(data=data)
+    r = w.hear(sid, SAY)
+    rr = rng(r)
+    assert rr is not None, r["message"]
+    note = rr["side_note"]
+    assert note.startswith("区間のすぐ前・後ろに信号（DOUT）や待ち時間（TIMER）の行があります")
+    assert f"{FIRST + 1}行目「DOUT OT#(1) ON」" in note and f"{END + 2}行目「TIMER T=0.50」" in note
+    assert note.endswith("それらは繰り返しません") and note in r["message"]
+    c = cand(w.repeat_choose(sid, "yes", rr["turn"]))
+    assert all("DOUT" not in d["text"] and "TIMER" not in d["text"] for d in c["diff"])
+
+
+def test_no_side_note_without_such_lines():
+    w, sid = start()
+    rr = rng(w.hear(sid, SAY))
+    assert rr["side_note"] is None and rr["heading"] == "この範囲を繰り返しますか？"

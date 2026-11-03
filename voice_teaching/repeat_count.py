@@ -22,9 +22,10 @@ MIXED_MESSAGE = ("1回の指示では、1つの変更だけを行います。回
                  "別々に指示してください")
 FORM_UNKNOWN = f"回数の変更は「{EXAMPLE}」のように言ってください"
 RANGE_NEEDED = f"回数を変えるときは「{EXAMPLE}」のように、範囲（どの位置からどの位置まで）を言ってください"
-DECIMAL_MESSAGE = "回数は整数（1〜5回）で言ってください。小数の回数は扱いません"
+DECIMAL_MESSAGE = "回数は整数で言ってください。小数の回数は扱いません"
 
 # 範囲の確認（唐川さんの決定 2026-11-03）：ボタンだけで確定する。声の「はい」では確定しない
+RANGE_HEADING = "この範囲を繰り返しますか？"
 RANGE_YES_LABEL = "この範囲を繰り返す"
 RANGE_NO_LABEL = "違う"
 RANGE_NO_REPLY = "分かりました。変更はしません"
@@ -107,10 +108,18 @@ def canonical(start: str, end: str, said: int, total: int) -> str:
     return f"{start}から{end}の作業を{said}回から{total}回にして"
 
 
-def range_message(first: int, last: int, cycle_texts: tuple[str, ...], count: int, block_last: int, total: int) -> str:
-    """範囲の確認の文。行番号は 1 から。数・命令の行はすべてプログラムが入れる。"""
-    return (f"この範囲（{first}〜{last}行目：{'・'.join(cycle_texts)}）を繰り返しますか？ "
-            f"今は{count}回続けて書かれています（{first}〜{block_last}行目）。合計{total}回にします")
+def ranges_text(cycles: list[tuple[int, int]], cycle_texts: tuple[str, ...]) -> str:
+    """「1回目：21〜23行目（…）／2回目：24〜26行目／全体：21〜26行目（2回）」。行番号は 1 から。プログラムが入れる。"""
+    parts = [f"{k}回目：{a}〜{b}行目" + (f"（{'・'.join(cycle_texts)}）" if k == 1 else "")
+             for k, (a, b) in enumerate(cycles, start=1)]
+    parts.append(f"全体：{cycles[0][0]}〜{cycles[-1][1]}行目（{len(cycles)}回）")
+    return "／".join(parts)
+
+
+def range_message(cycles: list[tuple[int, int]], cycle_texts: tuple[str, ...], total: int) -> str:
+    """範囲の確認の文。数・行番号・命令の行はすべてプログラムが入れる。"""
+    return (f"この範囲（{ranges_text(cycles, cycle_texts)}）を繰り返しますか？ "
+            f"今は{len(cycles)}回続けて書かれています。合計{total}回にします")
 
 
 def mismatch_message(target: str, count: int) -> str:

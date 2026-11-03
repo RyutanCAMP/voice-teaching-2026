@@ -802,7 +802,7 @@ def _range_state(rr: dict | None) -> dict | None:
     if rr is None:
         return None
     keep = ("turn", "target", "total", "count", "positions", "cycle_lines", "line_nos", "block_line_nos",
-            "yes_label", "no_label", "note")
+            "yes_label", "no_label", "note", "side_note", "heading", "cycles")
     return {k: rr[k] for k in keep}
 
 

@@ -569,8 +569,10 @@ def check_repeat(browser, url, check, shots: Path | None, out: Path, errors: lis
     pg.click("#text-send")
     pg.wait_for_selector("#range-yes")
     reply = pg.inner_text("#reply-message")
-    check("この範囲（21〜23行目：MOVL C00001 V=150.0・MOVL C00002 V=30.0・MOVL C00003 V=150.0）を繰り返しますか？" in reply
-          and "今は2回続けて書かれています" in reply, f"回数の変更：範囲の確認の文（行番号・命令の行・回数）：{reply[:120]}")
+    check(all(x in reply for x in ("この範囲を繰り返しますか？", "1回目：21〜23行目", "MOVL C00002 V=30.0",
+                                    "2回目：24〜26行目", "全体：21〜26行目（2回）", "今は2回続けて書かれています")),
+          f"回数の変更：範囲の確認に見出し・1回目・2回目・全体の範囲と命令の行：{reply[:160]}")
+    shot(pg, "R2_range_confirm.png")
     check("繰り返すのは移動の行だけです" in reply, "回数の変更：範囲の確認に、対象外の固定文")
     check(pg.inner_text("#range-yes") == "この範囲を繰り返す" and pg.inner_text("#range-no") == "違う",
           "回数の変更：［この範囲を繰り返す］［違う］のボタン")
