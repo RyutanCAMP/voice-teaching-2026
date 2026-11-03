@@ -151,3 +151,36 @@ def test_output_words_after_approval_do_not_cancel_or_export(tmp_path):
     r = w.talk(sid, "出力して", "voice")
     assert r["via"] == ["button"] and r["state"]["approval"] is not None  # 承認はそのまま（取り消さない）
     assert not r["state"]["exported"]  # 声では出力しない（出力ボタンだけ）
+
+
+# ---- 内部 Safety 再確認（7af2288）P2-3・P2-4：ボタンだけの操作の言葉・承認のあとの相づちで、承認を取り消さない ----
+@pytest.mark.parametrize("said", ["保存して", "転送して", "書き出して", "承認して", "起動して", "はい", "OK", "確定して",
+                                  "エクスポートして", "ダウンロードして", "登録して", "上書きして", "出力して"])
+def test_words_after_approval_do_not_cancel_or_export(tmp_path, said):
+    w, f, sid = start(tmp_path, data=DEMO_C)
+    w.select(sid, "C00005")
+    w.talk(sid, "Zマイナス3ミリ")
+    w.approve(sid, "テスト")
+    n = calls(f)
+    r = w.talk(sid, said, "voice")
+    assert r["state"]["approval"] is not None, said  # 承認は取り消さない
+    assert not r["state"]["exported"] and calls(f) == n, said  # 出力しない・Claude を呼ばない
+
+
+def test_a_real_new_instruction_after_approval_still_cancels_it(tmp_path):
+    # 新しい変更の指示は、今まで通り承認を取り消す（承認したものと違う候補にしないため）
+    w, f, sid = start(tmp_path, data=DEMO_C)
+    w.select(sid, "C00005")
+    w.talk(sid, "Zマイナス3ミリ")
+    w.approve(sid, "テスト")
+    r = w.talk(sid, "Zマイナス2ミリ")
+    assert r["state"]["approval"] is None
+
+
+def test_approve_word_during_range_confirmation_explains_the_two_steps(tmp_path):
+    w, f, sid = start(tmp_path)
+    r = w.talk(sid, "じゃあ、3回にして")
+    turn = r["state"]["repeat_range"]["turn"]
+    r = w.talk(sid, "承認して", "voice")
+    assert r["via"] == ["hear"] and r["hear"]["message"] == rc.RANGE_APPROVE_GUIDE
+    assert r["state"]["repeat_range"]["turn"] == turn and r["state"]["candidate"] is None
