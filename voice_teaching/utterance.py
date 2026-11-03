@@ -191,7 +191,8 @@ _APPROVE = re.compile(
     r"承認|(?<![A-Z])OK(?![A-Z])|オーケー|これでいい|それでいい|決定|確定|書き出|書出|転送|送って|保存"
     r"|(^|[、。,\s])はい([、。,!！\s]|$)")
 _START = re.compile(r"起動|スタート|運転開始|動作開始|実行して|再生して")
-_THIS = re.compile(r"この位置|この点|この命令|ここ|その位置|その点|そこ")
+# 「ここの位置」「そこの点」（唐川さんの実マイク 11/3：「ここの位置を3ミリ下げてくれる」）も、選んでいる位置を指す言葉（11/4 の決定）
+_THIS = re.compile(r"ここの位置|ここの点|そこの位置|そこの点|この位置|この点|この命令|ここ|その位置|その点|そこ")
 
 _SIGN = {"+": 1, "プラス": 1, "-": -1, "マイナス": -1}
 _SIGN_TOKEN = re.compile(r"マイナス|プラス|[+\-]")
@@ -293,7 +294,7 @@ _AMOUNT_PREFIX = re.compile(f"(?:{_alt(AMOUNT_PREFIXES)})" + r"(?=\s?[0-9]+(?:\.
 # 位置番号のすぐ後の「位置」（「C00005の位置を下に3mm」）。「この位置」「その位置」は _THIS で読む
 _POSITION_WORD = re.compile(r"^\s?(?:の\s?)?位置")
 # 「ここここ」「そこそこ」：同じ指す言葉の繰り返しは、指す言葉として読まない（そこそこ は、あいまいな量として読む）
-_THIS_REPEAT = re.compile(r"(?:この位置|この点|この命令|ここ|その位置|その点|そこ){2,}")
+_THIS_REPEAT = re.compile(r"(?:ここの位置|ここの点|そこの位置|そこの点|この位置|この点|この命令|ここ|その位置|その点|そこ){2,}")
 
 
 def _negation_words(text: str, heard: str | None = None) -> tuple[tuple[str, ...], tuple[str, ...]]:
@@ -465,6 +466,9 @@ MAX_AMOUNT_DECIMALS = 6
 _SHIMASU_END = re.compile(rf"(?<={'|'.join(SHIMASU_AFTER)})(?:しておき|し)ます[ねよ]?[\s　。．.!！]*$")
 _SHIMASU_VERB = re.compile(f"(?:{'|'.join(SHIMASU_AFTER)})$")
 _MASU_END = re.compile(rf"(?<={'|'.join(MASU_AFTER)})(?:ておき)?ます[ねよ]?[\s　。．.!！]*$")
+# 「下げてくれる」「下げてもらえる」（唐川さんの実マイク 11/3）：お願いとも、できるかの質問とも読める。
+# 「〜ます」と同じく外して2択で確かめる（候補にしない。安全の決まりは緩めない）。「くれない」「もらえない」は外さない
+_KURERU_END = re.compile(r"(?<=て)(?:くれる|くれます|もらえる|もらえます)[ねよ]?[\s　。．.!！]*$")
 _NI_SHIMASU_END = re.compile(r"([0-9０-９]+(?:[.．][0-9０-９]+)?\s*(?:mm|ＭＭ|MM|ｍｍ|ミリ))\s*に(?:しておき|し)ます[ねよ]?[\s　。．.!！]*$", re.I)
 
 
@@ -474,6 +478,9 @@ def _strip_shimasu(text: str) -> str | None:
     すぐ前が「て」の動きの言葉（「下げて動かします」）なら、後ろの「動かします」ごと外す。それ以外は「します」を「して」にする。
     言葉は足さない・変えない（外した文は、ふつうの指示と同じ検査を通る）。
     """
+    k = _KURERU_END.search(text)
+    if k is not None:
+        return text[: k.start()]  # 「ここの位置を3ミリ下げてくれる」→「ここの位置を3ミリ下げて」（言葉は足さない）
     n = _NI_SHIMASU_END.search(text)
     if n is not None:
         return text[: n.end(1)]  # 「Zマイナス3ミリにします」→「Zマイナス3ミリ」（言葉は足さない）
