@@ -98,6 +98,9 @@ class UtteranceFacts:
     place_ref: str | None = None           # 「置くところ」などの場所の言葉（どの位置かはプログラムが決めない）
     place_as_destination: bool = False     # 場所の言葉を行き先に使った（「置くところに」「置き場所へ」「置く位置まで」）
     relative_dir: tuple[str, ...] = ()     # 手前・奥・前・後ろ・右・左（軸には当てない。止める・聞き返す）
+    # 文の終わりの「動かします」「移動します」「ずらします」を外した指示の文（CHECKER_026 M3）。候補にせず、
+    # 変更の希望か操作の説明かを確かめる。答えと合わせたとき・疑問の形のときは None
+    shimasu_text: str | None = None
 
     @property
     def position(self) -> str | None:
@@ -206,7 +209,9 @@ OPENERS = ("それでは", "じゃあ", "では", "まず")                     
 FILLER_WORDS = PARTICLES + TE_FORMS + REQUESTS + POLITE_AFTER_TE + FINALS + HESITATIONS + OPENERS
 # 読み取りで使った動きの言葉のすぐ後の言い終わり（「下げる」「下げます」「ずらす」「移動させて」）。2026-11-03 シクロの判断
 VERB_ENDINGS = ("させて", "させ", "ます", "です", "る", "す")
-# 「動かします」「移動します」「ずらします」の「します」（2026-11-03 夜）。ほかの動きの言葉の後（「下げします」）は使わない
+# 「動かします」「移動します」「ずらします」の「します」。CHECKER_026 M3（唐川さんの判断 2026-11-03 13:27）で、
+# 読み取りのつなぎの言葉としては使わない（3b4cac1 の「受け付ける」は取り消し）。文の終わりにあるときだけ read_utterance が外して
+# facts.shimasu_text に入れ、pre_check が「変更をご希望ですか？ それとも操作の説明でしょうか？」と確かめる（候補にしない）
 SHIMASU_AFTER = ("動か", "移動", "ずら")
 # 疑問の形のときだけ、元に戻す・比較・選択の言葉の後の「ます」「します」（「元に戻しますか」「比較しますか」）
 QUESTION_ONLY_ENDINGS = ("します", "ます")
@@ -261,8 +266,7 @@ _AXIS_DIRECTION_WORD = re.compile(r"(?<![A-Z])[XYZ]\s?(?:の\s?)?(?:(?:マイナ
 # 「Y座標」「Yの値」「Y座標値」：座標の値の言葉（_COORD_VALUE で読んだときだけ取り除く）
 _COORD_VALUE_WORD = re.compile(r"(?<![A-Z])[XYZ]\s?(?:の\s?)?(?:座標値|座標|値)")
 _CONNECTOR = re.compile(r"そして|それから")  # 2つの変更の区切り（_SPLIT_MOVES）
-_VERB_TAIL = re.compile(f"(?<=上げ|下げ|増や|減ら|動か|ずら|寄せ|移動)(?:{_alt(VERB_ENDINGS)})"
-                        f"|(?<={'|'.join(SHIMASU_AFTER)})します")
+_VERB_TAIL = re.compile(f"(?<=上げ|下げ|増や|減ら|動か|ずら|寄せ|移動)(?:{_alt(VERB_ENDINGS)})")
 _QUESTION_VERB_TAIL = re.compile(f"(?<=戻|消|較|択)(?:{_alt(QUESTION_ONLY_ENDINGS)})")
 _AMOUNT_PREFIX = re.compile(f"(?:{_alt(AMOUNT_PREFIXES)})" + r"(?=\s?[0-9]+(?:\.[0-9]+)?\s?(?:MM|ミリ|%))")
 # 位置番号のすぐ後の「位置」（「C00005の位置を下に3mm」）。「この位置」「その位置」は _THIS で読む
@@ -344,7 +348,7 @@ def _run_is_allowed(run: str, used_before: bool, used_after: bool, prev_char: st
     if _HESITATION_RE.fullmatch(run):
         return True
     if after_verb_tail:
-        return False  # 「下げます」「動かします」の後に重ねない（「しますです」「移動しますね」）
+        return False  # 「下げます」の後に重ねない（「下げますです」「下げますね」）
     if run in SENTENCE_END_COPULA and not after_amount:
         return False  # 文の終わりの「です」は量のすぐ後だけ（「下に3ミリです」）
     if not used_before:  # 読んだ言葉より前（文の初め）
@@ -431,6 +435,28 @@ def _repeat(text: str) -> tuple[tuple[int | None, str] | None, list[tuple[int, i
     return None, []
 
 
+# 文の終わりの「動かします」「移動します」「ずらします」（後ろは句読点・空白だけ）。CHECKER_026 M3
+_SHIMASU_END = re.compile(rf"(?<={'|'.join(SHIMASU_AFTER)})します[\s　。．.!！]*$")
+_SHIMASU_VERB = re.compile(f"(?:{'|'.join(SHIMASU_AFTER)})$")
+
+
+def _strip_shimasu(text: str) -> str | None:
+    """「3mm下げて動かします」→「3mm下げて」、「下に3mm移動します」→「下に3mm移動して」。文の終わりが「〜します」でなければ None。
+
+    すぐ前が「て」の動きの言葉（「下げて動かします」）なら、後ろの「動かします」ごと外す。それ以外は「します」を「して」にする。
+    言葉は足さない・変えない（外した文は、ふつうの指示と同じ検査を通る）。
+    """
+    m = _SHIMASU_END.search(text)
+    if m is None:
+        return None
+    head = text[: m.start()]
+    verb = _SHIMASU_VERB.search(head)
+    before = head[: verb.start()].rstrip()
+    if before.endswith("て") and len(before) > 1:
+        return before
+    return head + "して"
+
+
 def read_utterance(raw: str) -> UtteranceFacts:
     q = _QUESTION_END.search(raw)
     tail = q.group(0) if q else ""
@@ -441,9 +467,15 @@ def read_utterance(raw: str) -> UtteranceFacts:
         f = _read("".join(" " if _is_question_mark(c) else c for c in plain), question=True)
         return replace(f, raw=raw, question=True, question_text=None)
     if at_end:
-        # 疑問の形：？・か を外した文を読み、確かめるために印を付ける（候補にはしない。pre_check が確かめる）
+        # 疑問の形：？・か を外した文を読み、確かめるために印を付ける（候補にはしない。pre_check が確かめる）。
+        # 「3mm下げて動かしますか？」は「〜します」も外した「3mm下げて」で確かめる（CHECKER_026 M3。疑問の扱いに合わせる）
+        plain = _strip_shimasu(plain) or plain
         f = _read(plain, question=True)
         return replace(f, raw=raw, question=True, question_text=plain or None)
+    request = _strip_shimasu(raw)
+    if request is not None:
+        # 言い終わりの「〜します」（CHECKER_026 M3）：外した文を読み、候補にせず確かめる印を付ける（pre_check が確かめる）
+        return replace(_read(request, question=False), raw=raw, shimasu_text=request)
     return _read(raw, question=False)
 
 
@@ -661,6 +693,8 @@ def combine_axes(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceF
                    unknown_words=tuple(dict.fromkeys(previous.unknown_words + answer.unknown_words)),
                    negations=tuple(dict.fromkeys(previous.negations + answer.negations)),
                    undo_negations=tuple(dict.fromkeys(previous.undo_negations + answer.undo_negations)),
+                   # 答えの「〜します」を外した文だけで［変更したい］を作らない（前に言った軸を捨てることになる）。今どおり聞き返す
+                   shimasu_text=None,
                    **_merged_extras(previous, answer))
 
 
@@ -751,12 +785,71 @@ def unknown_words_message(words: Sequence[str], op: str) -> str:
 
 QUESTION_RESTATE_MESSAGE = "質問の形の指示では変更しません。してほしいことを、もう一度言ってください"
 
+# 言い終わりの「〜します」の確かめ（CHECKER_026 M3。唐川さんの判断 2026-11-03 13:27）
+SHIMASU_ASK = "{what}変更をご希望ですか？ それとも操作の説明でしょうか？"
+SHIMASU_FIXED_WHAT = "この"
+WANT_CHANGE_LABEL = "変更したい"
+EXPLAIN_LABEL = "説明です"
+# ［説明です］の選択肢が送る文。この文（だけ）の指示は、何も変えずに EXPLAIN_REPLY を返す（Session.hear・WebFlow.hear）。
+# 位置番号を足さない。承認・候補・会話の状態も変えない
+EXPLAIN_CHOICE_TEXT = EXPLAIN_LABEL
+EXPLAIN_REPLY = "分かりました。変更はしません"
+_EXPLAIN_STRIP = re.compile(r"[\s　。．.!！、,]+")
+
+
+def is_explain_choice(text: object) -> bool:
+    """［説明です］の選択肢の文（「説明です」だけ。前後の空白・句読点は無視）か。"""
+    return isinstance(text, str) and _EXPLAIN_STRIP.sub("", unicodedata.normalize("NFKC", text)) == EXPLAIN_CHOICE_TEXT
+
+
+def is_shimasu_confirmation(v: Verdict) -> bool:
+    """「〜します」の2択の聞き返しか。"""
+    return v.status == "ask" and len(v.choices) == 2 and v.choices[1] == (EXPLAIN_LABEL, EXPLAIN_CHOICE_TEXT)
+
+
+def _shimasu_what(facts: UtteranceFacts) -> str:
+    """「3mm下げる」「C00004を3mm上げる」「Yのマイナス方向に3mm動かす」。発話から決まらなければ「この」（固定の言い方）。
+
+    数字・軸・向きはプログラムが読んだもの（facts）から入れる。上下を軸に当てはめた言い方はしない（言った言葉の上げ・下げのまま）。
+    """
+    a = facts.amount
+    if (facts.op != "move" or a is None or a.unit != "mm" or facts.unclear_amounts or len(facts.axes) != 1
+            or len(facts.positions) > 1 or facts.sides or facts.relative_dir or facts.place_ref or facts.repeat
+            or facts.stray_signs or facts.unknown_words):
+        return SHIMASU_FIXED_WHAT
+    value = facts.requested_value()
+    if value is None or value == 0:
+        return SHIMASU_FIXED_WHAT
+    w, v = _where(facts), _num(a.value)
+    if facts.vertical:
+        return f"{w}{v}mm{'上げる' if value > 0 else '下げる'}"
+    return f"{w}{facts.axis}の{'プラス' if value > 0 else 'マイナス'}方向に{v}mm動かす"
+
+
+def _shimasu_check(facts: UtteranceFacts, v: Verdict) -> Verdict:
+    """言い終わりの「〜します」：候補にしない。変更の希望か、操作の説明かを2択で確かめる。
+
+    止めるもの（打ち消し・繰り返し・承認や起動の言葉など）は選択肢なしで今どおり止める。知らない言葉は選択肢なしで聞き返す。
+    ［変更したい］は「〜します」を外した指示の文を、ふつうの指示として送る（確認・検査・上限・確認表示・承認ボタンを全部通る）。
+    """
+    if v.status == "stop":
+        return v
+    if facts.unknown_words:
+        if v.status == "ask" and not v.choices:
+            return v
+        return _ask(f"{''.join(f'「{w}」' for w in facts.unknown_words)}が分かりませんでした。もう一度指示してください")
+    t = facts.shimasu_text
+    return _ask(SHIMASU_ASK.format(what=_shimasu_what(facts)),
+                ((WANT_CHANGE_LABEL, t), (EXPLAIN_LABEL, EXPLAIN_CHOICE_TEXT)))
+
 
 def pre_check(facts: UtteranceFacts, selected: str | None = None,
               updown: "ud.UpdownStatus | None" = None) -> Verdict:
     """Claude に頼らず、発話だけで止める・聞き返すことが決まるかを調べる。selected：画面で選んでいる位置（文の案内だけに使う）。
     updown：上下の向きの照合の結果（渡さなければ未確認として扱う）。"""
     v = _pre_check(facts, selected, updown)
+    if facts.shimasu_text is not None and not facts.question:
+        return _shimasu_check(facts, v)
     if v.status != "ok" or not facts.question:
         return v
     # 疑問の形（「3mm下げて？」）：候補にせず、？を外した同じ指示でよいかを確かめる。選択肢はその文の1つだけ。

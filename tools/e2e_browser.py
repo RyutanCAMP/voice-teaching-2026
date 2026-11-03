@@ -644,7 +644,8 @@ def check_dialog(browser, check, shots: Path | None, errors: list, updown_config
         before = interp.decides
         r = pg.request.post(url + "api/hear", data={"session_id": sid, "text": "この位置を上に2mm", "source": "text"}).json()
         r2 = pg.request.post(url + "api/hear", data={"session_id": sid, "text": "置くところを上に2mm", "source": "text"}).json()
-        check(r["status"] == "stop" and r["message"].startswith("承認待ちの変更候補があります")
+        # 1つ目は承認したあと（CHECKER_026 S-msg：「承認した変更候補があります…」。承認は今どおり取り消す）、2つ目は承認前の文
+        check(r["status"] == "stop" and r["message"].startswith("承認した変更候補があります")
               and r2["status"] == "stop" and r2["message"].startswith("承認待ちの変更候補があります")
               and interp.decides == before and interp.locates == 1,
               f"承認待ちの候補があるとき、新しい移動の指示は解釈の係を呼ばずに断る（{interp.decides - before}回）")
@@ -661,10 +662,11 @@ def check_dialog(browser, check, shots: Path | None, errors: list, updown_config
         send(pg, "置くところを少し手前にして")
         until(pg, lambda: labels(pg) == ["C00005 です", "ほかの位置"])
         send(pg, "そうじゃなくて")
-        until(pg, lambda: "打ち消し" in last_said(pg))
+        until(pg, lambda: "「ほかの位置」を押してください" in last_said(pg))
         check(pg.inner_text("#voice-position strong") == "位置は未選択" and labels(pg) == ["C00005 です", "ほかの位置"]
-              and pg.get_attribute("#step-3", "aria-current") == "step",
-              "会話：途中の「そうじゃなくて」は止まり、位置は選ばれず、同じ問いのまま")
+              and pg.get_attribute("#step-3", "aria-current") == "step"
+              and last_said(pg) == "分かりました。合っていなければ「ほかの位置」を押してください",
+              "会話：途中の「そうじゃなくて」は止まり、位置は選ばれず、同じ問いのまま（S-pick：「ほかの位置」を案内する）")
         shot(pg, "d6_negation.png")
         pg.locator("#dialog-choices button", has_text="ほかの位置").click()
         until(pg, lambda: pg.get_attribute("#step-2", "aria-current") == "step")
@@ -786,6 +788,41 @@ def check_dialog(browser, check, shots: Path | None, errors: list, updown_config
         until(pg, lambda: "動きの追加・繰り返しはできません" in pg.inner_text("#reply-message"))
         check(pg.get_attribute("#step-3", "aria-current") == "step" and (interp.decides, interp.locates) == before,
               "くり返し：どちらを選んでも、動きは足せないと伝える（候補なし・解釈の係を呼ばない）")
+        pg.close()
+
+        # ---- 3b. 言い終わりの「〜します」（CHECKER_026 M3）→［変更したい］［説明です］の2択。候補にしない ----
+        pg = browser.new_page(viewport={"width": 1280, "height": 720})
+        watch(pg)
+        pg.add_init_script(FAKE_RECOGNITION)
+        pg.goto(url)
+        pg.click("#sample-button")
+        pg.wait_for_selector("#job-area:not([hidden])")
+        pg.locator("#position-chips button", has_text="C00004").click()
+        until(pg, lambda: pg.inner_text("#voice-position strong") == "C00004")
+        before = (interp.decides, interp.locates)
+        send(pg, "Yのマイナス3ミリずらします")
+        until(pg, lambda: pg.is_visible("#reply-message button.choice"))
+        rc = [t.strip() for t in pg.locator("#reply-message button.choice").all_inner_texts()]
+        reply = pg.inner_text("#reply-message")
+        check(rc == ["変更したい", "説明です"] and "Yのマイナス方向に3mm動かす変更をご希望ですか？" in reply
+              and "それとも操作の説明でしょうか？" in reply and pg.get_attribute("#step-3", "aria-current") == "step"
+              and pg.is_hidden("#candidate-panel") and (interp.decides, interp.locates) == before,
+              f"「〜します」：候補にせず［変更したい］［説明です］で確かめる（解釈の係も呼ばない）：{rc} {reply[:60]}")
+        shot(pg, "d8b_shimasu.png")
+        pg.locator("#reply-message button.choice", has_text="説明です").click()
+        until(pg, lambda: "分かりました。変更はしません" in pg.inner_text("#reply-message"))
+        check(pg.get_attribute("#step-3", "aria-current") == "step" and pg.is_hidden("#candidate-panel")
+              and (interp.decides, interp.locates) == before
+              and pg.locator("#reply-message button.choice").count() == 0,
+              "［説明です］：何もしない（候補なし・解釈の係を呼ばない・選択肢は消える）")
+        send(pg, "Yのマイナス3ミリずらします")
+        until(pg, lambda: pg.is_visible("#reply-message button.choice"))
+        pg.locator("#reply-message button.choice", has_text="変更したい").click()
+        until(pg, lambda: pg.get_attribute("#step-4", "aria-current") == "step")
+        cv = pg.inner_text("#candidate-view")
+        check("Y方向に −3.000mm" in cv and pg.is_hidden("#approval-status") and pg.is_enabled("#open-confirm")
+              and pg.is_hidden("#export-button"),
+              f"［変更したい］：ふつうの指示として候補になるだけ（承認・出力はされない。確認表示と承認ボタンへ）：{cv[:60]}")
         pg.close()
 
         # ---- 4. 合成でないジョブ：Claude（モック）に頼まず、手で選んでもらう ----

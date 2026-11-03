@@ -1,7 +1,8 @@
 """2026-11-03 夜の唐川さんの決定（docs/UNKNOWN_WORDS_PLAN.md 7章）。実装より先に書いた。
 
 1. 疑問の形（「3mm下げて？」「下に3mmですか」）は候補にしない。「「…」でよいですか？」と、？を外した同じ指示の選択肢を1つだけ出す
-2. 「動かします」「移動します」「下げます」、読んだ指示の後の文の終わりの「です」、ひらがなの「さげて」「あげて」を読む
+2. 「下げます」、読んだ指示の後の文の終わりの「です」、ひらがなの「さげて」「あげて」を読む
+   （「動かします」「移動します」は CHECKER_026 M3（2026-11-03 13:27）で取り消し：候補にせず2択で確かめる。tests/test_c026_m3.py）
 5. 繰り返し・往復（「2回移動させて」「2往復」「行き来」「繰り返し」）は候補にしない。最後は必ず止める
 6. 「置くところ」などの場所の言葉は facts.place_ref。位置番号が無ければ聞き返す
 7. 手前・奥・前・後ろ・右・左は今までどおり止める・聞き返す。facts.relative_dir に出す
@@ -95,7 +96,7 @@ def test_question_facts():
 # ---- 2. 言い終わり・ひらがなの上げ下げ ----
 @pytest.mark.parametrize("source", SOURCES)
 @pytest.mark.parametrize("text,want", [
-    ("下に3mm動かします", ("Z", "-3.000")), ("下に3mm移動します", ("Z", "-3.000")), ("3mm下げます", ("Z", "-3.000")),
+    ("3mm下げます", ("Z", "-3.000")),
     ("下に3ミリです", ("Z", "-3.000")), ("Xのマイナス5ミリです", ("X", "-5.000")),
     ("3mmさげて", ("Z", "-3.000")), ("3mmあげて", ("Z", "+3.000")), ("Y座標を 3 ミリ さげて", ("Y", "-3.000")),
     ("Y座標を3mmあげてください", ("Y", "+3.000")), ("えーとさげて3mm", ("Z", "-3.000")),
@@ -346,9 +347,17 @@ def test_s_p3_3_no_stacked_endings(text, source):
     assert r["status"] == "ask" and cand(r) is None, (text, r.get("message"))
 
 
-@pytest.mark.parametrize("text", ["下に3mmずらします", "下に3mm動かします", "下に3mm移動します", "3mm下げます"])
-def test_s_p3_3_single_endings_still_work(text):
-    assert cand(hear(text)) == ("Z", "-3.000")
+def test_s_p3_3_single_endings_still_work():
+    assert cand(hear("3mm下げます")) == ("Z", "-3.000")
+
+
+@pytest.mark.parametrize("source", SOURCES)
+@pytest.mark.parametrize("text", ["下に3mmずらします", "下に3mm動かします", "下に3mm移動します"])
+def test_shimasu_endings_ask_two_choices(text, source):
+    # CHECKER_026 M3（唐川さんの判断 2026-11-03 13:27）：言い終わりの「〜します」は候補にせず、2択で確かめる
+    r = hear(text, source)
+    assert r["status"] == "ask" and cand(r) is None, (text, r.get("message"))
+    assert [c["label"] for c in r["choices"]] == ["変更したい", "説明です"]
 
 
 # ---- Safety P3-4：場所の言葉と位置番号 ----

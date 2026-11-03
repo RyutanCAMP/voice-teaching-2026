@@ -29,7 +29,7 @@ from .. import claude_interpreter, jbi, mock_claude, sim
 from .. import dialog as dg
 from .. import updown as ud
 from .. import utterance as ut
-from ..session import PENDING_MESSAGE, Comparison, Reply, Session
+from ..session import APPROVED_PENDING_MESSAGE, PENDING_MESSAGE, Comparison, Reply, Session
 from . import api
 
 MAX_SESSIONS = 8
@@ -131,7 +131,12 @@ class WebFlow:
             return {"ok": False, "error": "指示の種類（voice か text）が分かりません"}
 
         def run(e: _Entry) -> dict:
-            self._cancel_approval(e, "新しい指示があったため")
+            if ut.is_explain_choice(text):
+                # ［説明です］（「〜します」の2択。CHECKER_026 M3）：何もしない。承認・候補・会話の状態も変えない
+                r = e.session.explain_only(text, source)
+                return {"ok": True, "heard": text, "source": source, "facts": None, "tool_calls": [],
+                        "dialog": False, "no_change": True, **self._reply(e, r)}
+            self._begin_instruction(e)
             f0 = ut.read_utterance(text)
             talking = e.dialog.step is not None
             out = (self._dialog_turn(e, text, source, f0) if talking
@@ -206,10 +211,11 @@ class WebFlow:
             return None
         ops = [k for k in f0.kinds if k in ut.OPS]
         if (f0.negations or f0.undo_negations or getattr(f0, "repeat", None) or getattr(f0, "question", False)
+                or getattr(f0, "shimasu_text", None) is not None
                 or getattr(f0, "place_as_destination", False)
                 or f0.positions or f0.bad_positions or len(ops) > 1 or f0.op in ("speed", "compare", "undo")
                 or any(r != ut.FRONT_BACK_MESSAGE for r in f0.stop_reasons)):
-            return None  # 今の流れのまま（打ち消し・繰り返し・疑問の形・行き先の場所の言葉・承認の言葉 など）
+            return None  # 今の流れのまま（打ち消し・繰り返し・疑問の形・「〜します」・行き先の場所の言葉・承認の言葉 など）
         rel = dg.find_relative_dir(text, f0)
         if rel and (dg.has_neighbour_relative(text, word) or f0.axes or f0.vertical or dg.has_sign_word(text)):
             # 向きの言葉と、軸・上げ下げ・符号が一緒（「置くところを奥へ3mm下げて」）、または「置くところの手前」：
@@ -242,7 +248,7 @@ class WebFlow:
             return self._dialog_out(e, text, source, f0, refused.status, refused.message)
         if s.candidate is not None:  # 承認待ちの候補がある：位置の候補も頼まない
             d.end(clear_estimate=False)
-            return self._dialog_out(e, text, source, f0, "stop", PENDING_MESSAGE, who="アプリ")
+            return self._dialog_out(e, text, source, f0, "stop", s.pending_message, who="アプリ")
         fs = ut.read_utterance(dg.substitute_opening(text, word))
         if fs.unknown_words:  # B1：知らない言葉を捨てて読まない
             d.end(clear_estimate=False)
@@ -328,6 +334,9 @@ class WebFlow:
                 d.end()
                 return self._dialog_out(e, text, source, f0, "ok", dg.END_UNDO)
             if v.status == "stop":  # 打ち消し・承認の言葉など：止めて、同じ所にいる（選択肢もそのまま）
+                if (f0.negations or f0.undo_negations) and any(c["id"] == "other" for c in d.choices()):
+                    # 打ち消し（「やっぱり違う」）：「ほかの位置」のボタンが見えているので、次にすることを案内する（CHECKER_026 S-pick）
+                    return self._dialog_out(e, text, source, f0, "stop", dg.PICK_AFTER_NEGATION, who="アプリ")
                 return self._dialog_out(e, text, source, f0, "stop", v.message, who="アプリ")
             return self._dialog_out(e, text, source, f0, "ask", dg.CONFIRM_STAY)
         # ask_move：方向と量を聞いている
@@ -345,8 +354,8 @@ class WebFlow:
         if d.confirm_go:  # 手で選んだ位置の確かめ：［go］のボタンのほかでは進めない
             return self._dialog_out(e, text, source, f0, v.status if v.status == "stop" else "ask",
                                     v.message if v.status == "stop" else dg.GO_BUTTON)
-        if getattr(f0, "repeat", None) or getattr(f0, "question", False):
-            # 繰り返し・疑問の形は、今の pre_check の答えのまま（量として使わない）
+        if getattr(f0, "repeat", None) or getattr(f0, "question", False) or getattr(f0, "shimasu_text", None) is not None:
+            # 繰り返し・疑問の形・「〜します」は、今の pre_check の答えのまま（量として使わない）
             return self._dialog_out(e, text, source, f0, v.status if v.status != "ok" else "ask",
                                     v.message or d.ask_move_message(), who="アプリ", choices=v.choices)
         others = [r for r in f0.stop_reasons if r != ut.FRONT_BACK_MESSAGE]
@@ -436,7 +445,7 @@ class WebFlow:
                 e.session.log.append(("止めた理由", dg.STALE))
                 return {"ok": True, "status": "stop", "message": dg.STALE, "blocked_reason": None,
                         "candidate_made": False, "choices": [], "dialog": True, "tool_calls": []}
-            self._cancel_approval(e, "新しい指示があったため")
+            self._begin_instruction(e)
             label = ids[choice]
             d.say("人", label, "human")
             e.session.log.append(("選択", f"ボタン：{label}"))
@@ -621,6 +630,11 @@ class WebFlow:
     def _updown_unchanged(self, e: _Entry) -> bool:
         """承認したときの上下の向きの照合の結果と、今（読み直した）結果が同じか。"""
         return e.approval_updown is not None and e.approval_updown.token == e.session.updown_status().token
+
+    def _begin_instruction(self, e: _Entry) -> None:
+        """新しい指示の始め：承認を今どおり取り消す。承認していたときは、承認待ちの文を「承認した変更候補…」にする（S-msg）。"""
+        e.session.pending_message = APPROVED_PENDING_MESSAGE if self._approved(e) else PENDING_MESSAGE
+        self._cancel_approval(e, "新しい指示があったため")
 
     def _cancel_approval(self, e: _Entry, why: str) -> None:
         if e.approval is not None:
