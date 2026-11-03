@@ -31,6 +31,19 @@ DATA_CHANGED = "データが変わったので、ここからは新しい内容�
 INVALIDATED = "さきほど教えてもらった意味（{text}）を確認できなくなりました。もう一度教えてください"
 TAUGHT = "「{text}」を、{target}の意味として覚えました（人が教えた・この会話の中だけ。保存しません）"
 REPLACED = "「{old}」を「{new}」に置き換えました（{target}。人が教えた・この会話の中だけ）"
+CONFIRM_ONE = "「{text}」のは、この光っている動き（{where}）のことですか？"
+CONFIRM_POINT = "「{text}」は、この光っている点（{pos}。{where}の中）のことですか？"
+CONFIRM_POINT_YES = "この点です"
+CONFIRM_POINT_NO = "ほかの点"
+CONFIRM_REPLACE = "{target}の意味を、「{old}」から「{new}」に置き換えますか？"
+REPLACE_YES = "置き換える"
+REPLACE_NO = "置き換えない"
+NOT_REPLACED = "置き換えませんでした（前の意味のままです）"
+CONFIRM_YES = "この動きです"
+CONFIRM_NO = "ほかの動き"
+TAUGHT_CONFIRMED = "分かりました。この動き（{where}）を「{text}」として、この会話の中で覚えます"
+NOT_THIS = ("分かりました。覚えていません。どの動きか分かるように、位置番号を添えて教えてください"
+            "（例：「C00002 でボタンを押している」ではなく「ボタンは C00002」のように1つの点で）")
 ASK_WHICH_BLOCK = "どの動きのことですか？ 下のボタンで選んでください"
 ASK_WHICH_POINT = "どの点のことですか？ 下のボタンで選ぶか、「ボタンは C00002」のように位置番号を添えて教えてください"
 NO_BLOCK = "どの動きのことか、プログラムで確かめられませんでした。意味は覚えていません"
@@ -444,6 +457,7 @@ class Outcome:
     message: str | None = None
     meaning: Meaning | None = None
     category: str = "other"   # question・change・backchannel・hesitant・negated・correction・meaning・other
+    block: "Block | None" = None  # 確かめている区間（画面で光らせる）
 
 
 def _strip_back(t: str) -> str:
@@ -513,8 +527,8 @@ def classify(text: str) -> tuple[str, dict]:
                 if noun and not _POS.search(ut.normalize(noun)):
                     return "meaning", {"text": noun, "position": ut.normalize(mm.group("pos")), "point": True}
         return "meaning", {"positions": positions}
-    if not body or len(body) < 2:
-        return "other", {}
+    if not body or len(body) < 2 or re.fullmatch(r"(?:この|その|あの)(?:動き|動作|点|位置|作業)", body):
+        return "other", {}  # 指す言葉だけ（「この動きです」）は意味ではない
     action = bool(_ACTION_END.search(body))
     if not (had_end or topic or action):
         return "other", {}
@@ -527,8 +541,10 @@ class Pending:
     token: int
     text: str
     said: str
-    kind: str                           # "block" か "point"
+    kind: str                           # "block"・"point"・"block_then_point"・"confirm"
     options: list[tuple[str, str, tuple, str | None]]  # (id, 表示, 区間の key, 点)
+    question: str | None = None
+    old: str | None = None              # 置き換えの前の意味（kind が "replace" のとき）
 
 
 @dataclass
@@ -611,12 +627,16 @@ class TalkMemory:
                 target = inside[0]
             if pos not in target.positions:
                 return Outcome("refused", NOT_IN_BLOCK.format(pos=pos, target=target.target), category=kind)
-            return self._register(Meaning(mtext, target.key, pos, text), current)
+            return self._ask_confirm(text, mtext, target, pos)  # 対象が決まっても、人がボタンで確かめるまで登録しない
         if target is None:
             if not options:
                 return Outcome("refused", NO_BLOCK, category=kind)
+            if len(blocks) == 1:
+                # データの中の区間は1つだけ（根拠の行に区間の外の行があった）：その区間を光らせて確かめる。押すまで登録しない
+                return self._ask_confirm(text, mtext, blocks[0])
             return self._ask_block(text, mtext, options, "block")
-        return self._register(Meaning(mtext, target.key, None, text), current)
+        # 対象の区間が1つに決まっても、必ず人がボタンで確かめてから登録する（唐川さんの判断 2026-11-03）
+        return self._ask_confirm(text, mtext, target)
 
     def _register(self, m: Meaning, current: jbi.Job | None) -> Outcome:
         b = verify(m, current)
@@ -644,10 +664,11 @@ class TalkMemory:
         new_text = m.text.replace(old, new, 1)
         if len(new_text) > MAX_MEANING:
             return Outcome("refused", TOO_LONG_MEANING.format(n=MAX_MEANING), category="correction")
-        nm = Meaning(new_text, m.block, m.position, said)
-        self.meanings = [nm if x is m else x for x in self.meanings]
-        return Outcome("replaced", REPLACED.format(old=m.text, new=new_text, target=nm.target_text(b)), nm,
-                       category="correction")
+        # 置き換えも、人がボタンで確かめるまでしない
+        q = CONFIRM_REPLACE.format(old=m.text, new=new_text, target=m.target_text(b))
+        opts = [("replace:yes", REPLACE_YES, m.block, m.position), ("replace:no", REPLACE_NO, m.block, m.position)]
+        self.pending = Pending(self._next_token(), new_text, said, "replace", opts, q, old=m.text)
+        return Outcome("ask", q, category="correction", block=b)
 
     def _next_token(self) -> int:
         self._token += 1
@@ -657,6 +678,17 @@ class TalkMemory:
         opts = [(f"block:{i}", b.label, b.key, None) for i, b in enumerate(blocks)]
         self.pending = Pending(self._next_token(), mtext, said, "block" if kind == "block" else "block_then_point", opts)
         return Outcome("ask", ASK_WHICH_BLOCK, category="meaning")
+
+    def _ask_confirm(self, said: str, mtext: str, b: Block, pos: str | None = None) -> Outcome:
+        where = f"{b.first_line}〜{b.last_line}行目のくり返し"
+        if pos is None:
+            q = CONFIRM_ONE.format(text=mtext, where=where)
+            opts = [("confirm:yes", CONFIRM_YES, b.key, None), ("confirm:no", CONFIRM_NO, b.key, None)]
+        else:
+            q = CONFIRM_POINT.format(text=mtext, pos=pos, where=where)
+            opts = [("confirm:yes", CONFIRM_POINT_YES, b.key, pos), ("confirm:no", CONFIRM_POINT_NO, b.key, pos)]
+        self.pending = Pending(self._next_token(), mtext, said, "confirm", opts, q)
+        return Outcome("ask", q, category="meaning", block=b)
 
     def _ask_point(self, said: str, mtext: str, b: Block) -> Outcome:
         opts = [(f"pos:{p}", f"{p}（{b.first_line}〜{b.last_line}行目の中）", b.key, p) for p in b.positions]
@@ -679,6 +711,25 @@ class TalkMemory:
             return Outcome("refused", STALE_CHOICE)
         if p.kind == "block_then_point":  # 点の意味：区間を決めたので、次はどの点か
             return self._ask_point(p.said, p.text, b)
+        if p.kind == "confirm":
+            if choice == "confirm:no":
+                self.pending = None
+                return Outcome("refused", NOT_THIS, category="meaning")
+            o = self._register(Meaning(p.text, key, pos, p.said), current)
+            if o.kind == "taught" and pos is None:
+                o.message = TAUGHT_CONFIRMED.format(where=f"{b.first_line}〜{b.last_line}行目のくり返し", text=p.text)
+            return o
+        if p.kind == "replace":
+            self.pending = None
+            if choice == "replace:no":
+                return Outcome("refused", NOT_REPLACED, category="correction")
+            hit = next((x for x in self.meanings if x.block == key and x.position == pos and x.text == p.old), None)
+            if hit is None or verify(hit, current) is None:
+                return Outcome("refused", STALE_CHOICE, category="correction")
+            nm = Meaning(p.text, key, pos, p.said)
+            self.meanings = [nm if x is hit else x for x in self.meanings]
+            return Outcome("replaced", REPLACED.format(old=hit.text, new=nm.text, target=nm.target_text(b)), nm,
+                           category="correction")
         return self._register(Meaning(p.text, key, pos, p.said), current)
 
     # ---- Claude に渡す事実・画面に出すもの ----
@@ -706,7 +757,8 @@ class TalkMemory:
         return {
             "meanings": items,
             "pending": ({"token": p.token, "text": p.text,
-                         "question": ASK_WHICH_POINT if p.kind == "point" else ASK_WHICH_BLOCK,
+                         "question": p.question or (ASK_WHICH_POINT if p.kind == "point" else ASK_WHICH_BLOCK),
+                         "kind": p.kind,
                          "options": [{"id": o[0], "label": o[1]} for o in p.options]} if p else None),
             "human_mark": HUMAN_MARK, "ai_mark": AI_MARK,
         }

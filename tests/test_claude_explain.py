@@ -114,7 +114,7 @@ def test_facts_have_instructions_moves_repeats_but_no_coordinates_name_or_commen
     assert by_line[22] == {"line": 22, "command": "MOVL", "from": "C00001", "to": "C00002",
                            "change_mm": {"X": 0.0, "Y": 0.0, "Z": -45.0}}
     assert by_line[27]["command"] == "MOVJ"
-    assert f["repeats"] == [{"positions": ["C00001", "C00002", "C00003"], "count": 2, "first_line": 21,
+    assert f["repeats"] == [{"positions": ["C00001", "C00002", "C00003"], "count": 2, "points_per_cycle": 3, "first_line": 21,
                              "last_line": 26, "cycles": [{"cycle": 1, "lines": [21, 23]},
                                                          {"cycle": 2, "lines": [24, 26]}]}]
     assert f["updown"]["status"] == "unconfirmed"

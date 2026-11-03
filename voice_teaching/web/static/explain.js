@@ -150,7 +150,9 @@ function showReply(r) {
     const li = addTurn("アプリ", r.taught_note, "app taught");
     li.prepend(mark("human", ask.marks.human || "人が教えた（この会話の中だけ）"));
   }
-  if (r.reply) {
+  // 「どの動きのことですか？」：問いはボタンと一緒に1つの吹き出しで出す（下の renderPending）
+  const asking = r.status === "ask_which" && r.talk && r.talk.pending;
+  if (r.reply && !asking) {
     const isClaude = r.reply_by === "claude";
     const li = addTurn(isClaude ? "Claude（" + r.model + "）" : "アプリ", r.reply, isClaude ? "claude" : "app");
     if ((r.guesses || []).length) {  // AI の推定（未確定）：登録はしない。表示だけ

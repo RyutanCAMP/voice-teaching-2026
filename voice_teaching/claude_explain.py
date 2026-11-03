@@ -339,6 +339,7 @@ def find_repeats(job: jbi.Job, limit: int = 60) -> list[dict]:
             if blk.count >= 2:
                 found.append({
                     "positions": list(blk.positions), "count": blk.count,
+                    "points_per_cycle": len(blk.positions),  # 1回の中でめぐる位置の数（プログラムが数えた）
                     "first_line": blk.first_line + 1, "last_line": blk.end_line,
                     "cycles": [{"cycle": c + 1, "lines": [blk.first_line + c * blk.cycle_len + 1,
                                                           blk.first_line + (c + 1) * blk.cycle_len]}
@@ -355,14 +356,22 @@ def updown_fact(status: "ud.UpdownStatus | None") -> dict:
 
 def build_facts(job: jbi.Job, status: "ud.UpdownStatus | None" = None) -> dict:
     """Claude に送る事実（プログラムが作る）。//POS の行・座標の値・ジョブ名・見出し・コメントは入れない。"""
+    names = [n for n in job.positions if _POS.fullmatch(n)]
+    moves = move_summary(job)
+    reps = find_repeats(job)
     return {
         "note": "架空の合成ジョブ（シミュレーション用）の事実。アプリのプログラムが作った。座標の値は入れていない",
         "instructions": [{"line": n, "text": t} for n, t in dg.instruction_lines(job)],
-        "positions": [n for n in job.positions if _POS.fullmatch(n)],
-        "moves": move_summary(job),
+        "positions": names,
+        "moves": moves,
         "moves_note": ("change_mm は始点と終点の位置の差（X・Y・Z、mm）。MOVJ（関節移動）の通り道は直線ではなく、"
                        "差は通り道を表さない。ロボット本体・ツールの形は入っていない"),
-        "repeats": find_repeats(job),
+        "repeats": reps,
+        # プログラムが数えた数（答えで使ってよい数）。時間・距離・合計などは数えていない（使わない）
+        "counts": {"positions": len(names), "instructions": len(job.instructions), "moves": len(moves),
+                   "repeat_blocks": len(reps),
+                   "moves_by_command": {k: sum(1 for m in moves if m["command"] == k)
+                                        for k in sorted({m["command"] for m in moves})}},
         "updown": updown_fact(status),
     }
 

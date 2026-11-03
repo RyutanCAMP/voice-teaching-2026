@@ -874,8 +874,9 @@ def check_talk(browser, check, shots: Path | None, errors: list, out: Path) -> N
                                   cache_read_input_tokens=0, cache_creation=None))
 
     block = [21, 22, 23, 24, 25, 26]
-    replies = [ans(1, "同じ動きを2回くり返しています。何をする動きか、教えてもらえますか？", block),
-               ans(2, "分かりました。ボタンを押す動きを、2回くり返しているんですね。", block),
+    # 1ターン目は本物の Claude の答え（2026-11-03 シクロの通し）と同じ文・同じ根拠の行（20〜27。MOVJ の行を含む）
+    replies = [ans(1, "最初の位置に動いたあと、同じ3か所をめぐる動きを2回くり返し、最後に別の位置へ移ります。"
+                      "作業の目的は分からないので、何の作業か教えてもらえますか？", list(range(20, 28))),
                ans(3, "ボタンを押す動きを、2回から3回にしますか？", block, "change_request",
                    {"kind": "repeat", "from_count": 2, "to_count": 3})]
 
@@ -910,15 +911,27 @@ def check_talk(browser, check, shots: Path | None, errors: list, out: Path) -> N
             pg.wait_for_selector("#ask-turns .thinking", timeout=3000)
             check("考えています" in pg.inner_text("#ask-turns .thinking"), "会話：返事を待つ間「考えています…」が出る")
             pg.wait_for_selector("#ask-turns .bubble.claude:not(.thinking)")
-            until(pg, lambda: pg.locator("#fig-3d line.ask-hl").count() == 6)
-            check(pg.locator("#fig-3d line.ask-hl").count() == 6,
-                  "会話：返事が出たら、根拠の区間（21〜26行目）が 3D で自動で光る（押さなくてよい）")
+            until(pg, lambda: pg.locator("#fig-3d line.ask-hl").count() == 7)
+            check(pg.locator("#fig-3d line.ask-hl").count() == 7,
+                  "会話：返事が出たら、根拠の行（20〜27行目）の区間が 3D で自動で光る（押さなくてよい）")
+            movj = pg.locator("#fig-3d line.ask-hl.seg-movj")
+            check(movj.count() == 1 and movj.first.get_attribute("stroke-dasharray") == "2 6"
+                  and pg.locator('#fig-3d line.seg.before.seg-movj[data-to="C00004"]').get_attribute("stroke-dasharray") == "2 6",
+                  "会話：光らせても MOVJ の区間は点線のまま（直線の通り道に見せない）")
+            check(pg.locator("#ask-turns .bubble.claude").count() == 1, "会話：本物と同じ文（3か所・2回）がそのまま表示される")
             check("21〜26行目：C00001→C00002→C00003（2回）" in pg.inner_text("#ask-turns .supplement"),
                   "会話：番号は補足として小さく出る")
             whos = pg.locator("#ask-turns .bubble .who").all_inner_texts()
             check(any(x.startswith("Claude") for x in whos) and "人" in whos, f"会話：話し手（人・Claude）が出る：{whos}")
             pg.fill("#ask-input", "ボタンを押してるんだよ")
             pg.click("#ask-send")
+            pg.wait_for_selector("#ask-turns .talk-choice")
+            labels = pg.locator("#ask-turns .talk-choice").all_inner_texts()
+            until(pg, lambda: pg.locator("#fig-3d line.ask-hl").count() == 6)
+            check(labels == ["この動きです", "ほかの動き"] and "この光っている動き（21〜26行目のくり返し）" in pg.inner_text("#ask-turns")
+                  and pg.locator("#fig-3d line.ask-hl").count() == 6 and pg.locator("#fig-3d g.taught-mark").count() == 0,
+                  f"会話：区間が1つなら、その区間を光らせて［この動きです］［ほかの動き］で確かめる（押すまで覚えない）：{labels}")
+            pg.locator("#ask-turns .talk-choice", has_text="この動きです").click()
             until(pg, lambda: pg.locator("#fig-3d g.taught-mark").count() == 1)
             check(pg.locator("#ask-turns .bubble.taught .mark-human").count() == 1
                   and pg.is_visible("#ask-memory-box") and "ボタンを押してる" in pg.inner_text("#ask-memory"),

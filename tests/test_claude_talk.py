@@ -115,10 +115,22 @@ def meanings(w, sid):
     return w.ask(sid, sync=True)["talk"]["meanings"]
 
 
-def taught_button(w, fake, sid, reply="ボタンを押す動作ですね。"):
-    fake.add(answer(reply, [22]))
-    r = w.ask(sid, "そう、ボタンを押しているんだよ")
-    assert r["ok"] and r["taught_note"], r
+def press(w, sid, choice="confirm:yes"):
+    """「〜のことですか？」のボタンを押す（人がボタンで確かめる。Claude は呼ばない）。"""
+    p = w.ask(sid, sync=True)["talk"]["pending"]
+    assert p is not None
+    return w.ask(sid, choose=choice, token=p["token"])
+
+
+def taught_button(w, fake, sid, said="そう、ボタンを押しているんだよ"):
+    """人が意味を言う → その区間を光らせて確かめる → ［この動きです］を押して登録（唐川さんの判断：必ずボタンで確かめる）。"""
+    n = len(fake.requests)
+    r = w.ask(sid, said)
+    assert r["status"] == "ask_which" and len(fake.requests) == n, r  # 確かめる間は Claude を呼ばない
+    assert [o["id"] for o in r["talk"]["pending"]["options"]] == ["confirm:yes", "confirm:no"]
+    assert meanings(w, sid) == []  # 押すまで登録しない
+    r = press(w, sid)
+    assert r["ok"] and r["status"] == "taught" and r["taught_note"], r
     return r
 
 
@@ -211,15 +223,18 @@ def test_e2_7_claude_cannot_register_by_saying_so(tmp_path):
 def test_e2_7_concrete_meaning_in_own_words_is_registered_from_human_text(tmp_path):
     w, fake = flow(tmp_path)
     sid = first_turn(w, fake)
-    r = taught_button(w, fake, sid, reply="スイッチを操作する動きですね。")  # Claude の言い換えは登録しない
-    assert r["taught_note"] == talk.TAUGHT.format(text="ボタンを押している",
-                                                  target="21〜26行目の動き（C00001→C00002→C00003）")
+    r = taught_button(w, fake, sid)
+    assert r["taught_note"] == ("分かりました。この動き（21〜26行目のくり返し）を「ボタンを押している」として、"
+                                "この会話の中で覚えます")
     m = meanings(w, sid)
     assert [(x["text"], x["lines"], x["mark"], x["by"]) for x in m] == [
         ("ボタンを押している", [21, 22, 23, 24, 25, 26], talk.HUMAN_MARK, "human")]
-    # 登録した意味は、同じ回の要求から事実として渡す（人が教えた・この会話の中だけ）
+    # 登録した意味は、次の要求から事実として渡す（人が教えた・この会話の中だけ）。Claude の言い換えは登録しない
+    fake.add(answer("スイッチを操作する動きですね。", [22]))
+    w.ask(sid, "くわしく")
     sent = dump(fake.requests[-1]["messages"][-1])
     assert "taught_by_human" in sent and "ボタンを押している" in sent and "21〜26行目の動き" in sent
+    assert [x["text"] for x in meanings(w, sid)] == ["ボタンを押している"]
 
 
 def test_e2_meaning_is_used_in_the_next_answer(tmp_path):
@@ -267,9 +282,10 @@ def test_e2_7_two_blocks_ask_which_with_buttons_then_register(tmp_path, syntheti
 def test_e2_7_two_blocks_evidence_in_one_block_registers_that_block(tmp_path, synthetic_two):
     w, fake = flow(tmp_path)
     sid = first_turn(w, fake, data=TWO_BLOCKS, lines=(28, 29, 30))
-    fake.add(answer("ボタンを押す動作ですね。", [28]))
     r = w.ask(sid, "ボタンを押してるんだよ")
-    assert r["status"] == "answered" and r["taught_note"]
+    assert r["status"] == "ask_which" and r["highlight"]["lines"] == list(range(28, 34)) and meanings(w, sid) == []
+    assert "28〜33行目のくり返し" in r["reply"]
+    press(w, sid)
     assert [x["lines"][0] for x in meanings(w, sid)] == [28]
 
 
@@ -278,9 +294,10 @@ def test_e2_7_evidence_across_blocks_or_outside_asks(tmp_path, synthetic_two):
     sid = first_turn(w, fake, data=TWO_BLOCKS, lines=(22, 28))
     assert w.ask(sid, "ボタンを押してる")["status"] == "ask_which"
     w2, fake2 = flow(tmp_path)
-    sid2 = first_turn(w2, fake2, lines=(20, 21))  # 区間の外の行（20行目）も話題：決めない
+    sid2 = first_turn(w2, fake2, lines=(20, 21))  # 区間の外の行（20行目）も話題：区間は1つなので、その区間か確かめる
     r = w2.ask(sid2, "ボタンを押してる")
-    assert r["status"] == "ask_which" and len(r["talk"]["pending"]["options"]) == 1
+    assert r["status"] == "ask_which" and [o["id"] for o in r["talk"]["pending"]["options"]] == ["confirm:yes", "confirm:no"]
+    assert meanings(w2, sid2) == []
 
 
 def test_e2_7_this_is_button_unknown_point_asks_then_registers_point(tmp_path):
@@ -316,13 +333,29 @@ def test_e2_7_correction_replaces_previous_meaning(tmp_path):
     w, fake = flow(tmp_path)
     sid = first_turn(w, fake)
     taught_button(w, fake, sid)
-    fake.add(answer("スイッチを押す動作ですね。", [22]))
+    n = len(fake.requests)
     r = w.ask(sid, "ボタンじゃなくてスイッチ")
-    assert r["ok"] and r["taught_note"].startswith("「ボタンを押している」を「スイッチを押している」に置き換えました")
-    assert [x["text"] for x in meanings(w, sid)] == ["スイッチを押している"]
+    assert r["status"] == "ask_which" and len(fake.requests) == n
+    assert r["reply"] == talk.CONFIRM_REPLACE.format(old="ボタンを押している", new="スイッチを押している",
+                                                     target="21〜26行目の動き（C00001→C00002→C00003）")
+    assert [x["text"] for x in meanings(w, sid)] == ["ボタンを押している"]  # 押すまで置き換えない
     assert r["change_record"] is None and r["change_request"] is None  # 変更の指示の打ち消しとは混ぜない
+    r = press(w, sid, "replace:yes")
+    assert r["taught_note"].startswith("「ボタンを押している」を「スイッチを押している」に置き換えました")
+    assert [x["text"] for x in meanings(w, sid)] == ["スイッチを押している"]
+    fake.add(answer("スイッチを押す動作ですね。", [22]))
+    w.ask(sid, "くわしく")
     sent = dump(fake.requests[-1]["messages"][-1])
     assert "スイッチを押している" in sent and "ボタンを押している" not in sent
+
+
+def test_e2_7_correction_not_confirmed_keeps_old(tmp_path):
+    w, fake = flow(tmp_path)
+    sid = first_turn(w, fake)
+    taught_button(w, fake, sid)
+    w.ask(sid, "ボタンじゃなくてスイッチ")
+    assert press(w, sid, "replace:no")["reply"] == talk.NOT_REPLACED
+    assert [x["text"] for x in meanings(w, sid)] == ["ボタンを押している"]
 
 
 def test_e2_7_correction_without_previous_meaning_is_not_registered(tmp_path):
@@ -348,9 +381,11 @@ def test_e3_meaning_against_facts_is_not_taken(tmp_path, said, msg):
 def test_e3_point_in_the_block_is_taken(tmp_path):
     w, fake = flow(tmp_path)
     sid = first_turn(w, fake)
-    fake.add(answer("その点でボタンを押すのですね。", [22]))
     r = w.ask(sid, "ボタンは C00002 だよ")
-    assert r["taught_note"] and [(x["text"], x["position"]) for x in meanings(w, sid)] == [("ボタン", "C00002")]
+    assert r["status"] == "ask_which" and meanings(w, sid) == []
+    assert [o["label"] for o in r["talk"]["pending"]["options"]] == [talk.CONFIRM_POINT_YES, talk.CONFIRM_POINT_NO]
+    assert press(w, sid)["taught_note"]
+    assert [(x["text"], x["position"]) for x in meanings(w, sid)] == [("ボタン", "C00002")]
 
 
 # ======== E2-1・E2-2 読み直し ========
@@ -417,10 +452,12 @@ def post(srv, path, obj, headers=None):
 def test_e2_1_e2_2_reload_and_sample_over_http(running):
     srv, fake = running
     sid = post(srv, "/api/load", demo_bytes())["session_id"]
-    fake.add(answer("同じ動きを2回くり返しています。" + ASKED, [21]), answer("ボタンを押す動作ですね。", [22]))
+    fake.add(answer("同じ動きを2回くり返しています。" + ASKED, [21]))
     post(srv, "/api/ask", {"session_id": sid, "text": "このロボット、何をしている？"})
     r = post(srv, "/api/ask", {"session_id": sid, "text": "そう、ボタンを押しているんだよ", "source": "voice"})
-    assert r["taught_note"] and r["source"] == "voice"
+    assert r["status"] == "ask_which" and r["source"] == "voice"
+    r = post(srv, "/api/ask", {"session_id": sid, "choose": "confirm:yes", "token": r["talk"]["pending"]["token"]})
+    assert r["taught_note"]
     sid2 = post(srv, "/api/load", demo_bytes().replace(b"\r\n", b"\n"),
                 {"X-VT-Previous-Session": sid})["session_id"]
     assert [x["text"] for x in post(srv, "/api/ask", {"session_id": sid2, "sync": True})["talk"]["meanings"]] \
@@ -702,9 +739,10 @@ def test_e7_correction_is_not_a_change_negation_and_all_three_two_blocks(tmp_pat
     w, fake = flow(tmp_path)
     sid = first_turn(w, fake, data=TWO_BLOCKS, lines=(22, 23))
     taught_button(w, fake, sid)
-    fake.add(answer("スイッチを押す動作ですね。", [22]))
     r = w.ask(sid, "ボタンじゃなくてスイッチ")
-    assert r["change_record"] is None and [x["text"] for x in meanings(w, sid)] == ["スイッチを押している"]
+    assert r["change_record"] is None
+    press(w, sid, "replace:yes")
+    assert [x["text"] for x in meanings(w, sid)] == ["スイッチを押している"]
     fake.add(answer("どちらの動きを3回にしますか？", [], "change_request",
                     {"kind": "repeat", "from_count": 2, "to_count": 3}))
     r = w.ask(sid, "全部3回にして")
@@ -787,10 +825,11 @@ def test_scene_3_2_and_3_3_teach_then_three_times(tmp_path):
     w, fake = flow(tmp_path, answer(SCENE_31, [21, 22, 23, 24, 25, 26]), updown_config=confirmed_config(tmp_path))
     sid = w.load(demo_bytes())["session_id"]
     w.ask(sid, "このロボット、何をしている？")
-    # 3-2 教える
-    fake.add(answer("分かりました。ボタンを押す動きを、2回くり返しているんですね。", [21, 22, 23, 24, 25, 26]))
+    # 3-2 教える：その区間を光らせて確かめ、［この動きです］を押してから覚える（アプリの文。Claude は呼ばない）
     r = w.ask(sid, "ボタンを押してるんだよ")
-    assert r["reply_by"] == "claude" and r["reply"].startswith("分かりました。ボタンを押す動き")
+    assert r["status"] == "ask_which" and r["highlight"]["lines"] == [21, 22, 23, 24, 25, 26]
+    r = press(w, sid)
+    assert r["reply_by"] == "app" and r["taught_note"].startswith("分かりました。この動き（21〜26行目のくり返し）")
     m = r["talk"]["meanings"]
     assert [(x["text"], x["mark"], x["positions"]) for x in m] == [
         ("ボタンを押してる", talk.HUMAN_MARK, ["C00001", "C00002", "C00003"])]  # 吹き出しと 3D の印に使う
@@ -822,3 +861,92 @@ def test_scene_3_taught_mark_is_drawn_in_3d():
     js = (STATIC / "explain.js").read_text(encoding="utf-8")
     v3 = (STATIC / "view3d.js").read_text(encoding="utf-8")
     assert "vtTaught" in js and "_taughtMarks" in v3 and "（人が教えた）" in v3
+
+
+
+# ======== シクロの本物の通し（2026-11-03）で見つかったこと ========
+REAL_1 = ("最初の位置に動いたあと、同じ3か所をめぐる動きを2回くり返し、最後に別の位置へ移ります。"
+          "作業の目的は分からないので、何の作業か教えてもらえますか？")
+
+
+def test_real_counted_numbers_are_allowed_but_uncounted_are_not(tmp_path):
+    w, fake = flow(tmp_path, answer(REAL_1, list(range(20, 28))), updown_config=confirmed_config(tmp_path))
+    sid = w.load(demo_bytes())["session_id"]
+    r = w.ask(sid, "このロボット、何をしている？")
+    assert r["reply_by"] == "claude" and r["reply"] == REAL_1
+    facts = json.loads(fake.requests[0]["messages"][0]["content"][0]["text"])["job_facts"]
+    assert facts["repeats"][0]["points_per_cycle"] == 3  # プログラムが数えて Claude にも渡す
+    assert facts["counts"] == {"positions": 5, "instructions": 10, "moves": 8, "repeat_blocks": 1,
+                               "moves_by_command": {"MOVJ": 2, "MOVL": 6}}
+    fake.add(answer("全部で4秒かかります。", [21]), answer("同じ動きを7回くり返します。", [21]))
+    assert w.ask(sid, "時間は？")["reply"] == cx.FIXED_NUMBER  # 数えていない数（時間）は今どおり使わない
+    assert w.ask(sid, "回数は？")["reply"] == cx.FIXED_NUMBER
+
+
+def test_real_three_turns_single_block_confirm_then_three_times(tmp_path):
+    w, fake = flow(tmp_path, answer(REAL_1, list(range(20, 28))), updown_config=confirmed_config(tmp_path))
+    sid = w.load(demo_bytes())["session_id"]
+    r1 = w.ask(sid, "このロボット、何をしている？")
+    assert r1["reply_by"] == "claude"
+    n = len(fake.requests)
+    # 2ターン目：根拠に区間の外の行（20・27）があるが、区間は1つ：その区間を光らせて［この動きです］［ほかの動き］
+    r2 = w.ask(sid, "ボタンを押してるんだよ")
+    q = "「ボタンを押してる」のは、この光っている動き（21〜26行目のくり返し）のことですか？"
+    assert r2["status"] == "ask_which" and r2["reply"] == q and len(fake.requests) == n
+    p = r2["talk"]["pending"]
+    assert p["question"] == q and [o["label"] for o in p["options"]] == [talk.CONFIRM_YES, talk.CONFIRM_NO]
+    assert r2["highlight"] == {"lines": [21, 22, 23, 24, 25, 26], "positions": ["C00001", "C00002", "C00003"]}
+    assert meanings(w, sid) == []  # 押すまで登録しない（E2-7 ④）
+    # 声・文字の「はい」では選ばない
+    fake.add(answer("どの動きか、ボタンで選んでください。", []))
+    w.ask(sid, "はい", source="voice")
+    assert meanings(w, sid) == []
+    p = w.ask(sid, sync=True)["talk"]["pending"]
+    r3 = w.ask(sid, choose="confirm:yes", token=p["token"])
+    assert r3["status"] == "taught" and r3["reply_by"] == "app"
+    assert r3["taught_note"] == "分かりました。この動き（21〜26行目のくり返し）を「ボタンを押してる」として、この会話の中で覚えます"
+    assert [(x["text"], x["lines"][0], x["lines"][-1]) for x in meanings(w, sid)] == [("ボタンを押してる", 21, 26)]
+    # 3ターン目：Claude に人が教えた意味が渡り、change_record の対象は登録した区間
+    fake.add(answer("ボタンを押す動きを、2回から3回に変更しますか？", list(range(21, 27)), "change_request",
+                    {"kind": "repeat", "from_count": 2, "to_count": 3}))
+    r4 = w.ask(sid, "じゃあ、3回にして")
+    sent = json.loads(next(b["text"] for b in fake.requests[-1]["messages"][-1]["content"]
+                           if b["type"] == "text" and "taught_by_human" in b["text"]))["taught_by_human"]
+    assert [(t["meaning"], t["lines"]) for t in sent] == [("ボタンを押してる", [21, 26])]
+    rec = r4["change_record"]
+    assert rec["target"] == "21〜26行目：C00001→C00002→C00003（2回）" and rec["program_from"] == 2
+    assert rec["program_total"] == 3 and rec["evidence_matches_block"] is True and rec["mismatch"] is False
+    assert w._entries[sid].session.candidate is None
+
+
+def test_real_single_block_other_move_does_not_register(tmp_path):
+    w, fake = flow(tmp_path)
+    sid = first_turn(w, fake, lines=list(range(20, 28)))
+    p = w.ask(sid, "ボタンを押してるんだよ")["talk"]["pending"]
+    r = w.ask(sid, choose="confirm:no", token=p["token"])
+    assert r["reply"] == talk.NOT_THIS and meanings(w, sid) == [] and r["talk"]["pending"] is None
+
+
+def test_real_first_turn_highlight_includes_movj_lines_but_they_stay_dotted(tmp_path):
+    # 1ターン目の根拠 20〜27 は、MOVJ の行（20・27）と C00000・C00004 も光らせる。
+    # 線の見た目は区間の種類のまま（MOVJ は点線。highlight.js の askHighlightLook・e2e で確かめる）
+    w, fake = flow(tmp_path, answer(REAL_1, list(range(20, 28))), updown_config=confirmed_config(tmp_path))
+    sid = w.load(demo_bytes())["session_id"]
+    r = w.ask(sid, "このロボット、何をしている？")
+    assert r["highlight"]["lines"] == list(range(20, 28))
+    assert r["highlight"]["positions"] == ["C00000", "C00001", "C00002", "C00003", "C00004"]
+    segs = {s["line_no"]: s["kind"] for s in __import__("voice_teaching.web.api", fromlist=["x"]).job_view(
+        demo_bytes())["segments"]}
+    assert segs[27] == "movj" and 20 not in segs  # 20行目は最初の移動（線は無い）。27行目は MOVJ の点線
+
+
+@pytest.mark.parametrize("said", ["そう", "はい", "そうそう", "うん、そうだね", "この動きです"])
+@pytest.mark.parametrize("source", ["voice", "text"])
+def test_pending_target_is_not_confirmed_by_words(tmp_path, said, source):
+    """「〜のことですか？」は、声・文字の「そう」「はい」（ボタンの文字と同じ言葉でも）では確定しない。ボタンだけ。"""
+    w, fake = flow(tmp_path)
+    sid = first_turn(w, fake)
+    assert w.ask(sid, "ボタンを押してるんだよ")["status"] == "ask_which"
+    fake.add(answer("ボタンで選んでください。", []))
+    w.ask(sid, said, source=source)
+    assert meanings(w, sid) == []

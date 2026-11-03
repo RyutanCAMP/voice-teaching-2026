@@ -787,6 +787,9 @@ class WebFlow:
         out = self._app_reply(e, o.message or "", notices, source, status, said)
         if o.kind in ("taught", "replaced"):  # ボタンで選んで登録した：アプリの知らせだけ（Claude は呼ばない）
             out["taught_note"], out["reply"] = o.message, ""
+        if o.block is not None:  # 確かめている区間を光らせる（行番号からプログラムが決める）
+            out["highlight"], out["supplement"] = talk.highlight_and_supplement(
+                e.session.original, [{"line": o.block.first_line}])
         return out
 
     # ---- 内部 ----
