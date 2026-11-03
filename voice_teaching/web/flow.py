@@ -720,7 +720,9 @@ class WebFlow:
                          if approved else None),
             "can_approve": (ch is not None and ch.kind == "shift" and not approved
                             and not s.candidate_blocked_reason and same_updown),
-            "can_export": approved,
+            # 出力できるのは合成ジョブ（samples/dummy と同じバイト列）だけ。実機の JOB は承認しても出力ボタンを押せない（画面で明示する）
+            "exportable": sim._is_synthetic(s.original_bytes),
+            "can_export": approved and sim._is_synthetic(s.original_bytes),
             "exported": e.exported if approved else None,
             "out_dir": str(Path(sim.DEFAULT_OUT_DIR).resolve()),
             "mock_notice": self.interpreter.notice,

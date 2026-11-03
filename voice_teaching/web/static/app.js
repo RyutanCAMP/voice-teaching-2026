@@ -704,6 +704,7 @@ function openConfirm() {
     ? "この変更は承認できません。閉じて「元に戻す」を押し、別の位置を選んでください" + reason : "";
   $("confirm-blocked").hidden = !st.blocked_reason;
   $("confirm-stopped-legend").hidden = !st.blocked_reason;
+  $("confirm-review-only").hidden = st.exportable !== false;  // 実機の JOB（合成ジョブでない）は出力しない
   // U1：承認ボタンを押す画面に、候補の注意をすべて出す（右のカードは確認表示に隠れるため）
   const notes = [...st.candidate.warnings];  // 候補の注意は全部（一部だけにしない）
   if (state.view.figure_message) notes.push(state.view.figure_message);  // 図に描けない点がある
@@ -776,8 +777,10 @@ function renderApproval() {
   $("approval-status").textContent = a ? `✓ ${a.approved_by} さんが承認しました` : "";
   $("approval-status").hidden = !a;
   $("open-confirm").hidden = !!a;
-  $("export-button").hidden = !a;
-  $("export-note").hidden = !a;
+  const reviewOnly = st.exportable === false;  // 実機の JOB：承認しても出力しない
+  $("export-button").hidden = !a || reviewOnly;
+  $("export-note").hidden = !a || reviewOnly;
+  $("export-review-only").hidden = !a || !reviewOnly;
   $("export-button").disabled = !st.can_export || recording();
   $("approve-button").disabled = !st.can_approve || recording();
   if (!a && !$("export-result").hidden && $("export-result").dataset.ok === "true") {
