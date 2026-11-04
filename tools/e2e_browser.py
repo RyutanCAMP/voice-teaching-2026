@@ -811,6 +811,92 @@ def check_voice_error_typing(browser, check, shots: Path | None, out: Path) -> N
         srv.server_close()
 
 
+def check_export_twice(browser, check, shots: Path | None, out: Path) -> None:
+    """11/5 夜 H1：出力に成功したあと［シミュレーション用に出力］をもう一度押す（2回押す・ダブルクリック）と、
+    2回目が「既にあるため、上書きしません」の赤い失敗になり、「出力しました」の見出し・「出力 済み」と食い違っていた。
+    出力に成功したら、そのボタンは押せない（2回目を送らない）。ダブルクリックでも /api/export は1回だけ。
+    サーバーの「上書きしない」決まりは変えない。1回目が本当に失敗したとき（同じ名前のファイルが既にある）は、
+    今までどおり失敗を出す。出力は一時フォルダ（out の下）に書く。"""
+    from voice_teaching import sim
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import server
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    saved_out_dir = sim.DEFAULT_OUT_DIR
+
+    def approved_page(w, h):
+        pg = browser.new_page(viewport={"width": w, "height": h})
+        pg.add_init_script(FAKE_RECOGNITION)
+        exports = []
+        pg.on("request", lambda r: exports.append(r.url) if r.method == "POST" and "/api/export" in r.url else None)
+        pg.goto(url)
+        pg.set_input_files("#file-input", str(REPO / "samples/dummy" / "DEMO_C_PLACE.JBI"))
+        pg.wait_for_selector("#job-area:not([hidden])")
+        pg.locator("#position-chips button", has_text="C00003").click()
+        until(pg, lambda: pg.inner_text("#voice-position strong") == "C00003")
+        fill_text(pg, "Zプラス方向に10mm")
+        pg.click("#text-send")
+        until(pg, lambda: pg.is_enabled("#open-confirm"))
+        pg.click("#open-confirm")
+        pg.wait_for_selector("#confirm-overlay:not([hidden])")
+        pg.fill("#approver-name", "e2e確認")
+        pg.click("#approve-button")
+        until(pg, lambda: pg.is_visible("#approval-status"))
+        until(pg, lambda: pg.is_enabled("#export-button"))
+        return pg, exports
+
+    def no_contradiction(pg):
+        box = pg.inner_text("#export-result")
+        return (pg.get_attribute("#export-result", "data-ok") == "true" and "出力しました" in box
+                and "上書きしません" not in box and "出力していません" not in box)
+
+    try:
+        for (w, h) in [(1280, 720), (1920, 1080)]:
+            for how in ["click2", "dblclick"]:
+                sim.DEFAULT_OUT_DIR = out / f"h1_sim_{w}_{how}"
+                pg, exports = approved_page(w, h)
+                if how == "click2":
+                    pg.click("#export-button")
+                    pg.wait_for_selector("#export-result:not([hidden])")
+                    pg.wait_for_timeout(300)
+                    if pg.is_enabled("#export-button"):  # 押せるなら、人と同じようにもう一度押す
+                        pg.click("#export-button")
+                else:
+                    pg.dblclick("#export-button")
+                    pg.wait_for_selector("#export-result:not([hidden])")
+                pg.wait_for_timeout(800)
+                check(no_contradiction(pg) and len(exports) == 1 and pg.is_disabled("#export-button")
+                      and "出力 済み" in (pg.text_content("#status-line") or "")
+                      and pg.inner_text("#next-action") == "出力しました",
+                      f"11/5 H1（{w}×{h}・{how}）：出力に成功したあとは［シミュレーション用に出力］を押せず、2回目を送らない。"
+                      f"赤い「上書きしません」を出さない（送信 {len(exports)}回・ボタン {'押せない' if pg.is_disabled('#export-button') else '押せる'}・"
+                      f"結果「{' '.join(pg.inner_text('#export-result').split())[:60]}」）")
+                if shots is not None and how == "click2":
+                    shots.mkdir(parents=True, exist_ok=True)
+                    pg.screenshot(path=str(shots / f"H1_{w}_export_twice.png"))
+                pg.close()
+        # 1回目が本当に失敗したとき（同じ名前のファイルが既にある）は、今までどおり失敗を出す（隠さない）
+        d = out / "h1_sim_exists"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "DEMO_C_PLACE_SIM.JBI.txt").write_text("e2e：前からあるファイル（上書きしないことを確かめる）", encoding="utf-8")
+        sim.DEFAULT_OUT_DIR = d
+        pg, exports = approved_page(1280, 720)
+        pg.click("#export-button")
+        pg.wait_for_selector("#export-result:not([hidden])")
+        pg.wait_for_timeout(300)
+        box = pg.inner_text("#export-result")
+        check(pg.get_attribute("#export-result", "data-ok") == "false" and "上書きしません" in box and len(exports) == 1
+              and "出力 まだ" in (pg.text_content("#status-line") or "")
+              and (d / "DEMO_C_PLACE_SIM.JBI.txt").read_text(encoding="utf-8").startswith("e2e："),
+              f"11/5 H1：1回目の出力が本当に失敗したときは、失敗をそのまま出す（ファイルは上書きしない）：{' '.join(box.split())[:60]}")
+        pg.close()
+    finally:
+        sim.DEFAULT_OUT_DIR = saved_out_dir
+        srv.shutdown()
+        srv.server_close()
+
+
 # 11/5 夜 F6：1920×1080 で撮る動画の文字。測る要素（会話の吹き出し・話し手・状態の1行・返事の札・凡例・図の注意書き）
 TEXT_SIZE_SELS = [".bubble.human .said", ".bubble.claude .said", ".bubble.app .said", ".bubble .who", ".status-line",
                   ".status-line .st-chip", "#reply-message", "#reply-message .range-lines", ".legend", ".legend.kinds",
@@ -2311,6 +2397,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check_load_while_waiting(b, check, shots, out)
             check_reload_same_file(b, check, shots, out)
             check_voice_error_typing(b, check, shots, out)
+            check_export_twice(b, check, shots, out)
             check_dialog(b, check, shots, errors, updown_cfg["DEMO_C_PLACE.JBI"])
             check_talk(b, check, shots, errors, out)
             check_updown_unconfirmed(b, check, shots, errors)

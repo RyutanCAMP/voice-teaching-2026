@@ -56,7 +56,7 @@ def test_entry_card_at_step_4_only_after_approval():
     assert '$("voice-input-slot").hidden = step === 4;' in js and "|| currentStep() === 4;" in js
     # 録音中は、確認表示・承認・出力のボタンを押せない
     for b in ('$("open-confirm").disabled = !c || recording();', '$("approve-button").disabled = !st.can_approve || recording();',
-              '$("export-button").disabled = !st.can_export || recording();'):
+              '$("export-button").disabled = !st.can_export || !!st.exported || state.exporting || recording();'):
         assert b in js, b
 
 

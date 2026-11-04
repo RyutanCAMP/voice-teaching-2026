@@ -1226,7 +1226,9 @@ function renderApproval() {
   $("export-note").hidden = !a || reviewOnly;
   $("export-review-only").hidden = !a || !reviewOnly;
   renderAfterApproval(a ? st.after_approval : null);
-  $("export-button").disabled = !st.can_export || recording();
+  // 出力に成功したら（今の承認の出力が済み）・出力を送っている間は押せない。2回目が「上書きしません」の赤い失敗になって、
+  // 「出力しました」と食い違うため（11/5 夜 H1）。上書きしない決まりはサーバーのまま。1回目の失敗のあとは押せる
+  $("export-button").disabled = !st.can_export || !!st.exported || state.exporting || recording();
   $("approve-button").disabled = !st.can_approve || recording();
   if (!a && !$("export-result").hidden && $("export-result").dataset.ok === "true") {
     $("export-result").hidden = true;
@@ -1235,8 +1237,15 @@ function renderApproval() {
 
 // ---- シミュレーション用の出力 ----
 $("export-button").addEventListener("click", async () => {
-  if (recording()) return;
-  const res = await postJson("/api/export", { session_id: state.sessionId });
+  if (recording() || state.exporting || (state.st && state.st.exported)) return;  // ダブルクリックでも送るのは1回（11/5 夜 H1）
+  state.exporting = true;
+  $("export-button").disabled = true;
+  let res;
+  try {
+    res = await postJson("/api/export", { session_id: state.sessionId });
+  } finally {
+    state.exporting = false;
+  }
   if (res.state) state.st = res.state;
   const box = $("export-result");
   if (res.ok === true) {
