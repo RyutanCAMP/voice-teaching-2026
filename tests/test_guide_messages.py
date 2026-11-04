@@ -29,9 +29,11 @@ def test_range_and_decimal_heads_still_match(tmp_path):
     w, f = T.flow(tmp_path)
     sid = w.load(T.demo_bytes())["session_id"]
     assert w.talk(sid, "C00002からC00003を3回にして")["hear"]["message"].startswith("区間（C00002〜C00003）の中に、区間の外の位置")
-    # 小数の回数：くり返しの区間が無いジョブ（DEMO_C）では「回数は整数で…」。区間のあるジョブでは、別の理由で断る
-    # （「3.5回」を「5回にはしません」と断る。サーバーの読み方の残件として報告済み。画面の表は変えない）
+    # 11/5 P0: reject the complete decimal before creating a canonical count.
+    # It now uses the conversation reply, retaining the UI's integer-message head.
     w2, f2 = T.flow(tmp_path / "b", T.answer("回数を変えたいのですね。", (21,), "change_request",
                                            {"kind": "repeat", "from_count": 2, "to_count": 3}))
     sid2 = w2.load(K.DEMO_C)["session_id"]
-    assert w2.talk(sid2, "3.5回にして")["hear"]["message"].startswith("回数は整数で言ってください")
+    r = w2.talk(sid2, "3.5回にして")
+    assert r["ask"]["reply"].startswith("回数は整数で言ってください")
+    assert r["hear"] is None and not r["state"]["candidate"] and not r["state"]["repeat_range"]
