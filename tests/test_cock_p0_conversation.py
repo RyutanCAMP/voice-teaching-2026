@@ -75,6 +75,17 @@ def test_uncertain_cancellation_is_a_question_not_an_action(tmp_path, text):
     assert not fake.requests
 
 
+def test_approximate_count_with_existing_candidate_still_asks(tmp_path):
+    w, fake = T.flow(tmp_path)
+    sid = w.load(T.demo_bytes())['session_id']
+    repeat_candidate(w, sid)
+    old = w.state(sid)['state']['candidate']
+    r = w.talk(sid, '3回くらい')
+    assert '3回でよいですか' in r['ask']['reply']
+    assert r['state']['candidate'] == old and not r['state']['approval']
+    assert not fake.requests and not r['state']['repeat_range']
+
+
 @pytest.mark.parametrize('text', ['取り消して', 'やっぱりやめて', 'キャンセル', '元に戻して'])
 def test_explicit_cancellation_stays_available(tmp_path, text):
     w, fake = T.flow(tmp_path)

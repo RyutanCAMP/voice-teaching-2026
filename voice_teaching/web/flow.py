@@ -944,14 +944,15 @@ class WebFlow:
                 return {**self.explainer.ask(conv, text), "talk": self._talk_state(e, notices)}
             text = text.strip()
             pending = s.candidate is not None
-            if pending and talk.looks_like_change(text):
-                # 承認待ちの候補がある：Claude に変更の希望を受けさせない（呼ばない）。説明だけ
-                return self._app_reply(e, talk.PENDING_EXPLAIN_ONLY, notices, source, "explain_only", text)
             blocks = talk.repeat_blocks(s.original)
             count = talk.read_count(text, blocks, e.talk.last_evidence)
             if count is not None and count.stop:
                 # 回数の言葉に打ち消し・ためらい（「3回にしないで」「そう、じゃなくて4回」「たぶん3回」）：読まない・呼ばない
                 return self._app_reply(e, count.stop, notices, source, "count_refused", text)
+            if pending and talk.looks_like_change(text):
+                # Existing candidate is protected; a numeric clarification above
+                # must not be replaced with instructions to approve this candidate.
+                return self._app_reply(e, talk.PENDING_EXPLAIN_ONLY, notices, source, "explain_only", text)
             o = e.talk.consider(text, s.original, self._current_job(e))
             if o.kind in ("ask", "refused"):
                 return self._talk_reply(e, o, notices, source, said=text)
