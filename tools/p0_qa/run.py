@@ -22,19 +22,19 @@ def module(name, path):
     return mod
 
 
-def snapshot(name, committed=False):
+def snapshot(name, committed=False, commit='HEAD'):
     out = BASE / name
     if out.exists():
         raise RuntimeError('Snapshot already exists; preserve it')
-    files = subprocess.check_output(['git', 'ls-files', 'voice_teaching', 'samples/dummy', 'tests', 'requirements.txt'], cwd=ROOT).decode().splitlines()
+    files = subprocess.check_output(['git', 'ls-tree', '-r', '--name-only', commit, '--', 'voice_teaching', 'samples/dummy', 'tests', 'requirements.txt'], cwd=ROOT).decode().splitlines()
     hashes = {}
     for n in files:
-        data = subprocess.check_output(['git', 'show', 'HEAD:' + n], cwd=ROOT) if committed else (ROOT / n).read_bytes()
+        data = subprocess.check_output(['git', 'show', commit + ':' + n], cwd=ROOT) if committed else (ROOT / n).read_bytes()
         p = out / 'source' / n
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(data)
         hashes[n] = hashlib.sha256(data).hexdigest()
-    doc = dict(commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT).decode().strip(), files=hashes)
+    doc = dict(commit=subprocess.check_output(['git', 'rev-parse', commit], cwd=ROOT).decode().strip(), files=hashes)
     (out / 'manifest.json').write_text(json.dumps(doc, indent=2), encoding='utf-8')
 
 
@@ -51,6 +51,7 @@ def worker(args):
 if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--snapshot')
+    ap.add_argument('--commit', default='HEAD')
     ap.add_argument('--mode', choices=['replay', 'live'], default='replay')
     ap.add_argument('--variant', default='before')
     ap.add_argument('--run', default='before-base')
@@ -60,7 +61,7 @@ if __name__ == '__main__':
     ap.add_argument('--child', action='store_true')
     a = ap.parse_args()
     if a.snapshot:
-        snapshot(a.snapshot, committed=True)
+        snapshot(a.snapshot, committed=True, commit=a.commit)
     elif a.child:
         raise SystemExit(worker(a))
     else:

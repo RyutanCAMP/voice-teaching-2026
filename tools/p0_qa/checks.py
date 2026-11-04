@@ -13,6 +13,7 @@ OUT = ROOT / 'output/p0-20261105'
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('suite', choices=['core', 'browser'])
+    ap.add_argument('--label', default='clean', choices=['clean', 'final'])
     a = ap.parse_args()
     keep = {'SYSTEMROOT', 'WINDIR', 'PATH', 'COMSPEC', 'PATHEXT', 'SYSTEMDRIVE'}
     env = {k: v for k, v in os.environ.items() if k.upper() in keep}
@@ -20,7 +21,7 @@ if __name__ == '__main__':
                PLAYWRIGHT_BROWSERS_PATH=str(QA / 'output/qa9417/browsers'))
     cmd = [str(QA / 'output/qa9417/venv/Scripts/python.exe'), '-X', 'utf8', '-B', '-m', 'pytest', '-q', '--tb=short']
     cmd += ['--ignore=tests/test_e2e_browser.py'] if a.suite == 'core' else ['tests/test_e2e_browser.py', '-o', 'faulthandler_timeout=45']
-    log = OUT / f'clean-{a.suite}.txt'
+    log = OUT / f'{a.label}-{a.suite}.txt'
     with log.open('wb') as f:
         try:
             code = subprocess.run(cmd, cwd=ROOT, env=env, stdout=f, stderr=subprocess.STDOUT,

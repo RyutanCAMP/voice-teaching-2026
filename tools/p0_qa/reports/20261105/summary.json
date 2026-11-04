@@ -1,0 +1,80 @@
+{
+  "target_sha": "ce7c981a917e9137f2f2e1b584fc39d579892ed9",
+  "base_sha": "20c8464a7c5b31b1485ddd066f6ce0ae095eb0d6",
+  "before": {
+    "PASS": 96,
+    "FAIL": 71,
+    "REVIEW_REQUIRED": 2
+  },
+  "replay": {
+    "PASS": 120,
+    "FAIL": 46,
+    "REVIEW_REQUIRED": 3
+  },
+  "replay_executed": 168,
+  "replay_execution_errors": [
+    "SUP-D05-dialog"
+  ],
+  "combined": {
+    "PASS": 121,
+    "FAIL": 46,
+    "REVIEW_REQUIRED": 2
+  },
+  "combined_method": "168 original-response replays + 1 replay of a newly captured real response. Not 169 new live trials.",
+  "improved": [
+    "A02",
+    "A04",
+    "A07",
+    "A17",
+    "A20",
+    "A25",
+    "A27",
+    "A31",
+    "C03",
+    "C14",
+    "E02",
+    "E03",
+    "E04",
+    "F04",
+    "F07",
+    "F08",
+    "F15",
+    "F16",
+    "H04",
+    "H11",
+    "NUM-FRACTION-23",
+    "SUP-D05-dialog",
+    "SUP-E03-candidate",
+    "SUP-E03-taught",
+    "SUP-F07-candidate"
+  ],
+  "regressions": [],
+  "real_api": {
+    "calls": 5,
+    "successful": 5,
+    "usage": {
+      "input_tokens": 1169,
+      "output_tokens": 801,
+      "cache_creation_input_tokens": 10588,
+      "cache_read_input_tokens": 3528
+    },
+    "estimated_usd": 0.0371708,
+    "median_seconds": 1.992,
+    "model": "claude-sonnet-5-5",
+    "source_sha": "35c537fa458b3f1779e0d81dbc3ed522dbf27202",
+    "cases": 7,
+    "direct_target_api_cases": 4
+  },
+  "observed_hard_boundary_violations": {
+    "unrequested_approval": 0,
+    "output_from_language": 0,
+    "original_job_modified": 0,
+    "robot_transfer": 0
+  },
+  "unresolved_approvable_candidate_risks": [
+    "H02",
+    "H16"
+  ],
+  "microphone": "NOT_RUN",
+  "filming": "FAIL"
+}

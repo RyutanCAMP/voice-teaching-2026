@@ -1,0 +1,32 @@
+{
+  "target_sha": "ce7c981a917e9137f2f2e1b584fc39d579892ed9",
+  "prior_qa_commit": "da9ee7b",
+  "test_asset_sha256": {
+    "natural_cases_v1.json": "2b8807c45530b81d8dd5e34f7d504bb49906f668b16cd45d305ba8c784f9b53d",
+    "natural_extra_v1.json": "8ee1a62e24239cd309dcf69fa1406b812555cf7fe9064fff09c7e013486b9f4d",
+    "context_supplement_v1.json": "a896bd927a2273e7ccfd8e28418a7f21395d7f5f32ce2dddd872d04d6a6ef225",
+    "fraction_boundary_v1.json": "3e83d6211eb91af9af5e41270d2bf5768a7121358bb324bd926aae28f607e0f9"
+  },
+  "job_sha256": {
+    "DEMO_BUTTON_REPEAT.JBI": "88b3ed2f9f4b8d73c82577f58d7a85e95fcd2743ede726ea6a5f4aead84d4ec9",
+    "DEMO_C_PLACE.JBI": "9fc72d40532e959909cfef80287f8b7fd95cadcbd5916c51e3cc00b6f543a512",
+    "DEMO_PLACE.JBI": "9e974781b192c8357c62916b2d07d1c24e40953fa2811d2c822a3cd0165d28a3",
+    "DEMO_RJ_XYZ.JBI": "605e0f083039793e7cbbcd35b8c5be3eef26b1251b9b785f477785b73eb2351c"
+  },
+  "prior_review_sha256": "43bb6ebeea92d52ddfcc519df311836552298573f2fb53eac5cd793ab39792d1",
+  "condition": {
+    "updown": "unconfirmed",
+    "real_microphone": false,
+    "API_retries": 0,
+    "synthetic_only": true,
+    "dedicated_port": "ephemeral, never 8765"
+  },
+  "baseline_semantic_projection_mismatch": [],
+  "app_files_changed": [
+    "voice_teaching/claude_explain.py",
+    "voice_teaching/claude_talk.py",
+    "voice_teaching/session.py",
+    "voice_teaching/utterance.py",
+    "voice_teaching/web/flow.py"
+  ]
+}
