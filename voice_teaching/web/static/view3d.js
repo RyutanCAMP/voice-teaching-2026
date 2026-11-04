@@ -336,7 +336,7 @@ export class View3D {
     }
     if (d.repeat) this._repeatMark(svg, d, labelBoxes, cAfterText);
     if (this.marker && this.marker.dest) this._destMark(svg, this.marker.dest, this.marker.color);
-    if ((d.taught || []).length) this._taughtMarks(svg, d);
+    if ((d.taught || []).length) this._taughtMarks(svg, d, labelBoxes);
     if (this.marker && this.marker.xyz) {  // MOVJ・目安の区間の間は xyz が無い（印を出さない）
       const m = this.project(this.marker.xyz);
       svg.append(svgEl("circle", { cx: m[0], cy: m[1], r: 9, fill: this.marker.color, stroke: "#fff", "stroke-width": 3, class: "marker" }));
@@ -349,21 +349,39 @@ export class View3D {
 
   // 人が教えた意味（「Claude に聞く」の欄。サーバーのメモリの中だけ）：対象の点の上に、緑の印と文字で出す。
   // AI の推定とは別の印（緑・実線・✓）。位置はジョブの点の座標の真ん中（描くだけ。変更の範囲には使わない）
-  _taughtMarks(svg, d) {
+  // 札は、点（候補の輪の大きさ）・点の名前・動かす点の名前・回数の札（boxes）・右上の窓に重ならず、図の中に収まる所に置く
+  // （まず点の上の真ん中。重なるなら上・横に少しずつずらし、それでも無ければ点の下。11/5 夜 G6）。点と図は動かさない
+  _taughtMarks(svg, d, boxes = []) {
     const at = Object.fromEntries(d.points.map((p) => [p.name, p.xyz]));
+    const inset = { x0: this.W - 156, x1: this.W, y0: 0, y1: 148 };  // 回数の窓・変更の拡大の窓
+    const dots = d.points.map((p) => this.project(p.xyz)).map(([px, py]) => ({ x0: px - 20, x1: px + 20, y0: py - 20, y1: py + 20 }));
     for (const t of d.taught) {
       const pts = (t.positions || []).map((n) => at[n]).filter(Boolean);
       if (!pts.length || typeof t.text !== "string") continue;
       const s = pts.map((v) => this.project(v));
-      const x = s.reduce((a, q) => a + q[0], 0) / s.length, y = Math.min(...s.map((q) => q[1])) - 26;
       const label = `✓ ${t.text}（人が教えた）`;
       const w = textWidth(label) + 16;
+      const cx = s.reduce((a, q) => a + q[0], 0) / s.length;
+      const top = Math.min(...s.map((q) => q[1])), bottom = Math.max(...s.map((q) => q[1]));
+      const box = ([x, y]) => ({ x0: x - w / 2 - 3, x1: x + w / 2 + 3, y0: y - 18, y1: y + 10 });  // 札（3px の間をあける）
+      const inside = (q) => q.x0 >= 5 && q.x1 <= this.W - 5 && q.y0 >= 5 && q.y1 <= this.H - 5;
+      const free = (sp) => inside(box(sp)) && !boxes.concat(dots).some((q) => overlaps(box(sp), q)) && !overlaps(box(sp), inset);
+      const spots = [];
+      for (const base of [top - 26, bottom + 44]) {
+        for (let dy = 0; dy <= 72; dy += 6) for (let dx = 0; dx <= w / 2 + 60; dx += 12) {
+          const y = base < top ? base - dy : base + dy;
+          spots.push([cx - dx, y, Math.hypot(dx, dy) + (base < top ? 0 : 1000)], [cx + dx, y, Math.hypot(dx, dy) + (base < top ? 0 : 1000) + 0.5]);
+        }
+      }
+      spots.sort((a, b) => a[2] - b[2]);
+      const [x, y] = spots.find(free) || spots.find((sp) => inside(box(sp))) || [cx, top - 26];
       const g = svgEl("g", { class: "taught-mark" });
       g.append(svgEl("rect", { x: x - w / 2, y: y - 15, width: w, height: 22, rx: 11, fill: "#12301f", stroke: "#5fd19a", "stroke-width": 1.5 }));
       const tx = svgEl("text", { x, y: y + 1, "text-anchor": "middle", fill: "#c9f2dc", "font-weight": "700" });
       tx.textContent = label;
       g.append(tx);
       svg.append(g);
+      boxes.push(box([x, y]));  // 札が2つあっても重ならないように
     }
   }
 

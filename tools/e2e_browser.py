@@ -1257,6 +1257,108 @@ def check_approve_twice(browser, check, shots: Path | None, out: Path) -> None:
         srv.server_close()
 
 
+# 人が教えた意味の札（g.taught-mark の rect）と、ほかの 3D の文字・点・窓・枠との重なり（2px の間をあける）
+TAUGHT_PILL_OVERLAP_JS = """() => {
+  const svg = document.querySelector('#fig-3d svg');
+  const pills = [...document.querySelectorAll('#fig-3d g.taught-mark rect')];
+  if (!svg || !pills.length) return ['札が無い'];
+  const a = svg.getBoundingClientRect(), h = document.querySelector('#fig-3d').getBoundingClientRect();
+  const L = Math.max(a.left, h.left, 0), R = Math.min(a.right, h.right, innerWidth);
+  const T = Math.max(a.top, h.top, 0), B = Math.min(a.bottom, h.bottom, innerHeight);
+  const others = [...svg.querySelectorAll('g.pt3 > text, text.moved-label, text.repeat-label, g.inset > rect')]
+    .map((e) => [e.textContent || e.parentNode.getAttribute('class'), e.getBoundingClientRect()]);
+  const dots = [...svg.querySelectorAll('g.pt3')].map((g) => {
+    const c = [...g.querySelectorAll('circle')].find((q) => q.getAttribute('r') === '6');
+    return ['点 ' + g.dataset.names, c.getBoundingClientRect()]; });
+  const bad = [];
+  for (const p of pills) {
+    const r = p.getBoundingClientRect();
+    if (r.left < L || r.right > R || r.top < T || r.bottom > B) bad.push(`枠の外（札 ${Math.round(r.left)},${Math.round(r.top)}-${Math.round(r.right)},${Math.round(r.bottom)} 枠 ${Math.round(L)},${Math.round(T)}-${Math.round(R)},${Math.round(B)}）`);
+    for (const [s, q] of others.concat(dots)) if (r.left < q.right + 2 && r.right > q.left - 2 && r.top < q.bottom + 2 && r.bottom > q.top - 2)
+      bad.push(`${s}（${Math.round(q.left)},${Math.round(q.top)}-${Math.round(q.right)},${Math.round(q.bottom)} 札 ${Math.round(r.left)},${Math.round(r.top)}-${Math.round(r.right)},${Math.round(r.bottom)}）`);
+  }
+  return bad; }"""
+
+
+def check_taught_pill_clear(browser, check, shots: Path | None, out: Path) -> None:
+    """11/5 夜 G6：DEMO_BUTTON_REPEAT で意味を教えたあと（「✓ ボタンを押してる（人が教えた）」の札）、教えた直後・範囲の確認・
+    回数の変更の候補・承認のあとで、札が点の名前（C00003 など）・点・動かす点の名前・回数の札・右上の窓・枠の端に重ならない
+    （2px の間をあける。1280×720・1920×1080）。札を置き直すだけで、点は動かさない：同じ段階の、教えていないときの点の画面の位置と
+    同じ（1px 以内）。モックの台本の答え（tools/demo_mock.py の ScriptClient。本物の Claude は呼ばない）。"""
+    sys.path.insert(0, str(REPO / "tools"))
+    import demo_mock as dm
+    from voice_teaching import claude_explain as cx
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import server
+    cx.PRICES[dm.MOCK_MODEL] = cx.Price(input=0.0, output=0.0, cache_write_5m=0.0, cache_write_1h=0.0, cache_read=0.0)
+    ex = cx.Explainer("mock-no-network", dm.MOCK_MODEL, client=dm.ScriptClient(), usage_log=cx.UsageLog(out / "g6_usage.jsonl"))
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None, explainer=ex)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+
+    def flow(w, h, teach):
+        """読み込み →（教える）→ 範囲の確認 → 候補 → 承認。段階ごとに、点の画面の位置と札の重なりを返す。"""
+        pg = browser.new_page(viewport={"width": w, "height": h})
+        pg.add_init_script(FAKE_RECOGNITION)
+        pg.goto(url)
+        pg.set_input_files("#file-input", str(REPO / "samples/dummy/DEMO_BUTTON_REPEAT.JBI"))
+        pg.wait_for_selector("#job-area:not([hidden])")
+        until(pg, lambda: pg.is_enabled("#text-send"))
+        res = {}
+
+        def stage(name):
+            pg.wait_for_timeout(400)
+            res[name] = (pg.evaluate(PT3_CENTERS_JS), pg.evaluate(TAUGHT_PILL_OVERLAP_JS) if teach else None)
+            if shots is not None and teach:
+                shots.mkdir(parents=True, exist_ok=True)
+                pg.screenshot(path=str(shots / f"G6_{w}_{name}.png"))
+
+        if teach:
+            fill_text(pg, "このロボット、何をしている？")
+            pg.click("#text-send")
+            pg.wait_for_selector("#ask-turns .bubble.claude:not(.thinking)")
+            fill_text(pg, "ボタンを押してるんだよ")
+            pg.click("#text-send")
+            pg.wait_for_selector("#ask-turns .talk-choice")
+            pg.locator("#ask-turns .talk-choice", has_text="この動きです").click()
+            pg.wait_for_selector("#ask-turns .bubble.taught")
+            until(pg, lambda: pg.locator("#fig-3d g.taught-mark").count() > 0)
+        stage("taught")  # 教えていないときは、読み込んだあとの同じ所
+        fill_text(pg, "じゃあ、3回にして")
+        pg.click("#text-send")
+        pg.wait_for_selector("#range-yes", timeout=5000)
+        stage("range")
+        pg.click("#range-yes")
+        until(pg, lambda: pg.is_enabled("#open-confirm"))
+        stage("repeat_candidate")
+        pg.click("#open-confirm")
+        pg.wait_for_selector("#confirm-overlay:not([hidden])")
+        pg.fill("#approver-name", "e2e確認")
+        pg.click("#approve-button")
+        until(pg, lambda: pg.is_visible("#approval-status"))
+        pg.wait_for_timeout(300)
+        stage("approved")
+        pg.close()
+        return res
+
+    def moved(a, b):
+        if set(a) != set(b):
+            return {"点の組が違う": (sorted(a), sorted(b))}
+        return {n: (round(a[n][0] - b[n][0], 1), round(a[n][1] - b[n][1], 1)) for n in a
+                if abs(a[n][0] - b[n][0]) > 1 or abs(a[n][1] - b[n][1]) > 1}
+    try:
+        for (w, h) in [(1280, 720), (1920, 1080)]:
+            ref, got = flow(w, h, False), flow(w, h, True)
+            for name in ("taught", "range", "repeat_candidate", "approved"):
+                bad = got[name][1]
+                check(not bad, f"11/5 G6（{w}×{h}・{name}）：人が教えた意味の札が、点の名前・点・回数の札・窓・枠の端に重ならない（重なり {bad or 'なし'}）")
+                diff = moved(got[name][0], ref[name][0])
+                check(not diff, f"11/5 G6（{w}×{h}・{name}）：札を出しても点は動かない（教えていないときと比べて 1px より動いた点 {diff or 'なし'}）")
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 def check_text_size_1080(browser, check, shots: Path | None, out: Path) -> None:
     """11/5 夜 F6：1920×1080（デモの動画を撮る大きさ）で、会話・話し手・状態の1行・返事の札・凡例・図の注意書きの文字を大きく。
     1280×720・1366×768・1440×900 の文字の大きさは前のまま。1920×1080 でもページはスクロールせず、3D は小さくならず、
@@ -2736,6 +2838,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check_export_path_short(b, check, shots, out)
             check_heading_matches(b, check, shots, out)
             check_approve_twice(b, check, shots, out)
+            check_taught_pill_clear(b, check, shots, out)
             check_dialog(b, check, shots, errors, updown_cfg["DEMO_C_PLACE.JBI"])
             check_talk(b, check, shots, errors, out)
             check_updown_unconfirmed(b, check, shots, errors)
