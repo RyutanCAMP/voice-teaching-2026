@@ -858,6 +858,7 @@ window.addEventListener("vt:talk-result", (ev) => {
 async function sendInstruction(text, source) {
   if (!state.sessionId) return;
   clearReply();  // 前の聞き返し（と選択肢・範囲のボタン）は消す。古い選択肢を後から押せないように
+  followCardAt = -1e9;  // 人が新しく送った：その答えの吹き出しは見せる（直前に見せた候補・承認のカードの 1.5 秒の待ちで止めない。11/5 F1）
   // 入口は1つ（11/4 唐川さんの指示③）：/api/talk（explain.js の vtTalk）。結果は vt:talk-result で applyResult に渡る。
   // 指示の欄から /api/hear を直接呼ばない（振り分けをしないと、ボタンだけの言葉や相づちで承認が取り消されるため）
   const t = await window.vtTalk(text, source);

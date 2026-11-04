@@ -451,6 +451,70 @@ def check_ui_1105(browser, check, shots: Path | None, out: Path) -> None:
     srv.server_close()
 
 
+def check_answer_after_approval(browser, check, shots: Path | None, out: Path) -> None:
+    """11/5 夜 F1：承認のあとに［送る］で質問すると、いちばん新しい答えの吹き出しが会話の欄の中に見える
+    （1280×720・1366×768 で欄の上に隠れていた）。モックの台本の答え（tools/demo_mock.py の ScriptClient。本物の Claude は呼ばない）。"""
+    sys.path.insert(0, str(REPO / "tools"))
+    import demo_mock as dm
+    from voice_teaching import claude_explain as cx
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import server
+    cx.PRICES[dm.MOCK_MODEL] = cx.Price(input=0.0, output=0.0, cache_write_5m=0.0, cache_write_1h=0.0, cache_read=0.0)
+    ex = cx.Explainer("mock-no-network", dm.MOCK_MODEL, client=dm.ScriptClient(), usage_log=cx.UsageLog(out / "f1_usage.jsonl"))
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None, explainer=ex)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    n_turns = "() => document.querySelectorAll('#ask-turns > li').length"
+    try:
+        for (w, h) in [(1280, 720), (1366, 768), (1440, 900), (1920, 1080)]:
+            pg = browser.new_page(viewport={"width": w, "height": h})
+            pg.add_init_script(FAKE_RECOGNITION)
+            pg.goto(url)
+            pg.set_input_files("#file-input", str(REPO / "samples/dummy/DEMO_BUTTON_REPEAT.JBI"))
+            pg.wait_for_selector("#job-area:not([hidden])")
+            until(pg, lambda: pg.is_enabled("#text-send"))
+            fill_text(pg, "このロボット、何をしている？")
+            pg.click("#text-send")
+            pg.wait_for_selector("#ask-turns .bubble.claude:not(.thinking)")
+            fill_text(pg, "ボタンを押してるんだよ")
+            pg.click("#text-send")
+            pg.wait_for_selector("#ask-turns .talk-choice")
+            pg.locator("#ask-turns .talk-choice", has_text="この動きです").click()
+            pg.wait_for_selector("#ask-turns .bubble.taught")
+            fill_text(pg, "じゃあ、3回にして")
+            pg.click("#text-send")
+            pg.wait_for_selector("#range-yes", timeout=5000)
+            pg.click("#range-yes")
+            until(pg, lambda: pg.is_enabled("#open-confirm"))
+            pg.click("#open-confirm")
+            pg.wait_for_selector("#confirm-overlay:not([hidden])")
+            pg.fill("#approver-name", "e2e確認")
+            pg.click("#approve-button")
+            until(pg, lambda: pg.is_visible("#approval-status"))
+            pg.wait_for_timeout(300)  # すぐに次の質問を送る人（承認のカードを見せてから 1.5 秒の内）
+            before = pg.evaluate(n_turns)
+            fill_text(pg, "このロボット、何をしている？")
+            pg.click("#text-send")
+            until(pg, lambda: pg.evaluate(n_turns) > before
+                  and pg.locator("#ask-turns .thinking").count() == 0)
+            pg.wait_for_timeout(400)  # 送りの描き直し（requestAnimationFrame）を待つ
+            r = pg.evaluate("""() => { const box = document.querySelector('#side-scroll').getBoundingClientRect();
+                const last = [...document.querySelectorAll('#ask-turns > li')].pop().getBoundingClientRect();
+                return [last.top, last.bottom, box.top, box.bottom]; }""")
+            check(r[0] >= r[2] - 1 and r[1] <= r[3] + 1,
+                  f"11/5 F1（{w}×{h}）：承認のあとの質問の答えの吹き出しが会話の欄の中に見える"
+                  f"（吹き出し {r[0]:.0f}〜{r[1]:.0f}px・欄 {r[2]:.0f}〜{r[3]:.0f}px）")
+            check(pg.is_visible("#text-send") and pg.is_visible("#status-line"),
+                  f"11/5 F1（{w}×{h}）：入力欄の［送る］と状態の1行は見えたまま")
+            if shots is not None:
+                shots.mkdir(parents=True, exist_ok=True)
+                pg.screenshot(path=str(shots / f"F1_{w}_after_approval_answer.png"))
+            pg.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 def check_review_only(browser, url, check, shots: Path | None) -> None:
     """実機の JOB（合成ジョブでない）：確認表示と承認のあとに「変更案の確認のみ」の帯。出力ボタンを出さず、出力を促さない。
     合成ジョブでは帯を出さず、今どおり出力ボタンが出る（唐川さんの指示・内部 QA の再レビュー P1-1・P2-6）。"""
@@ -1679,6 +1743,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check_c026(b, url, check, shots)
             check_review_only(b, url, check, shots)
             check_ui_1105(b, check, shots, out)
+            check_answer_after_approval(b, check, shots, out)
             check_dialog(b, check, shots, errors, updown_cfg["DEMO_C_PLACE.JBI"])
             check_talk(b, check, shots, errors, out)
             check_updown_unconfirmed(b, check, shots, errors)
