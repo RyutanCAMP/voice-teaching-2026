@@ -1012,6 +1012,66 @@ def check_opening_click_through(browser, check, shots: Path | None, out: Path) -
     srv.server_close()
 
 
+def check_export_path_short(browser, check, shots: Path | None, out: Path) -> None:
+    """11/5 夜 H10（撮影）：出力のあとの結果と出力先の注意に、PC の利用者のフォルダ（C:\\Users\\…）まで出さない。
+    画面にはファイル名と、アプリの中の場所（…\\output\\sim\\）だけを出す。絶対パスは要素の title（マウスを乗せると出る）に残す。
+    1920×1080 と 1280×720 で確かめる。サーバーの返す値・書く場所は変えない"""
+    from voice_teaching import sim
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import server
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    saved_out_dir = sim.DEFAULT_OUT_DIR
+    name = "DEMO_C_PLACE_SIM.JBI.txt"
+    try:
+        for (w, h) in [(1920, 1080), (1280, 720)]:
+            d = (out / f"h10_{w}" / "output" / "sim").resolve()
+            sim.DEFAULT_OUT_DIR = d
+            full_dir, full_file = str(d), str(d / name)
+            above = str(d.parent.parent)  # アプリのフォルダにあたるところより上（C:\Users\… を含む）
+            pg = browser.new_page(viewport={"width": w, "height": h})
+            pg.add_init_script(FAKE_RECOGNITION)
+            pg.goto(url)
+            pg.set_input_files("#file-input", str(REPO / "samples/dummy" / "DEMO_C_PLACE.JBI"))
+            pg.wait_for_selector("#job-area:not([hidden])")
+            pg.locator("#position-chips button", has_text="C00003").click()
+            until(pg, lambda: pg.inner_text("#voice-position strong") == "C00003")
+            fill_text(pg, "Zプラス方向に10mm")
+            pg.click("#text-send")
+            until(pg, lambda: pg.is_enabled("#open-confirm"))
+            pg.click("#open-confirm")
+            pg.wait_for_selector("#confirm-overlay:not([hidden])")
+            pg.fill("#approver-name", "e2e確認")
+            pg.click("#approve-button")
+            until(pg, lambda: pg.is_enabled("#export-button"))
+            note = " ".join(pg.inner_text("#export-note").split()) if pg.is_visible("#export-note") else ""
+            note_title = pg.get_attribute("#out-dir", "title") or ""
+            check(pg.is_visible("#export-note") and "output\\sim" in note and above not in note and "Users" not in note
+                  and "実機には入れないでください" in note and note_title == full_dir,
+                  f"11/5 H10（{w}×{h}）：承認後の出力先の注意は、アプリの中の場所（output\\sim）だけを見せる（利用者のフォルダを出さない）。"
+                  f"絶対パスは title に残す：「{note[:70]}」 title={'絶対パス' if note_title == full_dir else note_title[:40]}")
+            pg.click("#export-button")
+            pg.wait_for_selector("#export-result:not([hidden])")
+            until(pg, lambda: "出力しました" in pg.inner_text("#export-result"))
+            box = " ".join(pg.inner_text("#export-result").split())
+            titles = pg.evaluate("() => Array.from(document.querySelectorAll('#export-result [title]')).map((e) => e.title)")
+            note2 = " ".join(pg.inner_text("#export-note").split()) if pg.is_visible("#export-note") else ""
+            check((d / name).is_file() and name in box and "output\\sim" in box and above not in box and "Users" not in box
+                  and "実機には入れないでください" in box and full_file in titles
+                  and above not in note2 and "Users" not in note2,
+                  f"11/5 H10（{w}×{h}）：出力のあとの結果は、ファイル名と output\\sim だけを見せる（利用者のフォルダを出さない）。"
+                  f"絶対パスは title に残す：「{box[:90]}」 title={titles}")
+            if shots is not None:
+                shots.mkdir(parents=True, exist_ok=True)
+                pg.screenshot(path=str(shots / f"H10_{w}_export_path.png"))
+            pg.close()
+    finally:
+        sim.DEFAULT_OUT_DIR = saved_out_dir
+        srv.shutdown()
+        srv.server_close()
+
+
 def check_text_size_1080(browser, check, shots: Path | None, out: Path) -> None:
     """11/5 夜 F6：1920×1080（デモの動画を撮る大きさ）で、会話・話し手・状態の1行・返事の札・凡例・図の注意書きの文字を大きく。
     1280×720・1366×768・1440×900 の文字の大きさは前のまま。1920×1080 でもページはスクロールせず、3D は小さくならず、
@@ -2488,6 +2548,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check_voice_error_typing(b, check, shots, out)
             check_export_twice(b, check, shots, out)
             check_opening_click_through(b, check, shots, out)
+            check_export_path_short(b, check, shots, out)
             check_dialog(b, check, shots, errors, updown_cfg["DEMO_C_PLACE.JBI"])
             check_talk(b, check, shots, errors, out)
             check_updown_unconfirmed(b, check, shots, errors)

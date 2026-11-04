@@ -311,7 +311,8 @@ function renderState() {
   $("voice-position").replaceChildren(el("strong", {}, st.selected || "位置は未選択"), el("span", {}, st.selected ? "変える" : "選ぶ"));
   renderSelLine(st.selected);
   renderUpdown(st.updown);
-  $("out-dir").textContent = st.out_dir;
+  $("out-dir").textContent = shortDir(st.out_dir);
+  $("out-dir").title = st.out_dir;
   renderChips();
   renderCandidate();
   renderApproval();
@@ -1236,6 +1237,18 @@ function renderApproval() {
 }
 
 // ---- シミュレーション用の出力 ----
+// 出力先は、画面には「…\output\sim\」のように最後の2つのフォルダだけを出す（撮影で PC の利用者のフォルダを映さない。11/5 夜 H10）。
+// 絶対パスは title に残す（マウスを乗せると出る）。サーバーの返す値・書く場所は変えない
+function shortDir(dir) {
+  const sep = dir.includes("\\") ? "\\" : "/";
+  const parts = dir.split(/[\\/]+/).filter((x) => x);
+  return (parts.length > 2 ? "…" + sep : "") + parts.slice(-2).join(sep) + sep;
+}
+function splitPath(path) {
+  const i = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
+  return { dir: i >= 0 ? path.slice(0, i) : "", name: path.slice(i + 1) };
+}
+
 $("export-button").addEventListener("click", async () => {
   if (recording() || state.exporting || (state.st && state.st.exported)) return;  // ダブルクリックでも送るのは1回（11/5 夜 H1）
   state.exporting = true;
@@ -1252,7 +1265,8 @@ $("export-button").addEventListener("click", async () => {
     box.className = "result done";
     box.dataset.ok = "true";
     box.replaceChildren(el("strong", {}, "✓ シミュレーション用に出力しました（実機には入れないでください）"),
-      el("p", { class: "reason" }, el("code", {}, res.path)));
+      el("p", { class: "reason", title: res.path }, el("code", {}, splitPath(res.path).name),
+        "（場所：" + shortDir(splitPath(res.path).dir) + "）"));
   } else {
     box.className = "result";
     box.dataset.ok = "false";
