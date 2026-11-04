@@ -18,8 +18,8 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 const DEFAULT_YAW = -0.75;    // 最初の向き（ラジアン）
 const DEFAULT_PITCH = 0.42;
 const OVERLAP_PX = 6;         // この距離より近く見える点は、まとめて選び分ける
-const C_AFTER = "#ff6a1a", C_AFTER_TEXT = "#c4470a";
-const C_STOPPED = "#8e8e93";  // 止まった候補（承認できない）の変更後：オレンジにしない
+const C_AFTER = "#ff6a1a", C_AFTER_TEXT = "#ffa266";
+const C_STOPPED = "#9aa3b5";  // 止まった候補（承認できない）の変更後：オレンジにしない
 const HOLD_MS = 700;          // MOVJ・目安の区間で、印を消しておく時間（画面の上だけ。実際の動きとは関係ない）
 
 function svgEl(tag, attrs) {
@@ -139,7 +139,7 @@ export class View3D {
       if (look.dash) line.setAttribute("stroke-dasharray", look.dash);
       // 回数の変更の範囲を確かめている間：その範囲の線を光らせる（会話の位置の候補と同じ色）
       if (key === "before" && (d.rangeLines || []).includes(s.line_no)) {
-        line.setAttribute("stroke", "#5e5ce6"); line.setAttribute("stroke-width", "5"); line.classList.add("range");
+        line.setAttribute("stroke", "#a99cff"); line.setAttribute("stroke-width", "5"); line.classList.add("range");
       }
       // 止まった候補は、目安の区間（6 5 の破線）・MOVJ の点線と見分けられる細かい点線
       if (key === "after" && stopped) { line.setAttribute("stroke-dasharray", "0.5 7"); line.setAttribute("stroke-width", "4"); }
@@ -173,7 +173,7 @@ export class View3D {
       if (look.dash) glow.setAttribute("stroke-dasharray", look.dash);
       svg.append(glow);
     }
-    for (const s of d.segments) seg(s, d.points, c ? "#a1a6ad" : "#c7cbd1", 2.5, "before");
+    for (const s of d.segments) seg(s, d.points, c ? "#7f8ba3" : "#c9d6ec", 2.5, "before");
     // 変更後は、動かす点に触れる区間だけ（ほかの区間は変更前と同じ線なので描き直さない）
     if (c && !d.repeat) for (const s of c.segments) if (s.from === c.moved || s.to === c.moved) seg(s, c.points, cAfter, 3, "after");
     // 回数の変更：足した回の線だけを変更後の色で重ねる（元からある線と同じ線。新しい線は無い）
@@ -204,21 +204,21 @@ export class View3D {
       const el = svgEl("g", { class: "pt3" + (sel ? " sel" : ""), "data-names": g.names.join(" ") });
       // 床への縦の補助線（奥行きを分かりやすくする）
       const floor = this.project([g.p.xyz[0], g.p.xyz[1], this.lo[2] - this.span * 0.08]);
-      svg.insertBefore(svgEl("line", { x1: x, y1: y, x2: floor[0], y2: floor[1], stroke: "#d8d8de",
+      svg.insertBefore(svgEl("line", { x1: x, y1: y, x2: floor[0], y2: floor[1], stroke: "#3a4d72",
         "stroke-width": 1, "stroke-dasharray": "2 3" }), svg.firstChild.nextSibling);
       el.append(svgEl("circle", { cx: x, cy: y, r: 16, fill: "transparent" }));  // 押しやすい大きさ
-      if (sel) el.append(svgEl("circle", { cx: x, cy: y, r: 12, fill: "rgba(10,132,255,0.15)", stroke: "#0a84ff", "stroke-width": 2 }));
+      if (sel) el.append(svgEl("circle", { cx: x, cy: y, r: 12, fill: "rgba(77,163,255,0.18)", stroke: "#4da3ff", "stroke-width": 2 }));
       // 会話で Claude（モック）が出した位置の候補：選んではいないので、選んだ点（青）と違う色の点線の輪で示す
       if (g.names.some((n) => (d.candidates || []).includes(n))) {
         el.classList.add("cand");
-        el.append(svgEl("circle", { cx: x, cy: y, r: 19, fill: "rgba(94,92,230,0.10)", stroke: "#5e5ce6",
+        el.append(svgEl("circle", { cx: x, cy: y, r: 19, fill: "rgba(169,156,255,0.12)", stroke: "#a99cff",
           "stroke-width": 2.5, "stroke-dasharray": "5 4", class: "cand-ring" }));
       }
-      el.append(svgEl("circle", { cx: x, cy: y, r: 6, fill: isMoved ? "#a1a6ad" : (sel ? "#0a84ff" : "#1d1d1f") }));
+      el.append(svgEl("circle", { cx: x, cy: y, r: 6, fill: isMoved ? "#7f8ba3" : (sel ? "#4da3ff" : "#e3ebf8") }));
       // 動かす点の名前は、変更後の点の横に1つだけ出す（変更前の名前と重ならないように）
       const shownNames = isMoved && c ? g.names.filter((n) => n !== moved) : g.names;
       if (shownNames.length) {
-        const label = svgEl("text", { x: x + 12, y: y - 8, fill: sel && !isMoved ? "#0a84ff" : "#6e6e73",
+        const label = svgEl("text", { x: x + 12, y: y - 8, fill: sel && !isMoved ? "#7cbcff" : "#b3c0d8",
           "font-weight": sel && !isMoved ? "600" : "400" });
         label.textContent = shownNames.join(" / ");
         el.append(label);
@@ -281,8 +281,8 @@ export class View3D {
       const label = `✓ ${t.text}（人が教えた）`;
       const w = textWidth(label) + 16;
       const g = svgEl("g", { class: "taught-mark" });
-      g.append(svgEl("rect", { x: x - w / 2, y: y - 15, width: w, height: 22, rx: 11, fill: "#d9f2e1", stroke: "#34a853", "stroke-width": 1.5 }));
-      const tx = svgEl("text", { x, y: y + 1, "text-anchor": "middle", fill: "#1d5c32", "font-weight": "700" });
+      g.append(svgEl("rect", { x: x - w / 2, y: y - 15, width: w, height: 22, rx: 11, fill: "#12301f", stroke: "#5fd19a", "stroke-width": 1.5 }));
+      const tx = svgEl("text", { x, y: y + 1, "text-anchor": "middle", fill: "#c9f2dc", "font-weight": "700" });
       tx.textContent = label;
       g.append(tx);
       svg.append(g);
@@ -314,19 +314,19 @@ export class View3D {
     // 右上の窓：変更後の回数（×3）を大きく、変更前（×2）を灰色で小さく。候補が無ければ今の回数だけ
     const S = 140, x0 = this.W - S - 12, y0 = 12;
     const g = svgEl("g", { class: "inset repeat-inset" });
-    g.append(svgEl("rect", { x: x0, y: y0, width: S, height: 92, rx: 14, fill: "#fff", stroke: "#e5e5ea" }));
+    g.append(svgEl("rect", { x: x0, y: y0, width: S, height: 92, rx: 14, fill: "#101c33", stroke: "#2b3f66" }));
     const head = svgEl("text", { x: x0 + 12, y: y0 + 22, class: "inset-head", "data-fs": 12 });
     head.textContent = "区間を通る回数";
     g.append(head);
     if (r.after != null) {
-      const was = svgEl("text", { x: x0 + 14, y: y0 + 70, fill: "#8e8e93", "data-fs": 18, "font-weight": "600", class: "repeat-was" });
+      const was = svgEl("text", { x: x0 + 14, y: y0 + 70, fill: "#a3afc6", "data-fs": 18, "font-weight": "600", class: "repeat-was" });
       was.textContent = `×${r.before} →`;
       const now = svgEl("text", { x: x0 + S - 14, y: y0 + 74, "text-anchor": "end", fill: textColor, "data-fs": 34,
         "font-weight": "800", class: "repeat-now" });
       now.textContent = `×${r.after}`;
       g.append(was, now);
     } else {
-      const now = svgEl("text", { x: x0 + S / 2, y: y0 + 72, "text-anchor": "middle", fill: "#6e6e73", "data-fs": 30,
+      const now = svgEl("text", { x: x0 + S / 2, y: y0 + 72, "text-anchor": "middle", fill: "#d5deed", "data-fs": 30,
         "font-weight": "700", class: "repeat-now" });
       now.textContent = `×${r.before}`;
       g.append(now);
@@ -357,14 +357,14 @@ export class View3D {
     const dx = pb[0] - pa[0], dy = pb[1] - pa[1];
     const len = Math.hypot(dx, dy);
     const g = svgEl("g", { class: "inset" });
-    g.append(svgEl("rect", { x: x0, y: y0, width: S, height: S, rx: 14, fill: "#fff", stroke: "#e5e5ea" }));
+    g.append(svgEl("rect", { x: x0, y: y0, width: S, height: S, rx: 14, fill: "#101c33", stroke: "#2b3f66" }));
     const cx = x0 + S / 2, cy = y0 + S / 2 + 12;
     let ux = 0, uy = -1;
     if (len > 0.01) { ux = dx / len; uy = dy / len; }
     const L = 24;  // 窓の中では、向きはそのまま・長さは決まった大きさで見せる
     const ax = cx - ux * L, ay = cy - uy * L, bx = cx + ux * L, by = cy + uy * L;
     g.append(svgEl("line", { x1: ax, y1: ay, x2: bx, y2: by, stroke: color, "stroke-width": 3, "stroke-linecap": "round" }));
-    g.append(svgEl("circle", { cx: ax, cy: ay, r: 7, fill: "#a1a6ad" }));
+    g.append(svgEl("circle", { cx: ax, cy: ay, r: 7, fill: "#7f8ba3" }));
     g.append(svgEl("circle", { cx: bx, cy: by, r: 8, fill: color }));
     const head = svgEl("text", { x: x0 + 12, y: y0 + 20, class: "inset-head" });
     head.textContent = "変更（拡大）";
@@ -388,8 +388,8 @@ export class View3D {
       const p = this.project(a), q = this.project(b);
       g.append(svgEl("line", Object.assign({ x1: p[0], y1: p[1], x2: q[0], y2: q[1] }, attrs)));
     };
-    for (let x = Math.ceil(x0 / step) * step; x <= x1; x += step) line([x, y0, z0], [x, y1, z0], { stroke: "#dcdce2", "stroke-width": 1 });
-    for (let y = Math.ceil(y0 / step) * step; y <= y1; y += step) line([x0, y, z0], [x1, y, z0], { stroke: "#dcdce2", "stroke-width": 1 });
+    for (let x = Math.ceil(x0 / step) * step; x <= x1; x += step) line([x, y0, z0], [x, y1, z0], { stroke: "#1b2a47", "stroke-width": 1 });
+    for (let y = Math.ceil(y0 / step) * step; y <= y1; y += step) line([x0, y, z0], [x1, y, z0], { stroke: "#1b2a47", "stroke-width": 1 });
     // 軸（床の角から、格子1目盛りの長さ）
     const pts = this.data.points.map((p) => this.project(p.xyz));
     const mx = pts.reduce((a, q) => a + q[0], 0) / pts.length, my = pts.reduce((a, q) => a + q[1], 0) / pts.length;
@@ -397,7 +397,7 @@ export class View3D {
     const far = (c) => { const q = this.project(c); return Math.hypot(q[0] - mx, q[1] - my); };
     const o = corners.reduce((a, c) => (far(c) > far(a) ? c : a));
     const sx = o[0] === x0 ? 1 : -1, sy = o[1] === y0 ? 1 : -1;  // 角から床の内側へ向けて描く（＋の向きは矢印の先の文字で示す）
-    const axes = [["X", [sx * step, 0, 0], "#e5484d"], ["Y", [0, sy * step, 0], "#30a46c"], ["Z", [0, 0, step], "#0a84ff"]];
+    const axes = [["X", [sx * step, 0, 0], "#ff7b7f"], ["Y", [0, sy * step, 0], "#4fd08f"], ["Z", [0, 0, step], "#5aa9ff"]];
     // 軸の文字は、点と点の名前に重ならない所に置く（軸の線の上を、先の方から根元の方へずらして探す）
     const taken = pts.flatMap((q) => [
       { x0: q[0] - 9, x1: q[0] + 9, y0: q[1] - 9, y1: q[1] + 9 },          // 点

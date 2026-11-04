@@ -178,6 +178,7 @@ function showReply(r) {
       li.append(el("p", { class: "supplement" }, el("span", { class: "sup-head" }, "補足 "), r.supplement.join("　")));
     }
     if ((r.evidence || []).length) {
+      // 根拠の命令の行は、必要なときだけ開く（いつもは閉じている。唐川さん承認のデザイン 11/4）。中身はサーバーの根拠の行のまま
       const box = el("div", { class: "evidence" });
       for (const e of r.evidence) {
         const b = el("button", { type: "button", class: "link small", title: "図でこの行の位置を光らせる（選択ではありません）" },
@@ -185,7 +186,7 @@ function showReply(r) {
         b.addEventListener("click", () => highlight(e.positions || []));
         box.append(b);
       }
-      li.append(box);
+      li.append(el("details", { class: "more ev-more" }, el("summary", {}, `根拠の行（${r.evidence.length}）`), box));
     }
   }
   for (const n of r.notes || []) addTurn("アプリ", n, "app");
@@ -278,6 +279,7 @@ $("ask-reset").addEventListener("click", async () => {
   else renderTalk(r.talk);
   showUsage(r);
   renderLock();
+  window.dispatchEvent(new CustomEvent("vt:talk-reset"));  // 画面の見せ方だけ（app.js が ① 初期の画面に戻すか決める）
 });
 
 renderLock();

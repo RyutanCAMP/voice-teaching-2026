@@ -8,17 +8,22 @@
 </head>
 <body>
 <header class="top">
+  <!-- 上の帯（唐川さん承認のデザイン 11/4）：ロゴ・シミュレーションの印・解釈の印・状態のチップ・使い方（？）・詳細表示。
+       4つのステップの列は画面から外した（今のステップの印だけ残す。今のステップは見出しと状態のチップで分かる） -->
   <div class="brand">
-    <h1>ボイスティーチング</h1>
+    <span class="logo-mark" aria-hidden="true"><svg viewBox="0 0 32 32" width="30" height="30"><path d="M4 16h3M9 11v10M14 6v20M19 10v12M24 13v6M28 15v2" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></span>
+    <h1 class="logo"><span class="logo-en"><span class="logo-thin">VOICE</span> TEACHING</span><span class="logo-ja">産業用ロボット 音声ティーチング</span></h1>
     <p id="mode-banner" class="mode-banner" data-mode="simulation">シミュレーションモード</p>
     <p id="interp-badge" class="interp-badge" hidden>解釈：—</p>
   </div>
-  <ol class="steps" id="steps" aria-label="手順">
+  <ol class="steps" id="steps" aria-label="手順" aria-hidden="true">
     <li id="step-1" class="step"><span class="num">1</span><span class="label">JOBを読み込む</span></li>
     <li id="step-2" class="step"><span class="num">2</span><span class="label">位置を選ぶ</span></li>
     <li id="step-3" class="step"><span class="num">3</span><span class="label">音声で指示</span></li>
     <li id="step-4" class="step"><span class="num">4</span><span class="label">確かめて承認</span></li>
   </ol>
+  <!-- 状態の1行（CHECKER_033 P1-A）：サーバーの文（state.status_line）をそのまま、区切り（／）ごとの小さなチップにして出す。文は変えない（app.js） -->
+  <p id="status-line" class="status-line" aria-live="polite" hidden></p>
   <div class="help-wrap">
     <button type="button" id="help-button" class="help-btn" aria-expanded="false" aria-controls="help-pop" aria-label="使い方" title="使い方">？</button>
     <div id="help-pop" class="help-pop" role="dialog" aria-label="使い方" hidden>
@@ -39,14 +44,18 @@
 </header>
 
 <section id="load-panel" class="load-panel">
+  <!-- ⓪ 読み込みの前：左＝案内とサンプル・ファイルを選ぶ、右＝3D の場所のドロップの枠 -->
+  <div class="load-left">
+    <p class="load-title">動作データを読み込んでください</p>
+    <p class="sample-row"><button type="button" id="sample-button" class="link sample-btn">サンプルで試す</button></p>
+    <p id="load-error" class="error" hidden></p>
+  </div>
   <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="JOBファイルを選ぶ">
     <div class="drop-icon" aria-hidden="true">⤓</div>
     <p class="drop-big">JOBファイルをここにドロップ</p>
     <p class="drop-small"><label for="file-input" class="file-label">またはファイルを選ぶ</label></p>
     <input type="file" id="file-input" accept=".JBI,.jbi">
   </div>
-  <p class="sample-row"><button type="button" id="sample-button" class="link">サンプルで試す</button></p>
-  <p id="load-error" class="error" hidden></p>
 </section>
 
 <section id="problems-panel" class="problems" hidden>
@@ -55,10 +64,166 @@
 </section>
 
 <main id="job-area" class="work" hidden>
-  <!-- 中央：位置の図（経路の目安） -->
+  <!-- 左：声と会話（唐川さん承認のデザイン 11/4。前の版と左右を入れ替えた）
+       上＝見出し（いつも見える）／中＝会話の履歴・範囲・候補（ここだけスクロール。新しいものを下に寄せて見せる）／
+       下＝操作の欄（いつも見える：位置・範囲のボタン・確認して承認へ・出力・マイクと入力欄）。
+       ① 初期（読み込んだあと・会話の前）は、中の段を出さず、大きなマイクだけを真ん中に出す（body.hero）。
+       並べ方・見せ方だけを変えた。隠す・出す決まり（どのステップで、どのカードを出すか）は app.js のまま -->
+  <aside class="side">
+    <div class="side-head">
+      <p id="next-action" class="next-action" aria-live="polite">JOBファイルをドロップしてください</p>
+      <!-- 見出しの下の1行の案内（CHECKER_030 S30-3：実機の JOB の承認のあと）。文は app.js の決まった文だけ -->
+      <p id="next-hint" class="next-hint" hidden></p>
+    </div>
+
+    <div id="side-scroll" class="side-scroll">
+    <div id="side-flow" class="side-flow">
+    <!-- 入口は1つ（11/4 唐川さんの指示③）：声も文字も下の「指示の欄」1つから /api/talk へ。会話の流れはこの欄に出す。旧「Claude に聞く」の入力欄は無くした -->
+    <!-- 会話（人・Claude（またはモック）・アプリの3つを別の印で出す）。答えでジョブ・変更候補・承認は変わらない。文は explain.js がテキストのノードで作る -->
+    <section id="ask-panel" class="card dialog talk-panel" aria-label="会話" hidden>
+      <div class="dlg-head">
+        <span class="dlg-title">会話</span>
+        <span id="ask-model" class="dlg-engine"></span>
+        <!-- トークン数・料金・会話のやり直し・役割の説明は「詳しく」の中（いつもは閉じている。会話の欄のいちばん上） -->
+        <details class="more talk-more"><summary>詳しく</summary>
+          <div class="talk-more-body">
+            <p id="ask-usage" class="fine"></p>
+            <button type="button" id="ask-reset" class="link small" disabled>会話をやり直す</button>
+            <p class="fine">Claude は動作の説明と作業目的の推定だけをします。数・状態・変更の案内はアプリが出します。承認と出力はボタンだけです。</p>
+          </div>
+        </details>
+      </div>
+      <p id="ask-nokey" class="warn" hidden></p>
+      <ol id="ask-turns" class="bubbles talk" aria-live="polite"></ol>
+      <!-- 人が教えた意味（サーバーのメモリの中だけ。この会話の中だけ。保存しない） -->
+      <div id="ask-memory-box" class="memory" hidden>
+        <span class="memory-head">覚えていること</span>
+        <ul id="ask-memory" class="memory-list"></ul>
+      </div>
+    </section>
+
+    <!-- Claude との会話（位置の候補の確認。人／Claude の吹き出し・位置の候補の根拠・選択肢）。文はすべてテキストのノードで作る -->
+    <section id="dialog-panel" class="card dialog" aria-label="Claude との会話" hidden>
+      <div class="dlg-head">
+        <span class="dlg-title">会話</span>
+        <span id="dialog-engine" class="dlg-engine"></span>
+      </div>
+      <ol id="dialog-turns" class="bubbles" aria-live="polite"></ol>
+      <div id="dialog-evidence" class="evidence"></div>
+      <p id="dialog-estimated" class="dlg-est" hidden></p>
+      <div id="dialog-choices" class="choices dlg-choices"></div>
+      <details class="more"><summary>詳しく</summary>
+        <p id="dialog-note" class="fine">Claude は意味を読んで候補を出し、聞き返すだけです。座標の変更・検査・数字はプログラムが行い、承認は確認表示のボタンだけです。</p>
+      </details>
+    </section>
+
+    <!-- 指示の結果（聞き返し・止めた理由・回数の変更の範囲の確認）。会話の流れの最後のカードとして出す。
+         出す・隠すは指示の欄（#instruction-panel）と同じ（app.js が合わせる）。範囲のボタンは下の操作の欄（#dock-range） -->
+    <section id="reply-panel" class="reply-panel" aria-label="指示の結果">
+      <div id="reply-message" class="reply" aria-live="polite" hidden></div>
+    </section>
+
+    <!-- ③ 変更候補（会話の最後のカード：変更前→変更後）と、④ 承認のあと（承認した人・3つの状態・出力の結果） -->
+    <section id="candidate-panel" class="card cand-card" aria-label="確かめて承認">
+      <div id="candidate-view"></div>
+      <div id="approval-panel" aria-label="承認と出力">
+        <p id="approval-status" class="approved" hidden></p>
+        <!-- 承認のあとの3つの状態（台本 Ver.6.1 Scene 3-3）。文はサーバーの決まった文（state.after_approval）だけ -->
+        <dl id="approval-states" class="approval-states" hidden></dl>
+        <p id="approval-note" class="fine" hidden></p>
+        <p id="approval-exported" class="fine approval-exported" hidden></p>
+        <div id="export-result" aria-live="polite" hidden></div>
+      </div>
+    </section>
+    </div><!-- /side-flow -->
+    </div><!-- /side-scroll -->
+
+    <!-- 下の操作の欄（いつも見える）。候補のボタンは「確かめて承認」のカードと同じときに出す（app.js が合わせる） -->
+    <div id="dock" class="dock">
+      <section id="select-panel" class="card select-card" aria-label="位置を選ぶ">
+        <p class="select-head">位置を選ぶ<span class="select-sub">右の図の点か、番号を押します</span></p>
+        <div id="position-chips" class="chips"></div>
+        <p id="chips-note" class="fine" hidden>薄い番号の位置は、ここでは変更できません（理由は番号に重ねると出ます）。</p>
+        <button type="button" id="talk-first" class="link small">位置を選ばずに話す（例：「置くところを…」）</button>
+      </section>
+      <!-- 回数の変更の範囲の確認のボタン（［この範囲を繰り返す］［違う］）。範囲の中身は会話の最後のカード。
+           範囲の確認が無くなったら、ここからも消す（前の答えのボタンを残さない。押すと今の turn を送る：app.js） -->
+      <div id="dock-range" class="dock-range" aria-label="範囲の確認" hidden></div>
+      <div id="dock-actions" class="dock-actions" aria-label="確かめて承認・出力">
+        <p id="export-review-only" class="review-only" hidden>変更案の確認のみ。実機用JOBは出力できません</p>
+        <button type="button" id="open-confirm" class="wide" disabled>確認して承認へ</button>
+        <button type="button" id="export-button" class="wide" disabled>シミュレーション用に出力（合成ジョブだけ・実機に入れない）</button>
+        <button type="button" id="undo-button" class="link" disabled>元に戻す</button>
+        <p id="export-note" class="fine export-note" hidden>出力先：<code id="out-dir"></code>（.JBI.txt）。実機での取り違えを完全に防ぐものではありません。実機には入れないでください。</p>
+        <p class="fine role-note">承認は確認表示のボタンだけです</p>
+      </div>
+    <section id="instruction-panel" class="card instr" aria-label="音声で指示">
+      <div id="instruction-slot">
+        <div class="pos-row">
+        <button type="button" id="voice-position" class="position-pill" title="位置を選び直す"></button>
+        <p id="updown-status" class="updown fine" hidden></p>
+        </div>
+        <div id="voice-input-slot">
+          <div id="voice-controls">
+            <div class="mic-row">
+              <!-- ① 初期は大きく光るマイク（真ん中）、② 会話のあとは入力欄の横の小さなマイク。同じボタン（最初の送信で滑らかに移る：app.js）。
+                   波形は「聞いている」間だけ動く飾り（声の大きさは使わない。音声認識とは別にマイクを開かない） -->
+              <div class="mic-stage">
+                <span class="mic-wave left" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+                <button type="button" id="mic-button" class="mic-big" disabled aria-label="マイクをONにする" aria-pressed="false"><svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8.5" y="2.5" width="7" height="12" rx="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+                <span class="mic-wave right" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+              </div>
+              <p id="mic-cta" class="mic-cta" aria-hidden="true">押して話す</p>
+              <p id="mic-label" class="mic-label">マイク OFF</p>
+              <p id="mic-hint" class="fine mic-hint" hidden></p>
+              <div class="rec-buttons">
+                <button type="button" id="voice-stop" disabled>話し終わった</button>
+                <button type="button" id="voice-cancel" class="link" disabled>マイクをOFF</button>
+              </div>
+            </div>
+            <div id="voice-consent" class="consent" hidden>
+              <p id="consent-text"></p>
+              <div class="consent-buttons">
+                <button type="button" id="consent-yes">使う</button>
+                <button type="button" id="consent-no" class="link">文字で入力する</button>
+              </div>
+            </div>
+            <p id="voice-status" class="voice-status"></p>
+            <p id="voice-partial" class="partial" aria-live="polite"></p>
+            <p id="voice-hint" class="voice-hint" hidden>＋か−が入っていません。このままだと聞き返します。「Xのマイナス」のように直せます</p>
+            <p id="voice-error" class="error" hidden></p>
+          </div>
+          <p id="browser-note" class="browser-note" hidden><span>アプリの中で開いた画面では、音声を使えないことがあります。Google Chrome で開いてください</span> <button type="button" id="copy-url" class="link small">アドレスをコピー</button></p>
+          <p id="voice-unsupported" class="warn" hidden>このブラウザでは音声入力を使えません。文字で入力してください</p>
+        </div>
+        <!-- キーボード：① 初期は押すと入力欄が出る。② 会話のあとは入力欄へ移る -->
+        <button type="button" id="kbd-button" class="kbd-btn" aria-label="文字で入力する" title="文字で入力する" aria-expanded="false" aria-controls="text-form"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M6 9.5h1M9.5 9.5h1M13 9.5h1M16.5 9.5h1M6 12.2h1M9.5 12.2h1M13 12.2h1M16.5 12.2h1M8 15h8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
+        <label for="text-input" id="heard-label" class="heard-label" hidden>聞き取った文（直せます）</label>
+        <form id="text-form" class="text-form">
+          <label for="text-input" class="sr-only">指示の文</label>
+          <input type="text" id="text-input" maxlength="500" placeholder="Zプラス方向に10mm" disabled>
+          <!-- 指示の例（ふだんは出さない。押すと小さな窓に出る。例は上下の向きの状態で app.js が入れ直す） -->
+          <button type="button" id="examples-button" class="info-btn" aria-label="指示の例" title="指示の例" aria-expanded="false" aria-controls="examples-pop">i</button>
+          <button type="submit" id="text-send" disabled>送る</button>
+        </form>
+        <div id="examples-pop" class="examples-pop" role="dialog" aria-label="指示の例" hidden>
+          <p class="help-head">指示の例</p>
+          <ul id="input-examples" class="help-examples"></ul>
+          <p class="help-line">例を押すと欄に入ります。送るのは［送る］です</p>
+        </div>
+        <p class="fine max-shift">1回に動かせる量：<span id="max-shift-label"></span></p>
+      </div>
+    </section>
+    </div><!-- /dock -->
+  </aside>
+
+  <!-- 右：位置の図（経路の目安。主役） -->
   <section id="figure-panel" class="stage" aria-label="位置の図">
     <div class="stage-head">
       <span id="file-name" class="file-name"></span>
+      <!-- 上下の向きの、ロボット名と確認した人・日時（CHECKER_030 S30-1）。マウスを重ねなくても常に見せる。文は highlight.js の updownDetail。
+           3D を広く取るため、図の上の帯（ファイル名の横）に置く -->
+      <p id="updown-detail" class="updown updown-detail" hidden></p>
       <!-- 再生中の「いま：24行目 MOVL C00001 V=150.0（2回目）」。サーバーの区間の線の文字だけ。図の点に重ねない（図の上の帯に出す） -->
       <div id="play-now" class="play-now" aria-live="polite" hidden></div>
       <button type="button" id="view-reset" class="link small" hidden>視点を戻す</button>
@@ -69,12 +234,15 @@
         <button type="button" class="view-tab" data-view="xy" role="tab" title="上から見る">X・Y</button>
       </div>
     </div>
-    <!-- 上下の向きの、ロボット名と確認した人・日時（CHECKER_030 S30-1）。マウスを重ねなくても常に見せる。文は highlight.js の updownDetail -->
-    <p id="updown-detail" class="updown updown-detail" hidden></p>
     <p id="figure-message" class="warn" hidden></p>
     <div class="fig-wrap">
       <div id="fig-3d" class="fig fig-main fig-3d"></div>
       <div id="fig-main" class="fig fig-main"></div>
+    </div>
+    <!-- 選んでいる位置の1行（位置を選んでいるときだけ。値はサーバーが読んだファイルの行のまま）と、シミュレーションの印 -->
+    <div class="sel-line">
+      <p id="sel-pos" class="sel-pos" hidden></p>
+      <span class="sim-chip">シミュレーション</span>
     </div>
     <!-- 再生の操作は図の外（図の下の段）。図の中の文字（点の名前・回数の印）を隠さない。比べる再生は、回数の変更の候補があるときだけ -->
     <div class="play-row">
@@ -113,131 +281,6 @@
     </div>
     <p class="fine figure-notes"><span id="play-note">点を命令の順に直線で結んだ目安です。ロボット本体の動きではありません。</span> <span id="view3d-note">3D はジョブの X・Y・Z をそのまま点で描いたもので、ロボット本体・関節は描いていません。動作や干渉を保証するシミュレーターではありません。</span> <span id="figure-note">この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。参考表示であり、実際のロボットの動きではありません。</span></p>
   </section>
-
-  <!-- 右：今のステップの操作だけ -->
-  <aside class="side">
-    <!-- PC 版（幅 1100px 以上）は右の列を3段にする（UI 修正 11/4・唐川さんの依頼書）：
-         上＝状態の1行と見出し（いつも見える）／中＝会話・範囲・候補（ここだけスクロール）／下＝今の操作の帯（いつも見える）。
-         並べ方だけを変えた。隠す・出す決まり（どのステップで、どのカードを出すか）は app.js のまま -->
-    <p id="status-line" class="status-line" aria-live="polite" hidden></p>
-    <p id="next-action" class="next-action" aria-live="polite">JOBファイルをドロップしてください</p>
-    <!-- 見出しの下の1行の案内（CHECKER_030 S30-3：実機の JOB の承認のあと）。文は app.js の決まった文だけ -->
-    <p id="next-hint" class="next-hint" hidden></p>
-
-    <div id="side-scroll" class="side-scroll">
-    <section id="select-panel" class="card" aria-label="位置を選ぶ">
-      <div id="position-chips" class="chips"></div>
-      <p id="chips-note" class="fine" hidden>薄い番号の位置は、ここでは変更できません（理由は番号に重ねると出ます）。</p>
-      <button type="button" id="talk-first" class="link small">位置を選ばずに話す（例：「置くところを…」）</button>
-    </section>
-
-    <!-- Claude との会話（人／Claude の吹き出し・位置の候補の根拠・選択肢）。文はすべてテキストのノードで作る -->
-    <section id="dialog-panel" class="card dialog" aria-label="Claude との会話" hidden>
-      <div class="dlg-head">
-        <span class="dlg-title">会話</span>
-        <span id="dialog-engine" class="dlg-engine"></span>
-      </div>
-      <ol id="dialog-turns" class="bubbles" aria-live="polite"></ol>
-      <div id="dialog-evidence" class="evidence"></div>
-      <p id="dialog-estimated" class="dlg-est" hidden></p>
-      <div id="dialog-choices" class="choices dlg-choices"></div>
-      <details class="more"><summary>詳しく</summary>
-        <p id="dialog-note" class="fine">Claude は意味を読んで候補を出し、聞き返すだけです。座標の変更・検査・数字はプログラムが行い、承認は確認表示のボタンだけです。</p>
-      </details>
-    </section>
-
-    <!-- 入口は1つ（11/4 唐川さんの指示③）：声も文字も下の「指示の欄」1つから /api/talk へ。会話の流れはこの欄に出す。旧「Claude に聞く」の入力欄は無くした -->
-    <!-- PC 版の画面（docs/UI_PC_LAYOUT.md）：会話の欄は右側。3D は左でいつも見える。入口は1つ（/api/talk・Step F） -->
-    <!-- Claude に聞く（読み取りだけ）。答えでジョブ・変更候補・承認は変わらない。文は explain.js がテキストのノードで作る -->
-    <section id="ask-panel" class="card dialog" aria-label="会話" hidden>
-      <div class="dlg-head">
-        <span class="dlg-title">会話</span>
-        <span id="ask-model" class="dlg-engine"></span>
-      </div>
-      <p id="ask-nokey" class="warn" hidden></p>
-      <ol id="ask-turns" class="bubbles talk" aria-live="polite"></ol>
-      <!-- 人が教えた意味（サーバーのメモリの中だけ。この会話の中だけ。保存しない） -->
-      <div id="ask-memory-box" class="memory" hidden>
-        <span class="memory-head">覚えていること</span>
-        <ul id="ask-memory" class="memory-list"></ul>
-      </div>
-      <!-- トークン数・料金・会話のやり直し・役割の説明は「詳しく」の中（いつもは閉じている） -->
-      <details class="more"><summary>詳しく</summary>
-        <p id="ask-usage" class="fine"></p>
-        <button type="button" id="ask-reset" class="link small" disabled>会話をやり直す</button>
-        <p class="fine">Claude は動作の説明と作業目的の推定だけをします。数・状態・変更の案内はアプリが出します。承認と出力はボタンだけです。</p>
-      </details>
-    </section>
-
-    <!-- 指示の結果（聞き返し・止めた理由・回数の変更の範囲の確認）。会話の流れの最後の吹き出しとして中の段に出す。
-         出す・隠すは指示の欄（#instruction-panel）と同じ（app.js が合わせる） -->
-    <section id="reply-panel" class="reply-panel" aria-label="指示の結果">
-      <div id="reply-message" class="reply" aria-live="polite" hidden></div>
-    </section>
-
-    <section id="candidate-panel" class="card" aria-label="確かめて承認">
-      <div id="candidate-view"></div>
-      <div id="approval-panel" aria-label="承認と出力">
-        <p id="approval-status" class="approved" hidden></p>
-        <!-- 承認のあとの3つの状態（台本 Ver.6.1 Scene 3-3）。文はサーバーの決まった文（state.after_approval）だけ -->
-        <dl id="approval-states" class="approval-states" hidden></dl>
-        <p id="approval-note" class="fine" hidden></p>
-        <p id="approval-exported" class="fine approval-exported" hidden></p>
-        <p id="export-note" class="fine" hidden>出力先：<code id="out-dir"></code>（.JBI.txt）。実機での取り違えを完全に防ぐものではありません。実機には入れないでください。</p>
-        <div id="export-result" aria-live="polite" hidden></div>
-      </div>
-    </section>
-    </div><!-- /side-scroll -->
-
-    <!-- 下の帯：今の操作（いつも見える）。候補のボタンは「確かめて承認」のカードと同じときに出す（app.js が合わせる） -->
-    <div id="dock" class="dock">
-      <div id="dock-actions" class="dock-actions" aria-label="確かめて承認・出力">
-        <p id="export-review-only" class="review-only" hidden>変更案の確認のみ。実機用JOBは出力できません</p>
-        <button type="button" id="open-confirm" class="wide" disabled>確認して承認へ</button>
-        <button type="button" id="export-button" class="wide" disabled>シミュレーション用に出力（合成ジョブだけ・実機に入れない）</button>
-        <button type="button" id="undo-button" class="link" disabled>元に戻す</button>
-      </div>
-    <section id="instruction-panel" class="card" aria-label="音声で指示">
-      <div id="instruction-slot">
-        <button type="button" id="voice-position" class="position-pill" title="位置を選び直す"></button>
-        <p id="updown-status" class="updown fine" hidden></p>
-        <div id="voice-input-slot">
-          <div id="voice-controls">
-            <div class="mic-row">
-              <button type="button" id="mic-button" class="mic-big" disabled aria-label="マイクをONにする" aria-pressed="false">🎤</button>
-              <p id="mic-label" class="mic-label">マイク OFF</p>
-              <p id="mic-hint" class="fine mic-hint" hidden></p>
-              <div class="rec-buttons">
-                <button type="button" id="voice-stop" disabled>話し終わった</button>
-                <button type="button" id="voice-cancel" class="link" disabled>マイクをOFF</button>
-              </div>
-            </div>
-            <div id="voice-consent" class="consent" hidden>
-              <p id="consent-text"></p>
-              <div class="consent-buttons">
-                <button type="button" id="consent-yes">使う</button>
-                <button type="button" id="consent-no" class="link">文字で入力する</button>
-              </div>
-            </div>
-            <p id="voice-status" class="voice-status"></p>
-            <p id="voice-partial" class="partial" aria-live="polite"></p>
-            <p id="voice-hint" class="voice-hint" hidden>＋か−が入っていません。このままだと聞き返します。「Xのマイナス」のように直せます</p>
-            <p id="voice-error" class="error" hidden></p>
-          </div>
-          <p id="browser-note" class="browser-note" hidden><span>アプリの中で開いた画面では、音声を使えないことがあります。Google Chrome で開いてください</span> <button type="button" id="copy-url" class="link small">アドレスをコピー</button></p>
-          <p id="voice-unsupported" class="warn" hidden>このブラウザでは音声入力を使えません。文字で入力してください</p>
-        </div>
-        <label for="text-input" id="heard-label" class="heard-label" hidden>聞き取った文（直せます）</label>
-        <form id="text-form" class="text-form">
-          <label for="text-input" class="sr-only">指示の文</label>
-          <input type="text" id="text-input" maxlength="500" placeholder="Zプラス方向に10mm" disabled>
-          <button type="submit" id="text-send" disabled>送る</button>
-        </form>
-        <p class="fine max-shift">1回に動かせる量：<span id="max-shift-label"></span></p>
-      </div>
-    </section>
-    </div><!-- /dock -->
-  </aside>
 
   <!-- 詳細表示（同じ画面の中の切り替え。最初は閉じている） -->
   <section id="engineer-view" class="engineer" hidden aria-label="詳細表示">

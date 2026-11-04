@@ -34,6 +34,7 @@ const state = {
   needChrome: false,    // Chrome 以外で声を文字にできなかった（アドレスのコピーを目立たせる）
   talkFirst: false,     // 位置を選ばずに話す（「置くところを…」から Claude との会話を始める）
   dialogNotice: false,  // 最後の結果が会話の層の答え（会話が終わっても、止めた・聞き返した理由を会話のカードに残す）
+  convo: false,         // 会話を始めた（最初に送った）。false の間は ① 初期の画面（大きなマイク）。見せ方だけに使う
 };
 const SAMPLE_NAME = "DEMO_C_PLACE.JBI";  // 「サンプルで試す」で読む架空のジョブ（サーバーが決まった1つを読む）
 
@@ -157,6 +158,8 @@ function applyLoad(res, fileName) {
   state.pickAgain = false;
   state.talkFirst = false;
   state.dialogNotice = false;
+  state.convo = false;  // 別のデータを読んだ：① 初期の画面に戻る（会話の履歴は explain.js が消す）
+  setKeyboard(!Recognition);  // 音声を使えないブラウザーでは、はじめから入力欄を出す
   $("heard-text").textContent = "（まだありません）";
   $("facts-view").textContent = "（まだありません）";
   $("reply-message").hidden = true;
@@ -171,6 +174,8 @@ function applyLoad(res, fileName) {
 function announceSession() {
   window.dispatchEvent(new CustomEvent("vt:session", { detail: { sessionId: state.sessionId } }));
 }
+// 会話をやり直した（explain.js）：候補・範囲の確認・会話の途中が無ければ ① 初期の画面に戻る（見せ方だけ）
+window.addEventListener("vt:talk-reset", () => { state.convo = false; if (state.st) renderSteps(); });
 // 根拠の行を押したとき：その位置を図で光らせる（選択ではない）
 window.addEventListener("vt:highlight", () => { if (state.view) renderFigures(); });
 
@@ -248,6 +253,24 @@ function renderUpdown(u) {
   $("text-input").placeholder = ex.placeholder;
   $("howto-examples").textContent = ex.howto;
   $("help-examples").replaceChildren(...ex.help.map((t) => el("li", {}, t)));
+  // 入力欄の横の ⓘ の例（同じ例）。押すと欄に入るだけ（送るのは人が［送る］で）
+  $("input-examples").replaceChildren(...ex.help.map((t) => {
+    const b = el("button", { type: "button", class: "example-fill" }, t);
+    b.addEventListener("click", () => { fillInput(t.replace(/^「|」$/g, "")); setExamples(false); });
+    return el("li", {}, b);
+  }));
+}
+
+// 例・言い換えの例を、入力欄に入れるだけ（自動では送らない。声から入った文ではないので source は text）
+function fillInput(text) {
+  if (recording() || $("text-input").disabled) return;
+  state.voiceFinal = null;
+  $("text-input").value = text;
+  setKeyboard(true);
+  $("voice-hint").hidden = true;
+  renderSteps();
+  renderMic();
+  $("text-input").focus({ preventScroll: true });
 }
 
 function renderState() {
@@ -255,7 +278,7 @@ function renderState() {
   if (!st) return;
   // 状態の1行（CHECKER_033 P1-A・唐川さんの方針①）：サーバーがプログラムの確定情報だけから作った文をそのまま出す
   $("status-line").hidden = !st.status_line;
-  $("status-line").textContent = st.status_line || "";
+  renderStatusChips(st.status_line || "");
   // 「Claude に聞く」の欄に、データ（候補・承認）が変わったかもしれないことを知らせる（欄がサーバーに確かめ直す）
   const c = st.candidate;
   window.dispatchEvent(new CustomEvent("vt:state", { detail: { sessionId: state.sessionId,
@@ -268,6 +291,7 @@ function renderState() {
   $("interp-badge").title = st.mock_notice;
   $("interp-badge").hidden = false;
   $("voice-position").replaceChildren(el("strong", {}, st.selected || "位置は未選択"), el("span", {}, st.selected ? "変える" : "選ぶ"));
+  renderSelLine(st.selected);
   renderUpdown(st.updown);
   $("out-dir").textContent = st.out_dir;
   renderChips();
@@ -277,6 +301,39 @@ function renderState() {
   renderTables();
   renderFigures();
   renderSteps();
+}
+
+// 状態の1行を、上の帯の小さなチップにする（唐川さん承認のデザイン 11/4）。文はサーバーの文のまま（区切りの「／」も文字として残す）。
+// 形が違う（「：」「／」で分けられない）ときは、そのまま1行で出す。色はチップの文字（済み・あり・参考の表示だけ）から付けるだけ
+function renderStatusChips(text) {
+  const box = $("status-line");
+  const at = text.indexOf("：");
+  const parts = at >= 0 ? text.slice(at + 1).split("／") : [];
+  if (at < 0 || parts.length < 2 || parts.some((p) => !p)) { box.textContent = text; return; }
+  const tone = (p) => (/参考の表示だけ|承認できません/.test(p) ? " stop" : /済み/.test(p) ? " done" : /あり|確認中/.test(p) ? " on" : "");
+  const nodes = [el("span", { class: "st-head" }, text.slice(0, at + 1))];
+  parts.forEach((p, i) => {
+    if (i) nodes.push(el("span", { class: "st-sep", "aria-hidden": "true" }, "／"));
+    nodes.push(el("span", { class: "st-chip" + tone(p) }, p));
+  });
+  box.replaceChildren(...nodes);
+}
+
+// 3D の下の「選択中 C00004　X 450.000　Y 200.000　Z 300.000 mm」。位置を選んでいるときだけ。
+// 値はサーバーが読んだファイルの行（p.line の「=」のあとの最初の3つ）のまま。ロボット座標で描ける位置（p.xyz がある）だけ数を出す
+function renderSelLine(name) {
+  const box = $("sel-pos");
+  const p = name && state.view ? state.view.positions.find((q) => q.name === name) : null;
+  if (!p) { box.hidden = true; box.replaceChildren(); return; }
+  const vals = p.xyz && typeof p.line === "string" && p.line.includes("=") ? p.line.slice(p.line.indexOf("=") + 1).split(",").slice(0, 3).map((s) => s.trim()) : [];
+  const nodes = [el("span", { class: "sel-head" }, "選択中"), el("span", { class: "sel-name" }, p.name)];
+  if (vals.length === 3 && vals.every((v) => /^[+-]?\d+(\.\d+)?$/.test(v))) {
+    ["X", "Y", "Z"].forEach((a, i) => nodes.push(el("span", { class: "sel-ax" }, a), displayMinus(vals[i])));
+    nodes.push(el("span", { class: "sel-ax" }, "mm"));
+  }
+  box.replaceChildren(...nodes);
+  box.title = p.line || "";
+  box.hidden = false;
 }
 
 // ---- 今のステップと「次にすること」 ----
@@ -399,14 +456,87 @@ function renderSteps() {
     text = st.repeat_range.heading;
     primary = null;
   }
+  // ① 初期（会話の前）：ふだんの案内（点か番号を押す・🎤 を押す・書いて送る）の代わりに、大きな見出しを1つだけ出す。
+  // 同意・録音中・聞き取った文の確かめ・Chrome の案内などは、そのまま出す（目立たせるボタンの決まりは変えない）
+  const hero = isHero();
+  if (hero && HERO_REPLACES.includes(text)) text = HERO_TITLE;
   $("next-action").textContent = text;
   $("next-hint").textContent = hint;
   $("next-hint").hidden = !hint;
   if (primary) $(primary).classList.add("primary");
   renderHeard();
+  syncRangeDock();
+  renderHero(hero);
 }
 
 $("text-input").addEventListener("input", renderSteps);
+
+// ---- ① 初期（大きなマイク）と ② 会話の切り替え（唐川さん承認のデザイン 11/4。見せ方だけ）----
+// ① は、読み込んだあと・会話の前（まだ送っていない・候補も範囲の確認も会話の途中も無い）。最初の送信で ② になり、
+// 大きなマイクが小さくなりながら左下の入力欄の横へ移る（FLIP・約0.4秒）。空いた場所に会話の履歴がふわっと出る。
+// 戻り方：別のデータを読んだ → ① に戻る（会話の履歴は無くなる）。「会話をやり直す」→ 候補・範囲の確認・会話の途中が無ければ ① に戻る
+//（小さなマイクが真ん中へ大きくなって戻る）。動きを減らす設定のときは、動かさずにすぐ切り替える
+const HERO_TITLE = "ロボットに、やりたい動きを話してください";
+const HERO_REPLACES = ["点か番号を押してください", "🎤 を押して話してください", "動かし方を書いて「次へ」"];
+
+function isHero() {
+  const st = state.st;
+  if (!state.sessionId || !st || state.convo) return false;
+  const step = currentStep();
+  if (step !== 2 && step !== 3) return false;
+  if (st.candidate || st.repeat_range || dialogStep()) return false;
+  if (!$("reply-message").hidden || $("ask-turns").children.length) return false;
+  return true;
+}
+
+const reduceMotion = () => window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function renderHero(want = isHero()) {
+  const was = document.body.classList.contains("hero");
+  if (want === was) return;
+  const mic = $("mic-button");
+  const first = mic.getBoundingClientRect();
+  document.body.classList.toggle("hero", want);
+  if (!want) setExamples(false);
+  if (reduceMotion() || !first.width || mic.offsetParent === null || typeof mic.animate !== "function") return;
+  const last = mic.getBoundingClientRect();
+  if (!last.width) return;
+  // FLIP：前の場所・大きさから、今の場所へ（transform だけ。押せる場所・大きさは今のまま）
+  const dx = first.left - last.left, dy = first.top - last.top, s = first.width / last.width;
+  mic.animate([{ transform: `translate(${dx}px, ${dy}px) scale(${s})`, transformOrigin: "0 0" },
+    { transform: "none", transformOrigin: "0 0" }], { duration: 420, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" });
+  if (!want) {
+    $("side-scroll").animate([{ opacity: 0, transform: "translateY(12px)" }, { opacity: 1, transform: "none" }],
+      { duration: 380, delay: 140, easing: "ease-out", fill: "backwards" });
+    document.querySelector(".side-head").animate([{ opacity: 0.4 }, { opacity: 1 }], { duration: 300, easing: "ease-out" });
+  }
+}
+
+// 会話の欄に何か出たら（アプリの知らせなど）、① の画面を ② に切り替える（見せ方だけ）
+new MutationObserver(() => { if (document.body.classList.contains("hero") && !isHero()) renderSteps(); })
+  .observe($("ask-turns"), { childList: true });
+
+// キーボード：① では押すと入力欄が出る（もう一度押すまで出したまま）。② では入力欄へ移る
+function setKeyboard(open) {
+  document.body.classList.toggle("kbd-open", open);
+  $("kbd-button").setAttribute("aria-expanded", String(open));
+}
+$("kbd-button").addEventListener("click", () => {
+  setKeyboard(true);
+  if (!$("text-input").disabled) $("text-input").focus({ preventScroll: true });
+});
+// 指示の例（ⓘ）：ふだんは出さない。押すと小さな窓。Esc か外を押すと閉じる
+function setExamples(open) {
+  $("examples-pop").hidden = !open;
+  $("examples-button").setAttribute("aria-expanded", String(open));
+}
+$("examples-button").addEventListener("click", (ev) => {
+  ev.stopPropagation();
+  setExamples($("examples-pop").hidden);
+});
+document.addEventListener("click", (ev) => {
+  if (!$("examples-pop").hidden && !ev.target.closest("#examples-pop, #examples-button")) setExamples(false);
+});
 
 // 声から入った文は、大きく・枠を付けて「聞き取った文（直せます）」と出す（聞き違いに気づけるように）
 function renderHeard() {
@@ -487,8 +617,7 @@ function applyResult(res, showOk = true) {
       && ((talking && res.status !== "stop") || res.candidate_made)) {
     // 会話の途中の問いかけ：文は会話のカード（吹き出し）に出す。下の返事の欄には重ねて出さない。
     // 止めた理由・会話が終わったときの聞き返しは、返事の欄にも出す（見出しも「もう一度、言い直してください」）
-    $("reply-message").hidden = true;
-    $("reply-message").replaceChildren();
+    clearReply();
   } else if (res.ok === false) {
     showReply("stop", res.error || "理由が分かりません");
   } else if (res.status && res.status !== "ok") {
@@ -512,11 +641,12 @@ function renderRepeatRange(notice = "") {
   if (limit) limit.hidden = !!rr;
   if (rr) $("text-input").placeholder = "";
   if (!rr) {
-    // 範囲の確認が無くなった：この関数が作った部品だけを消す（Safety S2-P2-1）
+    // 範囲の確認が無くなった：この関数が作った部品だけを消す（Safety S2-P2-1）。下の操作の欄のボタンも消す
     if (box.classList.contains("range-ask")) { box.replaceChildren(); box.hidden = true; box.classList.remove("range-ask"); }
+    syncRangeDock();
     return;
   }
-  if (box.hidden && !notice) return;
+  if (box.hidden && !notice) { syncRangeDock(); return; }
   const row = el("div", { class: "choices range-choices" });
   const send = async (choice) => {
     if (recording()) return;
@@ -538,24 +668,74 @@ function renderRepeatRange(notice = "") {
   const first = rr.line_nos[0], last = rr.line_nos[rr.line_nos.length - 1];
   const blockLast = rr.block_line_nos[rr.block_line_nos.length - 1];
   // 見出し（この範囲を繰り返しますか？）は画面の上の「次にすること」に1回だけ出す（ここでは出さない）
+  // 行の一覧は「詳しく」（会話の欄に入るときは開いたまま。入らないときは畳み、要約（1回目・2回目・全体）とボタンを同時に見せる）
+  const lines = el("details", { class: "more range-more", open: "" }, el("summary", {}, "行の一覧"),
+    el("div", { class: "diff range-lines" }, ...rr.cycle_lines.map((t, i) => big(el("div", {}, `${first + i}行目  ${t}`), 15))));
   const parts = [
     ...(notice ? [big(el("p", { class: "range-guide" }, notice), 15, "700")] : []),
     big(el("p", { class: "range-where" }, `${rr.target}　1回目：${first}〜${last}行目`), 18, "700"),
-    el("div", { class: "diff range-lines" }, ...rr.cycle_lines.map((t, i) => big(el("div", {}, `${first + i}行目  ${t}`), 15))),
     // 2回目以降の範囲と、全体の範囲（数・行番号はサーバーのもの）
     ...rr.cycles.slice(1).map(([a, b], k) => big(el("p", { class: "range-cycle" }, `${k + 2}回目：${a}〜${b}行目`), 16, "600")),
     big(el("p", { class: "range-all" }, `全体：${first}〜${blockLast}行目（${rr.count}回）`), 16, "600"),
     big(el("p", { class: "range-count" }, `今は${rr.count}回続けて書かれています。合計${rr.total}回にします`), 15),
   ];
   if (rr.side_note) parts.push(el("p", { class: "range-side" }, rr.side_note));
-  parts.push(el("p", { class: "fine range-note" }, rr.note), row,
-    el("p", { class: "range-button-note" }, rr.button_note));  // 範囲を決めるだけ。承認は次の確認表示
+  parts.push(lines, el("p", { class: "fine range-note" }, rr.note));
   box.className = "reply ask range-ask";
   box.replaceChildren(...parts);
   box.hidden = false;
+  // ボタンと注記（範囲を決めるだけ。承認は次の確認表示）は、下の操作の欄（いつも見える。前の答えのボタンは残さない）
+  $("dock-range").replaceChildren(row, el("p", { class: "range-button-note" }, rr.button_note));
+  $("dock-range").dataset.turn = String(rr.turn);
   renderSteps();  // 見出しを、ボタンに合わせる
+  // 会話の欄に入らない高さのときは、行の一覧を畳む（要約とボタンが同時に見えるように）
+  const area = $("side-scroll");
+  if (getComputedStyle(area).overflowY === "auto" && box.getBoundingClientRect().height > area.clientHeight - 4) lines.open = false;
   // 狭い画面：範囲の確認の中身とボタンが見えるところまで送る
   if (window.innerWidth < 700) box.scrollIntoView({ block: "start", behavior: "auto" });
+}
+
+// 範囲の確認のボタン（下の操作の欄）は、範囲の確認のカードが出ている間だけ。カードが消えた・別の答えに替わったら、すぐ消す
+function syncRangeDock() {
+  const box = $("reply-message"), dock = $("dock-range");
+  const rr = state.st && state.st.repeat_range;
+  const live = !!rr && !box.hidden && box.classList.contains("range-ask") && !$("reply-panel").hidden
+    && dock.dataset.turn === String(rr.turn);
+  if (!live && dock.childElementCount) { dock.replaceChildren(); delete dock.dataset.turn; }
+  dock.hidden = !live;
+}
+
+// 前の答え（聞き返し・選択肢・範囲の確認）を消す。範囲のボタンも一緒に消す（古い選択肢を後から押せないように）
+function clearReply() {
+  $("reply-message").hidden = true;
+  $("reply-message").replaceChildren();
+  syncRangeDock();
+}
+
+// 言い換えの例：サーバーの返事の文の中の「…」のうち、指示の形（軸や上げ下げと数・mm／ミリ、または回数）のものだけ。
+// 押すと入力欄に入るだけ（送るのは人）。サーバーの文は変えない。取れないときは出さない
+function rephraseExamples(message) {
+  const out = [];
+  for (const m of String(message || "").matchAll(/「([^「」…]{2,40})」/g)) {
+    const t = m[1].trim();
+    const move = /[XYZＸＹＺ]|プラス|マイナス|上に|下に|上へ|下へ|上げ|下げ/.test(t) && /[0-9０-９]+\s*(mm|ｍｍ|ミリ)/i.test(t);
+    const count = /[0-9０-９]+回から[0-9０-９]+回/.test(t);
+    if ((move || count) && t !== state.lastHeard && !out.includes(t)) out.push(t);
+  }
+  return out.slice(0, 3);
+}
+
+function rephraseRow(message) {
+  const ex = rephraseExamples(message);
+  if (!ex.length) return null;
+  const row = el("div", { class: "rephrase" }, el("span", { class: "rephrase-head" }, "言い換えの例（押すと欄に入ります）"));
+  for (const t of ex) {
+    const b = el("button", { type: "button", class: "rephrase-chip" }, t);
+    b.disabled = recording();
+    b.addEventListener("click", () => fillInput(t));
+    row.append(b);
+  }
+  return row;
 }
 
 function showReply(status, message, choices) {
@@ -585,8 +765,10 @@ function showReply(status, message, choices) {
   }
   else if (/上限[^。]*を超え/.test(message || "")) box.replaceChildren(friendly("limit", message));  // 移動量の上限を超えたときだけ
   else box.replaceChildren(friendly("stop", message));
+  if (status !== "ok") { const r = rephraseRow(message); if (r) box.append(r); }
   box.hidden = false;
   $("voice-status").textContent = "";
+  syncRangeDock();
 }
 
 // ---- 3. 指示（音声または文字）。どちらも同じ1つの入口（/api/talk）へ ----
@@ -600,8 +782,16 @@ $("text-form").addEventListener("submit", async (ev) => {
   state.voiceFinal = null;
   $("voice-hint").hidden = true;
   $("text-input").value = "";
+  startConversation();
   await sendInstruction(text, source);
 });
+
+// 最初の送信で ② 会話の画面へ（見せ方だけ。送る内容・順番は変えない）
+function startConversation() {
+  if (state.convo) return;
+  state.convo = true;
+  renderSteps();
+}
 
 // Step F：会話の欄（1つの入口 /api/talk）の答えのうち、指示の道の結果（範囲の確認・候補・止めた理由）を、
 // いつもの指示の結果と同じように描く。状態はサーバーの state のまま。承認・出力はここから呼ばない
@@ -623,8 +813,7 @@ window.addEventListener("vt:talk-result", (ev) => {
 
 async function sendInstruction(text, source) {
   if (!state.sessionId) return;
-  $("reply-message").hidden = true;  // 前の聞き返し（と選択肢）は消す。古い選択肢を後から押せないように
-  $("reply-message").replaceChildren();
+  clearReply();  // 前の聞き返し（と選択肢・範囲のボタン）は消す。古い選択肢を後から押せないように
   // 入口は1つ（11/4 唐川さんの指示③）：/api/talk（explain.js の vtTalk）。結果は vt:talk-result で applyResult に渡る。
   // 指示の欄から /api/hear を直接呼ばない（振り分けをしないと、ボタンだけの言葉や相づちで承認が取り消されるため）
   const t = await window.vtTalk(text, source);
@@ -638,8 +827,8 @@ async function sendInstruction(text, source) {
 // 振り分けをせずに指示の道（/api/hear）へ返す（Claude には送らない）。自由な文・声は、いつも入口（/api/talk）から
 async function answerChoice(text) {
   if (!state.sessionId) return;
-  $("reply-message").hidden = true;
-  $("reply-message").replaceChildren();
+  startConversation();
+  clearReply();
   const res = await postJson("/api/hear", { session_id: state.sessionId, text: text, source: "text" });
   $("heard-text").textContent = res.heard !== undefined ? res.heard : text;
   const uw = res.facts && res.facts.unknown_words;
@@ -744,6 +933,7 @@ function renderDialog() {
 
 async function chooseDialog(id, turn) {
   if (!state.sessionId || recording()) return;
+  startConversation();
   for (const x of $("dialog-choices").querySelectorAll("button")) x.disabled = true;  // 2回押しても1回だけ送る
   const res = await postJson("/api/dialog", { session_id: state.sessionId, choice: id, turn: turn });
   applyResult(res, false);
@@ -914,6 +1104,7 @@ $("confirm-close").addEventListener("click", closeConfirm);
 document.addEventListener("keydown", (ev) => {
   if (ev.key !== "Escape") return;
   if (!$("help-pop").hidden) { setHelp(false); $("help-button").focus(); return; }
+  if (!$("examples-pop").hidden) { setExamples(false); $("examples-button").focus(); return; }
   if (!$("confirm-overlay").hidden) closeConfirm();
 });
 
@@ -1050,8 +1241,9 @@ function renderTables() {
 // ---- 図（大きな図1つ。3つの向きを切り替える。小さな図は詳細表示） ----
 const AXES = { X: 0, Y: 1, Z: 2 };
 const VIEWS = { xy: ["X", "Y"], xz: ["X", "Z"], yz: ["Y", "Z"] };
-const C_LINE = "#c7cbd1", C_BEFORE = "#a1a6ad", C_AFTER = "#ff6a1a", C_POINT = "#1d1d1f", C_SEL = "#0a84ff";
-const C_STOPPED = "#8e8e93";  // 止まった候補（承認できない）の変更後
+// 色は暗い図の面（style.css の --fig）で読める色（唐川さん承認のデザイン 11/4。意味は今までどおり：灰＝変更前・オレンジ＝変更後・青＝選んだ位置）
+const C_LINE = "#c9d6ec", C_BEFORE = "#7f8ba3", C_AFTER = "#ff6a1a", C_POINT = "#e3ebf8", C_SEL = "#4da3ff";
+const C_STOPPED = "#9aa3b5";  // 止まった候補（承認できない）の変更後
 
 // 位置の広がりがいちばん大きい2つの軸の図を、最初に大きく出す
 function bestView(positions) {
@@ -1243,11 +1435,11 @@ function drawFigure(host, axA, axB, big) {
     const sel = p.name === selected;
     const g = svgEl("g", { class: "pt" + (sel ? " sel" : ""), "data-name": p.name });
     g.append(svgEl("circle", { cx: x, cy: y, r: big ? 18 : 8, fill: "transparent" }));  // 押しやすい大きさ
-    if (sel) g.append(svgEl("circle", { cx: x, cy: y, r: big ? 14 : 7, fill: "rgba(10,132,255,0.15)", stroke: C_SEL, "stroke-width": 2 }));
+    if (sel) g.append(svgEl("circle", { cx: x, cy: y, r: big ? 14 : 7, fill: "rgba(77,163,255,0.18)", stroke: C_SEL, "stroke-width": 2 }));
     g.append(svgEl("circle", { cx: x, cy: y, r: big ? 6 : 4, fill: moved ? C_BEFORE : (sel ? C_SEL : C_POINT) }));
     if (!moved) {  // 動かす点の名前は、変更後の点の横に1つだけ出す
       const label = svgEl("text", { x: x + 12, y: placeLabel(x, y, p.name.length * 8),
-        fill: sel ? C_SEL : "#6e6e73", "font-weight": sel ? "600" : "400" });
+        fill: sel ? "#7cbcff" : "#b3c0d8", "font-weight": sel ? "600" : "400" });
       label.textContent = p.name;
       g.append(label);
     }
@@ -1263,7 +1455,7 @@ function drawFigure(host, axA, axB, big) {
       const x = sx(q.xyz[a]), y = sy(q.xyz[b]);
       svg.append(svgEl("circle", { cx: x, cy: y, r: big ? 7 : 4, fill: cAfter }));
       const text = `${q.name} ${displayMinus(`${c.target.split(" ")[1]} ${c.delta}mm`)}`;
-      const label = svgEl("text", { x: x + 12, y: placeLabel(x, y, text.length * 8), fill: stopped ? C_STOPPED : "#c4470a", "font-weight": "600" });
+      const label = svgEl("text", { x: x + 12, y: placeLabel(x, y, text.length * 8), fill: stopped ? C_STOPPED : "#ffa266", "font-weight": "600" });
       label.textContent = text;
       svg.append(label);
     }
@@ -1599,6 +1791,7 @@ function failText(kind, message) {
 const voice = new SpeechInput(Recognition, {
   state: (value) => {
     state.voiceState = value;
+    document.body.classList.toggle("listening", value === "listening");  // 波形は「聞いている」間だけ動く（声の大きさは使わない）
     $("voice-status").textContent = { starting: "準備しています…", listening: "",
       stopping: "まとめています…", idle: "" }[value] || "";
     updateLocks();
@@ -1618,6 +1811,7 @@ const voice = new SpeechInput(Recognition, {
     }
     $("text-input").value = text;  // 入力欄に入れるだけ。自動では送らない
     state.voiceFinal = text;
+    setKeyboard(true);  // ① 初期の画面でも、聞き取った文を確かめられるように入力欄を出す
     state.live = false;  // 1回の発話で OFF（次は人が 🎤 を押す）
     state.needChrome = false;  // 声を文字にできた：Chrome の案内は要らない
     document.body.classList.remove("need-chrome");
@@ -1798,8 +1992,9 @@ $("copy-url").addEventListener("click", async () => {
     $("voice-status").textContent = "Chrome で " + url + " を開いてください";
   }
 });
-// ---- 右の列の中の段のスクロール（表示だけ。UI 修正 11/4）----
-// PC 版では右の列の中の段（会話・指示の結果・候補）だけがスクロールする。新しく出たもの・変わったものが見えるところへ送る。
+// ---- 左の列の中の段のスクロール（表示だけ。UI 修正 11/4・唐川さん承認のデザイン 11/4）----
+// PC 版では左の列の中の段（会話・指示の結果・候補）だけがスクロールする。ふだんは下に寄せて見せる（style.css の column-reverse。自動のスクロールに頼らない）。
+// 新しく出たものが下に寄せただけでは見えないとき（上の端が切れるときなど）だけ、見えるところへ送る。新しく出たもの・変わったものが見えるところへ送る。
 // - 指示の結果（範囲の確認など）・候補のカードの中身が変わった：そのカードを見せる（収まれば下の端まで。範囲のボタン・承認の1行が見える。
 //   収まらなければ候補は上の端から（止まった理由・変わる値）、範囲の確認は下の端（ボタン）を見せる）
 // - それ以外（会話の吹き出しが増えた）：いちばん新しい吹き出しを見せる
@@ -1814,12 +2009,13 @@ function zoneText(id) {
   return e.hidden ? "" : e.innerText;
 }
 
+// 会話の欄は下に寄せて見せる（column-reverse。scrollTop は 0 が下の端・上へ戻すと負）。どちらの向きでも動くよう、今の位置からの差で送る
 function revealIn(box, target, align) {
   const br = box.getBoundingClientRect(), r = target.getBoundingClientRect();
-  const top = r.top - br.top + box.scrollTop, bottom = top + r.height;
-  const max = box.scrollHeight - box.clientHeight;
-  let y = r.height <= box.clientHeight - 8 || align === "bottom" ? bottom - box.clientHeight + 8 : top - 8;
-  box.scrollTop = Math.max(0, Math.min(max, y));
+  if (r.top >= br.top - 0.5 && r.bottom <= br.bottom + 0.5) return;  // もう全部見えている：動かさない
+  const fits = r.height <= box.clientHeight - 8;
+  const down = fits ? r.bottom > br.bottom : align === "bottom";
+  box.scrollTop += down ? r.bottom - br.bottom + 8 : r.top - br.top - 8;
 }
 
 function followLatest() {
@@ -1839,7 +2035,7 @@ function followLatest() {
     if (!$("approval-status").hidden) return revealIn(sideScroll, $("approval-panel"), "top");
     return revealIn(sideScroll, $("candidate-panel"), "top");
   }
-  if (replyNew) return revealIn(sideScroll, $("reply-message"), "bottom");
+  if (replyNew) return revealIn(sideScroll, $("reply-message"), "top");  // 範囲のボタンは下の操作の欄にある：カードは上の端から
   if (!talkNew) return;  // 何も新しくない（同じ中身の描き直し）：今の位置のまま
   if (performance.now() - followCardAt < 1500) return;
   const bubbles = [...sideScroll.querySelectorAll("#ask-turns > li, #dialog-turns > li")].filter((e) => e.offsetParent !== null);
