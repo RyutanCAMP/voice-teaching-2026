@@ -259,3 +259,20 @@ export function tallyParts(max, added) {
   const a = Array.isArray(added) ? added : [];
   return Array.from({ length: max }, (_, k) => ({ text: String(k + 1), added: a.includes(k + 1) }));
 }
+
+// ---- 言い換えの例（唐川さん承認のデザイン 11/4）：サーバーの返事の文の中の例を、押すと入力欄に入るチップにする ----
+// 出すのは、サーバーの決まった文にある例のうち、下の白リストにあるものだけ（軸と符号と量がそろった、小さな量の例）。
+// 引用の中に別の量・別の向き・上下の言葉（上下の向きが確認済みのときしか使えない）が入っていても、チップにしない。
+// チップは入力欄に入れるだけで、送るのは人（［送る］）。サーバーの文は変えない
+export const REPHRASE_OK = ["Xのマイナス5ミリ", "Zプラス3ミリ", "Zマイナス3ミリ", "Yのプラス3ミリ"];
+export function rephraseExamples(message, heard) {
+  const text = typeof message === "string" ? message : "";
+  const found = [];
+  for (const m of text.matchAll(/「([^「」]{1,40})」/g)) found.push(m[1].trim());
+  for (const m of text.matchAll(/（例：([^）]{1,80})）/g)) found.push(...m[1].split("／").map((s) => s.trim()));
+  const out = [];
+  for (const t of found) {
+    if (REPHRASE_OK.includes(t) && t !== heard && !out.includes(t)) out.push(t);
+  }
+  return out.slice(0, 3);
+}

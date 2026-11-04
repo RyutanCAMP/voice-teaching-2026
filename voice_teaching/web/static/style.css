@@ -122,6 +122,7 @@ button.link.primary:not([disabled]) { padding: 10px 18px; text-decoration: none;
   border: 1px solid var(--line); color: var(--text); white-space: nowrap;
 }
 .status-line .st-chip.on { border-color: rgba(255, 122, 46, 0.7); color: var(--accent-text); }
+.status-line .st-chip.range { border-color: rgba(10, 132, 255, 0.8); color: var(--blue-text); }  /* 範囲の確認中は青（範囲＝青の決まり） */
 .status-line .st-chip.done { border-color: rgba(95, 209, 154, 0.6); color: var(--green); }
 .status-line .st-chip.stop { border-color: rgba(255, 107, 112, 0.6); color: var(--red); }
 .status-line .st-sep { display: inline-block; width: 6px; overflow: hidden; color: transparent; vertical-align: middle; }
@@ -198,6 +199,8 @@ svg .pt:hover circle:last-of-type { r: 8; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .sel-pos .sel-name { color: var(--blue-text); font-weight: 700; margin-right: 14px; }
 .sel-pos .sel-ax { color: var(--sub); margin: 0 4px 0 12px; }
+.sel-pos .sel-before { font-family: "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif; font-size: 12px; font-weight: 700; color: var(--text);
+  border: 1px solid #7f8ba3; border-radius: 999px; padding: 1px 8px; margin-right: 2px; }
 .sel-pos .sel-head { font-family: "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif; color: var(--sub); font-size: 13px; margin-right: 8px; }
 .sim-chip { margin-left: auto; flex: none; font-size: 12px; font-weight: 700; color: #a9cbff; background: #15294a; border: 1px solid #2b4f86;
   padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
@@ -358,12 +361,14 @@ body.recording .mic-label { color: #ffb3b6; }
 .dock-actions button.wide { flex: 1 1 0; width: auto; min-width: 0; }
 .dock-actions .export-note, .dock-actions .role-note, .dock-actions .export-result { flex: 1 1 100%; margin: 0; }
 .dock-actions .export-result .reason code { font-size: 11px; }
+.dock, .dock-actions, #instruction-panel, .side-flow, .side-flow > * { min-width: 0; }
+.export-note, .export-note code, .export-result, .export-result code, .approval-exported { overflow-wrap: anywhere; word-break: break-all; }
 .dock-actions .role-note { text-align: center; }
 #undo-button { display: block; margin: 0 auto; flex: none; }
 /* 確認して承認へ（オレンジ）は、目立たせる */
 #open-confirm.primary:not([disabled]) { box-shadow: 0 0 0 3px rgba(255, 122, 46, 0.18), 0 8px 26px rgba(255, 122, 46, 0.45); }
 /* ステップ4（候補・承認のあと）の指示の欄は文字の欄だけ：位置の札・上下の向き・1回に動かせる量の行は出さない
-   （上下の向きは図の上の行 #updown-detail にいつも出ている。録音しない決まりは app.js のまま） */
+   （上下の向きは、図の上の帯の #updown-detail に、再生中も含めていつも出している。録音しない決まりは app.js のまま） */
 .side:has(#candidate-panel:not([hidden])) .pos-row,
 .side:has(#candidate-panel:not([hidden])) .max-shift,
 .side:has(#candidate-panel:not([hidden])) #kbd-button { display: none; }
@@ -613,7 +618,8 @@ details.more .fine { margin-top: 4px; }
   background: #0f1a2e; border-left: 5px solid #8797b4; border-radius: 10px; padding: 4px 12px;
   display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 10px; row-gap: 0;
 }
-.stage-head:has(#play-now:not([hidden])) .file-name, .stage-head:has(#play-now:not([hidden])) .updown-detail { display: none; }
+/* 再生中は「いま」の帯を出す。隠すのはファイル名だけ（上下の向きは再生中も見せる。CHECKER_030 S30-1） */
+.stage-head:has(#play-now:not([hidden])) .file-name { display: none; }
 .play-now.after { border-left-color: var(--accent); }
 .now-head { display: flex; align-items: baseline; gap: 6px; }
 .now-run { font-size: 13px; font-weight: 600; color: var(--sub); }
@@ -746,10 +752,16 @@ body.hero #kbd-button { display: flex; order: 5; width: 150px; height: 46px; bor
 body.hero.kbd-open #kbd-button { display: none; }
 body.hero #heard-label { order: 6; }
 body.hero .pos-row { order: 8; justify-content: center; }
-body.hero:has(#select-panel:not([hidden])) #voice-position { display: none; }  /* 位置を選ぶ欄が出ている間は、同じ意味の札を出さない */
+.side:has(#select-panel:not([hidden])) #voice-position { display: none; }  /* 位置を選ぶ欄が出ている間は、同じ意味の札を出さない（① も ② も） */
 body.hero .max-shift { order: 10; }
 body.hero #examples-button { display: flex; }
 body.hero #dock { flex: none; }
+/* ② 会話：位置を選ぶカードは番号のボタンの1行だけ（横に送れる）。見出し・注記・「位置を選ばずに話す」は出さない
+   （入口は1つなので、位置を選ばずにそのまま話せる。薄い番号の理由は番号に重ねると出る） */
+body:not(.hero) #select-panel { padding: 6px 8px; }
+body:not(.hero) #select-panel .select-head, body:not(.hero) #chips-note, body:not(.hero) #talk-first { display: none; }
+body:not(.hero) #position-chips { flex-wrap: nowrap; overflow-x: auto; gap: 6px; padding-bottom: 2px; scrollbar-width: thin; }
+body:not(.hero) #position-chips .chip { flex: none; padding: 6px 12px; }
 body.hero #select-panel { order: 2; background: transparent; border-color: transparent; text-align: center; padding: 4px 0 0; }
 body.hero #select-panel .chips { justify-content: center; }
 body.hero #select-panel #talk-first { margin: 4px auto 0; }
@@ -844,19 +856,20 @@ body.hero #instruction-panel { order: 1; }
   .side-flow { flex: none; min-height: 100%; gap: 10px; }
   .side-flow > * { flex: none; }
   /* 長い答え：吹き出しは会話の欄の高さに収め、収まらない分は吹き出しの中だけ送る（上の端から読める） */
-  .side-flow .bubble .said { max-height: calc(100cqh - 96px); overflow-y: auto; scrollbar-width: thin; }
+  /* 本文の上限＝会話の欄の高さ − 話し手・補足・「根拠の行」・余白の分（吹き出しの全体が欄に入る） */
+  .side-flow .bubble .said { max-height: calc(100cqh - 140px); min-height: 3em; overflow-y: auto; scrollbar-width: thin; }
   .side-flow .reply:not(:empty), .side-flow #candidate-panel { max-height: 100cqh; overflow-y: auto; scrollbar-width: thin; }
   .card.dialog.done .bubbles { max-height: none; }
   #dialog-turns { max-height: none; }
   .dock { padding-top: 2px; }
-  .side-head { min-height: 0; }
   /* 詳細表示を開いている間は、ページをふつうにスクロールさせる（詳細表示を読めるように） */
   body:has(#engineer-view:not([hidden])) { height: auto; overflow: visible; }
   .work:has(#engineer-view:not([hidden])) { grid-template-rows: auto; align-items: start; }
   .work:has(#engineer-view:not([hidden])) .stage, .work:has(#engineer-view:not([hidden])) .side { height: calc(100vh - 120px); }
   .engineer { grid-row: 2; }
   /* ① 初期：左の列の真ん中に、見出し・マイク・キーボード（会話の欄は出さない） */
-  body.hero .side { grid-template-rows: 1fr auto auto 1fr; }
+  body.hero .side { grid-template-rows: minmax(0, 1fr) auto minmax(0, auto) minmax(0, 1fr); }
+  body.hero .dock { min-height: 0; overflow-y: auto; scrollbar-width: thin; }
   body.hero .side-head { grid-row: 2; }
   body.hero .dock { grid-row: 3; }
 }

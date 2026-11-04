@@ -13,7 +13,7 @@ import { SpeechInput } from "/static/speech.js";
 import { View3D } from "/static/view3d.js";
 import { Player } from "/static/player.js";
 import { splitUnknown, displayMinus, segmentLook, segmentTitle, confirmHeading, updownStatus, updownConfirmLine, updownDetail,
-  speechExamples, repeatCountLabel, cycleStatus, nowPlaying, nowText, sequenceChips, tallyParts } from "/static/highlight.js";
+  speechExamples, repeatCountLabel, cycleStatus, nowPlaying, nowText, sequenceChips, tallyParts, rephraseExamples } from "/static/highlight.js";
 
 const state = {
   sessionId: null,  // サーバーのメモリにある画面の状態の番号
@@ -175,7 +175,12 @@ function announceSession() {
   window.dispatchEvent(new CustomEvent("vt:session", { detail: { sessionId: state.sessionId } }));
 }
 // 会話をやり直した（explain.js）：候補・範囲の確認・会話の途中が無ければ ① 初期の画面に戻る（見せ方だけ）
-window.addEventListener("vt:talk-reset", () => { state.convo = false; if (state.st) renderSteps(); });
+window.addEventListener("vt:talk-reset", () => {
+  state.convo = false;
+  const st = state.st;
+  if (st && !st.candidate && !st.repeat_range && !dialogStep()) clearReply();  // 範囲の確認・候補の途中は消さない（そのまま ② に残る）
+  if (st) renderSteps();
+});
 // 根拠の行を押したとき：その位置を図で光らせる（選択ではない）
 window.addEventListener("vt:highlight", () => { if (state.view) renderFigures(); });
 
@@ -310,7 +315,7 @@ function renderStatusChips(text) {
   const at = text.indexOf("：");
   const parts = at >= 0 ? text.slice(at + 1).split("／") : [];
   if (at < 0 || parts.length < 2 || parts.some((p) => !p)) { box.textContent = text; return; }
-  const tone = (p) => (/参考の表示だけ|承認できません/.test(p) ? " stop" : /済み/.test(p) ? " done" : /あり|確認中/.test(p) ? " on" : "");
+  const tone = (p) => (/参考の表示だけ|承認できません/.test(p) ? " stop" : /済み/.test(p) ? " done" : /確認中/.test(p) ? " range" : /あり/.test(p) ? " on" : "");
   const nodes = [el("span", { class: "st-head" }, text.slice(0, at + 1))];
   parts.forEach((p, i) => {
     if (i) nodes.push(el("span", { class: "st-sep", "aria-hidden": "true" }, "／"));
@@ -326,7 +331,10 @@ function renderSelLine(name) {
   const p = name && state.view ? state.view.positions.find((q) => q.name === name) : null;
   if (!p) { box.hidden = true; box.replaceChildren(); return; }
   const vals = p.xyz && typeof p.line === "string" && p.line.includes("=") ? p.line.slice(p.line.indexOf("=") + 1).split(",").slice(0, 3).map((s) => s.trim()) : [];
+  // 候補・承認のあとも、ここの値はファイルの行（変更前）のまま。変更後と読み違えないよう「変更前」と付ける（Safety P2-2。計算は足さない）
+  const before = !!(state.st && state.st.candidate);
   const nodes = [el("span", { class: "sel-head" }, "選択中"), el("span", { class: "sel-name" }, p.name)];
+  if (before) nodes.push(el("span", { class: "sel-before" }, "変更前"));
   if (vals.length === 3 && vals.every((v) => /^[+-]?\d+(\.\d+)?$/.test(v))) {
     ["X", "Y", "Z"].forEach((a, i) => nodes.push(el("span", { class: "sel-ax" }, a), displayMinus(vals[i])));
     nodes.push(el("span", { class: "sel-ax" }, "mm"));
@@ -669,8 +677,8 @@ function renderRepeatRange(notice = "") {
   const blockLast = rr.block_line_nos[rr.block_line_nos.length - 1];
   // 見出し（この範囲を繰り返しますか？）は画面の上の「次にすること」に1回だけ出す（ここでは出さない）
   // 行の一覧は「詳しく」（会話の欄に入るときは開いたまま。入らないときは畳み、要約（1回目・2回目・全体）とボタンを同時に見せる）
-  const lines = el("details", { class: "more range-more", open: "" }, el("summary", {}, "行の一覧"),
-    el("div", { class: "diff range-lines" }, ...rr.cycle_lines.map((t, i) => big(el("div", {}, `${first + i}行目  ${t}`), 15))));
+  // 1回目の行（命令の行）は畳まずに出す（Safety P2-3：範囲が別のブロックに替わったことを、人が押さずに見抜けるように）
+  const lines = el("div", { class: "diff range-lines" }, ...rr.cycle_lines.map((t, i) => big(el("div", {}, `${first + i}行目  ${t}`), 14)));
   const parts = [
     ...(notice ? [big(el("p", { class: "range-guide" }, notice), 15, "700")] : []),
     big(el("p", { class: "range-where" }, `${rr.target}　1回目：${first}〜${last}行目`), 18, "700"),
@@ -688,9 +696,6 @@ function renderRepeatRange(notice = "") {
   $("dock-range").replaceChildren(row, el("p", { class: "range-button-note" }, rr.button_note));
   $("dock-range").dataset.turn = String(rr.turn);
   renderSteps();  // 見出しを、ボタンに合わせる
-  // 会話の欄に入らない高さのときは、行の一覧を畳む（要約とボタンが同時に見えるように）
-  const area = $("side-scroll");
-  if (getComputedStyle(area).overflowY === "auto" && box.getBoundingClientRect().height > area.clientHeight - 4) lines.open = false;
   // 狭い画面：範囲の確認の中身とボタンが見えるところまで送る
   if (window.innerWidth < 700) box.scrollIntoView({ block: "start", behavior: "auto" });
 }
@@ -712,21 +717,10 @@ function clearReply() {
   syncRangeDock();
 }
 
-// 言い換えの例：サーバーの返事の文の中の「…」のうち、指示の形（軸や上げ下げと数・mm／ミリ、または回数）のものだけ。
+// 言い換えの例：サーバーの返事の文の中の例のうち、白リスト（highlight.js の REPHRASE_OK）にあるものだけ。
 // 押すと入力欄に入るだけ（送るのは人）。サーバーの文は変えない。取れないときは出さない
-function rephraseExamples(message) {
-  const out = [];
-  for (const m of String(message || "").matchAll(/「([^「」…]{2,40})」/g)) {
-    const t = m[1].trim();
-    const move = /[XYZＸＹＺ]|プラス|マイナス|上に|下に|上へ|下へ|上げ|下げ/.test(t) && /[0-9０-９]+\s*(mm|ｍｍ|ミリ)/i.test(t);
-    const count = /[0-9０-９]+回から[0-9０-９]+回/.test(t);
-    if ((move || count) && t !== state.lastHeard && !out.includes(t)) out.push(t);
-  }
-  return out.slice(0, 3);
-}
-
 function rephraseRow(message) {
-  const ex = rephraseExamples(message);
+  const ex = rephraseExamples(message, state.lastHeard);
   if (!ex.length) return null;
   const row = el("div", { class: "rephrase" }, el("span", { class: "rephrase-head" }, "言い換えの例（押すと欄に入ります）"));
   for (const t of ex) {
