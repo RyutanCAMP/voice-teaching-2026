@@ -29,7 +29,8 @@ FORBIDDEN_WORDS = (
 OPS = ("move", "speed", "compare", "undo")  # 1つの発話で1つだけ
 KIND_ORDER = ("select", "move", "speed", "compare", "undo", "approve", "start")
 
-APPROVE_MESSAGE = "承認・書き出し・転送は、画面のボタンで行います。声や文字の指示では行いません"
+APPROVE_MESSAGE = ("承認とシミュレーション用の書き出しは、画面のボタンで行います。声や文字の指示では行いません。"
+                   "実機への転送・実機用の出力・ロボットの直接操作には対応していません")
 START_MESSAGE = "このアプリからはロボットを動かしません。ロボットはペンダントで選んで、人がスタートします"
 # 「右」「左」の案内。状態を知らずに出す固定の文（Claude の経路・提案の照らし合わせ）は、上下の言葉を例に出さない（CHECKER_026 M2）。
 # 上下の向きが確認済みのときだけ、pre_check が SIDE_MESSAGE_UPDOWN（「上げて」「下げて」の例つき）を出す
@@ -498,6 +499,9 @@ def _strip_shimasu(text: str) -> str | None:
 
 
 def read_utterance(raw: str) -> UtteranceFacts:
+    # Whole-utterance cancellation, excluding negated or compound operations.
+    if re.fullmatch(r"今の提案は取り消して[\s。.!！]*", unicodedata.normalize("NFKC", raw).strip()):
+        return replace(_read("取り消して", question=False), raw=raw)
     q = _QUESTION_END.search(raw)
     tail = q.group(0) if q else ""
     at_end = "か" in tail or any(_is_question_mark(c) for c in tail)
@@ -757,6 +761,20 @@ def combine_axes(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceF
                    # 答えの「〜します」を外した文だけで［変更したい］を作らない（前に言った軸を捨てることになる）。今どおり聞き返す
                    shimasu_text=None,
                    **_merged_extras(previous, answer))
+
+
+def is_explicit_direction_answer(previous: UtteranceFacts, answer: UtteranceFacts) -> bool:
+    """Axis/sign alone answering a missing direction for an explicitly pinned move.
+
+    New instructions, positions, amounts and physical directions cannot borrow
+    the previous amount. Session still applies every existing pre_check.
+    """
+    return bool(previous.op == "move" and previous.position and previous.amount is not None
+                and not previous.axes and not previous.sides and not previous.unclear_amounts
+                and answer.kinds == ("move",) and len(answer.explicit_axes) == 1
+                and len(answer.axis_signs) == 1 and not answer.vertical
+                and not answer.question and answer.shimasu_text is None
+                and re.fullmatch(r"[XYZ](?:の)?(?:プラス|マイナス|[+\-])(?:方向)?[。.!！]*", answer.text.strip()))
 
 
 def merge_answer(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceFacts:

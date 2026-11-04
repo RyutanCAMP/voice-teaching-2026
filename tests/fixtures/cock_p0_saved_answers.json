@@ -1,0 +1,16 @@
+{
+  "source_commit": "53fe7788e7a5e31135357a2cf5600064cf21fd40",
+  "source_case": "E02",
+  "tools": [
+    {
+      "name": "answer",
+      "id": "toolu_01Ld3eWXsmmwVE9bxFYPS2sd",
+      "input": {
+        "reply": "「いい感じ」とは、どう変えたいということですか？",
+        "evidence_lines": [],
+        "intent": "ask_user",
+        "change_request": null
+      }
+    }
+  ]
+}

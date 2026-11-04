@@ -811,7 +811,11 @@ class WebFlow:
             via.append("ask")
             if route == "count":
                 with e.lock:
-                    refused = ask_out.get("status") in ("count_refused", "explain_only")
+                    refused = (not ask_out.get("ok")
+                               or ask_out.get("status") in ("count_refused", "explain_only")
+                               or ask_out.get("intent") != "change_request"
+                               or (ask_out.get("change_request") or {}).get("kind") != "repeat"
+                               or bool((ask_out.get("change_record") or {}).get("mismatch")))
                     canon = None if (refused or e.session.candidate is not None) else self._repeat_canonical(e, text)
                 if canon is not None:
                     hear_out = self.hear(sid, canon, "text")  # プログラムが作った文（人の文は会話の道の記録にある）

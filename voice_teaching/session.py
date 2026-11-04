@@ -150,7 +150,7 @@ class Session:
         facts = ut.read_utterance(text)
         prev = self._awaiting_answer
         followup, self._updown_followup = self._updown_followup, None
-        if prev is not None and not facts.kinds:
+        if prev is not None and (not facts.kinds or ut.is_explicit_direction_answer(prev, facts)):
             facts = ut.merge_answer(prev, facts)
         elif (prev is not None and prev.op == "move" and prev.amount is None and not prev.unclear_amounts
               and prev.axes and facts.op == "move" and facts.vertical and facts.axes == ("Z",) and not facts.positions):

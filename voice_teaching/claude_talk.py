@@ -103,7 +103,7 @@ _POINT_B = re.compile(r"^(?P<pos>C[0-9]{5})\s?(?:は|が)\s?(?P<noun>.+)$")
 # 回数の言葉（「3回」「三回」「もう1回」「回数」）と、変える言葉
 _KANJI = "〇一二三四五六七八九十"
 _COUNT = re.compile(r"([0-9]+|[〇一二三四五六七八九十]+)\s?回(?!目)")
-_COUNT_FROM = re.compile(r"([0-9]+|[〇一二三四五六七八九十]+)\s?回\s?から\s?([0-9]+|[〇一二三四五六七八九十]+)\s?回")
+_COUNT_FROM = re.compile(r"([0-9]+|[〇一二三四五六七八九十]+)\s?回\s?(?:から|を)\s?([0-9]+|[〇一二三四五六七八九十]+)\s?回")
 _COUNT_ADD = re.compile(r"(?:もう)?\s?([0-9]+|[〇一二三四五六七八九十]+)\s?回\s?(?:増や|ふやし|ふやす|追加|足し|たし|多く)")
 _COUNT_KEEP = re.compile(r"([0-9]+|[〇一二三四五六七八九十]+)\s?回\s?(?:の)?\s?まま")
 _CHANGE_WORDS = re.compile(r"回数|にして|に変更|に変え|へ変更|増や|減ら|追加|足して|変更して|変えて")
@@ -376,12 +376,27 @@ def read_count(text: str, blocks: list[Block], last_evidence=()) -> CountReading
     if neg:
         return CountReading(reason=COUNT_NEGATED.format(word=neg), stop=COUNT_NEGATED.format(word=neg),
                             target=target, target_note=note)
+    # Read the complete numeric token before the integer regex can match its tail.
+    if re.search(r"(?:[0-9]+\.[0-9]+|[+\-][0-9]+)\s?回", t):
+        msg = "回数は正の整数で、もう一度指定してください。変更候補は作りません"
+        return CountReading(reason=msg, stop=msg, target=target, target_note=note)
+    if re.search(r"回\s?(?:くらい|ぐらい|程度|ほど|前後)", t):
+        nums = {_kanji_int(x) for x in _COUNT.findall(t)}
+        if len(nums) == 1 and None not in nums:
+            n = next(iter(nums))
+            msg = f"{n}回でよいですか？ 決まったら「{n}回にして」と言い直してください。まだ変更候補は作りません"
+        else:
+            msg = "希望する回数を、整数で一つ指定してください。まだ変更候補は作りません"
+        return CountReading(reason=msg, stop=msg, target=target, target_note=note)
     hes = _hesitation_word(text)
     if hes:
         return CountReading(reason=COUNT_HESITANT.format(word=hes), stop=COUNT_HESITANT.format(word=hes),
                             target=target, target_note=note)
     m = _COUNT_FROM.search(t)
     if m:
+        if target is not None and _kanji_int(m.group(1)) != target.count:
+            msg = f"動作データでは今{target.count}回です。指定された現在の回数と違うため、希望する回数をもう一度教えてください"
+            return CountReading(reason=msg, stop=msg, target=target, target_note=note)
         return CountReading(total=_kanji_int(m.group(2)), target=target, target_note=note)
     m = _COUNT_KEEP.search(t)
     if m:

@@ -857,6 +857,16 @@ class Explainer:
             p = talk.reply_mvp_problem(data["reply"])
             if p is not None:
                 why = shown = p
+        # Preserve the rejection. Add only a program-authored clarification;
+        # never expose rejected model claims or create a change from these notes.
+        if (intent == "ask_user" and change is None
+                and why in (talk.FIXED_STATE, talk.FIXED_NO_NUMBER)):
+            notes.append("どのようにしたいか、具体的に教えてください。位置の移動なら対象・軸と向き・量、回数なら希望する整数を教えてください")
+        state = (conv.facts or {}).get("change_state", {})
+        if (first and intent == "explain" and change is None and allow_change
+                and not state.get("pending_candidate") and not state.get("approved")
+                and why in (FIXED_NUMBER, talk.FIXED_NO_NUMBER, talk.FIXED_STATE)):
+            notes.append(talk.plain_fixed(conv.facts))
         conv.pending_result = RESULT_SHOWN if why is None else RESULT_HIDDEN.format(why=why)
         reply = data["reply"] if shown is None else shown
         return {"ok": True, "status": "answered", "turn": conv.turns, "first_turn": first,
