@@ -2189,20 +2189,28 @@ FIG_BEFORE = {(1280, 720): {"before_candidate": (689, 360), "candidate": (689, 2
               (1440, 900): {"before_candidate": (738, 492), "candidate": (738, 492)}}
 
 
-# 自動のスクロールを止める（QA の測るスクリプト qa_measure.py の NOFOLLOW=1 と同じ）：会話の欄（#side-scroll）を見張る仕組みを付けさせない。
+# 自動のスクロールを止める（QA の測るスクリプト qa_measure.py の NOFOLLOW=1 より強くした。差し戻し QA P1-1）：
+# 会話の欄（#side-scroll）を見張る仕組みを付けさせないうえ、画面のプログラムからのスクロール（scrollTop の書き込み・scrollTo・
+# scroll・scrollBy・scrollIntoView）もすべて止める。人のスクロールは、マウスのホイール（ブラウザーそのもののスクロール）でまねる。
 # これで合格すれば、画面は自動のスクロールに頼らずに重要な操作を見せている（前回 QA P2-1・P2-2）
 NOFOLLOW_JS = """(() => { const MO = window.MutationObserver; window.MutationObserver = class extends MO {
-  observe(t, o) { if (t && t.id === 'side-scroll') return; return super.observe(t, o); } }; })();"""
-# 人が会話の履歴をいちばん上まで戻して読む（column-reverse なので scrollTop は負。どちらの向きでも「いちばん上」）
-SCROLL_UP_JS = """() => { const s = document.querySelector('#side-scroll'); s.scrollTop = -s.scrollHeight;
-  return Math.round(s.scrollTop); }"""
-# 範囲の確認：カードの要約（1回目・全体の行）が会話の欄の中で切れずに見えるか。行の一覧が開いたままか
+  observe(t, o) { if (t && t.id === 'side-scroll') return; return super.observe(t, o); } };
+  const d = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop');
+  Object.defineProperty(Element.prototype, 'scrollTop', { configurable: true, get() { return d.get.call(this); }, set(v) {} });
+  for (const k of ['scrollTo', 'scroll', 'scrollBy', 'scrollIntoView']) { Element.prototype[k] = function () {}; }
+  window.scrollTo = function () {}; window.scroll = function () {}; window.scrollBy = function () {}; })();"""
+# 範囲の確認：カードの要約（1回目・全体の行）と1回目の行が、会話の欄の中で切れずに見えるか（Safety P2-3：1回目の行は畳まない）
 RANGE_TOGETHER_JS = """() => {
   const area = document.querySelector('#side-scroll').getBoundingClientRect();
   const inArea = (s) => { const e = document.querySelector(s); if (!e || e.offsetParent === null) return false;
     const r = e.getBoundingClientRect(); return r.top >= area.top - 0.5 && r.bottom <= area.bottom + 0.5; };
   return { where: inArea('#reply-message .range-where'), all: inArea('#reply-message .range-all'),
-    lines: !!document.querySelector('#reply-message details.range-more[open]') }; }"""
+    lines: inArea('#reply-message .range-lines') && !document.querySelector('#reply-message .range-lines').closest('details') }; }"""
+# 左の列から横にはみ出していないか（長い出力先：QA P2-1）
+INSIDE_SIDE_JS = """(sels) => { const s = document.querySelector('.side').getBoundingClientRect(); const bad = [];
+  for (const q of sels) { const e = document.querySelector(q); if (!e || e.offsetParent === null || !e.closest('.side')) continue;
+    const r = e.getBoundingClientRect(); if (r.left < s.left - 0.5 || r.right > s.right + 0.5) bad.push(`${q} ${Math.round(r.left)}〜${Math.round(r.right)}（列 ${Math.round(s.left)}〜${Math.round(s.right)}）`); }
+  return bad; }"""
 LONG_TAIL = ("同じ順番の動きを何度も通る流れです。最初の位置と最後の位置は別の場所です。気になるところがあれば、位置の番号で教えてください。"
              "教えてもらった意味は、次の説明に使います。作業の名前が分かると、説明が短くなります。")
 
@@ -2210,7 +2218,9 @@ LONG_TAIL = ("同じ順番の動きを何度も通る流れです。最初の位
 def check_above_fold(browser, check, shots: Path | None, errors: list, out: Path, log=print) -> dict:
     """S1〜S7（依頼書2章＋出力後）と、① 初期（大きなマイク）・② 会話・長い答え（約190字。前回 QA P1-3）を、
     1280×720・1440×900 で、重要な操作がスクロールなしで全部見えるか確かめる。自動のスクロールを止めた版（NF）でも同じに確かめる。
-    人が会話の履歴を上へ戻しても、重要なボタン（下の操作の欄）が見えていることも確かめる（↑）。表（OK/NG）を返す。
+    人が会話の履歴を上へ戻しても、重要なボタン（下の操作の欄）が見えていることも確かめる（↑）。
+    差し戻し（QA P1-1・P2-1）：位置を選ばずに質問する流れ（S2n・S2nL）、Chrome 以外の案内の帯が出ている状態（〜C）、
+    長い出力先（S6P・S7P）も確かめる。表（OK/NG）を返す。
     モックの台本の答え（tools/demo_mock.py の ScriptClient。本物の Claude は呼ばない）を使う。"""
     sys.path.insert(0, str(REPO / "tools"))
     import demo_mock as dm
@@ -2249,11 +2259,13 @@ def check_above_fold(browser, check, shots: Path | None, errors: list, out: Path
         need = FIG_BEFORE[(w, h)][fig_kind]
         fig_ok = fig is not None and fig["width"] >= need[0] and fig["height"] >= need[1]
         small = pg.evaluate(BUTTON_SIZE_JS)
-        ok = not bad and sw <= iw and sh <= ih and fig_ok and not small and extra_ok
+        outside = pg.evaluate(INSIDE_SIDE_JS, [s for s in sels if not s.startswith("#status-line")])
+        ok = not bad and sw <= iw and sh <= ih and fig_ok and not small and extra_ok and not outside
         table[(tag + name, f"{w}x{h}")] = "OK" if ok else "NG"
         label = f"{tag}{name}（{w}×{h}）"
         check(not bad, f"{label}：{'・'.join(sels)} がスクロールなしで全部見える{'' if not bad else '：' + str(bad)}")
         check(sw <= iw and sh <= ih, f"{label}：ページに縦横のスクロールが出ない（{sw}×{sh}・画面 {iw}×{ih}）")
+        check(not outside, f"{label}：左の列から横にはみ出さない：{outside}")
         check(fig_ok, f"{label}：3D は 434165d より小さくしない（{fig and round(fig['width'])}×{fig and round(fig['height'])}・"
                       f"434165d {need[0]}×{need[1]}）")
         check(not small, f"{label}：見えているボタンは文字 14px 以上・高さ 44px 以上：{small}")
@@ -2263,10 +2275,16 @@ def check_above_fold(browser, check, shots: Path | None, errors: list, out: Path
             shots.mkdir(parents=True, exist_ok=True)
             pg.screenshot(path=str(shots / f"FOLD_{tag.strip()}{w}x{h}_{name.split()[0]}.png"))
 
+    def wheel_side(pg, dy):
+        box = pg.locator("#side-scroll").bounding_box()
+        pg.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        pg.mouse.wheel(0, dy)
+        pg.wait_for_timeout(350)
+
     def scrolled_up(pg, w, h, name, sels, tag):
-        """人が会話の履歴をいちばん上まで戻しても、重要なボタン（下の操作の欄）は見えている。"""
-        top = pg.evaluate(SCROLL_UP_JS)
-        pg.wait_for_timeout(300)
+        """人が会話の履歴をいちばん上まで（マウスのホイールで）戻しても、重要なボタン（下の操作の欄）は見えている。"""
+        wheel_side(pg, -6000)
+        top = pg.evaluate("() => Math.round(document.querySelector('#side-scroll').scrollTop)")
         r = pg.evaluate(FOLD_JS, sels)
         bad = {k: v for k, v in r.items() if not v.startswith("OK")}
         table[(tag + name + "↑", f"{w}x{h}")] = "OK" if not bad else "NG"
@@ -2274,16 +2292,141 @@ def check_above_fold(browser, check, shots: Path | None, errors: list, out: Path
                        f"{'' if not bad else '：' + str(bad)}")
         if shots is not None:
             pg.screenshot(path=str(shots / f"FOLD_{tag.strip()}{w}x{h}_{name.split()[0]}_up.png"))
-        pg.evaluate("() => { document.querySelector('#side-scroll').scrollTop = 0; }")  # 下の端へ戻す（人の操作）
+        wheel_side(pg, 6000)  # 下の端へ戻す（人の操作）
 
-    def new_page(w, h, nofollow):
+    def new_page(w, h, nofollow, other=False):
         ctx = browser.new_context(viewport={"width": w, "height": h})
         if nofollow:
             ctx.add_init_script(NOFOLLOW_JS)
+        if other:
+            ctx.add_init_script("window.__asOther = true")  # Chrome 以外（アプリの中のブラウザーなど）：案内の帯が出る
         ctx.add_init_script(FAKE_RECOGNITION)
         pg = ctx.new_page()
         pg.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
         return pg
+
+    def position_flow(w, h, nofollow, tag, long_path):
+        """位置の変更（サンプル DEMO_C_PLACE → C00003 → 「Zプラス方向に10mm」→ 確認表示 → 承認 → 出力）。
+        long_path：出力先のパスを約120字にする（QA P2-1。S6P・S7P だけを測る）"""
+        p = "P" if long_path else ""
+        pg = new_page(w, h, nofollow)
+        pg.goto(url)
+        pg.click("#sample-button")
+        pg.wait_for_selector("#job-area:not([hidden])")
+        until(pg, lambda: pg.is_visible("#status-line"))
+        if not long_path:
+            hero = "hero" in (pg.get_attribute("body", "class") or "")
+            stl = pg.text_content("#status-line") or ""
+            check(stl == "アプリの記録：変更の候補 なし／承認 まだ／出力 まだ" and pg.locator("#status-line .st-chip").count() == 3,
+                  f"{tag}状態のチップ（{w}×{h}）：文はサーバーの状態の1行のまま、区切りごとに3つのチップ（{stl}）")
+            stage(pg, w, h, "S1a 読込直後（①）", head + ["#mic-button", "#kbd-button"], "before_candidate",
+                  hero and pg.is_hidden("#side-scroll") and pg.is_hidden("#text-input")
+                  and pg.inner_text("#next-action") == "ロボットに、やりたい動きを話してください",
+                  "① 初期：大きなマイクとキーボードだけ（会話の履歴・入力欄は出さない）。見出しは「ロボットに、やりたい動きを話してください」",
+                  tag)
+            mic = pg.locator("#mic-button").bounding_box()
+            check(mic is not None and mic["width"] >= 120, f"{tag}① 初期（{w}×{h}）：マイクは大きい（{mic and round(mic['width'])}px）")
+        pg.locator("#position-chips button", has_text="C00003").click()
+        until(pg, lambda: pg.inner_text("#voice-position strong") == "C00003")
+        if not long_path:
+            sp = pg.inner_text("#sel-pos")
+            stage(pg, w, h, "S1b 位置を選んだあと（①）", head + ["#mic-button", "#kbd-button", "#voice-position", "#sel-pos"],
+                  "before_candidate", "C00003" in sp and "300.000" in sp and "変更前" not in sp,
+                  f"3D の下に「選択中」の1行（値はファイルの行のまま。候補の前は「変更前」を付けない）：{sp}", tag)
+        pg.click("#kbd-button")
+        if not long_path:
+            stage(pg, w, h, "S1k キーボードを押したあと（①）", head + entry, "before_candidate", tag=tag)
+        pg.fill("#text-input", "Zプラス方向に10mm")
+        pg.click("#text-send")
+        until(pg, lambda: pg.is_enabled("#open-confirm"))
+        if not long_path:
+            change = pg.inner_text("#candidate-view .cand-change") if pg.locator("#candidate-view .cand-change").count() else ""
+            ch = " ".join(change.split())
+            sp = pg.inner_text("#sel-pos")
+            s4 = head + ["#open-confirm", "#undo-button", "#candidate-view .cand-change", "#dock-actions .role-note", "#sel-pos"]
+            stage(pg, w, h, "S4 候補表示", s4, "candidate",
+                  "300.000" in ch and "310.000" in ch and "変更前" in sp,
+                  f"Z の変更前→変更後が見え、3D の下の値には「変更前」と付く（{ch}／{sp}）", tag)
+            scrolled_up(pg, w, h, "S4 候補表示", ["#open-confirm", "#undo-button"], tag)
+            # Safety P2-1：再生中も上下の向きの表示が見える
+            pg.click("#play-button")
+            until(pg, lambda: pg.is_visible("#play-now"))
+            r = pg.evaluate(FOLD_JS, ["#updown-detail", "#play-now"])
+            ok = all(v.startswith("OK") for v in r.values()) and "上下の向き" in pg.inner_text("#updown-detail")
+            table[(tag + "S4p 再生中の上下の向き", f"{w}x{h}")] = "OK" if ok else "NG"
+            check(ok, f"{tag}S4p 再生中（{w}×{h}）：「いま」の帯と一緒に、上下の向きの表示も見える：{r}")
+            if shots is not None:
+                pg.screenshot(path=str(shots / f"FOLD_{tag.strip()}{w}x{h}_S4p.png"))
+            pg.click("#play-stop")
+        pg.click("#open-confirm")
+        pg.wait_for_selector("#confirm-overlay:not([hidden])")
+        if not long_path:
+            stage(pg, w, h, "S5 確認表示", ["#approve-button", "#approver-name"], "candidate", tag=tag)
+        pg.fill("#approver-name", "テスト")
+        pg.click("#approve-button")
+        until(pg, lambda: pg.is_visible("#approval-status"))
+        st = pg.inner_text("#approval-status")
+        s6 = head + ["#export-button", "#undo-button", "#approval-status", "#approval-states", "#candidate-view .cand-change",
+                     "#export-note", "#text-input", "#text-send"]
+        od = pg.inner_text("#out-dir")
+        stage(pg, w, h, f"S6{p} 承認後" + ("（長い出力先）" if long_path else ""), s6, "candidate",
+              "テスト さんが承認しました" in st and pg.is_hidden("#mic-button") and (len(od) >= 100 if long_path else True),
+              f"「テスト さんが承認しました」・3つの状態・変更前→変更後が出て、承認のあとは文字の欄だけ（🎤 は出さない）。出力先 {len(od)}字", tag)
+        scrolled_up(pg, w, h, f"S6{p} 承認後", ["#export-button", "#undo-button", "#text-input", "#text-send"], tag)
+        pg.click("#export-button")
+        pg.wait_for_selector("#export-result:not([hidden])")
+        s7 = head + ["#export-result", "#approval-status", "#undo-button", "#text-input", "#text-send"]
+        stage(pg, w, h, f"S7{p} 出力後" + ("（長い出力先）" if long_path else ""), s7, "candidate",
+              "出力しました" in pg.inner_text("#export-result"), "出力の結果が出る", tag)
+        scrolled_up(pg, w, h, f"S7{p} 出力後", ["#export-result", "#undo-button", "#text-input", "#text-send"], tag)
+        pg.close()
+
+    def talk_flow(w, h, nofollow, tag, select, long, other):
+        """回数の変更（DEMO_BUTTON_REPEAT → 〔C00001〕→ 質問 → 「じゃあ3回にして」→ 範囲の確認 → 候補）。
+        select=False：位置を選ばずに質問する（docs/CHROME_CHECK_MOCK.md の手順1〜2。QA P1-1）。other：Chrome 以外の案内の帯"""
+        name = "S2" + ("" if select else "n") + ("L" if long else "") + ("C" if other else "")
+        what = ("位置を選んで" if select else "位置を選ばずに") + ("長い答え" if long else "質問") + ("・Chrome 以外の帯" if other else "")
+        pg = new_page(w, h, nofollow, other)
+        pg.goto(url_long if long else url)
+        pg.set_input_files("#file-input", str(REPO / "samples/dummy/DEMO_BUTTON_REPEAT.JBI"))
+        pg.wait_for_selector("#job-area:not([hidden])")
+        if other:
+            stage(pg, w, h, "S1aC 読込直後（①・Chrome 以外の帯）", head + ["#mic-button", "#kbd-button", "#browser-note"], "before_candidate",
+                  pg.locator("#next-action").bounding_box()["height"] >= 20,
+                  "① 初期：Chrome 以外の案内の帯が出ても、見出しがしぼまない（QA P3-1）", tag)
+        if select:
+            pg.locator("#position-chips button", has_text="C00001").click()
+            until(pg, lambda: pg.inner_text("#voice-position strong") == "C00001")
+        fill_text(pg, "このロボット、何してる？")
+        pg.click("#text-send")
+        pg.wait_for_selector("#ask-turns .bubble.claude:not(.thinking)")
+        last = "#ask-turns > li:last-child"
+        said = pg.inner_text(f"{last} .said")
+        sels = head + entry + [last] + (["#browser-note"] if other else [])
+        stage(pg, w, h, f"{name} 会話のあと（{what}）", sels, "before_candidate",
+              "hero" not in (pg.get_attribute("body", "class") or "") and pg.is_visible("#side-scroll") and (len(said) >= 150 if long else True),
+              f"② 会話：最新の答え（{len(said)}字）の吹き出しの全体と、入力欄が見える", tag)
+        if long or other or not select:
+            pg.close()
+            return
+        fill_text(pg, "じゃあ3回にして")
+        pg.click("#text-send")
+        pg.wait_for_selector("#range-yes")
+        tog = pg.evaluate(RANGE_TOGETHER_JS)
+        rng = pg.locator("#status-line .st-chip.range")
+        check(rng.count() == 1 and "範囲の確認中" in rng.inner_text() and pg.locator("#status-line .st-chip.on").count() == 0,
+              f"{tag}S3（{w}×{h}）：状態のチップの「範囲の確認中」は青（範囲＝青。承認へ進むオレンジにしない。Safety P3-3）")
+        stage(pg, w, h, "S3 範囲の確認", head + ["#range-yes", "#range-no", "#dock-range .range-button-note",
+                                             "#reply-message .range-where", "#reply-message .range-lines", "#reply-message .range-all"],
+              "before_candidate", tog["where"] and tog["all"] and tog["lines"],
+              "範囲の中身の要約（1回目・全体）と1回目の命令の行（畳まない）と［この範囲を繰り返す］［違う］が同時に見える", tag)
+        scrolled_up(pg, w, h, "S3 範囲の確認", ["#range-yes", "#range-no"], tag)
+        pg.click("#range-yes")
+        until(pg, lambda: pg.is_enabled("#open-confirm"))
+        check(pg.locator("#dock-range button").count() == 0 and pg.is_hidden("#dock-range"),
+              f"{tag}S3（{w}×{h}）：範囲の確認が終わると、操作の欄から範囲のボタンも消える（前の答えのボタンを残さない）")
+        stage(pg, w, h, "S4r 回数の候補", head + ["#open-confirm", "#candidate-view .cand-change"], "candidate", tag=tag)
+        pg.close()
 
     from voice_teaching import sim
     saved_out_dir = sim.DEFAULT_OUT_DIR
@@ -2291,97 +2434,15 @@ def check_above_fold(browser, check, shots: Path | None, errors: list, out: Path
         for nofollow in (False, True):
             tag = "NF " if nofollow else ""
             for w, h in [(1280, 720), (1440, 900)]:
-                sim.DEFAULT_OUT_DIR = out / f"fold_sim_{w}{'_nf' if nofollow else ''}"  # 出力は一時フォルダ（同じ名前は上書きしない決まりのため分ける）
-                # ---- 位置の変更（サンプル DEMO_C_PLACE → C00003 → 「Zプラス方向に10mm」→ 確認表示 → 承認 → 出力） ----
-                pg = new_page(w, h, nofollow)
-                pg.goto(url)
-                pg.click("#sample-button")
-                pg.wait_for_selector("#job-area:not([hidden])")
-                until(pg, lambda: pg.is_visible("#status-line"))
-                hero = "hero" in (pg.get_attribute("body", "class") or "")
-                stl = pg.text_content("#status-line") or ""
-                check(stl == "アプリの記録：変更の候補 なし／承認 まだ／出力 まだ" and pg.locator("#status-line .st-chip").count() == 3,
-                      f"{tag}状態のチップ（{w}×{h}）：文はサーバーの状態の1行のまま、区切りごとに3つのチップ（{stl}）")
-                stage(pg, w, h, "S1a 読込直後（①）", head + ["#mic-button", "#kbd-button"], "before_candidate",
-                      hero and pg.is_hidden("#side-scroll") and pg.is_hidden("#text-input")
-                      and pg.inner_text("#next-action") == "ロボットに、やりたい動きを話してください",
-                      "① 初期：大きなマイクとキーボードだけ（会話の履歴・入力欄は出さない）。見出しは「ロボットに、やりたい動きを話してください」",
-                      tag)
-                mic = pg.locator("#mic-button").bounding_box()
-                check(mic is not None and mic["width"] >= 120, f"{tag}① 初期（{w}×{h}）：マイクは大きい（{mic and round(mic['width'])}px）")
-                pg.locator("#position-chips button", has_text="C00003").click()
-                until(pg, lambda: pg.inner_text("#voice-position strong") == "C00003")
-                stage(pg, w, h, "S1b 位置を選んだあと（①）", head + ["#mic-button", "#kbd-button", "#voice-position", "#sel-pos"],
-                      "before_candidate", "C00003" in pg.inner_text("#sel-pos") and "300.000" in pg.inner_text("#sel-pos"),
-                      f"3D の下に「選択中」の1行（値はファイルの行のまま）：{pg.inner_text('#sel-pos')}", tag)
-                pg.click("#kbd-button")
-                stage(pg, w, h, "S1k キーボードを押したあと（①）", head + entry, "before_candidate", tag=tag)
-                pg.fill("#text-input", "Zプラス方向に10mm")
-                pg.click("#text-send")
-                until(pg, lambda: pg.is_enabled("#open-confirm"))
-                change = pg.inner_text("#candidate-view .cand-change") if pg.locator("#candidate-view .cand-change").count() else ""
-                ch = " ".join(change.split())
-                s4 = head + ["#open-confirm", "#undo-button", "#candidate-view .cand-change", "#dock-actions .role-note"]
-                stage(pg, w, h, "S4 候補表示", s4, "candidate",
-                      "300.000" in ch and "310.000" in ch, f"Z の変更前→変更後が見える（{ch}）", tag)
-                scrolled_up(pg, w, h, "S4 候補表示", ["#open-confirm", "#undo-button"], tag)
-                pg.click("#open-confirm")
-                pg.wait_for_selector("#confirm-overlay:not([hidden])")
-                stage(pg, w, h, "S5 確認表示", ["#approve-button", "#approver-name"], "candidate", tag=tag)
-                pg.fill("#approver-name", "テスト")
-                pg.click("#approve-button")
-                until(pg, lambda: pg.is_visible("#approval-status"))
-                st = pg.inner_text("#approval-status")
-                s6 = head + ["#export-button", "#approval-status", "#approval-states", "#candidate-view .cand-change", "#export-note",
-                             "#text-input", "#text-send"]
-                stage(pg, w, h, "S6 承認後", s6, "candidate",
-                      "テスト さんが承認しました" in st and pg.is_hidden("#mic-button"),
-                      f"「テスト さんが承認しました」・3つの状態・変更前→変更後が出て、承認のあとは文字の欄だけ（🎤 は出さない）：{st}", tag)
-                scrolled_up(pg, w, h, "S6 承認後", ["#export-button", "#text-input", "#text-send"], tag)
-                pg.click("#export-button")
-                pg.wait_for_selector("#export-result:not([hidden])")
-                stage(pg, w, h, "S7 出力後", head + ["#export-result", "#approval-status", "#text-input", "#text-send"], "candidate",
-                      "出力しました" in pg.inner_text("#export-result"), "出力の結果が出る", tag)
-                pg.close()
-
-                # ---- 回数の変更（DEMO_BUTTON_REPEAT → C00001 → 質問 → 「じゃあ3回にして」→ 範囲の確認 → 候補） ----
-                for long in (False, True):
-                    pg = new_page(w, h, nofollow)
-                    pg.goto(url_long if long else url)
-                    pg.set_input_files("#file-input", str(REPO / "samples/dummy/DEMO_BUTTON_REPEAT.JBI"))
-                    pg.wait_for_selector("#job-area:not([hidden])")
-                    pg.locator("#position-chips button", has_text="C00001").click()
-                    until(pg, lambda: pg.inner_text("#voice-position strong") == "C00001")
-                    fill_text(pg, "このロボット、何してる？")
-                    pg.click("#text-send")
-                    pg.wait_for_selector("#ask-turns .bubble.claude:not(.thinking)")
-                    last = "#ask-turns > li:last-child"
-                    if long:
-                        said = pg.inner_text(f"{last} .said")
-                        stage(pg, w, h, "S2L 長い答えのあと", head + entry + [last], "before_candidate",
-                              len(said) >= 150 and "hero" not in (pg.get_attribute("body", "class") or ""),
-                              f"長い答え（{len(said)}字）の最新の吹き出しの全体が見える（前回 QA P1-3）", tag)
-                        pg.close()
-                        continue
-                    stage(pg, w, h, "S2 会話のあと（②）", head + entry + [last], "before_candidate",
-                          "hero" not in (pg.get_attribute("body", "class") or "") and pg.is_visible("#side-scroll"),
-                          "② 会話：上に会話の履歴、下に小さなマイクと入力欄", tag)
-                    fill_text(pg, "じゃあ3回にして")
-                    pg.click("#text-send")
-                    pg.wait_for_selector("#range-yes")
-                    tog = pg.evaluate(RANGE_TOGETHER_JS)
-                    stage(pg, w, h, "S3 範囲の確認", head + ["#range-yes", "#range-no", "#dock-range .range-button-note",
-                                                         "#reply-message .range-where", "#reply-message .range-all"], "before_candidate",
-                          tog["where"] and tog["all"],
-                          "範囲の中身の要約（1回目・全体）と［この範囲を繰り返す］［違う］が同時に見える（行の一覧は"
-                          + ("開いたまま）" if tog["lines"] else "「行の一覧」に畳んだ）"), tag)
-                    scrolled_up(pg, w, h, "S3 範囲の確認", ["#range-yes", "#range-no"], tag)
-                    pg.click("#range-yes")
-                    until(pg, lambda: pg.is_enabled("#open-confirm"))
-                    check(pg.locator("#dock-range button").count() == 0 and pg.is_hidden("#dock-range"),
-                          f"{tag}S3（{w}×{h}）：範囲の確認が終わると、操作の欄から範囲のボタンも消える（前の答えのボタンを残さない）")
-                    stage(pg, w, h, "S4r 回数の候補", head + ["#open-confirm", "#candidate-view .cand-change"], "candidate", tag=tag)
-                    pg.close()
+                nf = "_nf" if nofollow else ""
+                sim.DEFAULT_OUT_DIR = out / f"fold_sim_{w}{nf}"  # 出力は一時フォルダ（同じ名前は上書きしない決まりのため分ける）
+                position_flow(w, h, nofollow, tag, False)
+                # 長い出力先（QA P2-1。約120字）
+                sim.DEFAULT_OUT_DIR = out / f"fold_long_{w}{nf}" / ("長い出力先のフォルダ_" * 3 + "x" * 40) / "simulation_output_folder"
+                position_flow(w, h, nofollow, tag, True)
+                for select, long, other in [(True, False, False), (True, True, False), (False, False, False), (False, True, False),
+                                            (False, False, True), (False, True, True)]:
+                    talk_flow(w, h, nofollow, tag, select, long, other)
         check_hero_motion(browser, url, check, shots, errors)
     finally:
         sim.DEFAULT_OUT_DIR = saved_out_dir
@@ -2451,7 +2512,8 @@ def check_hero_motion(browser, url, check, shots: Path | None, errors: list) -> 
         if shots is not None and not reduced:
             pg.screenshot(path=str(shots / "HERO_2_conversation.png"))
         # 「会話をやり直す」：候補・範囲の確認・会話の途中が無いので ① に戻る
-        pg.click(".talk-more > summary")
+        if not pg.is_visible("#ask-reset"):
+            pg.click(".talk-more > summary")  # 「詳しく」を開く（開いていれば、そのまま）
         pg.click("#ask-reset")
         until(pg, lambda: "hero" in body())
         check("hero" in body() and pg.is_hidden("#side-scroll"), f"会話をやり直す（動きを減らす={reduced}）：① 初期の画面に戻る")
@@ -2464,6 +2526,16 @@ def check_hero_motion(browser, url, check, shots: Path | None, errors: list) -> 
         until(pg, lambda: "hero" in body())
         check("hero" in body() and pg.locator("#ask-turns > li").count() == 0,
               f"別のデータを読んだら ① 初期の画面に戻る（動きを減らす={reduced}）")
+        # 聞き返しのあとに「会話をやり直す」：候補・範囲の確認・会話の途中が無いので、前の聞き返しも消して ① に戻る（QA P3-2）
+        fill_text(pg, "少し動かして")
+        pg.click("#text-send")
+        until(pg, lambda: pg.is_visible("#reply-message"))
+        if not pg.is_visible("#ask-reset"):
+            pg.click(".talk-more > summary")  # 「詳しく」を開く（開いていれば、そのまま）
+        pg.click("#ask-reset")
+        until(pg, lambda: "hero" in body())
+        check("hero" in body() and pg.is_hidden("#reply-message"),
+              f"聞き返しのあとに「会話をやり直す」を押すと、前の聞き返しを消して ① 初期の画面に戻る（動きを減らす={reduced}）")
         ctx.close()
 
 
