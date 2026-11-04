@@ -515,6 +515,81 @@ def check_answer_after_approval(browser, check, shots: Path | None, out: Path) -
         srv.server_close()
 
 
+def check_send_while_waiting(browser, check, shots: Path | None, out: Path) -> None:
+    """11/5 夜 F3：答えを待っている間（「考えています」）に［送る］・Enter を押しても、書いた文が黙って消えない。
+    待っている間は送らず、文は入力欄に残る（答えのあとに送れる）。声も入力欄に入るだけ（自動では送らない）。
+    モックの台本の答え（tools/demo_mock.py の ScriptClient）を、サーバーの側で遅らせる。本物の Claude は呼ばない。"""
+    import time
+    sys.path.insert(0, str(REPO / "tools"))
+    import demo_mock as dm
+    from voice_teaching import claude_explain as cx
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import server
+
+    class SlowClient(dm.ScriptClient):
+        def create(self, **kw):
+            time.sleep(1.5)  # 本物の Claude は数秒かかる
+            return super().create(**kw)
+
+    cx.PRICES[dm.MOCK_MODEL] = cx.Price(input=0.0, output=0.0, cache_write_5m=0.0, cache_write_1h=0.0, cache_read=0.0)
+    ex = cx.Explainer("mock-no-network", dm.MOCK_MODEL, client=SlowClient(), usage_log=cx.UsageLog(out / "f3_usage.jsonl"))
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None, explainer=ex)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    humans = "() => document.querySelectorAll('#ask-turns .bubble.human').length"
+    thinking = "() => document.querySelectorAll('#ask-turns .thinking').length"
+    try:
+        pg = browser.new_page(viewport={"width": 1280, "height": 720})
+        pg.add_init_script("try { localStorage.setItem('vt-voice-mode', 'browser'); } catch (_) {}")
+        pg.add_init_script(FAKE_RECOGNITION)
+        talks = []
+        pg.on("request", lambda r: talks.append(r.url) if "/api/talk" in r.url else None)
+        pg.goto(url)
+        pg.set_input_files("#file-input", str(REPO / "samples/dummy/DEMO_BUTTON_REPEAT.JBI"))
+        pg.wait_for_selector("#job-area:not([hidden])")
+        until(pg, lambda: pg.is_enabled("#text-send"))
+        fill_text(pg, "このロボット、何をしている？")
+        pg.click("#text-send")
+        until(pg, lambda: pg.evaluate(thinking) == 1)
+        second = "ボタンを押してるんだよ"
+        fill_text(pg, second)
+        pg.click("#text-send", force=True)  # 押せないように見えても、押そうとする人
+        pg.press("#text-input", "Enter")
+        pg.wait_for_timeout(200)
+        waiting = pg.evaluate(thinking) == 1
+        kept = pg.input_value("#text-input")
+        check(waiting and kept == second,
+              f"11/5 F3：答えを待っている間に［送る］・Enter を押しても、書いた文は入力欄に残る（入力欄「{kept}」）")
+        # 声：待っている間に話しても、入力欄に入るだけ（送らない）
+        mic_ok = pg.is_visible("#mic-button") and pg.is_enabled("#mic-button")
+        if mic_ok:
+            pg.fill("#text-input", "")
+            pg.click("#mic-button")
+            until(pg, lambda: pg.is_enabled("#voice-stop"))
+            pg.click("#voice-stop")
+            until(pg, lambda: pg.input_value("#text-input") == FAKE_TEXT)
+            pg.fill("#text-input", second)
+        until(pg, lambda: pg.evaluate(thinking) == 0, 8000)
+        pg.wait_for_timeout(300)
+        check(len(talks) == 1 and pg.evaluate(humans) == 1 and pg.input_value("#text-input") == second,
+              f"11/5 F3：待っている間は送らない（/api/talk {len(talks)}回・人の吹き出し {pg.evaluate(humans)}つ）、"
+              f"答えのあとも文は残る（声でも送らない：マイク{'を使った' if mic_ok else 'は出ていない'}）")
+        until(pg, lambda: pg.is_enabled("#text-send"))
+        pg.click("#text-send")
+        until(pg, lambda: pg.evaluate(humans) == 2)
+        check(len(talks) == 2 and pg.input_value("#text-input") == "",
+              f"11/5 F3：答えのあとに［送る］で、残っていた文を送れる（/api/talk {len(talks)}回）")
+        check(pg.is_visible("#text-send") and pg.is_visible("#status-line"), "11/5 F3：［送る］と状態の1行は見えたまま")
+        if shots is not None:
+            shots.mkdir(parents=True, exist_ok=True)
+            pg.screenshot(path=str(shots / "F3_send_while_waiting.png"))
+        until(pg, lambda: pg.evaluate(thinking) == 0, 8000)
+        pg.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 def check_review_only(browser, url, check, shots: Path | None) -> None:
     """実機の JOB（合成ジョブでない）：確認表示と承認のあとに「変更案の確認のみ」の帯。出力ボタンを出さず、出力を促さない。
     合成ジョブでは帯を出さず、今どおり出力ボタンが出る（唐川さんの指示・内部 QA の再レビュー P1-1・P2-6）。"""
@@ -1744,6 +1819,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check_review_only(b, url, check, shots)
             check_ui_1105(b, check, shots, out)
             check_answer_after_approval(b, check, shots, out)
+            check_send_while_waiting(b, check, shots, out)
             check_dialog(b, check, shots, errors, updown_cfg["DEMO_C_PLACE.JBI"])
             check_talk(b, check, shots, errors, out)
             check_updown_unconfirmed(b, check, shots, errors)

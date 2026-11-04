@@ -36,6 +36,7 @@ const state = {
   talkFirst: false,     // 位置を選ばずに話す（「置くところを…」から Claude との会話を始める）
   dialogNotice: false,  // 最後の結果が会話の層の答え（会話が終わっても、止めた・聞き返した理由を会話のカードに残す）
   convo: false,         // 会話を始めた（最初に送った）。false の間は ① 初期の画面（大きなマイク）。見せ方だけに使う
+  sending: false,       // 答えを待っている（「考えています」）。その間は送らず、書いた文は入力欄に残す（11/5 F3）
 };
 const SAMPLE_NAME = "DEMO_C_PLACE.JBI";  // 「サンプルで試す」で読む架空のジョブ（サーバーが決まった1つを読む）
 
@@ -818,7 +819,7 @@ function showReply(status, message, choices) {
 // ---- 3. 指示（音声または文字）。どちらも同じ1つの入口（/api/talk）へ ----
 $("text-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
-  if (recording()) return;
+  if (recording() || state.sending) return;  // 答えを待っている間は送らない（文は入力欄に残る。11/5 F3）
   const text = $("text-input").value.trim();
   if (!text) return;
   // 認識文を直さずに送ったときだけ source=voice（記録だけ。結果は変わらない）
@@ -827,7 +828,12 @@ $("text-form").addEventListener("submit", async (ev) => {
   $("voice-hint").hidden = true;
   $("text-input").value = "";
   startConversation();
-  await sendInstruction(text, source);
+  state.sending = true;
+  updateLocks();
+  let t = null;
+  try { t = await sendInstruction(text, source); } finally { state.sending = false; updateLocks(); }
+  // 送れなかった（会話の欄が別の答えを待っていた など）：書いた文を黙って消さない
+  if (!t && !$("text-input").value) $("text-input").value = text;
 });
 
 // 最初の送信で ② 会話の画面へ（見せ方だけ。送る内容・順番は変えない）
@@ -862,10 +868,11 @@ async function sendInstruction(text, source) {
   // 入口は1つ（11/4 唐川さんの指示③）：/api/talk（explain.js の vtTalk）。結果は vt:talk-result で applyResult に渡る。
   // 指示の欄から /api/hear を直接呼ばない（振り分けをしないと、ボタンだけの言葉や相づちで承認が取り消されるため）
   const t = await window.vtTalk(text, source);
-  if (!t) return;
+  if (!t) return null;
   const res = t.hear || {};
   $("heard-text").textContent = res.heard !== undefined ? res.heard : text;
   keepHeadingInView();
+  return t;
 }
 
 // 指示の道が出した選択肢（［変更したい］［説明です］［2回の移動］など）への答え：プログラムが作った文なので、
@@ -1956,7 +1963,7 @@ function updateLocks() {
   const loaded = !!state.sessionId;
   $("file-input").disabled = rec;
   $("text-input").disabled = rec || !loaded;
-  $("text-send").disabled = rec || !loaded;
+  $("text-send").disabled = rec || !loaded || state.sending;  // 答えを待っている間は押せない（11/5 F3）
   $("voice-mode-browser").disabled = rec;
   $("voice-mode-local").disabled = rec;
   $("voice-mode-reset").disabled = rec;
