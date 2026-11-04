@@ -1,0 +1,485 @@
+{
+  "version": "cock-natural-extra-v1",
+  "cases": [
+    {
+      "id": "A17",
+      "group": "A",
+      "text": "見た感じ同じことを何度もしているけど、どういう動きなの？",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A18",
+      "group": "A",
+      "text": "初めて見た人にも分かるように、この動きを紹介して",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A19",
+      "group": "A",
+      "text": "動き始めてから止まるまでの流れを教えて",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A20",
+      "group": "A",
+      "text": "途中で何度か行ったり来たりするのは何をしているの？",
+      "expected_class": 2,
+      "oracle": "purpose_uncertain",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A21",
+      "group": "A",
+      "text": "人間の作業に例えると何に見える？",
+      "expected_class": 2,
+      "oracle": "purpose_uncertain",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A22",
+      "group": "A",
+      "text": "何をする作業なのか、動きだけで分かる？",
+      "expected_class": 2,
+      "oracle": "purpose_uncertain",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A23",
+      "group": "A",
+      "text": "この動きの目的って断言できる？",
+      "expected_class": 2,
+      "oracle": "purpose_uncertain",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A24",
+      "group": "A",
+      "text": "スイッチを押しているように見えるけど本当？",
+      "expected_class": 2,
+      "oracle": "purpose_uncertain",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A25",
+      "group": "A",
+      "text": "同じところをたどる部分について知りたいんだけど",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A26",
+      "group": "A",
+      "text": "なんで途中だけゆっくりに見えるんだろう？",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A27",
+      "group": "A",
+      "text": "往復みたいに見えるところは、どういう順番なの？",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A28",
+      "group": "A",
+      "text": "最初と最後は同じ場所に見えるけど、データでもそう？",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A29",
+      "group": "A",
+      "text": "どのあたりでボタンに触れていそう？まだ分からない？",
+      "expected_class": 2,
+      "oracle": "purpose_uncertain",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A30",
+      "group": "A",
+      "text": "動きを見ただけで何をしているかは分からないよね？",
+      "expected_class": 2,
+      "oracle": "purpose_uncertain",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A31",
+      "group": "A",
+      "text": "この動きについて確かに言えることだけ教えて",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A32",
+      "group": "A",
+      "text": "この説明で推測している部分はどこ？",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A33",
+      "group": "A",
+      "text": "押す動きって、どういう順でたどっているの？",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A34",
+      "group": "A",
+      "text": "ボタンを押すところだけ、やさしく説明してくれる？",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A35",
+      "group": "A",
+      "text": "教えた作業の目的と、動作データで分かることを分けて説明して",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A36",
+      "group": "A",
+      "text": "さっき教えた作業は何だったか説明して",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A37",
+      "group": "A",
+      "text": "押す動きの途中はどうなっているの？",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A38",
+      "group": "A",
+      "text": "押す動きを繰り返したあと、どんな動きをするの？",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A39",
+      "group": "A",
+      "text": "押す作業の前にはどんな動きがある？",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A40",
+      "group": "A",
+      "text": "これを見ながら作業を説明するとしたら何と言う？",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A41",
+      "group": "A",
+      "text": "もう少しふつうの言葉で説明できる？",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A42",
+      "group": "A",
+      "text": "今の話を短く言い直してもらえる？",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A43",
+      "group": "A",
+      "text": "押して離すように見える部分を教えて",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A44",
+      "group": "A",
+      "text": "どこまでがひとまとまりの動きになるの？",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A45",
+      "group": "A",
+      "text": "押す動きは何回くり返しているんだっけ？",
+      "expected_class": 1,
+      "oracle": "count_answer",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A46",
+      "group": "A",
+      "text": "このプログラムだと、押す動作は何度なの？",
+      "expected_class": 1,
+      "oracle": "count_answer",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A47",
+      "group": "A",
+      "text": "同じ場所に戻ってくるところを説明して",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    },
+    {
+      "id": "A48",
+      "group": "A",
+      "text": "最後までの流れを、専門用語なしで教えて",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "additional colloquial/context/epistemic questions"
+    }
+  ]
+}

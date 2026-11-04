@@ -7,12 +7,34 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tarfile
+import re
 from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[2]
-QA = ROOT.parent / 'voice-teaching-cock'
+QA = ROOT
+PORTABLE = ROOT / 'tools/p0_qa/portable'
 BASE = ROOT / 'output/p0-20261105'
-OLD = QA / 'output/live-natural-53fe778'
+OLD = BASE / 'recordings'
+
+
+def restore():
+    manifest = json.loads((PORTABLE / 'manifest.json').read_text(encoding='utf-8'))
+    archive = PORTABLE / 'recordings.tar.gz'
+    assert hashlib.sha256(archive.read_bytes()).hexdigest() == manifest['recording_archive_sha256']
+    with tarfile.open(archive, 'r:gz') as tar:
+        for member in tar:
+            assert member.isfile() and member.name in manifest['recording_files']
+            target = (OLD / member.name).resolve()
+            assert target.is_relative_to(OLD.resolve())
+            data = tar.extractfile(member).read()
+            assert hashlib.sha256(data).hexdigest() == manifest['recording_files'][member.name]
+            if target.exists():
+                assert target.read_bytes() == data, 'Existing recording differs; preserve it'
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
+    print('Five recording sets verified/restored. API calls: 0.')
 
 
 def module(name, path):
@@ -39,7 +61,7 @@ def snapshot(name, committed=False, commit='HEAD'):
 
 
 def worker(args):
-    n = module('frozen_runner', QA / 'tools/live_claude_qa/natural_run.py')
+    n = module('frozen_runner', PORTABLE / 'frozen_runner.py')
     n.ROOT = QA
     n.BASE = BASE
     n.TARGET = json.loads((BASE / args.variant / 'manifest.json').read_text())['commit']
@@ -51,16 +73,21 @@ def worker(args):
 if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--snapshot')
+    ap.add_argument('--restore', action='store_true')
     ap.add_argument('--commit', default='HEAD')
     ap.add_argument('--mode', choices=['replay', 'live'], default='replay')
     ap.add_argument('--variant', default='before')
     ap.add_argument('--run', default='before-base')
     ap.add_argument('--recorded', default='baseline-live')
-    ap.add_argument('--asset', default=str(QA / 'tools/live_claude_qa/natural_cases_v1.json'))
+    ap.add_argument('--asset', default=str(PORTABLE / 'natural_cases_v1.json'))
     ap.add_argument('--ids')
     ap.add_argument('--child', action='store_true')
     a = ap.parse_args()
-    if a.snapshot:
+    if not all(re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', v) for v in [a.variant, a.run] + ([a.snapshot] if a.snapshot else [])):
+        ap.exit(2, 'Invalid output name; no execution.\n')
+    if a.restore:
+        restore()
+    elif a.snapshot:
         snapshot(a.snapshot, committed=True, commit=a.commit)
     elif a.child:
         raise SystemExit(worker(a))
@@ -68,5 +95,6 @@ if __name__ == '__main__':
         keep = {'SYSTEMROOT', 'WINDIR', 'PATH', 'COMSPEC', 'PATHEXT', 'SYSTEMDRIVE'}
         env = {k: v for k, v in os.environ.items() if k.upper() in keep}
         env.update(PYTHONDONTWRITEBYTECODE='1', TEMP=str(BASE), TMP=str(BASE), TMPDIR=str(BASE))
-        cmd = [str(QA / 'output/qa9417/venv/Scripts/python.exe'), '-X', 'utf8', '-I', '-B', str(Path(__file__).resolve()), '--child', *sys.argv[1:]]
+        BASE.mkdir(parents=True, exist_ok=True)
+        cmd = [sys.executable, '-X', 'utf8', '-I', '-B', str(Path(__file__).resolve()), '--child', *sys.argv[1:]]
         raise SystemExit(subprocess.run(cmd, cwd=ROOT, env=env).returncode)

@@ -8,17 +8,19 @@ import threading
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[2]
-QA = ROOT.parent / 'voice-teaching-cock'
+QA = ROOT
 OUT = ROOT / 'output/p0-20261105/ui'
 
 if '--child' not in sys.argv:
     OUT.mkdir(parents=True, exist_ok=True)
     keep = {'SYSTEMROOT', 'WINDIR', 'PATH', 'COMSPEC', 'PATHEXT', 'SYSTEMDRIVE'}
     env = {k: v for k, v in os.environ.items() if k.upper() in keep}
-    env.update(TEMP=str(OUT), TMP=str(OUT), PLAYWRIGHT_BROWSERS_PATH=str(QA / 'output/qa9417/browsers'))
+    env.update(TEMP=str(OUT), TMP=str(OUT))
+    if os.environ.get('PLAYWRIGHT_BROWSERS_PATH'):
+        env['PLAYWRIGHT_BROWSERS_PATH'] = os.environ['PLAYWRIGHT_BROWSERS_PATH']
     with (OUT / 'execution.txt').open('wb') as log:
         try:
-            code = subprocess.run([str(QA / 'output/qa9417/venv/Scripts/python.exe'), '-X', 'utf8', '-B',
+            code = subprocess.run([sys.executable, '-X', 'utf8', '-B',
                                    str(Path(__file__)), '--child'], cwd=ROOT, env=env,
                                   stdout=log, stderr=subprocess.STDOUT, timeout=90).returncode
         except subprocess.TimeoutExpired:
@@ -38,7 +40,7 @@ def audit(event, args):
         if Path(os.fsdecode(args[0])).name.startswith('.env'):
             raise RuntimeError('Credential access forbidden')
 sys.addaudithook(audit)
-old = json.loads((QA / 'output/live-natural-53fe778/baseline-live/results.json').read_text(encoding='utf-8'))
+old = json.loads((QA / 'output/p0-20261105/recordings/baseline-live/results.json').read_text(encoding='utf-8'))
 raw = {r['id']: r['target_calls'][0]['tools'][0]['input'] for r in old['cases'] if r['id'] in ('A02', 'E02')}
 rows = []
 with sync_playwright() as pw:

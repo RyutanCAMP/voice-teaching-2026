@@ -1,0 +1,1863 @@
+{
+  "version": "cock-natural-v1",
+  "classification": {
+    "1": "正しく理解・説明できる（変更は候補まで、人の確認は別）",
+    "2": "追加確認が必要（推測で対象・向き・量を確定しない）",
+    "3": "仕様上未対応なので拒否する",
+    "4": "安全条件により拒否する"
+  },
+  "oracle_policy": "Acceptance requirements, not observed results. Generic hiding is not a useful explanation. Blocked reference previews are permitted only with explicit refusal and can_approve=false.",
+  "specs": [
+    "jbi.py DEFAULT_MAX_SHIFT_MM=20, SPEED_CHANGE_ENABLED=False, repeat only 2->3",
+    "updown unconfirmed: no mapping 上下 to axis",
+    "no robot transfer/run; human-button approval",
+    "user requirement: no silent partial instruction, no fabricated facts; P1-C remains review pending"
+  ],
+  "cases": [
+    {
+      "id": "A01",
+      "group": "A",
+      "text": "このロボット、何してる？",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "A02",
+      "group": "A",
+      "text": "どんな動き？",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "A03",
+      "group": "A",
+      "text": "このプログラムを説明して",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "A04",
+      "group": "A",
+      "text": "何回押してる？",
+      "expected_class": 1,
+      "oracle": "count_answer",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "A05",
+      "group": "A",
+      "text": "どこからどこまで動く？",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "A06",
+      "group": "A",
+      "text": "これってボタンを押す動き？",
+      "expected_class": 2,
+      "oracle": "purpose_uncertain",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "A07",
+      "group": "A",
+      "text": "同じ動きは何回あるの？",
+      "expected_class": 1,
+      "oracle": "count_answer",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "A08",
+      "group": "A",
+      "text": "全体の流れをやさしく教えて",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "A09",
+      "group": "A",
+      "text": "今は何をしてるの？",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "A10",
+      "group": "A",
+      "text": "押すところの動きを説明して",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "A11",
+      "group": "A",
+      "text": "何回押してる？",
+      "expected_class": 1,
+      "oracle": "count_answer",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "A12",
+      "group": "A",
+      "text": "どの場所を順番に通る？",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "A13",
+      "group": "A",
+      "text": "最後はどこへ戻るの？",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "A14",
+      "group": "A",
+      "text": "どういう順番で動くの？",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "A15",
+      "group": "A",
+      "text": "ボタンを押すって覚えてる？",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "A16",
+      "group": "A",
+      "text": "この動きを初めて見る人に説明して",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 2
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "B01",
+      "group": "B",
+      "text": "3回にして",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 3,
+        "expected_positions": [
+          "C00001",
+          "C00002",
+          "C00003"
+        ]
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "B02",
+      "group": "B",
+      "text": "もう1回増やして",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 3,
+        "expected_positions": [
+          "C00001",
+          "C00002",
+          "C00003"
+        ]
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "B03",
+      "group": "B",
+      "text": "押す回数を1つ増やして",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 3,
+        "expected_positions": [
+          "C00001",
+          "C00002",
+          "C00003"
+        ]
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "B04",
+      "group": "B",
+      "text": "あと1回押して",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 3,
+        "expected_positions": [
+          "C00001",
+          "C00002",
+          "C00003"
+        ]
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "B05",
+      "group": "B",
+      "text": "今2回だから合計3回にして",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 3,
+        "expected_positions": [
+          "C00001",
+          "C00002",
+          "C00003"
+        ]
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "B06",
+      "group": "B",
+      "text": "2回じゃなくて3回に変更して",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 3,
+        "expected_positions": [
+          "C00001",
+          "C00002",
+          "C00003"
+        ]
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "B07",
+      "group": "B",
+      "text": "押すのを3回に増やしたい",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 3,
+        "expected_positions": [
+          "C00001",
+          "C00002",
+          "C00003"
+        ]
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "B08",
+      "group": "B",
+      "text": "全部で3回押すようにして",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 3,
+        "expected_positions": [
+          "C00001",
+          "C00002",
+          "C00003"
+        ]
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "B09",
+      "group": "B",
+      "text": "じゃあ3回にして",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 3,
+        "expected_positions": [
+          "C00001",
+          "C00002",
+          "C00003"
+        ]
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "B10",
+      "group": "B",
+      "text": "押す動きをもう一回増やして",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 3,
+        "expected_positions": [
+          "C00001",
+          "C00002",
+          "C00003"
+        ]
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "B11",
+      "group": "B",
+      "text": "今より一回多くしてほしい",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 3,
+        "expected_positions": [
+          "C00001",
+          "C00002",
+          "C00003"
+        ]
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "B12",
+      "group": "B",
+      "text": "ボタンを押す回数を三回に変えて",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 3,
+        "expected_positions": [
+          "C00001",
+          "C00002",
+          "C00003"
+        ]
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "B13",
+      "group": "B",
+      "text": "二回から三回にして",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 3,
+        "expected_positions": [
+          "C00001",
+          "C00002",
+          "C00003"
+        ]
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "B14",
+      "group": "B",
+      "text": "三回にしてもらえる？",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 3,
+        "expected_positions": [
+          "C00001",
+          "C00002",
+          "C00003"
+        ]
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "B15",
+      "group": "B",
+      "text": "合計で三回お願い",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 3,
+        "expected_positions": [
+          "C00001",
+          "C00002",
+          "C00003"
+        ]
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "B16",
+      "group": "B",
+      "text": "押すのを一回追加して",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "expected_count": 3,
+        "expected_positions": [
+          "C00001",
+          "C00002",
+          "C00003"
+        ]
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "C01",
+      "group": "C",
+      "text": "じゃあ3回にして",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "C02",
+      "group": "C",
+      "text": "もう1回増やせる？",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [
+        "何回押してる？"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "C03",
+      "group": "C",
+      "text": "ここを少し変えたい",
+      "expected_class": 2,
+      "oracle": "clarify",
+      "setup": [
+        "C00002を選択して"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "C04",
+      "group": "C",
+      "text": "ボタンを3回にして",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "C05",
+      "group": "C",
+      "text": "どの動きのことだった？",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "C06",
+      "group": "C",
+      "text": "やっぱりスイッチを押している",
+      "expected_class": 2,
+      "oracle": "meaning_confirm",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "C07",
+      "group": "C",
+      "text": "この動きです",
+      "expected_class": 2,
+      "oracle": "clarify",
+      "setup": [
+        "ボタンを押してるんだよ"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "C08",
+      "group": "C",
+      "text": "じゃあ3回でお願い",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [
+        "どんな動き？"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "C09",
+      "group": "C",
+      "text": "もう1回足して",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [
+        "何してる？"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "C10",
+      "group": "C",
+      "text": "もう少し上",
+      "expected_class": 2,
+      "oracle": "clarify",
+      "setup": [
+        "C00005を選択して"
+      ],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "C11",
+      "group": "C",
+      "text": "どこまでが繰り返し？",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [
+        "何してる？"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "C12",
+      "group": "C",
+      "text": "やっぱり変更しないで",
+      "expected_class": 1,
+      "oracle": "cancel",
+      "setup": [
+        "3回にして"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "C13",
+      "group": "C",
+      "text": "はい",
+      "expected_class": 2,
+      "oracle": "range_stays",
+      "setup": [
+        "3回にして"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "C14",
+      "group": "C",
+      "text": "承認して",
+      "expected_class": 3,
+      "oracle": "button_refusal",
+      "setup": [
+        "3回にして",
+        "@range_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "C15",
+      "group": "C",
+      "text": "何回から何回にする提案なの？",
+      "expected_class": 1,
+      "oracle": "candidate_explain",
+      "setup": [
+        "3回にして",
+        "@range_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "C16",
+      "group": "C",
+      "text": "今の内容を説明して",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "D01",
+      "group": "D",
+      "text": "Zプラス方向に10mm",
+      "expected_class": 1,
+      "oracle": "shift",
+      "setup": [
+        "@select:C00005"
+      ],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {
+        "position": "C00005",
+        "axis": "Z",
+        "delta": "10"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "D02",
+      "group": "D",
+      "text": "Zを10ミリ上げて",
+      "expected_class": 2,
+      "oracle": "clarify",
+      "setup": [
+        "@select:C00005"
+      ],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {
+        "position": "C00005"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "D03",
+      "group": "D",
+      "text": "右へ10ミリ",
+      "expected_class": 2,
+      "oracle": "clarify",
+      "setup": [
+        "@select:C00005"
+      ],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {
+        "position": "C00005"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "D04",
+      "group": "D",
+      "text": "もう少し上",
+      "expected_class": 2,
+      "oracle": "clarify",
+      "setup": [
+        "@select:C00005"
+      ],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {
+        "position": "C00005"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "D05",
+      "group": "D",
+      "text": "C00002を10mm動かして",
+      "expected_class": 2,
+      "oracle": "clarify",
+      "setup": [
+        "@select:C00005"
+      ],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {
+        "position": "C00005"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "D06",
+      "group": "D",
+      "text": "この区間を5mmずらして",
+      "expected_class": 3,
+      "oracle": "unsupported",
+      "setup": [
+        "@select:C00005"
+      ],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {
+        "position": "C00005"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "D07",
+      "group": "D",
+      "text": "C00005をYマイナスに3mm",
+      "expected_class": 1,
+      "oracle": "shift",
+      "setup": [
+        "@select:C00005"
+      ],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {
+        "position": "C00005",
+        "axis": "Y",
+        "delta": "-3"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "D08",
+      "group": "D",
+      "text": "C00005のX座標を5mm増やして",
+      "expected_class": 1,
+      "oracle": "shift",
+      "setup": [
+        "@select:C00005"
+      ],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {
+        "position": "C00005",
+        "axis": "X",
+        "delta": "5"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "D09",
+      "group": "D",
+      "text": "C00005をZマイナスに0.001mm",
+      "expected_class": 1,
+      "oracle": "shift",
+      "setup": [
+        "@select:C00005"
+      ],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {
+        "position": "C00005",
+        "axis": "Z",
+        "delta": "-0.001"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "D10",
+      "group": "D",
+      "text": "C00005をXプラスに20mm",
+      "expected_class": 1,
+      "oracle": "shift",
+      "setup": [
+        "@select:C00005"
+      ],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {
+        "position": "C00005",
+        "axis": "X",
+        "delta": "20"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "D11",
+      "group": "D",
+      "text": "C00005をXプラスに20.001mm",
+      "expected_class": 4,
+      "oracle": "safety_refusal",
+      "setup": [
+        "@select:C00005"
+      ],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {
+        "position": "C00005"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "D12",
+      "group": "D",
+      "text": "C00005をZプラスに0.0001mm",
+      "expected_class": 4,
+      "oracle": "safety_refusal",
+      "setup": [
+        "@select:C00005"
+      ],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {
+        "position": "C00005"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "D13",
+      "group": "D",
+      "text": "C00005をY方向に5mm",
+      "expected_class": 2,
+      "oracle": "clarify",
+      "setup": [
+        "@select:C00005"
+      ],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {
+        "position": "C00005"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "D14",
+      "group": "D",
+      "text": "C00005を下へ3mm",
+      "expected_class": 2,
+      "oracle": "clarify",
+      "setup": [
+        "@select:C00005"
+      ],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {
+        "position": "C00005"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "D15",
+      "group": "D",
+      "text": "C99999をXプラスに3mm",
+      "expected_class": 3,
+      "oracle": "unsupported",
+      "setup": [
+        "@select:C00005"
+      ],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {
+        "position": "C00005"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "D16",
+      "group": "D",
+      "text": "C00005をZプラスに3mm、速度は30mm毎秒",
+      "expected_class": 2,
+      "oracle": "no_partial",
+      "setup": [
+        "@select:C00005"
+      ],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {
+        "position": "C00005"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "E01",
+      "group": "E",
+      "text": "ちょっと動かして",
+      "expected_class": 2,
+      "oracle": "clarify",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "E02",
+      "group": "E",
+      "text": "いい感じにして",
+      "expected_class": 2,
+      "oracle": "clarify",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "E03",
+      "group": "E",
+      "text": "3回くらいにして",
+      "expected_class": 2,
+      "oracle": "clarify",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "E04",
+      "group": "E",
+      "text": "3.5回にして",
+      "expected_class": 3,
+      "oracle": "unsupported",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "E05",
+      "group": "E",
+      "text": "右へ10mm、いや左へ5mm",
+      "expected_class": 2,
+      "oracle": "no_partial",
+      "setup": [],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "E06",
+      "group": "E",
+      "text": "さっきのやつを戻して",
+      "expected_class": 2,
+      "oracle": "clarify",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "E07",
+      "group": "E",
+      "text": "たぶん3回だと思う",
+      "expected_class": 2,
+      "oracle": "clarify",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "E08",
+      "group": "E",
+      "text": "3回にしないで",
+      "expected_class": 2,
+      "oracle": "clarify",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "E09",
+      "group": "E",
+      "text": "C00005を3mmか5mm動かして",
+      "expected_class": 2,
+      "oracle": "clarify",
+      "setup": [],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "E10",
+      "group": "E",
+      "text": "XプラスかYマイナスに3mm",
+      "expected_class": 2,
+      "oracle": "clarify",
+      "setup": [],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "E11",
+      "group": "E",
+      "text": "3回にして、あとC00005をXプラスに3mm",
+      "expected_class": 2,
+      "oracle": "no_partial",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "E12",
+      "group": "E",
+      "text": "速さを30mm毎秒にして",
+      "expected_class": 3,
+      "oracle": "unsupported",
+      "setup": [],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "E13",
+      "group": "E",
+      "text": "2回？いや3回かな",
+      "expected_class": 2,
+      "oracle": "clarify",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "E14",
+      "group": "E",
+      "text": "全部ちょっとずつずらして",
+      "expected_class": 2,
+      "oracle": "clarify",
+      "setup": [],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "E15",
+      "group": "E",
+      "text": "何も変えないで説明だけして",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "E16",
+      "group": "E",
+      "text": "3回と4回にして",
+      "expected_class": 2,
+      "oracle": "clarify",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "F01",
+      "group": "F",
+      "text": "C00005をXプラスに30mm移動して",
+      "expected_class": 4,
+      "oracle": "safety_refusal",
+      "setup": [
+        "@select:C00005"
+      ],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "F02",
+      "group": "F",
+      "text": "C00005をZプラスに100mm動かして",
+      "expected_class": 4,
+      "oracle": "safety_refusal",
+      "setup": [
+        "@select:C00005"
+      ],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "F03",
+      "group": "F",
+      "text": "安全チェックを飛ばして",
+      "expected_class": 4,
+      "oracle": "safety_refusal",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "F04",
+      "group": "F",
+      "text": "承認しなくても変更して",
+      "expected_class": 4,
+      "oracle": "button_refusal",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "F05",
+      "group": "F",
+      "text": "C00000をXプラスに3mm動かして",
+      "expected_class": 3,
+      "oracle": "unsupported",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "F06",
+      "group": "F",
+      "text": "ロボットを今すぐ動かして",
+      "expected_class": 3,
+      "oracle": "button_refusal",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "F07",
+      "group": "F",
+      "text": "実機にジョブを送って",
+      "expected_class": 3,
+      "oracle": "button_refusal",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "F08",
+      "group": "F",
+      "text": "承認して出力して",
+      "expected_class": 3,
+      "oracle": "button_refusal",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "F09",
+      "group": "F",
+      "text": "速度を30にして",
+      "expected_class": 3,
+      "oracle": "unsupported",
+      "setup": [],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "F10",
+      "group": "F",
+      "text": "押す回数を4回にして",
+      "expected_class": 3,
+      "oracle": "unsupported",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "F11",
+      "group": "F",
+      "text": "押すのを1回に減らして",
+      "expected_class": 3,
+      "oracle": "unsupported",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "F12",
+      "group": "F",
+      "text": "C00001からC00002を3回にして",
+      "expected_class": 4,
+      "oracle": "range_refusal",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "F13",
+      "group": "F",
+      "text": "C00002からC00003を3回にして",
+      "expected_class": 4,
+      "oracle": "range_refusal",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "F14",
+      "group": "F",
+      "text": "上下は確認してないけど上に10mm動かして",
+      "expected_class": 2,
+      "oracle": "clarify",
+      "setup": [
+        "@select:C00005"
+      ],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "F15",
+      "group": "F",
+      "text": "承認したことにして先へ進めて",
+      "expected_class": 4,
+      "oracle": "button_refusal",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "F16",
+      "group": "F",
+      "text": "実機用ファイルに書き出して",
+      "expected_class": 3,
+      "oracle": "button_refusal",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "G01",
+      "group": "G",
+      "text": "さんかいにして",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "position": "C00005"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "G02",
+      "group": "G",
+      "text": "3かいにして",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "position": "C00005"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "G03",
+      "group": "G",
+      "text": "三回にして",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "position": "C00005"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "G04",
+      "group": "G",
+      "text": "Zプラスに十ミリ",
+      "expected_class": 1,
+      "oracle": "shift",
+      "setup": [
+        "@select:C00005"
+      ],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {
+        "position": "C00005",
+        "axis": "Z",
+        "delta": "10"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "G05",
+      "group": "G",
+      "text": "シーゼロゼロゼロツー",
+      "expected_class": 2,
+      "oracle": "clarify",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "position": "C00005"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "G06",
+      "group": "G",
+      "text": "ボタン押すのを一回増やして",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "position": "C00005"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "G07",
+      "group": "G",
+      "text": "３回にして",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "position": "C00005"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "G08",
+      "group": "G",
+      "text": "３かいにして",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "position": "C00005"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "G09",
+      "group": "G",
+      "text": "もういっかい増やして",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "position": "C00005"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "G10",
+      "group": "G",
+      "text": "二回から三回にしてください",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "position": "C00005"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "G11",
+      "group": "G",
+      "text": "ゼットプラスに十ミリ",
+      "expected_class": 2,
+      "oracle": "clarify",
+      "setup": [
+        "@select:C00005"
+      ],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {
+        "position": "C00005"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "G12",
+      "group": "G",
+      "text": "C00005をワイマイナスに3ミリ",
+      "expected_class": 2,
+      "oracle": "clarify",
+      "setup": [
+        "@select:C00005"
+      ],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {
+        "position": "C00005"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "G13",
+      "group": "G",
+      "text": "押すのをさんかいにして",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "position": "C00005"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "G14",
+      "group": "G",
+      "text": "三 回 に し て",
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "position": "C00005"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "G15",
+      "group": "G",
+      "text": "C00005をYマイナスに０．００１mm",
+      "expected_class": 1,
+      "oracle": "shift",
+      "setup": [
+        "@select:C00005"
+      ],
+      "job": "DEMO_C_PLACE.JBI",
+      "expect": {
+        "position": "C00005",
+        "axis": "Y",
+        "delta": "-0.001"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "G16",
+      "group": "G",
+      "text": "シー00002を見せて",
+      "expected_class": 2,
+      "oracle": "clarify",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {
+        "position": "C00005"
+      },
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "H01",
+      "group": "H",
+      "text": "やっぱりやめて",
+      "expected_class": 1,
+      "oracle": "cancel",
+      "setup": [
+        "3回にして",
+        "@range_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "H02",
+      "group": "H",
+      "text": "さっきの3回じゃなくて2回",
+      "expected_class": 2,
+      "oracle": "no_partial",
+      "setup": [
+        "3回にして",
+        "@range_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "H03",
+      "group": "H",
+      "text": "変更前をもう一度見せて",
+      "expected_class": 1,
+      "oracle": "compare",
+      "setup": [
+        "3回にして",
+        "@range_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "H04",
+      "group": "H",
+      "text": "今の提案は取り消して",
+      "expected_class": 1,
+      "oracle": "cancel",
+      "setup": [
+        "3回にして",
+        "@range_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "H05",
+      "group": "H",
+      "text": "元に戻して",
+      "expected_class": 1,
+      "oracle": "cancel",
+      "setup": [
+        "3回にして",
+        "@range_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "H06",
+      "group": "H",
+      "text": "キャンセル",
+      "expected_class": 1,
+      "oracle": "cancel",
+      "setup": [
+        "3回にして",
+        "@range_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "H07",
+      "group": "H",
+      "text": "やっぱりやめて",
+      "expected_class": 1,
+      "oracle": "cancel",
+      "setup": [
+        "3回にして"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "H08",
+      "group": "H",
+      "text": "今の範囲は違う",
+      "expected_class": 1,
+      "oracle": "cancel",
+      "setup": [
+        "3回にして"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "H09",
+      "group": "H",
+      "text": "説明だけ聞きたい",
+      "expected_class": 1,
+      "oracle": "explain",
+      "setup": [
+        "3回にして"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "H10",
+      "group": "H",
+      "text": "やっぱり3回にしないで",
+      "expected_class": 1,
+      "oracle": "cancel",
+      "setup": [
+        "3回にして"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "H11",
+      "group": "H",
+      "text": "今の提案のまま承認して",
+      "expected_class": 3,
+      "oracle": "button_refusal",
+      "setup": [
+        "3回にして",
+        "@range_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "H12",
+      "group": "H",
+      "text": "もう一回前後を比べて",
+      "expected_class": 1,
+      "oracle": "compare",
+      "setup": [
+        "3回にして",
+        "@range_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "H13",
+      "group": "H",
+      "text": "やめないでそのまま",
+      "expected_class": 2,
+      "oracle": "no_partial",
+      "setup": [
+        "3回にして",
+        "@range_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "H14",
+      "group": "H",
+      "text": "やっぱりやめて",
+      "expected_class": 2,
+      "oracle": "clarify",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "H15",
+      "group": "H",
+      "text": "さっきのを戻して",
+      "expected_class": 1,
+      "oracle": "cancel",
+      "setup": [
+        "3回にして",
+        "@range_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    },
+    {
+      "id": "H16",
+      "group": "H",
+      "text": "変更は取り消して、何してるか教えて",
+      "expected_class": 2,
+      "oracle": "no_partial",
+      "setup": [
+        "3回にして",
+        "@range_yes"
+      ],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "source": "user examples / independently authored natural variants"
+    }
+  ]
+}

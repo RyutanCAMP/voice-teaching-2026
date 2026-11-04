@@ -7,7 +7,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[2]
-QA = ROOT.parent / 'voice-teaching-cock'
+QA = ROOT
 OUT = ROOT / 'output/p0-20261105'
 
 if __name__ == '__main__':
@@ -15,11 +15,13 @@ if __name__ == '__main__':
     ap.add_argument('suite', choices=['core', 'browser'])
     ap.add_argument('--label', default='clean', choices=['clean', 'final'])
     a = ap.parse_args()
+    OUT.mkdir(parents=True, exist_ok=True)
     keep = {'SYSTEMROOT', 'WINDIR', 'PATH', 'COMSPEC', 'PATHEXT', 'SYSTEMDRIVE'}
     env = {k: v for k, v in os.environ.items() if k.upper() in keep}
-    env.update(TEMP=str(OUT), TMP=str(OUT), TMPDIR=str(OUT), PYTHONDONTWRITEBYTECODE='1',
-               PLAYWRIGHT_BROWSERS_PATH=str(QA / 'output/qa9417/browsers'))
-    cmd = [str(QA / 'output/qa9417/venv/Scripts/python.exe'), '-X', 'utf8', '-B', '-m', 'pytest', '-q', '--tb=short']
+    env.update(TEMP=str(OUT), TMP=str(OUT), TMPDIR=str(OUT), PYTHONDONTWRITEBYTECODE='1')
+    if os.environ.get('PLAYWRIGHT_BROWSERS_PATH'):
+        env['PLAYWRIGHT_BROWSERS_PATH'] = os.environ['PLAYWRIGHT_BROWSERS_PATH']
+    cmd = [sys.executable, '-X', 'utf8', '-B', '-m', 'pytest', '-q', '--tb=short']
     cmd += ['--ignore=tests/test_e2e_browser.py'] if a.suite == 'core' else ['tests/test_e2e_browser.py', '-o', 'faulthandler_timeout=45']
     log = OUT / f'{a.label}-{a.suite}.txt'
     with log.open('wb') as f:

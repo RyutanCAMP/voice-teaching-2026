@@ -1,0 +1,28 @@
+{
+  "source_qa_commit": "da9ee7b",
+  "product_commit": "ce7c981",
+  "asset_source_sha256": {
+    "natural_cases_v1.json": "2b8807c45530b81d8dd5e34f7d504bb49906f668b16cd45d305ba8c784f9b53d",
+    "natural_extra_v1.json": "8ee1a62e24239cd309dcf69fa1406b812555cf7fe9064fff09c7e013486b9f4d",
+    "context_supplement_v1.json": "a896bd927a2273e7ccfd8e28418a7f21395d7f5f32ce2dddd872d04d6a6ef225",
+    "fraction_boundary_v1.json": "3e83d6211eb91af9af5e41270d2bf5768a7121358bb324bd926aae28f607e0f9",
+    "MIC_PRIORITY_20261105.md": "e14d3e5924621238dec78df7a854a96d4fe649f5414088ccba890f34d61d9f96",
+    "microphone_matrix.json": "968155264f3cf28f2805ebacaaff962cb3d1395a7f7a5a718dd7c289bbfe9786"
+  },
+  "original_runner_sha256": "88298f52c9d4056b7b386e95c9c90d616f165a12fbdbb6e9947d885435187c5f",
+  "adaptations": [
+    "repo-relative paths",
+    "current interpreter",
+    "local ignored .env only in explicit live mode",
+    "remove unused preparation helpers"
+  ],
+  "recording_files": {
+    "baseline-live/results.json": "bbee8f09ed3f0281cbf8007a35935b26767d59dea696613f90ef42bcc835ccc2",
+    "extra-live/results.json": "f0363bc3bb9d499aadec55a242e40bd13b9f3487314740415b200aacbceef304",
+    "context-live/results.json": "0a4e524ffb20ce41e281027864ac8474e2a54c4bf0777625bb0b8df852299e54",
+    "fraction-live/results.json": "d722880a1296915aa6e9763feeb5571e71f12ad2613caea871b095d1feff1c9e",
+    "recaptured-context/results.json": "1d798c7ed959e78fd79f4416708f7eae67eb898b01778d3784b0e6d5be7d3caa"
+  },
+  "recording_archive_sha256": "e6835420acb1c82a29a986f8090b2c47b4ac80a47698ad40be9fcbb99095250a",
+  "redaction": "Home directory prefixes and API request IDs removed from handoff recordings; tool answers and semantic state retained."
+}

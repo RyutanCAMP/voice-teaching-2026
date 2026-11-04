@@ -1,0 +1,24 @@
+{
+  "version": "cock-fraction-boundary-v1",
+  "source": "follow-up to saved E04: read_count independently reads decimal suffix as integer; expectation fixed before live call",
+  "cases": [
+    {
+      "id": "NUM-FRACTION-23",
+      "group": "E",
+      "text": "2.3回にして",
+      "expected_class": 3,
+      "oracle": "unsupported",
+      "setup": [],
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "expect": {},
+      "required_semantics": {
+        "reject_fractional_count": true,
+        "requested_value": "2.3",
+        "do_not_coerce_to": 3,
+        "candidate": null,
+        "repeat_range": null,
+        "approval": null
+      }
+    }
+  ]
+}

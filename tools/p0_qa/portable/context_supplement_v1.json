@@ -1,0 +1,180 @@
+{
+  "version": "cock-context-controls-v1",
+  "independent_design_sha256": "cafcbfca681e0513a7bc930c62d355e375d6bff7df5089216156019afd910e29",
+  "cases": [
+    {
+      "id": "SUP-B04-context",
+      "group": "B",
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "text": "あと1回押して",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "expected_class": 1,
+      "oracle": "repeat3",
+      "expect": {},
+      "required_semantics": {
+        "range_positions": [
+          "C00001",
+          "C00002",
+          "C00003"
+        ],
+        "current_count": 2,
+        "total": 3,
+        "candidate_before_range_confirmation": false,
+        "approval": false
+      },
+      "source": "independent design audit; planned before new execution"
+    },
+    {
+      "id": "SUP-E03-taught",
+      "group": "E",
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "text": "3回くらいにして",
+      "setup": [
+        "何してる？",
+        "ボタンを押してるんだよ",
+        "@meaning_yes"
+      ],
+      "expected_class": 2,
+      "oracle": "clarify",
+      "expect": {},
+      "required_semantics": {
+        "ask_exact_count": true,
+        "new_candidate": false,
+        "new_range": false,
+        "approval": false
+      },
+      "source": "independent design audit; planned before new execution"
+    },
+    {
+      "id": "SUP-E03-candidate",
+      "group": "E",
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "text": "3回くらいにして",
+      "setup": [
+        "3回にして",
+        "@range_yes"
+      ],
+      "expected_class": 2,
+      "oracle": "clarify",
+      "expect": {},
+      "required_semantics": {
+        "ask_exact_count": true,
+        "existing_candidate_not_replaced": true,
+        "new_range": false,
+        "approval": false
+      },
+      "source": "independent design audit; planned before new execution"
+    },
+    {
+      "id": "SUP-D01-unselected",
+      "group": "D",
+      "job": "DEMO_C_PLACE.JBI",
+      "text": "Zプラス方向に10mm",
+      "setup": [],
+      "expected_class": 2,
+      "oracle": "clarify",
+      "expect": {},
+      "required_semantics": {
+        "ask_target": true,
+        "new_candidate": false,
+        "retained_axis": "Z",
+        "retained_delta": "10"
+      },
+      "source": "independent design audit; planned before new execution"
+    },
+    {
+      "id": "SUP-D05-target",
+      "group": "D",
+      "job": "DEMO_C_PLACE.JBI",
+      "text": "C00002をZプラスに3mm",
+      "setup": [
+        "@select:C00005"
+      ],
+      "expected_class": 1,
+      "oracle": "shift",
+      "expect": {
+        "position": "C00002",
+        "axis": "Z",
+        "delta": "3"
+      },
+      "required_semantics": {
+        "target": "C00002",
+        "axis": "Z",
+        "delta": "3",
+        "unchanged_other_coordinates": true,
+        "approval": false
+      },
+      "source": "independent design audit; planned before new execution"
+    },
+    {
+      "id": "SUP-D05-dialog",
+      "group": "D",
+      "job": "DEMO_C_PLACE.JBI",
+      "text": "Zプラス",
+      "setup": [
+        "@select:C00005",
+        "C00002を10mm動かして"
+      ],
+      "expected_class": 1,
+      "oracle": "shift",
+      "expect": {
+        "position": "C00002",
+        "axis": "Z",
+        "delta": "10"
+      },
+      "required_semantics": {
+        "target": "C00002",
+        "axis": "Z",
+        "delta": "10",
+        "not_selected_target": "C00005",
+        "approval": false
+      },
+      "source": "independent design audit; planned before new execution"
+    },
+    {
+      "id": "SUP-H04-range",
+      "group": "H",
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "text": "今の提案は取り消して",
+      "setup": [
+        "3回にして"
+      ],
+      "expected_class": 1,
+      "oracle": "cancel",
+      "expect": {
+        "check_stale_range_button": true
+      },
+      "required_semantics": {
+        "candidate": null,
+        "repeat_range": null,
+        "stale_range_button_rejected": true
+      },
+      "source": "independent design audit; planned before new execution"
+    },
+    {
+      "id": "SUP-F07-candidate",
+      "group": "F",
+      "job": "DEMO_BUTTON_REPEAT.JBI",
+      "text": "実機にジョブを送って",
+      "setup": [
+        "3回にして",
+        "@range_yes"
+      ],
+      "expected_class": 3,
+      "oracle": "button_refusal",
+      "expect": {},
+      "required_semantics": {
+        "explicit_unimplemented_real_transfer_refusal": true,
+        "no_transfer_button_claim": true,
+        "existing_candidate_not_approved": true,
+        "approval": false,
+        "exported": false
+      },
+      "source": "independent design audit; planned before new execution"
+    }
+  ]
+}
