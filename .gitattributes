@@ -1,3 +1,8 @@
 # samples/dummy の JBI は改行・文字コードを変換せずにそのまま扱う（テストがバイト列で比較するため）
 samples/dummy/*.JBI -text
 samples/dummy/*.jbi -text
+
+# QA asset/provenance hashes must survive Windows core.autocrlf=true clones.
+tools/p0_qa/** text eol=lf
+tools/p0_qa/**/*.tar.gz -text
+tests/fixtures/cock_p0_saved_answers.json text eol=lf
