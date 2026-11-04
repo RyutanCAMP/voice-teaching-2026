@@ -161,8 +161,13 @@ def check_ux_polish(browser, url, check, shots: Path | None) -> None:
           f"止まった候補の変更後は、オレンジにしない（目安の破線 {sorted(est)} と違う点線）：{after}")
     to_color = pg.evaluate("() => getComputedStyle(document.querySelector('#candidate-view .cand-change .to')).color")
     check(pg.is_visible("#legend-stopped") and pg.is_hidden("#legend-after")
-          and "灰色の点線＝止まった候補（承認できません）" in pg.inner_text("#legend") and to_color != "rgb(196, 71, 10)",
-          f"止まった候補：凡例に「灰色の点線＝止まった候補」、カードの変更後の値はオレンジにしない（{to_color}）")
+          and "灰色の点線と ✕＝変更できない案（参考・承認できません）" in pg.inner_text("#legend") and to_color != "rgb(196, 71, 10)",
+          f"止まった候補：凡例に「灰色の点線と ✕＝変更できない案」、カードの変更後の値はオレンジにしない（{to_color}）")
+    xs = pg.locator("#fig-3d .stopped-x").count()
+    lab = pg.text_content("#fig-3d .moved-label") or ""
+    link = pg.text_content("#candidate-view .friendly.blocked") or ""
+    check(xs == 2 and "変更できません" in lab and "灰色の点線と ✕" in link,
+          f"止まった候補（11/5 残件3）：3D の変更後の点に ✕、名前の横に「変更できません」、赤い帯に 3D の印の説明（✕ {xs}・{lab}）")
     ov = label_overlaps_page(pg)
     check(not ov, f"同じ座標の位置（C00000・C00007）の名前と、動かす点の名前が重ならない：{ov}")
     shot(pg, "L1280_b_blocked_card.png")
@@ -174,7 +179,7 @@ def check_ux_polish(browser, url, check, shots: Path | None) -> None:
           f"1280×720：止まった候補の確認表示で、赤い「承認できません」の帯が見える（上 {r[0]:.0f}px・下 {r[1]:.0f}px）")
     to_color = pg.evaluate("() => getComputedStyle(document.querySelector('#confirm-xyz .cand-change .to')).color")
     check(to_color != "rgb(196, 71, 10)" and pg.is_visible("#confirm-stopped-legend")
-          and "灰色の点線＝止まった候補（承認できません）" in pg.inner_text("#confirm-stopped-legend"),
+          and "灰色の点線と ✕＝変更できない案（参考・承認できません）" in pg.inner_text("#confirm-stopped-legend"),
           f"確認表示でも、止まった候補の変更後の値はオレンジにせず（{to_color}）、凡例に止まった候補の線を出す")
     check("ドラッグで回す" not in pg.text_content("#confirm-figure svg"), "確認表示の図には操作のヒントを出さない")
     shot(pg, "L1280_c_blocked_confirm.png")
@@ -288,6 +293,71 @@ UNDO_HINT = "もう一度直すときは［元に戻す］を押してくださ�
 AFTER_ROWS = ["元の動作データ：変わっていません", "変更候補：人が承認しました（シミュレーション用）", "ロボットへの送信：していません"]
 AFTER_ROWS_JS = """() => [...document.querySelectorAll('#approval-states .state-row')]
   .map(r => r.querySelector('dt').textContent + '：' + r.querySelector('dd').textContent)"""
+
+
+def check_ui_1105(browser, check, shots: Path | None, out: Path) -> None:
+    """11/5 の残件：① の［位置を選ばずに話す］が画面の中・② の番号の1行のはみ出しの札（ほか N ›）・見出しの文言。
+    ② に入るために、モックの台本の答え（tools/demo_mock.py の ScriptClient。本物の Claude は呼ばない）で質問を1つ送る。"""
+    sys.path.insert(0, str(REPO / "tools"))
+    import demo_mock as dm
+    from voice_teaching import claude_explain as cx
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import server
+    cx.PRICES[dm.MOCK_MODEL] = cx.Price(input=0.0, output=0.0, cache_write_5m=0.0, cache_write_1h=0.0, cache_read=0.0)
+    ex = cx.Explainer("mock-no-network", dm.MOCK_MODEL, client=dm.ScriptClient(), usage_log=cx.UsageLog(out / "u1105_usage.jsonl"))
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None, explainer=ex)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    for (w, h) in [(1280, 720), (1920, 1080)]:
+        pg = browser.new_page(viewport={"width": w, "height": h})
+        pg.add_init_script(FAKE_RECOGNITION)
+        pg.goto(url)
+        pg.set_input_files("#file-input", str(REPO / "samples/dummy" / "DEMO_C_PLACE.JBI"))
+        pg.wait_for_selector("#job-area:not([hidden])")
+        until(pg, lambda: "hero" in (pg.get_attribute("body", "class") or ""))
+        pg.wait_for_timeout(200)
+        # 下の帯の上の端と、切り取る親（overflow が visible でないもの）の下の端の、小さい方より上にあること
+        r = pg.evaluate("""() => { const b = document.querySelector('#talk-first'); let lim = document.querySelector('.foot').getBoundingClientRect().top;
+            for (let e = b.parentElement; e; e = e.parentElement) { const o = getComputedStyle(e);
+              if (o.overflowY !== 'visible' || o.overflowX !== 'visible') lim = Math.min(lim, e.getBoundingClientRect().bottom); }
+            return [b.getBoundingClientRect().bottom, lim]; }""")
+        check(pg.is_visible("#talk-first") and r[0] <= r[1],
+              f"11/5 残件4（{w}×{h}）：① で［位置を選ばずに話す］が、下の帯より上に見える（下端 {r[0]:.0f}px・帯 {r[1]:.0f}px）")
+        check(pg.inner_text("#next-action") == "動作データの直し方を話してください" and "ロボットに" not in pg.inner_text("#next-action"),
+              f"11/5 残件2（{w}×{h}）：① の見出しは、ロボットに直接命令するように読めない言い方")
+        check(pg.is_hidden("#chips-more"), f"11/5 残件1（{w}×{h}）：① では番号を折り返すので、はみ出しの札を出さない")
+        fill_text(pg, "このロボット、何をしている？")
+        pg.click("#text-send")
+        until(pg, lambda: "hero" not in (pg.get_attribute("body", "class") or ""))
+        until(pg, lambda: pg.is_visible("#select-panel"))
+        pg.wait_for_timeout(300)
+        sw, cw = pg.evaluate("() => { const c = document.querySelector('#position-chips'); return [c.scrollWidth, c.clientWidth]; }")
+        if sw > cw + 1:
+            until(pg, lambda: pg.is_visible("#chips-more"))
+            t = pg.inner_text("#chips-more")
+            check(t.startswith("ほか") and t.endswith("›") and pg.get_attribute("#position-chips", "class").count("more-right"),
+                  f"11/5 残件1（{w}×{h}）：② で番号がはみ出すと、右端をぼかして「ほか N ›」の札を出す（{t}）")
+            for _ in range(5):  # 1回で 8 割ずつ送る。送りきるまで押す
+                if pg.inner_text("#chips-more") == "‹ 戻る":
+                    break
+                pg.click("#chips-more")
+                pg.wait_for_timeout(700)
+            seen = pg.evaluate("""() => { const c = document.querySelector('#position-chips').getBoundingClientRect();
+                const b = [...document.querySelectorAll('#position-chips .chip')].pop().getBoundingClientRect();
+                return b.right <= c.right + 1; }""")
+            check(seen and pg.inner_text("#chips-more") == "‹ 戻る",
+                  f"11/5 残件1（{w}×{h}）：札を押すと横に送られ、最後の番号が見える。送りきったら「‹ 戻る」")
+            pg.click("#chips-more")
+            until(pg, lambda: pg.evaluate("() => document.querySelector('#position-chips').scrollLeft") == 0)
+            check(True, f"11/5 残件1（{w}×{h}）：「‹ 戻る」で、はじめの番号に戻る")
+        else:
+            check(pg.is_hidden("#chips-more"), f"11/5 残件1（{w}×{h}）：番号がはみ出さないときは札を出さない")
+        if shots is not None:
+            shots.mkdir(parents=True, exist_ok=True)
+            pg.screenshot(path=str(shots / f"U1105_{w}_chips.png"))
+        pg.close()
+    srv.shutdown()
+    srv.server_close()
 
 
 def check_review_only(browser, url, check, shots: Path | None) -> None:
@@ -1517,6 +1587,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check_ux_polish(b, url, check, shots)
             check_c026(b, url, check, shots)
             check_review_only(b, url, check, shots)
+            check_ui_1105(b, check, shots, out)
             check_dialog(b, check, shots, errors, updown_cfg["DEMO_C_PLACE.JBI"])
             check_talk(b, check, shots, errors, out)
             check_updown_unconfirmed(b, check, shots, errors)
@@ -2321,8 +2392,8 @@ def check_above_fold(browser, check, shots: Path | None, errors: list, out: Path
                   f"{tag}状態のチップ（{w}×{h}）：文はサーバーの状態の1行のまま、区切りごとに3つのチップ（{stl}）")
             stage(pg, w, h, "S1a 読込直後（①）", head + ["#mic-button", "#kbd-button"], "before_candidate",
                   hero and pg.is_hidden("#side-scroll") and pg.is_hidden("#text-input")
-                  and pg.inner_text("#next-action") == "ロボットに、やりたい動きを話してください",
-                  "① 初期：大きなマイクとキーボードだけ（会話の履歴・入力欄は出さない）。見出しは「ロボットに、やりたい動きを話してください」",
+                  and pg.inner_text("#next-action") == "動作データの直し方を話してください",
+                  "① 初期：大きなマイクとキーボードだけ（会話の履歴・入力欄は出さない）。見出しは「動作データの直し方を話してください」",
                   tag)
             mic = pg.locator("#mic-button").bounding_box()
             check(mic is not None and mic["width"] >= 120, f"{tag}① 初期（{w}×{h}）：マイクは大きい（{mic and round(mic['width'])}px）")

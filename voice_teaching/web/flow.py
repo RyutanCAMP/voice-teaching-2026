@@ -52,6 +52,16 @@ STEP_F_PURPOSE_OR_CHANGE = ("作業の目的を教えるのか、動作データ
                             "目的を教えるときは「ボタンを押す作業です」のように、変更は1つずつ指示してください")
 _PURPOSE_SAVE = re.compile(r"として(?:登録|保存|覚え)|と(?:登録|覚え)|の(?:作業|動き|動作)(?:です|だよ|だ)?(?:と|として)?(?:登録|保存|覚え)")
 _OUTPUT_WORDS = re.compile(r"承認|出力|書き出|転送|送信|起動|実行|スタート|エクスポート|ダウンロード|上書き|確定")
+# P1-C（11/5）：回数の文で、人が位置・範囲を言った（「C00002からC00003を3回」）。プログラムが見つけた区間の決まった文に
+# 置き換えない（言った範囲が勝手に C00001〜C00003 に広がらない）。指示の道が、言ったとおりの範囲だけを調べる
+# （区間と合わなければ止める）。「2回から3回に」の「から」は範囲ではないので、先に外して調べる
+_RANGE_SAID = re.compile(r"C[0-9]|[0-9]+(?:番|行|点|か所|箇所|個目|つ目)|から|〜|~|まで|位置|ポイント")
+_COUNT_FROM_WORDS = re.compile(r"[0-9]+回から")
+
+
+def _said_range(text: str) -> bool:
+    """回数の文に、人が言った位置・範囲（C の番号・「から」「〜」「まで」・「2番」など）があるか。"""
+    return bool(_RANGE_SAID.search(_COUNT_FROM_WORDS.sub("", rc.to_digits(text))))
 
 
 def _status_line(has_candidate: bool, blocked: bool, approved: bool, exported: bool, range_pending: bool) -> str:
@@ -843,6 +853,8 @@ class WebFlow:
             return "hear"  # 承認・起動などは今の決まった文で止める／会話・範囲の確認の続きは今の道で
         if e.talk.pending is not None:
             return "ask"  # 「どの動きのことですか？」の途中（ボタンで確かめる）
+        if count is not None and _said_range(text):
+            return "hear"  # 位置・範囲を言った回数の文（P1-C）：言ったとおりの範囲を指示の道が調べる（Claude を呼ばない）
         if count is not None and not (f.repeat and f.repeat[1] == "ambiguous" and "move" in f.kinds):
             return "count"  # 「2回移動させて」（回数の移動か往復か、あいまい）は、指示の道が2択で聞き返す
         if rc.is_repeat_request(text) or f.kinds or f.axes or f.positions or f.amounts or f.place_ref or f.shimasu_text:
@@ -865,6 +877,8 @@ class WebFlow:
         count = talk.read_count(text, blocks, e.talk.last_evidence)
         if count is None or count.stop or count.keep or count.total is None:
             return None
+        if _said_range(text):
+            return text  # 人が言った範囲は置き換えない（P1-C）：利用者の文のまま変更の道へ（言った範囲だけを調べる）
         block = count.target or (blocks[0] if len(blocks) == 1 else None)
         if block is None:
             return text  # 区間が決まらない：利用者の文のまま変更の道へ（範囲を聞き返す）

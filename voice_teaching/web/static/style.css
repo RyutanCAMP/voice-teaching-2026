@@ -762,6 +762,15 @@ body:not(.hero) #select-panel { padding: 6px 8px; }
 body:not(.hero) #select-panel .select-head, body:not(.hero) #chips-note, body:not(.hero) #talk-first { display: none; }
 body:not(.hero) #position-chips { flex-wrap: nowrap; overflow-x: auto; gap: 6px; padding-bottom: 2px; scrollbar-width: thin; }
 body:not(.hero) #position-chips .chip { flex: none; padding: 6px 12px; }
+/* ② の番号の1行：はみ出した番号があることを、端のぼかしと「ほか3 ›」の札で見せる（11/5 残件1。押す・ホイールで横に送る） */
+.chips-row { display: flex; align-items: center; gap: 6px; }
+.chips-row #position-chips { flex: 1; min-width: 0; }
+body:not(.hero) #position-chips.more-right { -webkit-mask-image: linear-gradient(to right, #000 82%, transparent); mask-image: linear-gradient(to right, #000 82%, transparent); }
+body:not(.hero) #position-chips.more-left { -webkit-mask-image: linear-gradient(to left, #000 82%, transparent); mask-image: linear-gradient(to left, #000 82%, transparent); }
+body:not(.hero) #position-chips.more-left.more-right { -webkit-mask-image: linear-gradient(to right, transparent, #000 14%, #000 86%, transparent); mask-image: linear-gradient(to right, transparent, #000 14%, #000 86%, transparent); }
+.chips-more { flex: none; min-width: 72px; text-align: center; padding: 6px 10px; border-radius: 999px; font-size: 13px; font-weight: 700; white-space: nowrap;
+  color: #cfe4ff; background: rgba(61, 139, 255, 0.18); border: 1px solid rgba(124, 188, 255, 0.55); }
+body.hero .chips-more { display: none; }
 body.hero #select-panel { order: 2; background: transparent; border-color: transparent; text-align: center; padding: 4px 0 0; }
 body.hero #select-panel .chips { justify-content: center; }
 body.hero #select-panel #talk-first { margin: 4px auto 0; }
@@ -879,6 +888,17 @@ body.hero #instruction-panel { order: 1; }
   body.hero .next-action { font-size: 23px; }
   body.hero .mic-big { width: 132px; height: 132px; }
   body.hero .mic-stage { min-height: 150px; }
+  /* ① で［位置を選ばずに話す］が下にはみ出さない（11/5 残件4。1280×720 で下端が 727px だった）：① の間だけ間隔を詰める */
+  body.hero #instruction-slot { gap: 4px; }
+  body.hero .mic-big { width: 120px; height: 120px; }
+  body.hero .mic-stage { min-height: 124px; gap: 8px; }
+  body.hero .next-action { font-size: 22px; }
+  body.hero #select-panel { padding-top: 0; }
+  body.hero #select-panel .chips { gap: 6px; }
+  body.hero #select-panel .chip { padding-top: 6px; padding-bottom: 6px; }
+  body.hero #kbd-button { height: 40px; }
+  body.hero .side-head::after { margin-top: 8px; }
+  body.hero #select-panel #talk-first { margin-top: 0; }
   .cand-big { font-size: 19px; }
   .cand-change { font-size: 18px; }
   .card.dialog { padding: 10px 12px 8px; }

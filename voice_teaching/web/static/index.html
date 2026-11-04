@@ -142,7 +142,11 @@
     <div id="dock" class="dock">
       <section id="select-panel" class="card select-card" aria-label="位置を選ぶ">
         <p class="select-head">位置を選ぶ<span class="select-sub">右の図の点か、番号を押します</span></p>
-        <div id="position-chips" class="chips"></div>
+        <div class="chips-row">
+          <div id="position-chips" class="chips"></div>
+          <!-- ② の番号の1行：はみ出した番号があるときだけ出す（横に送れることを見せる。押すと送る） -->
+          <button type="button" id="chips-more" class="chips-more" hidden></button>
+        </div>
         <p id="chips-note" class="fine" hidden>薄い番号の位置は、ここでは変更できません（理由は番号に重ねると出ます）。</p>
         <button type="button" id="talk-first" class="link small">位置を選ばずに話す（例：「置くところを…」）</button>
       </section>
@@ -278,7 +282,7 @@
       <div id="legend" class="legend" hidden>
         <span class="lg before">変更前</span>
         <span class="lg after" id="legend-after">変更後</span>
-        <span class="lg stopped" id="legend-stopped" hidden>灰色の点線＝止まった候補（承認できません）</span>
+        <span class="lg stopped" id="legend-stopped" hidden>灰色の点線と ✕＝変更できない案（参考・承認できません）</span>
       </div>
     </div>
     <p class="fine figure-notes"><span id="play-note">点を命令の順に直線で結んだ目安です。ロボット本体の動きではありません。</span> <span id="view3d-note">3D はジョブの X・Y・Z をそのまま点で描いたもので、ロボット本体・関節は描いていません。動作や干渉を保証するシミュレーターではありません。</span> <span id="figure-note">この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。参考表示であり、実際のロボットの動きではありません。</span></p>
@@ -376,7 +380,7 @@
         <details class="fine"><summary>変わる命令の行</summary><ul id="confirm-affected" class="confirm-affected"></ul></details>
         <p class="fine">灰色＝変更前、オレンジ＝変更後。点を命令の順に直線で結んだ目安で、ロボット本体の動きではありません。ロボット本体・関節は描いていません。動作や干渉を保証するシミュレーターではありません。経路は人が確かめてください。</p>
         <p id="confirm-movj-legend" class="fine movj-legend" hidden>細い灰色の点線＝関節移動（MOVJ）。点線は命令の順番だけで、実際の通り道ではありません</p>
-        <p id="confirm-stopped-legend" class="fine stopped-legend" hidden>灰色の点線＝止まった候補（承認できません）</p>
+        <p id="confirm-stopped-legend" class="fine stopped-legend" hidden>灰色の点線と ✕＝変更できない案（参考・承認できません）</p>
         <p class="fine confirm-figure-note">この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。参考表示であり、実際のロボットの動きではありません。</p>
         <p class="fine">シミュレーション用の確認です。実機用の出力・転送・ロボットの起動はしません。</p>
       </div>

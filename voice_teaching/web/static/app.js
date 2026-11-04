@@ -475,6 +475,7 @@ function renderSteps() {
   renderHeard();
   syncRangeDock();
   renderHero(hero);
+  requestAnimationFrame(renderChipsMore);
 }
 
 $("text-input").addEventListener("input", renderSteps);
@@ -484,7 +485,8 @@ $("text-input").addEventListener("input", renderSteps);
 // 大きなマイクが小さくなりながら左下の入力欄の横へ移る（FLIP・約0.4秒）。空いた場所に会話の履歴がふわっと出る。
 // 戻り方：別のデータを読んだ → ① に戻る（会話の履歴は無くなる）。「会話をやり直す」→ 候補・範囲の確認・会話の途中が無ければ ① に戻る
 //（小さなマイクが真ん中へ大きくなって戻る）。動きを減らす設定のときは、動かさずにすぐ切り替える
-const HERO_TITLE = "ロボットに、やりたい動きを話してください";
+// ロボットに直接声で命令するように読めない言い方にする（Safety P2-4 の案。11/5 残件2）。動かすのではなく、動作データ（JOB）の直し方
+const HERO_TITLE = "動作データの直し方を話してください";
 const HERO_REPLACES = ["点か番号を押してください", "🎤 を押して話してください", "動かし方を書いて「次へ」"];
 
 function isHero() {
@@ -615,7 +617,41 @@ function renderChips() {
     b.addEventListener("click", () => select(p.name));
     return b;
   }));
+  requestAnimationFrame(renderChipsMore);
 }
+
+// ② の番号の1行（横に送る）：はみ出した番号の数を「ほか3 ›」の札で見せる。右に残りが無く左にあれば「‹ 戻る」（11/5 残件1）
+function chipsHidden() {
+  const c = $("position-chips"), box = c.getBoundingClientRect();
+  const kids = [...c.children].map((b) => b.getBoundingClientRect());
+  return { right: kids.filter((r) => r.right > box.right + 1).length, left: kids.filter((r) => r.left < box.left - 1).length };
+}
+
+function renderChipsMore() {
+  const c = $("position-chips"), more = $("chips-more");
+  const on = !document.body.classList.contains("hero") && !$("select-panel").hidden;
+  const h = on ? chipsHidden() : { right: 0, left: 0 };
+  c.classList.toggle("more-right", h.right > 0);
+  c.classList.toggle("more-left", h.left > 0);
+  more.hidden = !(h.right || h.left);
+  more.textContent = h.right ? `ほか${h.right} ›` : "‹ 戻る";
+  more.setAttribute("aria-label", h.right ? `ほかに ${h.right} つの番号があります。押すと横に送ります` : "はじめの番号に戻る");
+}
+
+$("chips-more").addEventListener("click", () => {
+  const c = $("position-chips");
+  if (chipsHidden().right) c.scrollBy({ left: Math.max(80, c.clientWidth * 0.8), behavior: reduceMotion() ? "auto" : "smooth" });
+  else c.scrollTo({ left: 0, behavior: reduceMotion() ? "auto" : "smooth" });
+});
+$("position-chips").addEventListener("scroll", renderChipsMore, { passive: true });
+$("position-chips").addEventListener("wheel", (ev) => {
+  // マウスのホイール（縦）でも横に送る（はみ出しているときだけ）
+  const c = ev.currentTarget;
+  if (c.scrollWidth <= c.clientWidth || Math.abs(ev.deltaX) > Math.abs(ev.deltaY)) return;
+  c.scrollLeft += ev.deltaY;
+  ev.preventDefault();
+}, { passive: false });
+window.addEventListener("resize", () => requestAnimationFrame(renderChipsMore));
 
 function applyResult(res, showOk = true) {
   if (res.state) state.st = res.state;
@@ -951,7 +987,12 @@ function renderCandidate() {
   if (c.kind === "repeat") return renderRepeatCandidate(c, host);
   const [pos, axis] = c.target.split(" ");
   const parts = [];
-  if (c.blocked_reason) parts.push(friendly("blocked", c.blocked_reason));
+  if (c.blocked_reason) {
+    // 赤い帯（ここ）と 3D の灰色の点線・✕ が同じもの（変更できない案）だと分かるように書き添える（11/5 残件3）
+    const band = friendly("blocked", c.blocked_reason);
+    band.append(el("p", { class: "fine stopped-link" }, "3D では、灰色の点線と ✕ で示しています（参考の表示だけ）"));
+    parts.push(band);
+  }
   parts.push(el("p", { class: "cand-pos" }, pos));
   if (c.estimated) parts.push(estimatedLine(c.estimated));
   parts.push(el("p", { class: "cand-big" }, displayMinus(`${axis}方向に ${c.delta}mm`) + dirName(axis, c.delta, c.direction_names)));

@@ -242,7 +242,14 @@ export class View3D {
         svg.append(svgEl("line", { x1: a[0], y1: a[1], x2: b[0], y2: b[1], stroke: cAfter, "stroke-width": 2 }));
         svg.append(svgEl("circle", { cx: b[0], cy: b[1], r: 7, fill: cAfter, class: "after-pt" }));
         svg.append(svgEl("circle", { cx: b[0], cy: b[1], r: 14, fill: "none", stroke: cAfter, "stroke-width": 1.5, "stroke-opacity": 0.5 }));
-        const text = `${moved} ${displayMinus(d.delta_label || "")}`.trim();
+        if (stopped) {
+          // 止まった候補（変更できない案）：変更後の点に ✕ を重ね、名前の横に「変更できません」と書く（11/5 残件3。色は灰色のまま）
+          for (const [dx, dy] of [[1, 1], [1, -1]]) {
+            svg.append(svgEl("line", { x1: b[0] - 9 * dx, y1: b[1] - 9 * dy, x2: b[0] + 9 * dx, y2: b[1] + 9 * dy,
+              stroke: C_STOPPED, "stroke-width": 3, "stroke-linecap": "round", class: "stopped-x" }));
+          }
+        }
+        const text = stopped ? `✕ ${moved} 変更できません` : `${moved} ${displayMinus(d.delta_label || "")}`.trim();
         const tw = textWidth(text);
         // 同じ所にほかの位置（共用の座標など）の名前があっても重ならないように、右下・左・右上・下の順に空いている所を探す
         const spots = [[b[0] + 14, b[1] + 18, "start"], [b[0] - 20, b[1] + 4, "end"], [b[0] + 14, b[1] - 22, "start"],
@@ -252,6 +259,7 @@ export class View3D {
         const spot = spots.find((s) => !labelBoxes.some((q) => overlaps(box(s), q))) || spots[0];
         const lab = svgEl("text", { x: spot[0], y: spot[1], "text-anchor": spot[2], fill: cAfterText, "font-weight": "600", class: "moved-label" });
         lab.textContent = text;
+        labelBoxes.push(box(spot));  // 回数の札（_repeatMark）が、動かす点の名前と重ならないように
         svg.append(lab);
         this._inset(svg, p0.xyz, q.xyz, displayMinus(d.delta_label || ""), cAfter, cAfterText);
       }
