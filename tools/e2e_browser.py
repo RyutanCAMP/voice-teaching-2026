@@ -737,6 +737,80 @@ def check_reload_same_file(browser, check, shots: Path | None, out: Path) -> Non
         srv.server_close()
 
 
+def check_voice_error_typing(browser, check, shots: Path | None, out: Path) -> None:
+    """11/5 夜 G7：① の画面（入力欄はキーボードのボタンを押すまで出ない）で声の認識に失敗すると、
+    「下の欄に文字で入力することもできます」と出る。そのとき、言っている欄が本当に見えていること（何も送らない）。
+    ① の決まり（1280×720 で［位置を選ばずに話す］が下の帯より上・ページの縦横のスクロールなし）も崩さない。
+    ② 会話の画面（入力欄はいつも見える）でも同じ文が正しいこと。"""
+    sys.path.insert(0, str(REPO / "tools"))
+    import demo_mock as dm
+    from voice_teaching import claude_explain as cx
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import server
+    cx.PRICES[dm.MOCK_MODEL] = cx.Price(input=0.0, output=0.0, cache_write_5m=0.0, cache_write_1h=0.0, cache_read=0.0)
+    ex = cx.Explainer("mock-no-network", dm.MOCK_MODEL, client=dm.ScriptClient(), usage_log=cx.UsageLog(out / "g7_usage.jsonl"))
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None, explainer=ex)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    body = lambda pg: pg.get_attribute("body", "class") or ""  # noqa: E731
+    try:
+        for (w, h) in [(1280, 720), (1920, 1080)]:
+            for code in ["not-allowed", "no-speech", "network", "audio-capture"]:
+                pg = browser.new_page(viewport={"width": w, "height": h})
+                pg.add_init_script(FAKE_RECOGNITION)
+                sends = []
+                pg.on("request", lambda r: sends.append(r.url) if r.method == "POST" and "/api/load" not in r.url else None)
+                pg.goto(url)
+                pg.set_input_files("#file-input", str(REPO / "samples/dummy" / "DEMO_C_PLACE.JBI"))
+                pg.wait_for_selector("#job-area:not([hidden])")
+                until(pg, lambda: "hero" in body(pg))
+                check(pg.is_hidden("#text-input"), f"11/5 G7（{w}×{h}・{code}）：前提：① の初めは入力欄が出ていない")
+                pg.wait_for_timeout(300)
+                sends.clear()  # 読み込みのときの知らせ（/api/ask）は数えない。ここから先、🎤 の失敗で何も送らないこと
+                pg.evaluate(f"window.__fails = [{code!r}]")
+                pg.click("#mic-button")
+                if pg.is_visible("#consent-yes"):
+                    pg.click("#consent-yes")
+                until(pg, lambda: pg.is_visible("#voice-error"))
+                pg.wait_for_timeout(400)
+                err = pg.inner_text("#voice-error")
+                inp = pg.locator("#text-input").bounding_box()
+                foot = pg.evaluate("() => document.querySelector('.foot').getBoundingClientRect().top")
+                check("hero" in body(pg) and "下の欄に文字で入力" in err and pg.is_visible("#text-input")
+                      and pg.is_visible("#text-send") and inp is not None and inp["y"] + inp["height"] <= foot
+                      and pg.input_value("#text-input") == "" and not sends,
+                      f"11/5 G7（{w}×{h}・{code}）：① で声の失敗のあと、文の言う「下の欄」（入力欄と［送る］）が帯より上に見える。"
+                      f"何も送らない（欄 {'見える' if pg.is_visible('#text-input') else '無い'}・送信 {len(sends)}）")
+                r = pg.evaluate("""() => { const b = document.querySelector('#talk-first'); let lim = document.querySelector('.foot').getBoundingClientRect().top;
+                    for (let e = b.parentElement; e; e = e.parentElement) { const o = getComputedStyle(e);
+                      if (o.overflowY !== 'visible' || o.overflowX !== 'visible') lim = Math.min(lim, e.getBoundingClientRect().bottom); }
+                    return [b.getBoundingClientRect().bottom, lim]; }""")
+                sc = pg.evaluate(PAGE_SCROLL_JS)
+                check(pg.is_visible("#talk-first") and r[0] <= r[1] and sc[0] <= sc[2] and sc[1] <= sc[3],
+                      f"11/5 G7（{w}×{h}・{code}）：入力欄を出しても［位置を選ばずに話す］は帯より上（下端 {r[0]:.0f}px・帯 {r[1]:.0f}px）、"
+                      f"ページのスクロールなし（{sc}）")
+                if shots is not None and code == "not-allowed":
+                    shots.mkdir(parents=True, exist_ok=True)
+                    pg.screenshot(path=str(shots / f"G7_hero_error_{w}.png"))
+                if code == "not-allowed":
+                    # ② 会話の画面：入力欄はいつも見える。失敗の文の「下の欄」はそのまま正しい
+                    fill_text(pg, "このロボット、何をしている？")
+                    pg.click("#text-send")
+                    until(pg, lambda: "hero" not in body(pg))
+                    until(pg, lambda: pg.is_enabled("#text-send"))
+                    pg.evaluate("window.__fails = ['no-speech']")
+                    pg.click("#mic-button")
+                    if pg.is_visible("#consent-yes"):
+                        pg.click("#consent-yes")
+                    until(pg, lambda: pg.is_visible("#voice-error"))
+                    check("下の欄に文字で入力" in pg.inner_text("#voice-error") and pg.is_visible("#text-input"),
+                          f"11/5 G7（{w}×{h}）：② で声の失敗のあとも、入力欄が見える")
+                pg.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 # 11/5 夜 F6：1920×1080 で撮る動画の文字。測る要素（会話の吹き出し・話し手・状態の1行・返事の札・凡例・図の注意書き）
 TEXT_SIZE_SELS = [".bubble.human .said", ".bubble.claude .said", ".bubble.app .said", ".bubble .who", ".status-line",
                   ".status-line .st-chip", "#reply-message", "#reply-message .range-lines", ".legend", ".legend.kinds",
@@ -2236,6 +2310,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check_3d_fit_stable(b, check, shots, out)
             check_load_while_waiting(b, check, shots, out)
             check_reload_same_file(b, check, shots, out)
+            check_voice_error_typing(b, check, shots, out)
             check_dialog(b, check, shots, errors, updown_cfg["DEMO_C_PLACE.JBI"])
             check_talk(b, check, shots, errors, out)
             check_updown_unconfirmed(b, check, shots, errors)

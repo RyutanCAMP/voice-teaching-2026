@@ -1938,6 +1938,7 @@ function renderSignHint() {
 function showVoiceError(message) {
   $("voice-error").replaceChildren(el("span", {}, message), el("span", { class: "reason" }, "下の欄に文字で入力することもできます"));
   $("voice-error").hidden = false;
+  setKeyboard(true);  // ① 初期の画面でも「下の欄」を出す（11/5 夜 G7）。出すだけ。入れない・送らない・移らない
 }
 
 // マイクの ON／OFF を一目で分かるように（OFF・聞いています）
