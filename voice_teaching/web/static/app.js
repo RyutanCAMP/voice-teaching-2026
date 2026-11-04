@@ -2152,7 +2152,7 @@ const opening = (() => {
   const box = $("opening");
   const STEPS = [[0, "s0"], [380, "s1"], [1080, "s2"], [1330, "s3"], [1580, "s4"], [2080, "s5"]];
   const END = 3300, FADE = 450;
-  let timers = [], audio = null, active = false, still = false, back = null;
+  let timers = [], audio = null, active = false, leaving = false, still = false, back = null;
 
   const tone = (freq, t0, dur, type = "square", vol = 0.05) => {
     const o = audio.createOscillator(), g = audio.createGain();
@@ -2184,11 +2184,12 @@ const opening = (() => {
     $("op-job-note").textContent = name ? `${name}（読み込みました）` : "まだ読み込んでいません";
   };
   function finish() {
-    if (!active) return;
+    if (!active || leaving) return;  // 消えかけの間の2回目の押す・キーは、消える時間を延ばさない（受け止めるだけ。11/5 夜 H3）
+    leaving = true;
     for (const t of timers) clearTimeout(t);
     timers = [];
     box.classList.add("out");
-    const done = () => { box.hidden = true; box.className = "opening"; active = false; if (back && back.focus) back.focus(); back = null; };
+    const done = () => { box.hidden = true; box.className = "opening"; active = false; leaving = false; if (back && back.focus) back.focus(); back = null; };
     if (still) done(); else timers.push(setTimeout(done, FADE));
   }
   function start(withSound = false) {

@@ -923,6 +923,95 @@ TEXT_SIZE_MIN_1080 = {".bubble.human .said": 16, ".bubble.claude .said": 16, ".b
 FIG_BEFORE_1080 = {"load": (1342, 742), "conversation": (1342, 742), "range": (1342, 742), "candidate": (1342, 681), "approved": (1342, 681)}
 
 
+def check_opening_click_through(browser, check, shots: Path | None, out: Path) -> None:
+    """11/5 夜 H3：オープニングを飛ばすときのダブルクリック・3回押し・Enter/Space の2回押しの2回目が、消えかけ（約0.45秒）の間に
+    下の画面へ届き、ドロップ欄（ファイルを選ぶ窓）・［サンプルで試す］・位置の番号を押してしまっていた。
+    飛ばすための押す・キーは、消えかけの間も下の画面に届かない。消え終わったら、すぐ（待ちを足さずに）ふだんどおり押せる。
+    最初の表示（?opening=1）と、JOB を読み込んだあとの出し直し（［▶ オープニング］）の両方で、1920×1080 で確かめる。"""
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import server
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    # 下の画面に届いた押す・キーを記録する（オープニングの中に向いたものは数えない）
+    spy = """() => { window.__leak = []; if (window.__spy) return; window.__spy = true;
+      const rec = (ev) => { const o = document.getElementById('opening');
+        if (!o.contains(ev.target)) window.__leak.push(ev.type + ':' + (ev.target.id || ev.target.tagName)); };
+      for (const t of ['pointerdown', 'mousedown', 'mouseup', 'click', 'dblclick']) document.addEventListener(t, rec, true);
+      document.addEventListener('keydown', rec, false); }"""
+    w, h = 1920, 1080
+    pg = browser.new_page(viewport={"width": w, "height": h})
+    pg.add_init_script(FAKE_RECOGNITION)
+    choosers, posts = [], []
+    pg.on("filechooser", lambda fc: choosers.append(1))
+    pg.on("request", lambda r: posts.append(r.url) if r.method == "POST" and "/api/" in r.url else None)
+
+    def centre(sel):
+        b = pg.locator(sel).first.bounding_box()
+        return b["x"] + b["width"] / 2, b["y"] + b["height"] / 2
+
+    def gestures():
+        pts = {"中央": (w / 2, h / 2)}
+        for sel, name in [("#sample-button", "［サンプルで試す］"), ("#drop-zone", "ドロップ欄"), ("#position-chips button", "位置の番号")]:
+            if pg.locator(sel).count() and pg.locator(sel).first.is_visible():
+                pts[name] = centre(sel)
+        res = []
+        for name, (x, y) in pts.items():
+            res.append((f"{name}をダブルクリック", lambda x=x, y=y: pg.mouse.dblclick(x, y)))
+            res.append((f"{name}を3回押す", lambda x=x, y=y: pg.mouse.click(x, y, click_count=3)))
+            res.append((f"{name}を0.2秒あけて2回押す", lambda x=x, y=y: (pg.mouse.click(x, y), pg.wait_for_timeout(200), pg.mouse.click(x, y))))
+        for key in ["Enter", "Space", "Escape"]:
+            res.append((f"{key} を2回", lambda key=key: (pg.keyboard.press(key), pg.wait_for_timeout(120), pg.keyboard.press(key))))
+        return res
+
+    def chosen():
+        return pg.inner_text("#voice-position") if pg.is_visible("#voice-position") else ""
+
+    def run_case(phase, show, name, do):
+        show()
+        until(pg, lambda: pg.is_visible("#opening"))
+        pg.wait_for_timeout(400)
+        pg.evaluate(spy)
+        n_ch, n_posts, sel_before = len(choosers), len(posts), chosen()
+        t0 = pg.evaluate("() => performance.now()")
+        do()
+        until(pg, lambda: pg.is_hidden("#opening"), timeout_ms=2000)
+        gone = pg.evaluate("() => performance.now()") - t0
+        pg.wait_for_timeout(250)
+        leak = pg.evaluate("() => window.__leak")
+        ok = not leak and len(choosers) == n_ch and len(posts) == n_posts and chosen() == sel_before
+        check(ok, f"11/5 夜 H3 オープニング（{phase}）：{name}で飛ばしても、下の画面に届かない"
+                  f"（届いた：{leak or 'なし'}・ファイルの窓 {len(choosers) - n_ch}・送信 {len(posts) - n_posts}）")
+        check(gone < 1100, f"11/5 夜 H3 オープニング（{phase}）：{name}：消えるまで {gone:.0f}ms（消えかけの分だけ。待ちを足さない）")
+
+    # ① 最初の表示（JOB はまだ）
+    pg.goto(url)
+    for name, do in gestures():
+        run_case("最初の表示", lambda: pg.goto(url + "?opening=1"), name, do)
+    # 消え終わったら、すぐふだんどおり押せる（［サンプルで試す］で読み込める）
+    pg.goto(url + "?opening=1")
+    until(pg, lambda: pg.is_visible("#opening"))
+    pg.mouse.dblclick(w / 2, h / 2)
+    until(pg, lambda: pg.is_hidden("#opening"), timeout_ms=2000)
+    samples = lambda: sum(1 for u in posts if "/api/sample" in u)
+    n_samples = samples()
+    pg.click("#sample-button", timeout=1000)
+    until(pg, lambda: pg.is_visible("#job-area"), timeout_ms=3000)
+    check(samples() == n_samples + 1, "11/5 夜 H3 オープニング：消え終わったら、すぐ［サンプルで試す］を押せる（1回だけ送る）")
+    # ② JOB を読み込んだあとの出し直し
+    pg.goto(url)
+    pg.set_input_files("#file-input", str(REPO / "samples/dummy" / "DEMO_BUTTON_REPEAT.JBI"))
+    pg.wait_for_selector("#job-area:not([hidden])")
+    pg.wait_for_timeout(300)
+    for name, do in gestures():
+        run_case("出し直し", lambda: pg.click("#opening-replay"), name, do)
+    if shots is not None:
+        pg.screenshot(path=str(shots / "H3_opening_after_skip.png"))
+    pg.close()
+    srv.shutdown()
+    srv.server_close()
+
+
 def check_text_size_1080(browser, check, shots: Path | None, out: Path) -> None:
     """11/5 夜 F6：1920×1080（デモの動画を撮る大きさ）で、会話・話し手・状態の1行・返事の札・凡例・図の注意書きの文字を大きく。
     1280×720・1366×768・1440×900 の文字の大きさは前のまま。1920×1080 でもページはスクロールせず、3D は小さくならず、
@@ -2398,6 +2487,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check_reload_same_file(b, check, shots, out)
             check_voice_error_typing(b, check, shots, out)
             check_export_twice(b, check, shots, out)
+            check_opening_click_through(b, check, shots, out)
             check_dialog(b, check, shots, errors, updown_cfg["DEMO_C_PLACE.JBI"])
             check_talk(b, check, shots, errors, out)
             check_updown_unconfirmed(b, check, shots, errors)

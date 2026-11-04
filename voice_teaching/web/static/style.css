@@ -977,7 +977,8 @@ button.tip.tip-word::before { width: calc(100% - 10px); height: 24px; }
   background: radial-gradient(ellipse at 50% 45%, #0a1630 0%, #03060d 62%, #000 100%); color: #dbe8ff; cursor: pointer;
   font-family: "SF Mono", Consolas, "Segoe UI", monospace; opacity: 1; transition: opacity 0.45s ease; }
 .opening[hidden] { display: none; }
-.opening.out { opacity: 0; pointer-events: none; }
+/* 消えかけの間も押す・キーを受け止める（2回目の押しが下の画面に届かない。11/5 夜 H3）。消え終わったら hidden で外れる */
+.opening.out { opacity: 0; }
 .op-grid { position: absolute; inset: -20%; opacity: 0; transition: opacity 1.2s ease;
   background-image: linear-gradient(rgba(61, 139, 255, 0.07) 1px, transparent 1px), linear-gradient(90deg, rgba(61, 139, 255, 0.07) 1px, transparent 1px);
   background-size: 48px 48px; transform: perspective(700px) rotateX(58deg) translateY(18%); transform-origin: 50% 100%; }
