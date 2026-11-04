@@ -686,6 +686,9 @@ svg .dest-mark { pointer-events: none; }
   margin-top: 2px; padding: 2px 0; scrollbar-width: thin; }
 .bubble.claude { max-width: calc(100% - 44px); }
 .bubble .evidence button.link { font-size: 14px; text-align: left; padding: 4px 8px; min-height: 44px; }
+/* 質問の上限の吹き出しの下に出す［会話をやり直す］（11/5 確定版 4・U-02。ふだんは「詳しく」の中） */
+.bubble #ask-reset { display: block; margin-top: 8px; font-size: 14px; min-height: 44px; padding: 6px 12px;
+  border-color: var(--blue-text); }
 .talk-choices { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .talk-choices .choice { flex: 1 1 100%; min-width: 0; font-size: 14px; padding: 9px 10px; overflow-wrap: anywhere; text-align: left; white-space: normal; }
 .memory { margin-top: 10px; padding: 8px 12px; border: 1.5px solid #2f6b4a; background: var(--green-bg); border-radius: 12px; }

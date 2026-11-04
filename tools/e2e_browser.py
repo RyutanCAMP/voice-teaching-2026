@@ -1359,6 +1359,193 @@ def check_taught_pill_clear(browser, check, shots: Path | None, out: Path) -> No
         srv.server_close()
 
 
+# 要素がスクロールせずに見えて、左寄り・中央・右寄りの3点でいちばん上にあるか（ほかの要素に隠れていない）
+IN_VIEW_TOP_JS = """(s) => { const e = document.querySelector(s); if (!e || !e.getClientRects().length) return false;
+  const b = e.getBoundingClientRect(); if (b.top < 0 || b.bottom > innerHeight || b.left < 0 || b.right > innerWidth) return false;
+  const y = b.top + b.height / 2;
+  return [0.2, 0.5, 0.8].every((f) => { const t = document.elementFromPoint(Math.min(innerWidth - 1, b.left + b.width * f), Math.min(innerHeight - 1, y));
+    return !!t && (t === e || e.contains(t)); }); }"""
+EXPORT_EXISTS_NEXT = "次にすること：同じ名前のファイルが output\\sim\\ にあります。消してから、もう一度［出力］"
+
+
+def check_export_fail_next(browser, check, shots: Path | None, out: Path) -> None:
+    """11/5 確定版 1（K1・K2）：出力に失敗したとき（同じ名前のファイルが既にある）、結果の欄にサーバーの理由をそのまま出し、
+    「次にすること：同じ名前のファイルが output\\sim\\ にあります。消してから、もう一度［出力］」を出す。［出力］は押せるまま
+    （目立たせない）、見出しは「出力できませんでした」。上書きはしない（ファイルの中身と日時が変わらない）。消してから押すと出力できる。
+    承認が消えて失敗したとき（承認のあとで上下の向きの設定が変わった）は、理由＋「次にすること：もう一度承認してください」。
+    出力は一時フォルダ（out の下）に書く。"""
+    from voice_teaching import jbi, sim, updown
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import server
+    cfg_dir = out / "k1_updown"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    job = jbi.load(REPO / "samples" / "dummy" / "DEMO_C_PLACE.JBI")
+    cfg = updown.write_config(updown.build_config(job, updown.DEFAULT_ROBOT, "e2e（一時フォルダの仮の設定）", "e2e 用の仮の設定"),
+                              cfg_dir / "updown_DEMO_C_PLACE.JBI.json", overwrite=True)
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=cfg)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    saved_out_dir = sim.DEFAULT_OUT_DIR
+
+    def approved_page(w, h):
+        pg = browser.new_page(viewport={"width": w, "height": h})
+        pg.add_init_script(FAKE_RECOGNITION)
+        exports = []
+        pg.on("request", lambda r: exports.append(r.url) if r.method == "POST" and "/api/export" in r.url else None)
+        pg.goto(url)
+        pg.set_input_files("#file-input", str(REPO / "samples/dummy" / "DEMO_C_PLACE.JBI"))
+        pg.wait_for_selector("#job-area:not([hidden])")
+        pg.locator("#position-chips button", has_text="C00003").click()
+        until(pg, lambda: pg.inner_text("#voice-position strong") == "C00003")
+        fill_text(pg, "Zプラス方向に10mm")
+        pg.click("#text-send")
+        until(pg, lambda: pg.is_enabled("#open-confirm"))
+        pg.click("#open-confirm")
+        pg.wait_for_selector("#confirm-overlay:not([hidden])")
+        pg.fill("#approver-name", "e2e確認")
+        pg.click("#approve-button")
+        until(pg, lambda: pg.is_visible("#approval-status"))
+        until(pg, lambda: pg.is_enabled("#export-button"))
+        return pg, exports
+
+    def press_export(pg, exports):
+        n = len(exports)
+        pg.click("#export-button")
+        until(pg, lambda: len(exports) > n and pg.is_visible("#export-result"))
+        pg.wait_for_timeout(400)
+        return " ".join(pg.inner_text("#export-result").split())
+
+    def primary(pg):
+        return "primary" in (pg.get_attribute("#export-button", "class") or "")
+
+    try:
+        for (w, h) in [(1280, 720), (1920, 1080)]:
+            d = out / f"k1_sim_exists_{w}"
+            d.mkdir(parents=True, exist_ok=True)
+            f = d / "DEMO_C_PLACE_SIM.JBI.txt"
+            f.write_text("e2e：前からあるファイル（上書きしないことを確かめる）", encoding="utf-8")
+            before = (f.read_bytes(), f.stat().st_mtime_ns)
+            sim.DEFAULT_OUT_DIR = d
+            pg, exports = approved_page(w, h)
+            for i in (1, 2):  # 押し直しても同じ：理由と次にすること。上書きしない
+                box = press_export(pg, exports)
+                check(pg.get_attribute("#export-result", "data-ok") == "false"
+                      and "出力しませんでした：DEMO_C_PLACE_SIM.JBI.txt が既にあるため、上書きしません" in box
+                      and EXPORT_EXISTS_NEXT in box,
+                      f"11/5 確定版 K2（{w}×{h}・{i}回目）：「既にある」で失敗したら、サーバーの理由のまま＋次にすること（消してから、もう一度［出力］）：{box[:120]}")
+                check(pg.is_enabled("#export-button") and not primary(pg) and pg.inner_text("#next-action") == "出力できませんでした",
+                      f"11/5 確定版 K2（{w}×{h}・{i}回目）：失敗のあと［出力］は押せる・目立たせない・見出しは「出力できませんでした」"
+                      f"（押せる={pg.is_enabled('#export-button')}・目立つ={primary(pg)}・見出し「{pg.inner_text('#next-action')}」）")
+                check(str(out) not in box and not re.search(r"[A-Za-z]:\\|(/[A-Za-z0-9._-]+){2,}", box),
+                      f"11/5 確定版 K2（{w}×{h}・{i}回目）：失敗の欄に絶対パスを出さない：{box[:120]}")
+                check((f.read_bytes(), f.stat().st_mtime_ns) == before and len(list(d.iterdir())) == 1,
+                      f"11/5 確定版 K1（{w}×{h}・{i}回目）：同じ名前のファイルは上書きしない（中身と日時が同じ・ほかのファイルを作らない）")
+            if shots is not None:
+                shots.mkdir(parents=True, exist_ok=True)
+                pg.screenshot(path=str(shots / f"K2_{w}_export_exists.png"))
+            f.unlink()  # 次にすること（消してから、もう一度［出力］）のとおりにすると、出力できる
+            box = press_export(pg, exports)
+            check(pg.get_attribute("#export-result", "data-ok") == "true" and "出力しました" in box and "次にすること" not in box
+                  and pg.is_disabled("#export-button") and pg.inner_text("#next-action") == "出力しました" and f.exists(),
+                  f"11/5 確定版 K2（{w}×{h}）：消してから［出力］を押すと出力でき、そのあと押せない（H1）：{box[:80]}")
+            pg.close()
+        # 失敗のあと［元に戻す］→ 新しい候補：前の結果の欄は消す（もう今の承認のものではない。11/5 確定版 1 の表）
+        d = out / "k1_sim_exists_undo"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "DEMO_C_PLACE_SIM.JBI.txt").write_text("e2e：前からあるファイル", encoding="utf-8")
+        sim.DEFAULT_OUT_DIR = d
+        pg, exports = approved_page(1280, 720)
+        press_export(pg, exports)
+        pg.click("#undo-button")
+        until(pg, lambda: not pg.is_visible("#approval-status"))
+        pg.wait_for_timeout(300)
+        after_undo = pg.is_visible("#export-result")
+        fill_text(pg, "Zプラス方向に10mm")
+        pg.click("#text-send")
+        until(pg, lambda: pg.is_enabled("#open-confirm"))
+        pg.wait_for_timeout(400)
+        after_new = pg.is_visible("#export-result")
+        check(not after_undo and not after_new,
+              f"11/5 確定版 1（元に戻した・新しい候補）：失敗の結果の欄を消す（元に戻したあと 見える={after_undo}・新しい候補のあと 見える={after_new}）")
+        pg.close()
+        # 承認が消えて失敗したとき（承認のあとで上下の向きの設定が変わった）：理由＋「もう一度承認してください」
+        sim.DEFAULT_OUT_DIR = out / "k1_sim_updown"
+        pg, exports = approved_page(1280, 720)
+        cfg.write_text(cfg.read_text(encoding="utf-8") + "\n", encoding="utf-8")  # 設定が1バイト変わる
+        box = press_export(pg, exports)
+        check(pg.get_attribute("#export-result", "data-ok") == "false" and "承認を取り消しました" in box
+              and "次にすること：もう一度承認してください" in box and "output\\sim\\" not in box
+              and not (out / "k1_sim_updown").exists(),
+              f"11/5 確定版 1（そのほかの失敗）：承認が消えたときは、理由＋「次にすること：もう一度承認してください」：{box[:120]}")
+        pg.close()
+    finally:
+        sim.DEFAULT_OUT_DIR = saved_out_dir
+        srv.shutdown()
+        srv.server_close()
+
+
+def check_ask_limit_reset(browser, check, shots: Path | None, out: Path) -> None:
+    """11/5 確定版 4（U-02）：質問の上限（「上限に達しました」）のあと、［会話をやり直す］を、スクロールせずに押せる
+    （1280×720・1920×1080。見えていて、3点でいちばん上）。#ask-reset は1つだけ。押すと会話が空になり、また聞ける。
+    やり直したあとは「詳しく」の中に戻る。モックの台本の答え（tools/demo_mock.py の ScriptClient。本物の Claude は呼ばない）。"""
+    sys.path.insert(0, str(REPO / "tools"))
+    import demo_mock as dm
+    from voice_teaching import claude_explain as cx
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import server
+    cx.PRICES[dm.MOCK_MODEL] = cx.Price(input=0.0, output=0.0, cache_write_5m=0.0, cache_write_1h=0.0, cache_read=0.0)
+    ex = cx.Explainer("mock-no-network", dm.MOCK_MODEL, client=dm.ScriptClient(), usage_log=cx.UsageLog(out / "u02_usage.jsonl"))
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None, explainer=ex)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+
+    def ask_once(pg, text):
+        n = pg.locator("#ask-turns > li").count()
+        fill_text(pg, text)
+        pg.click("#text-send")
+        until(pg, lambda: pg.locator("#ask-turns > li").count() > n + 1 and pg.locator("#ask-turns .thinking").count() == 0, 8000)
+        pg.wait_for_timeout(200)
+
+    try:
+        for (w, h) in [(1280, 720), (1920, 1080)]:
+            pg = browser.new_page(viewport={"width": w, "height": h})
+            pg.add_init_script(FAKE_RECOGNITION)
+            pg.goto(url)
+            pg.set_input_files("#file-input", str(REPO / "samples/dummy/DEMO_BUTTON_REPEAT.JBI"))
+            pg.wait_for_selector("#job-area:not([hidden])")
+            until(pg, lambda: pg.is_enabled("#text-send"))
+            pg.locator("#position-chips button:not([disabled])").nth(1).click()
+            pg.wait_for_timeout(300)
+            for _ in range(cx.MAX_TURNS + 1):
+                ask_once(pg, "このロボット、何をしている？")
+            limit = "上限に達しました" in pg.inner_text("#ask-turns")
+            pg.wait_for_timeout(400)
+            seen = pg.evaluate(IN_VIEW_TOP_JS, "#ask-reset")
+            if shots is not None:
+                shots.mkdir(parents=True, exist_ok=True)
+                pg.screenshot(path=str(shots / f"U02_{w}_ask_limit.png"))
+            check(limit and seen and pg.is_enabled("#ask-reset") and pg.locator("#ask-reset").count() == 1,
+                  f"11/5 確定版 4（{w}×{h}）：質問の上限のあと、［会話をやり直す］がスクロールせずに見えて押せる"
+                  f"（上限の文={limit}・見える={seen}・押せる={pg.is_enabled('#ask-reset')}・数={pg.locator('#ask-reset').count()}）")
+            if not seen:
+                pg.close()
+                continue
+            pg.click("#ask-reset")  # 人と同じように押す（force は使わない）
+            until(pg, lambda: "上限に達しました" not in pg.inner_text("#ask-turns"))
+            pg.wait_for_timeout(300)
+            home = pg.evaluate("() => !!document.querySelector('.talk-more #ask-reset')")
+            ask_once(pg, "このロボット、何をしている？")
+            again = (pg.locator("#ask-turns .bubble.claude:not(.thinking)").count() >= 1
+                     and "上限に達しました" not in pg.inner_text("#ask-turns"))
+            check(home and again and pg.locator("#ask-reset").count() == 1,
+                  f"11/5 確定版 4（{w}×{h}）：［会話をやり直す］を押すと会話が空になり、また聞ける。ボタンは「詳しく」の中に戻る"
+                  f"（戻った={home}・聞けた={again}）")
+            pg.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 def check_text_size_1080(browser, check, shots: Path | None, out: Path) -> None:
     """11/5 夜 F6：1920×1080（デモの動画を撮る大きさ）で、会話・話し手・状態の1行・返事の札・凡例・図の注意書きの文字を大きく。
     1280×720・1366×768・1440×900 の文字の大きさは前のまま。1920×1080 でもページはスクロールせず、3D は小さくならず、
@@ -2839,6 +3026,8 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check_heading_matches(b, check, shots, out)
             check_approve_twice(b, check, shots, out)
             check_taught_pill_clear(b, check, shots, out)
+            check_export_fail_next(b, check, shots, out)
+            check_ask_limit_reset(b, check, shots, out)
             check_dialog(b, check, shots, errors, updown_cfg["DEMO_C_PLACE.JBI"])
             check_talk(b, check, shots, errors, out)
             check_updown_unconfirmed(b, check, shots, errors)
