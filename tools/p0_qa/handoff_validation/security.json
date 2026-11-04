@@ -1,0 +1,13 @@
+{
+  "scope": "All unique changed Git blobs since base, including prior pushed commits and nested evidence archives",
+  "base": "20c8464",
+  "tip": "42d816b991712a39e4b7870c574755d809394f88",
+  "commits": 10,
+  "blobs": 56,
+  "payloads_scanned": 133,
+  "known_credential_compared": true,
+  "tracked_secret_files": [],
+  "findings": [],
+  "api_calls": 0,
+  "limitation": "Pattern/contact scan and exact local-key comparison; not a proof against every form of personal information."
+}
