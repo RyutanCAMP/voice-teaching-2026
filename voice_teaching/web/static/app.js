@@ -2030,8 +2030,7 @@ function followLatest() {
   followText.talk = talk;
   if (candNew || replyNew) followCardAt = performance.now();
   if (candNew) {
-    // 出力のあと：出力の結果。承認のあと：「〇〇さんが承認しました」と3つの状態。承認の前：候補のカードを上の端から（止まった理由・変わる値）
-    if (!$("export-result").hidden) return revealIn(sideScroll, $("export-result"), "bottom");
+    // 承認のあと：「〇〇さんが承認しました」と3つの状態（出力の結果は下の操作の欄）。承認の前：候補のカードを上の端から（止まった理由・変わる値）
     if (!$("approval-status").hidden) return revealIn(sideScroll, $("approval-panel"), "top");
     return revealIn(sideScroll, $("candidate-panel"), "top");
   }

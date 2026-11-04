@@ -38,7 +38,12 @@ def test_free_text_and_voice_go_only_through_talk():
 
 def test_status_line_is_drawn_from_the_server_state_only():
     js = (STATIC / "app.js").read_text(encoding="utf-8")
-    assert '$("status-line").textContent = st.status_line || "";' in js
+    # 唐川さん承認のデザイン 11/4：状態の1行は上の帯の小さなチップ。文はサーバーの state.status_line だけから作り、
+    # 区切り（「：」「／」）で分けるだけ（文字は足さない・変えない。分けられないときはそのまま1行）
+    assert 'renderStatusChips(st.status_line || "");' in js
+    body = js[js.index("function renderStatusChips(text)"):js.index("function renderSelLine(")]
+    assert "box.textContent = text;" in body and "text.slice(0, at + 1)" in body and '"／")' in body
+    assert "st." not in body and "state." not in body  # チップの文は引数（サーバーの文）だけから
     ex = (STATIC / "explain.js").read_text(encoding="utf-8")
     assert "status-line" not in ex  # 会話（Claude の答え）の側からは書かない
 

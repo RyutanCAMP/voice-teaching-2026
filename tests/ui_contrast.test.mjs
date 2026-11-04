@@ -32,7 +32,10 @@ const PAIRS = [
   ["warn-text", "warn-bg", "注意の帯"], ["#ffc2c4", "red-bg", "承認できない帯（確認表示）"],
   ["#b9d5ff", "#15294a", "変更案の確認のみの帯"], ["#a9cbff", "#15294a", "シミュレーションモードの印"],
   ["#ffffff", "#1f4f8f", "人の吹き出し"], ["#c9f2dc", "green-bg", "人が教えた（緑の吹き出し）"],
-  ["#5d626b", "fig", "図の面の軸の文字"],
+  // 唐川さん承認のデザイン 11/4：3D の面を暗い地にした（前回 QA P1-2）。軸の文字（格子 100mm）・操作のヒント・窓の見出しは CSS の色
+  ["#93a4c3", "fig", "図の面の軸の文字（格子の大きさ）"], ["#8f9fbd", "fig", "3D の操作のヒント"], ["#9fb0cc", "#101c33", "3D の窓の見出し"],
+  ["text", "chip", "状態のチップ"], ["accent-text", "chip", "状態のチップ（候補あり）"], ["green", "chip", "状態のチップ（済み）"],
+  ["red", "chip", "状態のチップ（承認できない）"], ["#a9cbff", "#15294a", "シミュレーションの印（3D の下）"],
 ];
 
 test("style.css の色の変数が読める", () => {
@@ -55,4 +58,50 @@ test("決まっている色の意味：範囲を決めるボタンは青、承�
 
 test("動きを減らす設定のときは、動きを出さない", () => {
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)\s*\{[^}]*animation: none !important/);
+});
+
+// ---- view3d.js の色（唐川さん承認：色の値だけを変えた）。暗い図の面（--fig）の上で、文字は 4.5:1 以上、線・点は 3:1 以上 ----
+const v3 = readFileSync(new URL("../voice_teaching/web/static/view3d.js", import.meta.url), "utf-8");
+const hl = readFileSync(new URL("../voice_teaching/web/static/highlight.js", import.meta.url), "utf-8");
+const pick = (re, src = v3) => { const m = src.match(re); assert.ok(m, String(re)); return m.slice(1); };
+const [AFTER, AFTER_TEXT] = pick(/const C_AFTER = "(#[0-9a-f]{6})", C_AFTER_TEXT = "(#[0-9a-f]{6})"/);
+const [STOPPED] = pick(/const C_STOPPED = "(#[0-9a-f]{6})"/);
+const [LABEL_SEL, LABEL] = pick(/fill: sel && !isMoved \? "(#[0-9a-f]{6})" : "(#[0-9a-f]{6})"/);
+const [PT_MOVED, PT_SEL, PT] = pick(/fill: isMoved \? "(#[0-9a-f]{6})" : \(sel \? "(#[0-9a-f]{6})" : "(#[0-9a-f]{6})"\)/);
+const [LINE_BEFORE, LINE] = pick(/seg\(s, d\.points, c \? "(#[0-9a-f]{6})" : "(#[0-9a-f]{6})", 2\.5, "before"\)/);
+const [RANGE] = pick(/line\.setAttribute\("stroke", "(#[0-9a-f]{6})"\); line\.setAttribute\("stroke-width", "5"\)/);
+const [CAND] = pick(/r: 19, fill: "[^"]+", stroke: "(#[0-9a-f]{6})"/);
+const [AX_X, AX_Y, AX_Z] = pick(/\["X", \[sx \* step, 0, 0\], "(#[0-9a-f]{6})"\], \["Y", \[0, sy \* step, 0\], "(#[0-9a-f]{6})"\], \["Z", \[0, 0, step\], "(#[0-9a-f]{6})"\]/);
+const [TAUGHT_BG, TAUGHT_TEXT] = [pick(/rx: 11, fill: "(#[0-9a-f]{6})"/)[0], pick(/"text-anchor": "middle", fill: "(#[0-9a-f]{6})", "font-weight": "700" \}\);\s*tx\.textContent/)[0]];
+const [INSET_BG] = pick(/rx: 14, fill: "(#[0-9a-f]{6})"/);
+const [WAS] = pick(/fill: "(#[0-9a-f]{6})", "data-fs": 18/);
+const [NOW] = pick(/"text-anchor": "middle", fill: "(#[0-9a-f]{6})", "data-fs": 30/);
+const [MOVJ] = pick(/movj: \{ kind: "movj", dash: "2 6", width: 0\.72, color: "(#[0-9a-f]{6})"/, hl);
+const V3_TEXT = [  // [文字, 地, どこ]
+  [LABEL, "fig", "3D の点の名前"], [LABEL_SEL, "fig", "3D の選んだ点の名前"], [AFTER_TEXT, "fig", "3D の動かす点の名前（変更量つき）"],
+  [STOPPED, "fig", "3D の止まった候補の名前"], [AX_X, "fig", "3D の軸の文字 X"], [AX_Y, "fig", "3D の軸の文字 Y"], [AX_Z, "fig", "3D の軸の文字 Z"],
+  [TAUGHT_TEXT, TAUGHT_BG, "3D の人が教えた印"], [AFTER_TEXT, INSET_BG, "3D の回数の窓（×3）・変更の窓の量"], [WAS, INSET_BG, "3D の回数の窓（×2 →）"],
+  [NOW, INSET_BG, "3D の回数の窓（読み込んだ直後の ×2）"],
+];
+const V3_LINE = [  // [線・点, 地, どこ]
+  [LINE, "fig", "3D の線（MOVL）"], [LINE_BEFORE, "fig", "3D の変更前の線"], [AFTER, "fig", "3D の変更後の線"], [STOPPED, "fig", "3D の止まった候補の点線"],
+  [MOVJ, "fig", "3D の MOVJ の点線"], [RANGE, "fig", "3D の範囲の線"], [CAND, "fig", "3D の位置の候補の輪"],
+  [PT, "fig", "3D の点"], [PT_SEL, "fig", "3D の選んだ点"], [PT_MOVED, "fig", "3D の動かす点（変更前）"],
+];
+for (const [fg, bg, where] of V3_TEXT) {
+  test(`view3d.js の文字 4.5:1 以上：${where}`, () => {
+    const r = ratio(fg, bg);
+    assert.ok(r >= 4.5, `${where}：${color(fg)} / ${color(bg)} = ${r.toFixed(2)}`);
+  });
+}
+for (const [fg, bg, where] of V3_LINE) {
+  test(`view3d.js の線・点 3:1 以上：${where}`, () => {
+    const r = ratio(fg, bg);
+    assert.ok(r >= 3, `${where}：${color(fg)} / ${color(bg)} = ${r.toFixed(2)}`);
+  });
+}
+test("view3d.js の色の意味：変更後はオレンジ（承認へ進むボタンと同じ系統）、止まった候補はオレンジにしない", () => {
+  assert.equal(AFTER.toLowerCase(), "#ff6a1a");
+  assert.notEqual(STOPPED.toLowerCase(), AFTER.toLowerCase());
+  assert.notEqual(STOPPED.toLowerCase(), AFTER_TEXT.toLowerCase());
 });

@@ -350,11 +350,14 @@ body.recording .mic-label { color: #ffb3b6; }
 #candidate-panel:has(#approval-status:not([hidden])) { padding: 12px 14px; }
 /* 承認のあと（出力の場面）は「承認は確認表示のボタンだけです」の注記を出さない（承認は済んでいる） */
 .side:has(#approval-status:not([hidden])) .dock-actions .role-note { display: none; }
+/* 出力が済んだあと：出力先の注記は、出力の結果（出力先・「実機には入れないでください」）が代わりに出す */
+.side:has(#export-result[data-ok="true"]:not([hidden])) #export-note { display: none; }
 /* 下の操作の欄の候補のボタン */
 .dock-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
 .dock-actions .review-only { margin: 0; flex: 1 1 100%; }
 .dock-actions button.wide { flex: 1 1 0; width: auto; min-width: 0; }
-.dock-actions .export-note, .dock-actions .role-note { flex: 1 1 100%; margin: 0; }
+.dock-actions .export-note, .dock-actions .role-note, .dock-actions .export-result { flex: 1 1 100%; margin: 0; }
+.dock-actions .export-result .reason code { font-size: 11px; }
 .dock-actions .role-note { text-align: center; }
 #undo-button { display: block; margin: 0 auto; flex: none; }
 /* 確認して承認へ（オレンジ）は、目立たせる */

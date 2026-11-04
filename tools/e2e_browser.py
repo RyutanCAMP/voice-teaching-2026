@@ -706,7 +706,7 @@ def check_repeat(browser, url, check, shots: Path | None, out: Path, errors: lis
     bg = pg.evaluate("() => [getComputedStyle(document.querySelector('#range-yes')).backgroundColor,"
                      " getComputedStyle(document.querySelector('#range-no')).borderTopStyle]")
     check("range-go" in cls and "primary" not in cls and bg[0] == "rgb(10, 132, 255)" and bg[1] == "solid"
-          and "承認は次の確認表示で行います" in pg.inner_text("#reply-message"),
+          and "承認は次の確認表示で行います" in pg.inner_text("#dock-range"),  # 注記はボタンと一緒に下の操作の欄（唐川さん承認のデザイン 11/4）
           f"回数の変更：［この範囲を繰り返す］は青（承認のオレンジとは別）、［違う］は枠のある控えめなボタン、承認ではない注記：{bg}")
     check(pg.inner_text("#next-action") == "この範囲を繰り返しますか？"
           and "もう少し教えてください" not in pg.inner_text("#reply-message") and pg.is_hidden("#max-shift-label"),
@@ -2299,6 +2299,9 @@ def check_above_fold(browser, check, shots: Path | None, errors: list, out: Path
                 pg.wait_for_selector("#job-area:not([hidden])")
                 until(pg, lambda: pg.is_visible("#status-line"))
                 hero = "hero" in (pg.get_attribute("body", "class") or "")
+                stl = pg.text_content("#status-line") or ""
+                check(stl == "アプリの記録：変更の候補 なし／承認 まだ／出力 まだ" and pg.locator("#status-line .st-chip").count() == 3,
+                      f"{tag}状態のチップ（{w}×{h}）：文はサーバーの状態の1行のまま、区切りごとに3つのチップ（{stl}）")
                 stage(pg, w, h, "S1a 読込直後（①）", head + ["#mic-button", "#kbd-button"], "before_candidate",
                       hero and pg.is_hidden("#side-scroll") and pg.is_hidden("#text-input")
                       and pg.inner_text("#next-action") == "ロボットに、やりたい動きを話してください",

@@ -79,7 +79,8 @@
     <div id="side-scroll" class="side-scroll">
     <div id="side-flow" class="side-flow">
     <!-- 入口は1つ（11/4 唐川さんの指示③）：声も文字も下の「指示の欄」1つから /api/talk へ。会話の流れはこの欄に出す。旧「Claude に聞く」の入力欄は無くした -->
-    <!-- 会話（人・Claude（またはモック）・アプリの3つを別の印で出す）。答えでジョブ・変更候補・承認は変わらない。文は explain.js がテキストのノードで作る -->
+    <!-- Claude に聞く（読み取りだけ）の欄を会話の欄にしたもの。人・Claude（またはモック）・アプリの3つを別の印で出す。
+         答えでジョブ・変更候補・承認は変わらない。文は explain.js がテキストのノードで作る -->
     <section id="ask-panel" class="card dialog talk-panel" aria-label="会話" hidden>
       <div class="dlg-head">
         <span class="dlg-title">会話</span>
@@ -132,7 +133,6 @@
         <dl id="approval-states" class="approval-states" hidden></dl>
         <p id="approval-note" class="fine" hidden></p>
         <p id="approval-exported" class="fine approval-exported" hidden></p>
-        <div id="export-result" aria-live="polite" hidden></div>
       </div>
     </section>
     </div><!-- /side-flow -->
@@ -154,6 +154,8 @@
         <button type="button" id="open-confirm" class="wide" disabled>確認して承認へ</button>
         <button type="button" id="export-button" class="wide" disabled>シミュレーション用に出力（合成ジョブだけ・実機に入れない）</button>
         <button type="button" id="undo-button" class="link" disabled>元に戻す</button>
+        <!-- 出力の結果（出力の場面でいつも見えるよう、操作の欄に出す。出力のあとは出力先の注記の代わり） -->
+        <div id="export-result" class="export-result" aria-live="polite" hidden></div>
         <p id="export-note" class="fine export-note" hidden>出力先：<code id="out-dir"></code>（.JBI.txt）。実機での取り違えを完全に防ぐものではありません。実機には入れないでください。</p>
         <p class="fine role-note">承認は確認表示のボタンだけです</p>
       </div>
