@@ -18,7 +18,7 @@ review = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(review)
 
 def read(p): return json.loads(p.read_text(encoding='utf-8'))
-def write(p, v): p.write_text(json.dumps(v, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+def write(p, v): p.write_text(json.dumps(v, ensure_ascii=False, indent=2) + '\n', encoding='utf-8', newline='\n')
 def sha(p): return hashlib.sha256(p.read_bytes()).hexdigest()
 
 before, after = review.read_run('before'), review.read_run('delivery')
