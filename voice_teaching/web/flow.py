@@ -259,7 +259,13 @@ class WebFlow:
             if f is not None and f.op == "undo":
                 # Only whole-utterance cancellation, not a vague mention of it.
                 # An AI omission cannot leave a cancelled proposal approvable.
-                if ut.is_explicit_cancellation(f.raw) and not f.question:
+                cancel_text = f.raw
+                if (s.candidate is not None and s.candidate.kind == "shift" and f.position
+                        and s.candidate.target.split()[0] == f.position):
+                    # Existing question-choice buttons pin the current position.
+                    # Do not drop a reference to another candidate/position.
+                    cancel_text = re.sub(r"^C[0-9]{5}を", "", ut.normalize(cancel_text))
+                if ut.is_explicit_cancellation(cancel_text) and not f.question:
                     r = s.undo()
                 else:
                     r = Reply("ask", "今の変更候補を取り消しますか？ 取り消す場合は「取り消して」と言ってください", facts=f)
