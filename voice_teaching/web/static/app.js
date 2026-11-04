@@ -13,7 +13,8 @@ import { SpeechInput } from "/static/speech.js";
 import { View3D } from "/static/view3d.js";
 import { Player } from "/static/player.js";
 import { splitUnknown, displayMinus, segmentLook, segmentTitle, confirmHeading, updownStatus, updownConfirmLine, updownDetail,
-  speechExamples, repeatCountLabel, cycleStatus, nowPlaying, nowText, sequenceChips, tallyParts, rephraseExamples } from "/static/highlight.js";
+  speechExamples, repeatCountLabel, cycleStatus, nowPlaying, nowText, sequenceChips, tallyParts, rephraseExamples,
+  nextStep, attachTips } from "/static/highlight.js";
 
 const state = {
   sessionId: null,  // サーバーのメモリにある画面の状態の番号
@@ -369,6 +370,7 @@ function voiceMode() {
 }
 
 function renderSteps() {
+  $("opening-replay").hidden = !state.sessionId;  // オープニングの出し直しは、JOB を読み込んだあと（最初の画面のボタンを増やさない）
   const step = currentStep();
   for (let i = 1; i <= 4; i++) {
     const li = $("step-" + i);
@@ -485,8 +487,8 @@ $("text-input").addEventListener("input", renderSteps);
 // 大きなマイクが小さくなりながら左下の入力欄の横へ移る（FLIP・約0.4秒）。空いた場所に会話の履歴がふわっと出る。
 // 戻り方：別のデータを読んだ → ① に戻る（会話の履歴は無くなる）。「会話をやり直す」→ 候補・範囲の確認・会話の途中が無ければ ① に戻る
 //（小さなマイクが真ん中へ大きくなって戻る）。動きを減らす設定のときは、動かさずにすぐ切り替える
-// ロボットに直接声で命令するように読めない言い方にする（Safety P2-4 の案。11/5 残件2）。動かすのではなく、動作データ（JOB）の直し方
-const HERO_TITLE = "動作データの直し方を話してください";
+// 唐川さんの確定文（11/5 UI 最終仕様）。ロボットを動かす命令ではなく、動きについて話す（Safety P2-4 の「直接命令に読める」を避ける）
+const HERO_TITLE = "ロボットの動きについて話しかけてください";
 const HERO_REPLACES = ["点か番号を押してください", "🎤 を押して話してください", "動かし方を書いて「次へ」"];
 
 function isHero() {
@@ -729,7 +731,8 @@ function renderRepeatRange(notice = "") {
   box.replaceChildren(...parts);
   box.hidden = false;
   // ボタンと注記（範囲を決めるだけ。承認は次の確認表示）は、下の操作の欄（いつも見える。前の答えのボタンは残さない）
-  $("dock-range").replaceChildren(row, el("p", { class: "range-button-note" }, rr.button_note));
+  $("dock-range").replaceChildren(row, el("p", { class: "range-button-note" }, rr.button_note,
+    el("button", { type: "button", class: "tip", "data-tip": "range" }, "?")));
   $("dock-range").dataset.turn = String(rr.turn);
   renderSteps();  // 見出しを、ボタンに合わせる
   // 狭い画面：範囲の確認の中身とボタンが見えるところまで送る
@@ -768,6 +771,16 @@ function rephraseRow(message) {
   return row;
 }
 
+// 次にすること（11/5）：サーバーの返事の文（今の検査の結果）に合わせた1行。理由の文はそのまま上に出す。
+// 例は決まった文だけで、押しても欄に入れない（人の言葉から正しい指示を推測して入れない）
+function nextStepLine(message) {
+  const n = nextStep(message);
+  if (!n) return null;
+  const line = el("p", { class: "next-step" }, el("span", { class: "next-step-head" }, "次にすること"), n.say);
+  if (n.ex) line.append(el("span", { class: "next-step-ex" }, `例：「${n.ex}」`));
+  return line;
+}
+
 function showReply(status, message, choices) {
   const box = $("reply-message");
   box.className = "reply " + status;
@@ -796,6 +809,7 @@ function showReply(status, message, choices) {
   else if (/上限[^。]*を超え/.test(message || "")) box.replaceChildren(friendly("limit", message));  // 移動量の上限を超えたときだけ
   else box.replaceChildren(friendly("stop", message));
   if (status !== "ok") { const r = rephraseRow(message); if (r) box.append(r); }
+  if (status !== "ok") { const n = nextStepLine(message); if (n) box.append(n); }
   box.hidden = false;
   $("voice-status").textContent = "";
   syncRangeDock();
@@ -2092,3 +2106,95 @@ $("voice-cancel").addEventListener("click", () => {
   updateLocks();
 });
 updateLocks();
+
+// 個別ヘルプ（11/5）：画面の「？」に、短い説明と例の小窓をつなぐ（見せ方だけ）
+attachTips(document);
+
+// ---- オープニング（11/5 UI 最終仕様）：起動のときだけの短い演出。表示だけ（読み込み・状態・検査には触らない） ----
+// - 約3秒。押す・Esc・Enter・Space・［SKIP］で飛ばす。下の画面はそのまま読み込みを続ける
+// - 動きを減らす設定：止めた絵を少しだけ出す（動かさない）
+// - 画面を開いたとき（起動のとき）に出す。ブラウザーには何も覚えさせない（E2-6）。自動のときは無音（ブラウザーの決まり）。下の［▶ オープニング］で出し直すと、
+//   押したあとなので短い電子音も鳴らす（ピピッ・カチカチ・シュン）。?opening=1 で必ず出す・?opening=0 で出さない
+// - 自動の試験（navigator.webdriver）では自動で出さない（ほかの確かめの邪魔をしない）。出し直しの確かめはボタンで行う
+// - ROBOT・TOOL・JOB・READY は、確かめていない接続・安全を言わない（ROBOT：実機に接続しない／TOOL：確認していない／
+//   JOB：読み込んだかどうかだけ／READY：シミュレーションの操作を始められるだけ）
+const opening = (() => {
+  const box = $("opening");
+  const STEPS = [[0, "s0"], [380, "s1"], [1080, "s2"], [1330, "s3"], [1580, "s4"], [2080, "s5"]];
+  const END = 3300, FADE = 450;
+  let timers = [], audio = null, active = false, still = false, back = null;
+
+  const tone = (freq, t0, dur, type = "square", vol = 0.05) => {
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, t0);
+    g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(vol, t0 + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    o.connect(g).connect(audio.destination); o.start(t0); o.stop(t0 + dur + 0.02);
+  };
+  const whoosh = (t0) => {
+    const n = Math.floor(audio.sampleRate * 0.4), buf = audio.createBuffer(1, n, audio.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+    const src = audio.createBufferSource(), f = audio.createBiquadFilter(), g = audio.createGain();
+    src.buffer = buf; f.type = "bandpass"; f.Q.value = 2.5;
+    f.frequency.setValueAtTime(300, t0); f.frequency.exponentialRampToValueAtTime(5200, t0 + 0.32);
+    g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.16, t0 + 0.08); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.38);
+    src.connect(f).connect(g).connect(audio.destination); src.start(t0); src.stop(t0 + 0.4);
+  };
+  const sound = (step) => {
+    if (!audio) return;
+    try {
+      const t = audio.currentTime + 0.01;
+      if (step === "s1") { tone(1760, t, 0.05); tone(2349, t + 0.09, 0.07); }           // ピピッ
+      else if (step === "s2" || step === "s3" || step === "s4") { tone(3400, t, 0.012, "square", 0.04); tone(1700, t + 0.05, 0.01, "square", 0.03); }  // カチカチ
+      else if (step === "s5") whoosh(t);                                                  // シュン
+    } catch { /* 音が出せなくても演出は続ける */ }
+  };
+  const jobLine = () => {
+    const name = ($("file-name").textContent || "").trim();
+    $("op-job").textContent = name ? "LOADED" : "NOT LOADED";
+    $("op-job-note").textContent = name ? `${name}（読み込みました）` : "まだ読み込んでいません";
+  };
+  function finish() {
+    if (!active) return;
+    for (const t of timers) clearTimeout(t);
+    timers = [];
+    box.classList.add("out");
+    const done = () => { box.hidden = true; box.className = "opening"; active = false; if (back && back.focus) back.focus(); back = null; };
+    if (still) done(); else timers.push(setTimeout(done, FADE));
+  }
+  function start(withSound = false) {
+    if (active) return;
+    active = true;
+    still = reduceMotion();
+    box.className = "opening";
+    jobLine();
+    if (withSound) {
+      try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); if (audio.state === "suspended") audio.resume(); }
+      catch { audio = null; }
+    }
+    const loud = withSound ? audio : null;
+    box.hidden = false;
+    back = document.activeElement;
+    $("op-skip").focus({ preventScroll: true });
+    if (still) {
+      box.classList.add("still", ...STEPS.map(([, c]) => c));
+      timers.push(setTimeout(finish, 1400));
+      return;
+    }
+    for (const [t, c] of STEPS) timers.push(setTimeout(() => { box.classList.add(c); if (loud) sound(c); }, t));
+    timers.push(setTimeout(finish, END));
+  }
+  box.addEventListener("click", finish);
+  document.addEventListener("keydown", (ev) => {
+    if (!active || !["Escape", "Enter", " ", "Spacebar"].includes(ev.key)) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    finish();
+  }, true);
+  $("opening-replay").addEventListener("click", () => start(true));
+  return { start, finish, get active() { return active; } };
+})();
+
+{
+  const q = new URLSearchParams(location.search).get("opening");
+  if (q !== "0" && (q === "1" || !navigator.webdriver)) opening.start(false);
+}

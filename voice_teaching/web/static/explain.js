@@ -197,7 +197,8 @@ function showReply(r) {
     const li = addTurn("アプリ", `変更の希望の記録：あなたの文から ${prog}／Claude ${cl}。対象 ${c.target || "決めていません"}`
       + `${c.target ? "" : (c.target_note ? "（" + c.target_note + "）" : "")}。${c.note}`, "app record");
     if (c.mismatch) li.prepend(el("span", { class: "mark mark-mismatch" }, "! 食い違い"));
-  } else if (r.change_request) {
+  } else if (r.change_request && !(r.notes || []).some((n) => n.startsWith("範囲を確かめてください"))) {
+    // 範囲の確認を始めたとき（サーバーが次にすることの文に替えたとき）は、同じことを2回言わない（11/5 情報を減らす）
     const what = r.change_request.kind === "repeat" ? "回数の変更" : "位置の移動";
     addTurn("アプリ", `Claude が読んだ変更の希望：${what}。記録して表示しただけで、何も変えていません`, "app");
   }

@@ -7,6 +7,24 @@
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+<!-- オープニング（11/5 UI 最終仕様）：起動のときだけの短い演出（約3秒・押すかキーで飛ばせる・動きを減らす設定では止めた絵だけ）。
+     表示だけ。ROBOT・TOOL・JOB・READY は、確かめていない接続・安全を言わない（実機に接続しない・TOOL は確認していない・READY はシミュレーションの操作を始められるだけ） -->
+<div id="opening" class="opening" role="dialog" aria-modal="true" aria-label="起動の演出（押すと飛ばします）" hidden>
+  <div class="op-grid" aria-hidden="true"></div>
+  <div class="op-scan" aria-hidden="true"></div>
+  <div class="op-center">
+    <p class="op-logo"><span class="op-logo-a">VOICE</span><span class="op-logo-b">TEACHING</span></p>
+    <p class="op-sub">INDUSTRIAL ROBOT ・ VOICE TEACHING ・ SIMULATION</p>
+    <ul class="op-lines">
+      <li class="op-line"><span class="op-key">ROBOT</span><span class="op-dots" aria-hidden="true"></span><span class="op-val">SIMULATION ONLY</span><span class="op-note">実機に接続しません</span></li>
+      <li class="op-line"><span class="op-key">TOOL</span><span class="op-dots" aria-hidden="true"></span><span class="op-val">NOT CHECKED</span><span class="op-note">確認していません</span></li>
+      <li class="op-line"><span class="op-key">JOB</span><span class="op-dots" aria-hidden="true"></span><span class="op-val" id="op-job">NOT LOADED</span><span class="op-note" id="op-job-note">まだ読み込んでいません</span></li>
+    </ul>
+    <p class="op-ready">READY</p>
+    <p class="op-ready-note">シミュレーションの操作を始められます（実機の接続・安全の確認ではありません）</p>
+  </div>
+  <button type="button" id="op-skip" class="op-skip">SKIP ›</button>
+</div>
 <header class="top">
   <!-- 上の帯（唐川さん承認のデザイン 11/4）：ロゴ・シミュレーションの印・解釈の印・状態のチップ・使い方（？）・詳細表示。
        4つのステップの列は画面から外した（今のステップの印だけ残す。今のステップは見出しと状態のチップで分かる） -->
@@ -23,7 +41,7 @@
     <li id="step-4" class="step"><span class="num">4</span><span class="label">確かめて承認</span></li>
   </ol>
   <!-- 状態の1行（CHECKER_033 P1-A）：サーバーの文（state.status_line）をそのまま、区切り（／）ごとの小さなチップにして出す。文は変えない（app.js） -->
-  <p id="status-line" class="status-line" aria-live="polite" hidden></p>
+  <p id="status-line" class="status-line" aria-live="polite" hidden></p><button type="button" class="tip" data-tip="status">?</button>
   <div class="help-wrap">
     <button type="button" id="help-button" class="help-btn" aria-expanded="false" aria-controls="help-pop" aria-label="使い方" title="使い方">？</button>
     <div id="help-pop" class="help-pop" role="dialog" aria-label="使い方" hidden>
@@ -35,7 +53,7 @@
         <li>「Zプラス方向に10ミリ」</li>
       </ul>
       <p class="help-line">一文字の『Yを…』は聞き違えやすいので、『Y座標を…』と言ってください</p>
-      <p class="help-line">話した文は欄に入るだけ。『次へ』で送ります</p>
+      <p class="help-line">話した文は欄に入るだけ。『送る』で送ります</p>
       <p class="help-line">聞き取った文がちがうときは、直してから送ってください</p>
       <p class="help-line">承認は確認表示のボタンだけです</p>
     </div><!-- /help-pop -->
@@ -141,7 +159,7 @@
     <!-- 下の操作の欄（いつも見える）。候補のボタンは「確かめて承認」のカードと同じときに出す（app.js が合わせる） -->
     <div id="dock" class="dock">
       <section id="select-panel" class="card select-card" aria-label="位置を選ぶ">
-        <p class="select-head">位置を選ぶ<span class="select-sub">右の図の点か、番号を押します</span></p>
+        <p class="select-head">位置を選ぶ<span class="select-sub">右の図の点か、番号を押します</span><button type="button" class="tip" data-tip="position">?</button></p>
         <div class="chips-row">
           <div id="position-chips" class="chips"></div>
           <!-- ② の番号の1行：はみ出した番号があるときだけ出す（横に送れることを見せる。押すと送る） -->
@@ -161,13 +179,13 @@
         <!-- 出力の結果（出力の場面でいつも見えるよう、操作の欄に出す。出力のあとは出力先の注記の代わり） -->
         <div id="export-result" class="export-result" aria-live="polite" hidden></div>
         <p id="export-note" class="fine export-note" hidden>出力先：<code id="out-dir"></code>（.JBI.txt）。実機での取り違えを完全に防ぐものではありません。実機には入れないでください。</p>
-        <p class="fine role-note">承認は確認表示のボタンだけです</p>
+        <p class="fine role-note">承認は確認表示のボタンだけです<button type="button" class="tip" data-tip="approve">?</button></p>
       </div>
     <section id="instruction-panel" class="card instr" aria-label="音声で指示">
       <div id="instruction-slot">
         <div class="pos-row">
         <button type="button" id="voice-position" class="position-pill" title="位置を選び直す"></button>
-        <p id="updown-status" class="updown fine" hidden></p>
+        <p id="updown-status" class="updown fine" hidden></p><button type="button" class="tip" data-tip="updown">?</button>
         </div>
         <div id="voice-input-slot">
           <div id="voice-controls">
@@ -179,7 +197,7 @@
                 <button type="button" id="mic-button" class="mic-big" disabled aria-label="マイクをONにする" aria-pressed="false"><svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8.5" y="2.5" width="7" height="12" rx="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
                 <span class="mic-wave right" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
               </div>
-              <p id="mic-cta" class="mic-cta" aria-hidden="true">押して話す</p>
+              <p class="mic-cta-row"><span id="mic-cta" class="mic-cta" aria-hidden="true">押して話す</span><button type="button" class="tip" data-tip="mic">?</button></p>
               <p id="mic-label" class="mic-label">マイク OFF</p>
               <p id="mic-hint" class="fine mic-hint" hidden></p>
               <div class="rec-buttons">
@@ -217,7 +235,7 @@
           <ul id="input-examples" class="help-examples"></ul>
           <p class="help-line">例を押すと欄に入ります。送るのは［送る］です</p>
         </div>
-        <p class="fine max-shift">1回に動かせる量：<span id="max-shift-label"></span></p>
+        <p class="fine max-shift">1回に動かせる量：<span id="max-shift-label"></span><button type="button" class="tip" data-tip="shift">?</button></p>
       </div>
     </section>
     </div><!-- /dock -->
@@ -258,7 +276,7 @@
         <button type="button" id="play-step" class="small" disabled title="今の区間を終わりまで進めて止める（終わったあとは、はじめから）">1つ進む</button>
         <button type="button" id="play-stop" class="small" disabled>止める</button>
       </div>
-      <span id="play-status" class="play-status" aria-live="polite"></span>
+      <button type="button" class="tip" data-tip="play">?</button><button type="button" class="tip tip-word" data-tip="count">回数 ?</button><span id="play-status" class="play-status" aria-live="polite"></span>
       <!-- 回数の変更の候補があるときだけ出す（候補が無ければ出さない） -->
       <div id="play-compare" class="play-compare" role="group" aria-label="変更前と変更後を比べる" hidden>
         <button type="button" id="play-before" class="small" aria-pressed="false">変更前を再生</button>
@@ -359,6 +377,7 @@
 <footer class="foot">
   <span id="app-version" class="ver">Ver.__VT_VERSION__</span>
   <p id="readonly-note">元のジョブは変えません。実機用の出力・転送・ロボットの起動はしません。</p>
+  <button type="button" id="opening-replay" class="link small op-replay" hidden title="起動の演出をもう一度（音あり）">▶ オープニング</button>
 </footer>
 
 <div id="confirm-overlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-title" hidden>

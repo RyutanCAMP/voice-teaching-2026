@@ -276,3 +276,123 @@ export function rephraseExamples(message, heard) {
   }
   return out.slice(0, 3);
 }
+
+// 11/5 UI の仕上げ（唐川さんの方針）：見せ方だけ。サーバーの検査・入力の読み方・承認は変えない。
+// 1. 個別ヘルプ（TIPS・attachTips）：操作の横の小さな「？」。マウスを合わせる・押す・キーボード（Tab で合わせる・Enter・Esc）で開く。
+//    説明は短く、具体例を中心に。できない操作をできるように書かない
+// 2. 次にすること（nextStep）：サーバーの返事の文（今の検査の結果・決まった文）に合わせて、次の行動を1行で添える。
+//    サーバーの理由はそのまま出す（隠さない）。例は決まった文だけ（人の言葉から正しい指示を推測しない・押しても欄に入れない）
+
+export const TIPS = {
+  mic: { head: "声で指示する", body: "押して1回話すと、自動で OFF になります。話した文は欄に入るので、確かめて［送る］。", ex: "Zプラス方向に10mm" },
+  input: { head: "文字で指示する", body: "声と同じ欄です。位置を選んでから、軸・向き・量を書きます。", ex: "Zマイナス3ミリ" },
+  shift: { head: "移動量", body: "軸（X・Y・Z）と向き（プラス・マイナス）と量（mm）を一緒に言います。上限を超える量は変更しません。", ex: "Zプラス方向に10mm" },
+  count: { head: "回数", body: "続けて2回以上書かれた動きの回数を変えます（2回→3回だけ）。範囲は画面のボタンで確かめます。", ex: "3回にして" },
+  range: { head: "変更範囲", body: "どの位置からどの位置まで変更するか確認します。違うときは［違う］を押します。", ex: null },
+  position: { head: "位置を選ぶ", body: "右の図の点か、番号を押します。薄い番号の位置は変更できません。", ex: "C00005 を押してから「Zプラス方向に10mm」" },
+  updown: { head: "上下の向き", body: "「上げる・下げる」が Z のどちら向きかを、設定で確かめたかどうかです。未確認のときは Zプラス・Zマイナスで言います。", ex: "Zマイナス方向に3mm" },
+  play: { head: "3D の再生", body: "▶ で命令の順に動きをたどります。候補があるときは［変更前を再生］［変更後を再生］で比べます。ドラッグで回す・ホイールで拡大。", ex: null },
+  approve: { head: "承認", body: "変更前と変更後を確かめてから、確認表示のボタンで承認します。声では承認しません。", ex: null },
+  status: { head: "アプリの記録", body: "アプリが記録している今の状態です（候補・承認・出力）。会話の答えでは変わりません。", ex: null },
+};
+
+// サーバーの返事の文（決まった文）→ 次にすること。上から順に、最初に合ったものだけ。合わなければ出さない
+// （例をすでに含む文・できない操作の文には足さない）
+export const NEXT_STEPS = [
+  { re: /^どの方向/, say: "移動する方向を指定してください", ex: "Zプラス方向に10mm" },
+  { re: /^何mm動かしますか|^量がはっきりしません/, say: "移動量を、数と mm で指定してください", ex: "Zプラス方向に10mm" },
+  { re: /^位置が決まっていないため/, say: "先に、右の図の点か下の番号で位置を選んでください", ex: null },
+  { re: /^回数は整数で言ってください/, say: "回数を、整数で指定してください", ex: "3回にして" },
+  { re: /^区間（[^）]+）の中に、区間の外の位置/, say: "指定された範囲では変更できません。対象の位置を確認してください", ex: null },
+  { re: /^位置 C[0-9]{5} はこのジョブにありません/, say: "対象の位置を確認してください。位置の番号は右の図と下の番号で確かめられます", ex: null },
+];
+
+export function nextStep(message) {
+  const text = typeof message === "string" ? message.trim() : "";
+  if (!text) return null;
+  const hit = NEXT_STEPS.find((s) => s.re.test(text));
+  return hit ? { say: hit.say, ex: hit.ex } : null;
+}
+
+// ---- 個別ヘルプの小窓（1つを使い回す）----
+// 目印：<button type="button" class="tip" data-tip="mic">?</button>。開く：マウスを合わせる・押す・Tab で合わせる。
+// 閉じる：マウスを外す（押して開いたときは、もう一度押す・×・Esc・外を押す）・Tab で外す
+export function attachTips(doc = document) {
+  const pop = doc.createElement("div");
+  pop.id = "tip-pop";
+  pop.className = "tip-pop";
+  pop.setAttribute("role", "tooltip");
+  pop.hidden = true;
+  doc.body.append(pop);
+  let owner = null, pinned = false, returning = false;  // returning：閉じて「？」へ戻すフォーカスでは、開き直さない
+
+  const fill = (key) => {
+    const t = TIPS[key];
+    const head = doc.createElement("p"); head.className = "tip-head"; head.textContent = t.head;
+    const body = doc.createElement("p"); body.className = "tip-body"; body.textContent = t.body;
+    const parts = [head, body];
+    if (t.ex) { const ex = doc.createElement("p"); ex.className = "tip-ex"; ex.textContent = `例：「${t.ex}」`; parts.push(ex); }
+    const x = doc.createElement("button");
+    x.type = "button"; x.className = "tip-close"; x.textContent = "×"; x.setAttribute("aria-label", "閉じる");
+    x.addEventListener("click", () => close(true));
+    pop.replaceChildren(x, ...parts);
+  };
+  const place = (btn) => {
+    const r = btn.getBoundingClientRect(), vw = doc.documentElement.clientWidth, vh = doc.documentElement.clientHeight;
+    pop.style.left = "0px"; pop.style.top = "0px";
+    const w = pop.offsetWidth, h = pop.offsetHeight;
+    const left = Math.max(8, Math.min(r.left + r.width / 2 - w / 2, vw - w - 8));
+    const top = r.bottom + 8 + h <= vh - 8 ? r.bottom + 8 : Math.max(8, r.top - 8 - h);
+    pop.style.left = `${Math.round(left)}px`; pop.style.top = `${Math.round(top)}px`;
+  };
+  const open = (btn, pin) => {
+    if (owner && owner !== btn) owner.setAttribute("aria-expanded", "false");
+    owner = btn; pinned = pin;
+    fill(btn.dataset.tip);
+    pop.hidden = false;
+    btn.setAttribute("aria-expanded", "true");
+    btn.setAttribute("aria-describedby", "tip-pop");
+    place(btn);
+  };
+  const close = (focusBack = false) => {
+    if (!owner) return;
+    const b = owner;
+    pop.hidden = true; owner.setAttribute("aria-expanded", "false"); owner.removeAttribute("aria-describedby");
+    owner = null; pinned = false;
+    if (focusBack) { returning = true; b.focus(); returning = false; }
+  };
+
+  // あとから足した「？」（範囲の確認の欄など）にも効くよう、文書全体で受ける（委譲）
+  const tipOf = (t) => {
+    const b = t && t.closest ? t.closest("button.tip[data-tip]") : null;
+    if (b && TIPS[b.dataset.tip] && !b.hasAttribute("aria-expanded")) {
+      b.setAttribute("aria-expanded", "false");
+      if (!b.getAttribute("aria-label")) b.setAttribute("aria-label", `${TIPS[b.dataset.tip].head}の説明`);
+    }
+    return b && TIPS[b.dataset.tip] ? b : null;
+  };
+  for (const b of doc.querySelectorAll("button.tip[data-tip]")) tipOf(b);
+  doc.addEventListener("mouseover", (ev) => { const b = tipOf(ev.target); if (b && !pinned && owner !== b) open(b, false); });
+  doc.addEventListener("mouseout", (ev) => {
+    const b = tipOf(ev.target);
+    if (b && !pinned && owner === b && !b.contains(ev.relatedTarget)) close();
+  });
+  doc.addEventListener("focusin", (ev) => { const b = tipOf(ev.target); if (b && !pinned && !returning) open(b, false); });
+  doc.addEventListener("focusout", (ev) => {
+    const b = tipOf(ev.target);
+    if (b && !pinned && owner === b && !pop.contains(ev.relatedTarget)) close();
+  });
+  doc.addEventListener("click", (ev) => {
+    const b = tipOf(ev.target);
+    if (b) {
+      ev.preventDefault();
+      if (owner === b && pinned) close(); else open(b, true);  // 押す・タップ：開いたまま（もう一度・×・Esc・外を押すと閉じる）
+      return;
+    }
+    if (owner && pinned && !pop.contains(ev.target)) close();
+  }, true);
+  doc.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && owner) close(true); });
+  doc.addEventListener("scroll", () => { if (owner) place(owner); }, true);  // 欄が動いても、目印のそばに付いていく
+  doc.defaultView.addEventListener("resize", () => { if (owner) place(owner); });
+  return { open, close, pop };
+}

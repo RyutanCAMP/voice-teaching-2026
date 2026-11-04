@@ -323,7 +323,7 @@ def check_ui_1105(browser, check, shots: Path | None, out: Path) -> None:
             return [b.getBoundingClientRect().bottom, lim]; }""")
         check(pg.is_visible("#talk-first") and r[0] <= r[1],
               f"11/5 残件4（{w}×{h}）：① で［位置を選ばずに話す］が、下の帯より上に見える（下端 {r[0]:.0f}px・帯 {r[1]:.0f}px）")
-        check(pg.inner_text("#next-action") == "動作データの直し方を話してください" and "ロボットに" not in pg.inner_text("#next-action"),
+        check(pg.inner_text("#next-action") == "ロボットの動きについて話しかけてください" and "ロボットに" not in pg.inner_text("#next-action"),
               f"11/5 残件2（{w}×{h}）：① の見出しは、ロボットに直接命令するように読めない言い方")
         check(pg.is_hidden("#chips-more"), f"11/5 残件1（{w}×{h}）：① では番号を折り返すので、はみ出しの札を出さない")
         fill_text(pg, "このロボット、何をしている？")
@@ -356,6 +356,97 @@ def check_ui_1105(browser, check, shots: Path | None, out: Path) -> None:
             shots.mkdir(parents=True, exist_ok=True)
             pg.screenshot(path=str(shots / f"U1105_{w}_chips.png"))
         pg.close()
+    # ---- 個別ヘルプ（11/5）：マウス・押す・キーボード。次にすること（間違った入力の案内） ----
+    def pop_open(pg):
+        return pg.is_visible("#tip-pop")
+    for (w, h) in [(1280, 720), (1920, 1080)]:
+        pg = browser.new_page(viewport={"width": w, "height": h})
+        pg.add_init_script(FAKE_RECOGNITION)
+        pg.goto(url)
+        pg.set_input_files("#file-input", str(REPO / "samples/dummy" / "DEMO_BUTTON_REPEAT.JBI"))
+        pg.wait_for_selector("#job-area:not([hidden])")
+        until(pg, lambda: pg.is_visible("[data-tip=mic]"))
+        tips = pg.eval_on_selector_all("button.tip[data-tip]", "els => els.filter(e => e.getClientRects().length).map(e => e.dataset.tip)")
+        check({"mic", "shift", "count", "position", "updown", "play", "status"} <= set(tips),
+              f"11/5 個別ヘルプ（{w}×{h}）：マイク・移動量・回数・位置・上下・再生・記録の「？」が見える（{tips}）")
+        pg.hover("[data-tip=shift]")
+        until(pg, lambda: pop_open(pg))
+        t = pg.inner_text("#tip-pop")
+        box = pg.locator("#tip-pop").bounding_box()
+        check("例：「Zプラス方向に10mm」" in t and box and box["x"] >= 0 and box["x"] + box["width"] <= w and box["y"] + box["height"] <= h,
+              f"11/5 個別ヘルプ（{w}×{h}）：マウスを合わせると、短い説明と例（画面の中）")
+        pg.mouse.move(5, h - 5)
+        until(pg, lambda: not pop_open(pg))
+        check(True, f"11/5 個別ヘルプ（{w}×{h}）：マウスを外すと消える")
+        pg.click("[data-tip=count]")
+        pg.mouse.move(5, h - 5)
+        pg.wait_for_timeout(200)
+        check(pop_open(pg) and "例：「3回にして」" in pg.inner_text("#tip-pop") and pg.get_attribute("[data-tip=count]", "aria-expanded") == "true",
+              f"11/5 個別ヘルプ（{w}×{h}）：押すと開いたまま（マウスを外しても消えない）")
+        pg.click("#tip-pop .tip-close")
+        until(pg, lambda: not pop_open(pg))
+        check(True, f"11/5 個別ヘルプ（{w}×{h}）：× で閉じる")
+        pg.focus("[data-tip=position]")
+        until(pg, lambda: pop_open(pg))
+        pg.keyboard.press("Escape")
+        until(pg, lambda: not pop_open(pg))
+        check(pg.evaluate("document.activeElement.dataset.tip") == "position",
+              f"11/5 個別ヘルプ（{w}×{h}）：キーボード（フォーカスで開く・Esc で閉じて「？」に戻る）")
+        fill_text(pg, "C00002からC00003を3回にして")
+        pg.click("#text-send")
+        until(pg, lambda: pg.is_visible("#reply-message .next-step"))
+        rm = pg.inner_text("#reply-message")
+        check("区間（C00002〜C00003）の中に、区間の外の位置" in rm and "指定された範囲では変更できません。対象の位置を確認してください" in rm
+              and pg.locator("#reply-message .next-step-ex").count() == 0 and pg.is_hidden("#range-yes"),
+              f"11/5 次にすること（{w}×{h}）：範囲が合わない：理由をそのまま出し、案内を添える（正しい範囲を推測して例に出さない・範囲の確認にしない）")
+        pg.locator("#position-chips button", has_text="C00004").click()
+        until(pg, lambda: pg.inner_text("#voice-position strong") == "C00004")
+        fill_text(pg, "10ミリ動かして")
+        pg.click("#text-send")
+        until(pg, lambda: pg.is_visible("#reply-message .next-step"))
+        ns = pg.inner_text("#reply-message .next-step")
+        check("移動する方向を指定してください" in ns and "例：「Zプラス方向に10mm」" in ns and pg.input_value("#text-input") == "",
+              f"11/5 次にすること（{w}×{h}）：方向が無い：次の行動と例（例は欄に入れない）：{ns}")
+        if shots is not None:
+            pg.screenshot(path=str(shots / f"U1105_{w}_next_step.png"))
+        pg.close()
+    # ---- オープニング（11/5）：飛ばせる・自分で終わる・出し直せる・動きを減らす設定・読み込みの邪魔をしない・接続を言わない ----
+    for (w, h) in [(1280, 720), (1920, 1080)]:
+        pg = browser.new_page(viewport={"width": w, "height": h})
+        pg.goto(url)
+        pg.wait_for_timeout(300)
+        check(pg.is_hidden("#opening"), f"11/5 オープニング（{w}×{h}）：自動の試験では自動で出さない")
+        pg.goto(url + "?opening=1")
+        until(pg, lambda: pg.is_visible("#opening"))
+        t = pg.inner_text("#opening")
+        check("SIMULATION ONLY" in t and "実機に接続しません" in t and "NOT CHECKED" in t and "NOT LOADED" in t
+              and "実機の接続・安全の確認ではありません" in t and "CONNECTED" not in t and "接続済み" not in t,
+              f"11/5 オープニング（{w}×{h}）：ROBOT・TOOL・JOB・READY は、確かめていない接続・安全を言わない")
+        until(pg, lambda: pg.is_hidden("#opening"), timeout_ms=5000)
+        check(True, f"11/5 オープニング（{w}×{h}）：数秒で自分で終わり、メインの画面になる")
+        pg.goto(url + "?opening=1")
+        until(pg, lambda: pg.is_visible("#opening"))
+        pg.keyboard.press("Escape")
+        until(pg, lambda: pg.is_hidden("#opening"), timeout_ms=1500)
+        check(True, f"11/5 オープニング（{w}×{h}）：Esc で飛ばせる")
+        pg.set_input_files("#file-input", str(REPO / "samples/dummy" / "DEMO_BUTTON_REPEAT.JBI"))
+        pg.wait_for_selector("#job-area:not([hidden])")
+        pg.click("#opening-replay")
+        until(pg, lambda: pg.is_visible("#opening"))
+        check("LOADED" in pg.inner_text("#op-job") and "DEMO_BUTTON_REPEAT.JBI" in pg.inner_text("#op-job-note"),
+              f"11/5 オープニング（{w}×{h}）：［▶ オープニング］で出し直せる。JOB は読み込んだファイルの名前だけ")
+        pg.click("#opening")
+        until(pg, lambda: pg.is_hidden("#opening"), timeout_ms=1500)
+        check(pg.is_visible("#mic-button"), f"11/5 オープニング（{w}×{h}）：押すと飛ばせる。下の画面はそのまま")
+        pg.close()
+    ctx = browser.new_context(viewport={"width": 1280, "height": 720}, reduced_motion="reduce")
+    pg = ctx.new_page()
+    pg.goto(url + "?opening=1")
+    until(pg, lambda: pg.is_visible("#opening"))
+    still = "still" in (pg.get_attribute("#opening", "class") or "")
+    until(pg, lambda: pg.is_hidden("#opening"), timeout_ms=3000)
+    check(still, "11/5 オープニング：動きを減らす設定では、止めた絵だけ（動かさない）で、すぐ終わる")
+    ctx.close()
     srv.shutdown()
     srv.server_close()
 
@@ -2127,14 +2218,18 @@ def check_updown_unconfirmed(browser, check, shots: Path | None, errors: list) -
               f"上下の設定なし：「上下の向き：未確認（Z＋・Z−で指示）」と出す（{pg.inner_text('#updown-status')!r}）")
         det = pg.inner_text("#updown-detail") if pg.is_visible("#updown-detail") else ""
         check(det == "上下の向き：未確認（HC20DT）", f"S30-1：設定なしのサーバーでもロボット名（--robot）を出す（{det!r}）")
-        side = len("".join(pg.evaluate("""() => [...document.querySelectorAll('.side > :not(#ask-panel):not(#status-line):not(#side-scroll), #side-scroll > :not(#ask-panel)')]
-            .filter((e) => e.offsetParent !== null).map((e) => e.innerText).join('')""").split()))  # 会話の欄（PC 版で右側）は数えない
+        side = len("".join(pg.evaluate("""() => { const tips = [...document.querySelectorAll('button.tip')]; tips.forEach((b) => { b.style.display = 'none'; });
+            const s = [...document.querySelectorAll('.side > :not(#ask-panel):not(#status-line):not(#side-scroll), #side-scroll > :not(#ask-panel)')]
+            .filter((e) => e.offsetParent !== null).map((e) => e.innerText).join('');
+            tips.forEach((b) => { b.style.display = ''; }); return s; }""").split()))  # 会話の欄（PC 版で右側）は数えない
         check(side <= 80, f"上下の設定なし：次にすることを足しても、音声のカードの右側の文字は80文字まで（{side}文字）")
         # 不一致・変更済みの表示の文に入れ替えても 80文字まで（表示の文だけを入れ替えて数える。サーバーの状態は変えない）
         for other in ("上下の向き：確認した座標系・ツールと違います", "上下の向き：設定が変わっています"):
             pg.evaluate("t => { document.querySelector('#updown-status').textContent = t; }", other)
-            side2 = len("".join(pg.evaluate("""() => [...document.querySelectorAll('.side > :not(#ask-panel):not(#status-line):not(#side-scroll), #side-scroll > :not(#ask-panel)')]
-            .filter((e) => e.offsetParent !== null).map((e) => e.innerText).join('')""").split()))  # 会話の欄（PC 版で右側）は数えない
+            side2 = len("".join(pg.evaluate("""() => { const tips = [...document.querySelectorAll('button.tip')]; tips.forEach((b) => { b.style.display = 'none'; });
+            const s = [...document.querySelectorAll('.side > :not(#ask-panel):not(#status-line):not(#side-scroll), #side-scroll > :not(#ask-panel)')]
+            .filter((e) => e.offsetParent !== null).map((e) => e.innerText).join('');
+            tips.forEach((b) => { b.style.display = ''; }); return s; }""").split()))  # 会話の欄（PC 版で右側）は数えない
             check(side2 <= 80, f"上下の向き「{other}」の表示でも、音声のカードの右側の文字は80文字まで（{side2}文字）")
         pg.evaluate("t => { document.querySelector('#updown-status').textContent = t; }", "上下の向き：未確認（Z＋・Z−で指示）")
         fill_text(pg, ph)
@@ -2392,8 +2487,8 @@ def check_above_fold(browser, check, shots: Path | None, errors: list, out: Path
                   f"{tag}状態のチップ（{w}×{h}）：文はサーバーの状態の1行のまま、区切りごとに3つのチップ（{stl}）")
             stage(pg, w, h, "S1a 読込直後（①）", head + ["#mic-button", "#kbd-button"], "before_candidate",
                   hero and pg.is_hidden("#side-scroll") and pg.is_hidden("#text-input")
-                  and pg.inner_text("#next-action") == "動作データの直し方を話してください",
-                  "① 初期：大きなマイクとキーボードだけ（会話の履歴・入力欄は出さない）。見出しは「動作データの直し方を話してください」",
+                  and pg.inner_text("#next-action") == "ロボットの動きについて話しかけてください",
+                  "① 初期：大きなマイクとキーボードだけ（会話の履歴・入力欄は出さない）。見出しは「ロボットの動きについて話しかけてください」",
                   tag)
             mic = pg.locator("#mic-button").bounding_box()
             check(mic is not None and mic["width"] >= 120, f"{tag}① 初期（{w}×{h}）：マイクは大きい（{mic and round(mic['width'])}px）")
@@ -2749,8 +2844,10 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     # ① 初期の画面（唐川さん承認のデザイン 11/4）：入力欄はキーボードのボタンを押すと出る（人と同じように押してから数える）
     if not pg.is_visible("#text-input") and pg.is_visible("#kbd-button"):
         pg.click("#kbd-button")
-    side = len("".join(pg.evaluate("""() => [...document.querySelectorAll('.side > :not(#ask-panel):not(#status-line):not(#side-scroll), #side-scroll > :not(#ask-panel)')]
-        .filter((e) => e.offsetParent !== null).map((e) => e.innerText).join('')""").split()))
+    side = len("".join(pg.evaluate("""() => { const tips = [...document.querySelectorAll('button.tip')]; tips.forEach((b) => { b.style.display = 'none'; });
+            const s = [...document.querySelectorAll('.side > :not(#ask-panel):not(#status-line):not(#side-scroll), #side-scroll > :not(#ask-panel)')]
+        .filter((e) => e.offsetParent !== null).map((e) => e.innerText).join('');
+            tips.forEach((b) => { b.style.display = ''; }); return s; }""").split()))
     check(all(pg.is_visible(s) for s in ["#voice-position", "#mic-button", "#text-input", "#text-send"])
           and pg.inner_text("#text-send") == "送る" and side <= 80,
           f"音声のカードは「位置・マイク・入力欄・送る」（右側の文字 {side}文字。80文字まで。状態の1行は数えない）")
