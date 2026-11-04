@@ -590,6 +590,118 @@ def check_send_while_waiting(browser, check, shots: Path | None, out: Path) -> N
         srv.server_close()
 
 
+# 11/5 夜 F6：1920×1080 で撮る動画の文字。測る要素（会話の吹き出し・話し手・状態の1行・返事の札・凡例・図の注意書き）
+TEXT_SIZE_SELS = [".bubble.human .said", ".bubble.claude .said", ".bubble.app .said", ".bubble .who", ".status-line",
+                  ".status-line .st-chip", "#reply-message", "#reply-message .range-lines", ".legend", ".legend.kinds",
+                  ".figure-notes", ".range-button-note", ".cand-heard", ".cand-warn"]
+TEXT_SIZE_JS = """(sels) => { const r = {}; for (const s of sels) {
+  const v = [...document.querySelectorAll(s)].filter(e => e.offsetParent !== null).map(e => parseFloat(getComputedStyle(e).fontSize));
+  if (v.length) r[s] = [Math.min(...v), Math.max(...v)]; } return r; }"""
+# 直す前（9671245）に同じ手順で測った値。1280×720・1366×768・1440×900 はこのまま（小さな画面の文字は変えない）
+_TS_SIDE = {".bubble.human .said": [14, 14], ".bubble.claude .said": [15, 15], ".bubble .who": [11, 11]}
+_TS_ALL = {".status-line": [12, 12], ".status-line .st-chip": [12, 12], ".legend.kinds": [12, 12], ".figure-notes": [12, 12]}
+TEXT_SIZE_BEFORE = {
+    "load": {**_TS_ALL, ".legend": [12, 12]},
+    "conversation": {**_TS_SIDE, **_TS_ALL, ".legend": [12, 12]},
+    "range": {**_TS_SIDE, **_TS_ALL, ".bubble.app .said": [14, 14], "#reply-message": [14, 14], "#reply-message .range-lines": [14, 14],
+              ".legend": [12, 12], ".range-button-note": [12, 12]},
+    "candidate": {**_TS_SIDE, **_TS_ALL, ".bubble.app .said": [13, 14], ".legend": [12, 13], ".cand-heard": [13, 13], ".cand-warn": [13, 13]},
+    "approved": {**_TS_SIDE, **_TS_ALL, ".bubble.app .said": [13, 14], "#reply-message": [14, 14], ".legend": [12, 13], ".cand-warn": [12, 12]},
+}
+# 1920×1080 で、これより小さくしない（会話の文字 16px・話し手 13px・状態の1行 14px・凡例と注意書き 13px）
+TEXT_SIZE_MIN_1080 = {".bubble.human .said": 16, ".bubble.claude .said": 16, ".bubble.app .said": 15, ".bubble .who": 13,
+                      ".status-line": 14, ".status-line .st-chip": 14, "#reply-message": 16, "#reply-message .range-lines": 15,
+                      ".legend": 13, ".legend.kinds": 13, ".figure-notes": 13, ".range-button-note": 13, ".cand-heard": 14, ".cand-warn": 14}
+# 1920×1080 の 3D の大きさ（直す前 9671245 に同じ手順で測った値）。これより小さくしない
+FIG_BEFORE_1080 = {"load": (1342, 742), "conversation": (1342, 742), "range": (1342, 742), "candidate": (1342, 681), "approved": (1342, 681)}
+
+
+def check_text_size_1080(browser, check, shots: Path | None, out: Path) -> None:
+    """11/5 夜 F6：1920×1080（デモの動画を撮る大きさ）で、会話・話し手・状態の1行・返事の札・凡例・図の注意書きの文字を大きく。
+    1280×720・1366×768・1440×900 の文字の大きさは前のまま。1920×1080 でもページはスクロールせず、3D は小さくならず、
+    いちばん新しい吹き出し・入力欄・［送る］（出ている状態で）・［この範囲を繰り返す］・［確認して承認へ］が見える。
+    モックの台本の答え（tools/demo_mock.py の ScriptClient。本物の Claude は呼ばない）。"""
+    sys.path.insert(0, str(REPO / "tools"))
+    import demo_mock as dm
+    from voice_teaching import claude_explain as cx
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import server
+    cx.PRICES[dm.MOCK_MODEL] = cx.Price(input=0.0, output=0.0, cache_write_5m=0.0, cache_write_1h=0.0, cache_read=0.0)
+    ex = cx.Explainer("mock-no-network", dm.MOCK_MODEL, client=dm.ScriptClient(), usage_log=cx.UsageLog(out / "f6_usage.jsonl"))
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None, explainer=ex)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    fig_js = "() => { const r = document.querySelector('#fig-3d svg').getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; }"
+    not_seen = """(sels) => sels.filter(s => { const e = document.querySelector(s); if (!e || e.offsetParent === null) return true;
+      const r = e.getBoundingClientRect(); return r.top < -0.5 || r.bottom > innerHeight + 0.5 || r.width === 0; })"""
+    # 会話の欄の中に切れずに見えないもの（"last" は、いちばん新しい吹き出し）
+    out_of_talk = """(sels) => { const box = document.querySelector('#side-scroll').getBoundingClientRect();
+      return sels.filter(s => { const e = s === 'last' ? [...document.querySelectorAll('#ask-turns > li')].pop() : document.querySelector(s);
+        if (!e || e.offsetParent === null) return true;
+        const r = e.getBoundingClientRect(); return r.top < box.top - 1 || r.bottom > box.bottom + 1; }); }"""
+    try:
+        for (w, h) in [(1280, 720), (1366, 768), (1440, 900), (1920, 1080)]:
+            big = (w, h) == (1920, 1080)
+            pg = browser.new_page(viewport={"width": w, "height": h})
+            pg.add_init_script(FAKE_RECOGNITION)
+            pg.goto(url)
+            pg.set_input_files("#file-input", str(REPO / "samples/dummy/DEMO_BUTTON_REPEAT.JBI"))
+            pg.wait_for_selector("#job-area:not([hidden])")
+            until(pg, lambda: pg.is_enabled("#text-send"))
+
+            def stage(name, keys, newest):
+                pg.wait_for_timeout(400)
+                got = pg.evaluate(TEXT_SIZE_JS, TEXT_SIZE_SELS)
+                if not big:
+                    same = got == TEXT_SIZE_BEFORE[name]
+                    check(same, f"11/5 F6（{w}×{h}・{name}）：文字の大きさは前のまま（{'同じ' if same else got}）")
+                    return
+                sizes = {s: v[0] for s, v in got.items()}
+                small = {s: v for s, v in sizes.items() if v < TEXT_SIZE_MIN_1080[s]}
+                check(not small and (name == "load" or ".bubble .who" in got),
+                      f"11/5 F6（1920×1080・{name}）：文字が大きい（{sizes}・小さいもの {small or 'なし'}）")
+                fig = pg.evaluate(fig_js)
+                fb = FIG_BEFORE_1080[name]
+                sw, sh, iw, ih = pg.evaluate(PAGE_SCROLL_JS)
+                hidden = pg.evaluate(not_seen, keys) + pg.evaluate(out_of_talk, newest)
+                check(fig[0] >= fb[0] and fig[1] >= fb[1] and sw <= iw and sh <= ih and not hidden,
+                      f"11/5 F6（1920×1080・{name}）：3D は小さくならない（{fig[0]}×{fig[1]}・前 {fb[0]}×{fb[1]}）・"
+                      f"ページのスクロールなし（{sw}×{sh}）・見えないもの {hidden or 'なし'}（いちばん新しい答え・札は会話の欄の中）")
+                if shots is not None:
+                    shots.mkdir(parents=True, exist_ok=True)
+                    pg.screenshot(path=str(shots / f"F6_1920_{name}.png"))
+
+            pg.wait_for_timeout(300)
+            stage("load", [], [])
+            fill_text(pg, "このロボット、何をしている？")
+            pg.click("#text-send")
+            pg.wait_for_selector("#ask-turns .bubble.claude:not(.thinking)")
+            stage("conversation", ["#text-input", "#text-send"], ["last"])
+            fill_text(pg, "ボタンを押してるんだよ")
+            pg.click("#text-send")
+            pg.wait_for_selector("#ask-turns .talk-choice")
+            pg.locator("#ask-turns .talk-choice", has_text="この動きです").click()
+            pg.wait_for_selector("#ask-turns .bubble.taught")
+            fill_text(pg, "じゃあ、3回にして")
+            pg.click("#text-send")
+            pg.wait_for_selector("#range-yes", timeout=5000)
+            stage("range", ["#text-input", "#text-send", "#range-yes"], ["last", "#reply-message .range-where"])
+            pg.click("#range-yes")
+            until(pg, lambda: pg.is_enabled("#open-confirm"))
+            stage("candidate", ["#open-confirm"], [])
+            pg.click("#open-confirm")
+            pg.wait_for_selector("#confirm-overlay:not([hidden])")
+            pg.fill("#approver-name", "e2e確認")
+            pg.click("#approve-button")
+            until(pg, lambda: pg.is_visible("#approval-status"))
+            pg.wait_for_timeout(1800)  # 承認のカードを見せたあとの答え
+            stage("approved", ["#text-input", "#text-send"], ["#reply-message", "#approval-status"])  # 承認のあとは、返事の札と承認のカードがいちばん新しい
+            pg.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 def check_review_only(browser, url, check, shots: Path | None) -> None:
     """実機の JOB（合成ジョブでない）：確認表示と承認のあとに「変更案の確認のみ」の帯。出力ボタンを出さず、出力を促さない。
     合成ジョブでは帯を出さず、今どおり出力ボタンが出る（唐川さんの指示・内部 QA の再レビュー P1-1・P2-6）。"""
@@ -1820,6 +1932,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check_ui_1105(b, check, shots, out)
             check_answer_after_approval(b, check, shots, out)
             check_send_while_waiting(b, check, shots, out)
+            check_text_size_1080(b, check, shots, out)
             check_dialog(b, check, shots, errors, updown_cfg["DEMO_C_PLACE.JBI"])
             check_talk(b, check, shots, errors, out)
             check_updown_unconfirmed(b, check, shots, errors)

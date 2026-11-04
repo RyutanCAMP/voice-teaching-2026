@@ -912,6 +912,24 @@ body.hero #instruction-panel { order: 1; }
   .logo-mark { width: 36px; height: 36px; }
 }
 
+/* 大きな画面（1920×1080 など。デモの動画を撮る大きさ。11/5 夜 F6）：会話・話し手・状態の1行・返事の札・凡例・図の注意書きの文字を
+   2割ほど大きく。色・並び・3D の場所は同じ。1440×900 以下の画面は変えない */
+@media (min-width: 1700px) and (min-height: 950px) {
+  .bubble { font-size: 16px; }
+  .bubble.claude { font-size: 17px; }
+  .bubble.app.notice, .bubble.app.record { font-size: 15px; }
+  .bubble .who { font-size: 13px; }
+  .status-line { font-size: 14px; }
+  .reply, .next-hint { font-size: 16px; }
+  .range-button-note { font-size: 14px; }
+  .cand-heard, .cand-warn { font-size: 15px; }
+  #candidate-panel:has(#approval-status:not([hidden])) .cand-warn { font-size: 14px; }
+  /* 3D を小さくしない：大きくした凡例・注意書きの分（約 9px）は、行の間と上の余白を詰めて取り戻す */
+  .legend { font-size: 15px; line-height: 1.2; }
+  .legend.kinds { font-size: 14px; }
+  .figure-notes { font-size: 14px; line-height: 1.35; margin-top: 2px; }
+}
+
 /* ---- 軽い動き（動きを減らす設定のときは出さない） ---- */
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes pop { from { opacity: 0; transform: scale(0.98); } to { opacity: 1; transform: none; } }
