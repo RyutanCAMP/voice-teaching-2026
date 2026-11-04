@@ -590,6 +590,100 @@ def check_send_while_waiting(browser, check, shots: Path | None, out: Path) -> N
         srv.server_close()
 
 
+def check_load_while_waiting(browser, check, shots: Path | None, out: Path) -> None:
+    """11/5 夜 G2：答えを待っている間（「考えています」）は、別の JOB を読み込めない（ファイルを選ぶ・ドロップ・［サンプルで試す］）。
+    前の JOB の答え（補足・3D の光）が、新しい JOB の空の会話に出ないように。答えが来たあとは、ふつうに読み込める。
+    モックの台本の答え（tools/demo_mock.py の ScriptClient）を、サーバーの側で 4 秒遅らせる。本物の Claude は呼ばない。"""
+    import base64
+    import time
+    sys.path.insert(0, str(REPO / "tools"))
+    import demo_mock as dm
+    from voice_teaching import claude_explain as cx
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import server
+
+    class SlowClient(dm.ScriptClient):
+        def create(self, **kw):
+            time.sleep(4)  # 本物の Claude は長いと 60 秒ほどかかる
+            return super().create(**kw)
+
+    cx.PRICES[dm.MOCK_MODEL] = cx.Price(input=0.0, output=0.0, cache_write_5m=0.0, cache_write_1h=0.0, cache_read=0.0)
+    ex = cx.Explainer("mock-no-network", dm.MOCK_MODEL, client=SlowClient(), usage_log=cx.UsageLog(out / "g2_usage.jsonl"))
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None, explainer=ex)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    humans = "() => document.querySelectorAll('#ask-turns .bubble.human').length"
+    answers = "() => document.querySelectorAll('#ask-turns .bubble.claude:not(.thinking)').length"
+    thinking = "() => document.querySelectorAll('#ask-turns .thinking').length"
+    lit = "() => { const h = window.vtAskHighlight; return h ? ((h.positions || []).length + (h.lines || []).length) : 0; }"
+    other = base64.b64encode((REPO / "samples/dummy/DEMO_C_PLACE.JBI").read_bytes()).decode("ascii")
+    try:
+        # ドロップは DataTransfer を作るので、画面の CSP を外した中で（ほかのドロップの確かめと同じ）
+        ctx = browser.new_context(viewport={"width": 1280, "height": 720}, bypass_csp=True)
+        pg = ctx.new_page()
+        pg.add_init_script("try { localStorage.setItem('vt-voice-mode', 'browser'); } catch (_) {}")
+        pg.add_init_script(FAKE_RECOGNITION)
+        talks, loads = [], []
+        pg.on("request", lambda r: talks.append(r.url) if "/api/talk" in r.url else
+              (loads.append(r.url) if "/api/load" in r.url or "/api/sample" in r.url else None))
+        talked = []  # 答えが届いた /api/talk（読み込みで「考えています」が消えても、届くまで待つため）
+        pg.on("requestfinished", lambda r: talked.append(r.url) if "/api/talk" in r.url else None)
+        pg.goto(url)
+        pg.set_input_files("#file-input", str(REPO / "samples/dummy/DEMO_BUTTON_REPEAT.JBI"))
+        pg.wait_for_selector("#job-area:not([hidden])")
+        until(pg, lambda: pg.is_enabled("#text-send"))
+        fill_text(pg, "このロボット、何をしている？")
+        pg.click("#text-send")
+        until(pg, lambda: pg.evaluate(thinking) == 1)
+
+        def same_job(tag):
+            name = pg.inner_text("#file-name")
+            check(name == "DEMO_BUTTON_REPEAT.JBI" and len(loads) == 1 and pg.evaluate(thinking) == 1
+                  and pg.evaluate(humans) == 1,
+                  f"11/5 G2：答えを待っている間に{tag}しても、別の JOB は読み込まない（JOB「{name}」・読み込み {len(loads)}回・"
+                  f"「考えています」{pg.evaluate(thinking)}つ・人の吹き出し {pg.evaluate(humans)}つ）")
+
+        # ファイルを選ぶ欄と［サンプルで試す］は、待っている間は押せない
+        check(pg.is_disabled("#file-input") and pg.is_disabled("#sample-button"),
+              "11/5 G2：答えを待っている間は、ファイルを選ぶ欄と［サンプルで試す］は押せない")
+        try:
+            pg.set_input_files("#file-input", str(REPO / "samples/dummy/DEMO_C_PLACE.JBI"), timeout=1000)
+        except Exception:
+            pass  # 押せない欄には入れられない（それで良い）
+        pg.wait_for_timeout(300)
+        same_job("ファイルを選ぼうと")
+        # ページの上にドロップ（読み込んだあとの画面）と、ドロップの枠へのドロップ
+        for target, tag in (("#ask-panel", "ページにドロップ"), ("#drop-zone", "ドロップの枠にドロップ")):
+            dt = pg.evaluate_handle(DROP_FILE, ["DEMO_C_PLACE.JBI", other])
+            pg.dispatch_event(target, "drop", {"dataTransfer": dt})
+            pg.wait_for_timeout(300)
+            same_job(tag)
+        until(pg, lambda: len(talked) == 1 and pg.evaluate(thinking) == 0, 10000)
+        pg.wait_for_timeout(300)
+        name = pg.inner_text("#file-name")
+        check(name == "DEMO_BUTTON_REPEAT.JBI" and len(loads) == 1 and len(talks) == 1
+              and pg.evaluate(humans) == 1 and pg.evaluate(answers) == 1,
+              f"11/5 G2：答えは、聞いた JOB の会話に出る（JOB「{name}」・読み込み {len(loads)}回・/api/talk {len(talks)}回・"
+              f"人 {pg.evaluate(humans)}つ・答え {pg.evaluate(answers)}つ）")
+        # 答えが来たあとは、ふつうに読み込める。新しい JOB の会話は空で、3D は光らない
+        until(pg, lambda: pg.is_enabled("#file-input") and pg.is_enabled("#sample-button"))
+        dt = pg.evaluate_handle(DROP_FILE, ["DEMO_C_PLACE.JBI", other])
+        pg.dispatch_event("#ask-panel", "drop", {"dataTransfer": dt})
+        until(pg, lambda: pg.inner_text("#file-name") == "DEMO_C_PLACE.JBI")
+        pg.wait_for_timeout(500)
+        n_h, n_a, n_lit = pg.evaluate(humans), pg.evaluate(answers), pg.evaluate(lit)
+        check(len(loads) == 2 and n_h == 0 and n_a == 0 and n_lit == 0,
+              f"11/5 G2：答えのあとはドロップで読み込める。新しい JOB の会話は空・3D は光らない"
+              f"（読み込み {len(loads)}回・人 {n_h}つ・答え {n_a}つ・光 {n_lit}）")
+        if shots is not None:
+            shots.mkdir(parents=True, exist_ok=True)
+            pg.screenshot(path=str(shots / "G2_load_while_waiting.png"))
+        ctx.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 # 11/5 夜 F6：1920×1080 で撮る動画の文字。測る要素（会話の吹き出し・話し手・状態の1行・返事の札・凡例・図の注意書き）
 TEXT_SIZE_SELS = [".bubble.human .said", ".bubble.claude .said", ".bubble.app .said", ".bubble .who", ".status-line",
                   ".status-line .st-chip", "#reply-message", "#reply-message .range-lines", ".legend", ".legend.kinds",
@@ -2087,6 +2181,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check_text_size_1080(b, check, shots, out)
             check_3d_labels_inside(b, check, shots, out)
             check_3d_fit_stable(b, check, shots, out)
+            check_load_while_waiting(b, check, shots, out)
             check_dialog(b, check, shots, errors, updown_cfg["DEMO_C_PLACE.JBI"])
             check_talk(b, check, shots, errors, out)
             check_updown_unconfirmed(b, check, shots, errors)

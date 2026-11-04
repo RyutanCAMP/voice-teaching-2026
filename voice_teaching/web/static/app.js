@@ -98,6 +98,12 @@ function recording() {
   return state.voiceState !== "idle";
 }
 
+// 別の JOB を読み込めない間：録音中と、答えを待っている間（「考えています」）。待っている間に読み込むと、
+// 前の JOB の答え（補足・3D の光）が新しい JOB の会話に出てしまう（11/5 G2）。答えが来れば、また読み込める
+function loadLocked() {
+  return recording() || state.sending;
+}
+
 // ---- 1. 読み込み（ドラッグ＆ドロップ、またはファイルを選ぶ。どちらも loadFile を通る） ----
 function resetForLoad() {
   voice.cancel();
@@ -117,7 +123,7 @@ function previousHeader(h) {
 }
 
 async function loadFile(f) {
-  if (!f || recording()) return;
+  if (!f || loadLocked()) return;
   resetForLoad();
   const bytes = new Uint8Array(await f.arrayBuffer());
   let res;
@@ -190,7 +196,7 @@ $("file-input").addEventListener("change", (ev) => loadFile(ev.target.files[0]))
 
 // 「サンプルで試す」：サーバーが決まった1つの架空のジョブ（samples/dummy/DEMO_C_PLACE.JBI）を読む。名前も場所も渡さない
 async function loadSample() {
-  if (recording()) return;
+  if (loadLocked()) return;
   resetForLoad();
   const res = await postJson("/api/sample", {});
   applyLoad(res, SAMPLE_NAME);
@@ -200,7 +206,7 @@ $("sample-button").addEventListener("click", loadSample);
 const drop = $("drop-zone");
 drop.addEventListener("dragover", (ev) => {
   ev.preventDefault();
-  if (!recording()) drop.classList.add("dragover");
+  if (!loadLocked()) drop.classList.add("dragover");
 });
 drop.addEventListener("dragleave", () => drop.classList.remove("dragover"));
 drop.addEventListener("drop", (ev) => {
@@ -210,11 +216,11 @@ drop.addEventListener("drop", (ev) => {
   if (f) loadFile(f);
 });
 drop.addEventListener("click", (ev) => {
-  if (ev.target.closest("label, input") || recording()) return;  // ラベルは自分でファイル選択を開く
+  if (ev.target.closest("label, input") || loadLocked()) return;  // ラベルは自分でファイル選択を開く
   $("file-input").click();
 });
 drop.addEventListener("keydown", (ev) => {
-  if ((ev.key === "Enter" || ev.key === " ") && !recording()) { ev.preventDefault(); $("file-input").click(); }
+  if ((ev.key === "Enter" || ev.key === " ") && !loadLocked()) { ev.preventDefault(); $("file-input").click(); }
 });
 // 枠の外に落としたファイルも読み込む（ブラウザーがファイルを開いてしまわないように）
 window.addEventListener("dragover", (ev) => ev.preventDefault());
@@ -1961,7 +1967,8 @@ function startListening() {
 function updateLocks() {
   const rec = recording();
   const loaded = !!state.sessionId;
-  $("file-input").disabled = rec;
+  $("file-input").disabled = rec || state.sending;  // 答えを待っている間は、別の JOB を読み込まない（11/5 G2）
+  $("sample-button").disabled = rec || state.sending;
   $("text-input").disabled = rec || !loaded;
   $("text-send").disabled = rec || !loaded || state.sending;  // 答えを待っている間は押せない（11/5 F3）
   $("voice-mode-browser").disabled = rec;
