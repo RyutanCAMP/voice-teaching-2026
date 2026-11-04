@@ -1546,6 +1546,71 @@ def check_ask_limit_reset(browser, check, shots: Path | None, out: Path) -> None
         srv.server_close()
 
 
+APPROVE_TIP_BODY = "［確認して承認へ］を押し、名前を入れて［承認する］。声では承認しません。"
+
+
+def check_approve_tip_error(browser, check, shots: Path | None, out: Path) -> None:
+    """11/5 確定版 3（U-07・N-2）：候補があるとき、承認の「？」を開いても［確認して承認へ］が隠れない（見えていて、3点でいちばん上）。
+    説明の文は「［確認して承認へ］を押し、名前を入れて［承認する］。声では承認しません。」。
+    確認表示で名前なしに［承認する］を押すと、#confirm-error が下の固定の帯の中（名前の欄の上）に、見えていて3点でいちばん上に出る。
+    確認表示のほかの中身（見出し・注意）は今までどおり見える。1280×720・1920×1080。サンプル（DEMO_C_PLACE）・モックの解釈。"""
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import server
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    try:
+        for (w, h) in [(1280, 720), (1920, 1080)]:
+            pg = browser.new_page(viewport={"width": w, "height": h})
+            pg.add_init_script(FAKE_RECOGNITION)
+            pg.goto(url)
+            pg.click("#sample-button")
+            pg.wait_for_selector("#job-area:not([hidden])")
+            until(pg, lambda: pg.is_enabled("#text-send"))
+            pg.locator("#position-chips button:not([disabled])").nth(3).click()
+            pg.wait_for_timeout(300)
+            fill_text(pg, "Zプラス方向に10mm")
+            pg.click("#text-send")
+            until(pg, lambda: pg.is_enabled("#open-confirm"), 8000)
+            pg.wait_for_timeout(300)
+            pg.hover('button.tip[data-tip="approve"]')
+            pg.wait_for_timeout(300)
+            pop = pg.is_visible("#tip-pop")
+            body = pg.inner_text("#tip-pop .tip-body") if pop else ""
+            seen = pg.evaluate(IN_VIEW_TOP_JS, "#open-confirm")
+            pop_in = pg.evaluate("() => { const b = document.querySelector('#tip-pop').getBoundingClientRect();"
+                                 " return b.top >= 0 && b.bottom <= innerHeight && b.left >= 0 && b.right <= innerWidth; }")
+            if shots is not None:
+                shots.mkdir(parents=True, exist_ok=True)
+                pg.screenshot(path=str(shots / f"U07_{w}_approve_tip.png"))
+            check(pop and pop_in and body == APPROVE_TIP_BODY and seen,
+                  f"11/5 確定版 3（{w}×{h}）：承認の「？」を開いても［確認して承認へ］が隠れない。説明は画面の中で、文は決まった文"
+                  f"（説明={pop}・画面の中={pop_in}・文={body!r}・ボタンが見える={seen}）")
+            pg.mouse.move(2, 2)
+            pg.wait_for_timeout(200)
+            pg.click("#open-confirm")
+            pg.wait_for_selector("#confirm-overlay:not([hidden])")
+            pg.wait_for_timeout(400)
+            pg.click("#approve-button")
+            until(pg, lambda: pg.is_visible("#confirm-error"))
+            pg.wait_for_timeout(300)
+            err = pg.evaluate(IN_VIEW_TOP_JS, "#confirm-error")
+            where = pg.evaluate("""() => { const e = document.querySelector('#confirm-error'), n = document.querySelector('#approver-name');
+              return !!e.closest('.confirm-actions') && e.getBoundingClientRect().bottom <= n.getBoundingClientRect().top; }""")
+            name_seen = pg.evaluate(IN_VIEW_TOP_JS, "#approver-name")
+            title_seen = pg.evaluate(IN_VIEW_TOP_JS, "#confirm-title")
+            warn_seen = pg.evaluate(IN_VIEW_TOP_JS, "#confirm-warnings")
+            if shots is not None:
+                pg.screenshot(path=str(shots / f"U07_{w}_no_name.png"))
+            check(err and where and name_seen and title_seen and warn_seen and "名前を入れて" in pg.inner_text("#confirm-error"),
+                  f"11/5 確定版 3（{w}×{h}）：名前なしで［承認する］→ 注意が下の帯の中（名前の欄の上）に見える。見出し・注意も見える"
+                  f"（注意が見える={err}・帯の中で名前の上={where}・名前の欄={name_seen}・見出し={title_seen}・注意={warn_seen}）")
+            pg.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 def check_text_size_1080(browser, check, shots: Path | None, out: Path) -> None:
     """11/5 夜 F6：1920×1080（デモの動画を撮る大きさ）で、会話・話し手・状態の1行・返事の札・凡例・図の注意書きの文字を大きく。
     1280×720・1366×768・1440×900 の文字の大きさは前のまま。1920×1080 でもページはスクロールせず、3D は小さくならず、
@@ -3028,6 +3093,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check_taught_pill_clear(b, check, shots, out)
             check_export_fail_next(b, check, shots, out)
             check_ask_limit_reset(b, check, shots, out)
+            check_approve_tip_error(b, check, shots, out)
             check_dialog(b, check, shots, errors, updown_cfg["DEMO_C_PLACE.JBI"])
             check_talk(b, check, shots, errors, out)
             check_updown_unconfirmed(b, check, shots, errors)

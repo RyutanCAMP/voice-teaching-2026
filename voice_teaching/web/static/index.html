@@ -405,12 +405,13 @@
       </div>
     </div>
     <div class="confirm-actions">
+      <!-- 承認の注意（名前が空・失敗）は、下の固定の帯の中・名前の欄の上に出す（スクロールせずに見える。11/5 確定版 3） -->
+      <p id="confirm-error" class="error" hidden></p>
       <label for="approver-name" class="sr-only">承認する人の名前</label>
       <input type="text" id="approver-name" maxlength="50" autocomplete="name" placeholder="承認する人の名前">
       <button type="button" id="approve-button" class="approve" disabled>承認する</button>
       <button type="button" id="confirm-close" class="link">閉じる</button>
     </div>
-    <p id="confirm-error" class="error" hidden></p>
   </div>
 </div><!-- /confirm-overlay -->
 

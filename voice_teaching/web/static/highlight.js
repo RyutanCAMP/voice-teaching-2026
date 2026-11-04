@@ -292,7 +292,7 @@ export const TIPS = {
   position: { head: "位置を選ぶ", body: "右の図の点か、番号を押します。薄い番号の位置は変更できません。", ex: "C00005 を押してから「Zプラス方向に10mm」" },
   updown: { head: "上下の向き", body: "「上げる・下げる」が Z のどちら向きかを、設定で確かめたかどうかです。未確認のときは Zプラス・Zマイナスで言います。", ex: "Zマイナス方向に3mm" },
   play: { head: "3D の再生", body: "▶ で命令の順に動きをたどります。候補があるときは［変更前を再生］［変更後を再生］で比べます。ドラッグで回す・ホイールで拡大。", ex: null },
-  approve: { head: "承認", body: "変更前と変更後を確かめてから、確認表示のボタンで承認します。声では承認しません。", ex: null },
+  approve: { head: "承認", body: "［確認して承認へ］を押し、名前を入れて［承認する］。声では承認しません。", ex: null },
   status: { head: "アプリの記録", body: "アプリが記録している今の状態です（候補・承認・出力）。会話の答えでは変わりません。", ex: null },
 };
 
@@ -342,7 +342,16 @@ export function attachTips(doc = document) {
     pop.style.left = "0px"; pop.style.top = "0px";
     const w = pop.offsetWidth, h = pop.offsetHeight;
     const left = Math.max(8, Math.min(r.left + r.width / 2 - w / 2, vw - w - 8));
-    const top = r.bottom + 8 + h <= vh - 8 ? r.bottom + 8 : Math.max(8, r.top - 8 - h);
+    const below = r.bottom + 8 + h <= vh - 8;
+    let top = below ? r.bottom + 8 : r.top - 8 - h;
+    // 操作の大きいボタン（［確認して承認へ］など）は隠さない：重なるときは、開く向きのまま、そのボタンの外まで動かす
+    const keep = [...doc.querySelectorAll("button.wide, button.approve")].filter((e) => e.getClientRects().length).map((e) => e.getBoundingClientRect());
+    for (let i = 0; i < keep.length; i++) {
+      const hit = keep.filter((k) => left < k.right && left + w > k.left && top < k.bottom && top + h > k.top);
+      if (!hit.length) break;
+      top = below ? Math.max(...hit.map((k) => k.bottom)) + 8 : Math.min(...hit.map((k) => k.top)) - 8 - h;
+    }
+    if (top < 8 || top + h > vh - 8) top = below ? r.bottom + 8 : Math.max(8, r.top - 8 - h);  // 画面に入らないときは今までの位置
     pop.style.left = `${Math.round(left)}px`; pop.style.top = `${Math.round(top)}px`;
   };
   const open = (btn, pin) => {
