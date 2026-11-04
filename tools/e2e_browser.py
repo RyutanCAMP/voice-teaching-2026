@@ -1179,6 +1179,84 @@ def check_heading_matches(browser, check, shots: Path | None, out: Path) -> None
         srv.server_close()
 
 
+def check_approve_twice(browser, check, shots: Path | None, out: Path) -> None:
+    """11/5 夜 N2：確認表示の［承認する］をダブルクリックすると /api/approve が2回送られ、作業ログに同じ承認が2行残っていた。
+    1回の操作で送るのは1回だけ（位置の変更 DEMO_C_PLACE と回数の変更 DEMO_BUTTON_REPEAT）。
+    本当の失敗（名前が空・サーバーの失敗）は今までどおり文を出し、もう一度押せる。承認はボタンだけ（声では承認しない）。"""
+    import json as _json
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import server
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+
+    def confirm_page(job):
+        pg = browser.new_page(viewport={"width": 1280, "height": 720})
+        pg.add_init_script(FAKE_RECOGNITION)
+        sent = []
+        pg.on("request", lambda r: sent.append(r.url) if r.method == "POST" and "/api/approve" in r.url else None)
+        pg.goto(url)
+        pg.set_input_files("#file-input", str(REPO / "samples/dummy" / job))
+        pg.wait_for_selector("#job-area:not([hidden])")
+        if job == "DEMO_C_PLACE.JBI":
+            pg.locator("#position-chips button", has_text="C00003").click()
+            until(pg, lambda: pg.inner_text("#voice-position strong") == "C00003")
+            fill_text(pg, "Zプラス方向に10mm")
+            pg.click("#text-send")
+        else:
+            pg.locator("#position-chips button", has_text="C00001").first.click()
+            until(pg, lambda: pg.inner_text("#voice-position strong") == "C00001")
+            fill_text(pg, REPEAT_SAY)
+            pg.click("#text-send")
+            pg.wait_for_selector("#range-yes")
+            pg.click("#range-yes")
+        until(pg, lambda: pg.is_enabled("#open-confirm"))
+        pg.click("#open-confirm")
+        pg.wait_for_selector("#confirm-overlay:not([hidden])")
+        return pg, sent
+
+    approvals = lambda pg: (pg.text_content("#work-log") or "").count("さんが承認ボタンで承認しました")  # noqa: E731
+    try:
+        for job in ["DEMO_C_PLACE.JBI", "DEMO_BUTTON_REPEAT.JBI"]:
+            pg, sent = confirm_page(job)
+            # 名前が空：文を出すだけで送らない。名前を入れてダブルクリック → 送るのは1回
+            pg.click("#approve-button")
+            empty_ok = pg.is_visible("#confirm-error") and "名前を入れて" in pg.inner_text("#confirm-error") and len(sent) == 0
+            pg.fill("#approver-name", "e2e確認")
+            pg.dblclick("#approve-button")
+            until(pg, lambda: pg.is_visible("#approval-status"))
+            pg.wait_for_timeout(800)
+            n = approvals(pg)
+            check(empty_ok and len(sent) == 1 and n == 1 and pg.is_hidden("#confirm-overlay")
+                  and "e2e確認 さんが承認しました" in pg.inner_text("#approval-status"),
+                  f"11/5 N2（{job}）：［承認する］をダブルクリックしても /api/approve は1回、作業ログの承認は1行"
+                  f"（名前が空のときは送らず文を出す：{empty_ok}・送信 {len(sent)}回・ログ {n}行）")
+            if shots is not None and job == "DEMO_C_PLACE.JBI":
+                shots.mkdir(parents=True, exist_ok=True)
+                pg.screenshot(path=str(shots / "N2_approve_twice.png"))
+            pg.close()
+        # サーバーの失敗：ダブルクリックでも送るのは1回、失敗の文を出し、もう一度押せば承認できる
+        pg, sent = confirm_page("DEMO_C_PLACE.JBI")
+        body = _json.dumps({"ok": False, "error": "e2e：わざと失敗させた"}, ensure_ascii=False)
+        pg.route("**/api/approve", lambda r: r.fulfill(status=500, content_type="application/json", body=body))
+        pg.fill("#approver-name", "e2e確認")
+        pg.dblclick("#approve-button")
+        until(pg, lambda: pg.is_visible("#confirm-error"))
+        pg.wait_for_timeout(500)
+        fail_ok = (len(sent) == 1 and pg.is_visible("#confirm-overlay") and pg.is_enabled("#approve-button")
+                   and pg.is_hidden("#approval-status") and approvals(pg) == 0)
+        pg.unroute("**/api/approve")
+        pg.click("#approve-button")
+        until(pg, lambda: pg.is_visible("#approval-status"))
+        pg.wait_for_timeout(300)
+        check(fail_ok and len(sent) == 2 and approvals(pg) == 1,
+              f"11/5 N2：承認が本当に失敗したときは文を出し、もう一度押せる（失敗のとき {fail_ok}・送信 {len(sent)}回・ログ {approvals(pg)}行）")
+        pg.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 def check_text_size_1080(browser, check, shots: Path | None, out: Path) -> None:
     """11/5 夜 F6：1920×1080（デモの動画を撮る大きさ）で、会話・話し手・状態の1行・返事の札・凡例・図の注意書きの文字を大きく。
     1280×720・1366×768・1440×900 の文字の大きさは前のまま。1920×1080 でもページはスクロールせず、3D は小さくならず、
@@ -2657,6 +2735,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check_opening_click_through(b, check, shots, out)
             check_export_path_short(b, check, shots, out)
             check_heading_matches(b, check, shots, out)
+            check_approve_twice(b, check, shots, out)
             check_dialog(b, check, shots, errors, updown_cfg["DEMO_C_PLACE.JBI"])
             check_talk(b, check, shots, errors, out)
             check_updown_unconfirmed(b, check, shots, errors)

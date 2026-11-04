@@ -483,8 +483,11 @@ def test_recording_locks_other_operations():
     assert '$("voice-stop").disabled = !rec' in locks
     assert '$("voice-cancel").disabled = !rec' in locks
     js = static_text()["app.js"]
-    assert '$("export-button").disabled = !st.can_export || !!st.exported || state.exporting || recording()'  # 出力のあと・出力中も押せない（11/5 H1） in js
+    # 出力のあと・出力中も押せない（11/5 H1）
+    assert '$("export-button").disabled = !st.can_export || !!st.exported || state.exporting || recording()' in js
     assert '$("approve-button").disabled = !st.can_approve || recording()' in js
+    # 承認を送っている間も押せない（ダブルクリックで2回送らない。11/5 夜 N2）
+    assert '$("approve-button").disabled = !st.can_approve || state.approving || recording()' in js
 
 
 def test_approve_button_is_inside_overlay_and_export_label():

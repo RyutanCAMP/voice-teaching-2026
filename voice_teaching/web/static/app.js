@@ -1184,7 +1184,7 @@ document.addEventListener("keydown", (ev) => {
 
 // ---- 承認（このボタンからだけ） ----
 async function onApproveClick() {
-  if (recording()) return;
+  if (recording() || state.approving) return;  // ダブルクリックでも送るのは1回（作業ログに同じ承認を2行残さない。11/5 夜 N2）
   const name = $("approver-name").value.trim();
   if (!name) {
     $("confirm-error").textContent = "名前を入れてから、承認してください";
@@ -1192,7 +1192,14 @@ async function onApproveClick() {
     $("approver-name").focus();
     return;
   }
-  const res = await postJson("/api/approve", { session_id: state.sessionId, approver: name });
+  state.approving = true;
+  $("approve-button").disabled = true;
+  let res;
+  try {
+    res = await postJson("/api/approve", { session_id: state.sessionId, approver: name });
+  } finally {
+    state.approving = false;
+  }
   if (res.state) state.st = res.state;
   if (res.ok !== true) {
     $("confirm-error").replaceChildren(friendly("approve", res.error || "理由が分かりません"));
@@ -1235,7 +1242,7 @@ function renderApproval() {
   // 出力に成功したら（今の承認の出力が済み）・出力を送っている間は押せない。2回目が「上書きしません」の赤い失敗になって、
   // 「出力しました」と食い違うため（11/5 夜 H1）。上書きしない決まりはサーバーのまま。1回目の失敗のあとは押せる
   $("export-button").disabled = !st.can_export || !!st.exported || state.exporting || recording();
-  $("approve-button").disabled = !st.can_approve || recording();
+  $("approve-button").disabled = !st.can_approve || state.approving || recording();  // 承認を送っている間は押せない（11/5 夜 N2）
   if (!a && !$("export-result").hidden && $("export-result").dataset.ok === "true") {
     $("export-result").hidden = true;
   }
