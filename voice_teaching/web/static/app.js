@@ -192,7 +192,12 @@ window.addEventListener("vt:talk-reset", () => {
 // 根拠の行を押したとき：その位置を図で光らせる（選択ではない）
 window.addEventListener("vt:highlight", () => { if (state.view) renderFigures(); });
 
-$("file-input").addEventListener("change", (ev) => loadFile(ev.target.files[0]));
+// 選んだファイルを受け取ったら欄を空にする。欄に前のファイルが残ると、同じファイルを選び直しても change が出ない（11/5 G5）
+$("file-input").addEventListener("change", (ev) => {
+  const f = ev.target.files[0];
+  ev.target.value = "";
+  loadFile(f);
+});
 
 // 「サンプルで試す」：サーバーが決まった1つの架空のジョブ（samples/dummy/DEMO_C_PLACE.JBI）を読む。名前も場所も渡さない
 async function loadSample() {

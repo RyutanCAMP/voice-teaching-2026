@@ -684,6 +684,59 @@ def check_load_while_waiting(browser, check, shots: Path | None, out: Path) -> N
         srv.server_close()
 
 
+def check_reload_same_file(browser, check, shots: Path | None, out: Path) -> None:
+    """11/5 夜 G5：同じファイルを、ファイルを選ぶ欄からもう一度選んでも読み込む（ドロップと同じ決まり。同じ中身なら人が教えた意味を引き継ぐ）。
+    Chrome は、欄に残っている前のファイルと同じものを選ぶと change を出さない。だから、読んだあとは欄が空であること
+    （次に何を選んでも change が出る）を確かめる。読めなかったとき（読み込みの枠が見えたまま）も同じ。"""
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import server
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    job = str(REPO / "samples/dummy/DEMO_C_PLACE.JBI")
+    bad = out / "g5_not_a_job.JBI"
+    bad.write_text("これは JOB ではありません\n", encoding="utf-8")
+    try:
+        pg = browser.new_page(viewport={"width": 1280, "height": 720})
+        loads = []
+        pg.on("request", lambda r: loads.append(r.headers.get("x-vt-previous-session")) if "/api/load" in r.url else None)
+        pg.goto(url)
+        left = "() => { const i = document.querySelector('#file-input'); return [i.value, i.files.length]; }"
+        pg.set_input_files("#file-input", job)
+        pg.wait_for_selector("#job-area:not([hidden])")
+        until(pg, lambda: len(loads) == 1 and pg.inner_text("#file-name") == "DEMO_C_PLACE.JBI")
+        v = pg.evaluate(left)
+        check(v == ["", 0], f"11/5 G5：JOB を読んだあと、ファイルを選ぶ欄は空（同じファイルを選び直せる）（欄 {v!r}）")
+        first = pg.evaluate("() => document.querySelector('#file-name').textContent")
+        pg.set_input_files("#file-input", job)
+        try:
+            until(pg, lambda: len(loads) == 2, 3000)
+        except TimeoutError:
+            pass  # 読み込まなかった（下の確かめで NG にする）
+        pg.wait_for_timeout(300)
+        check(len(loads) == 2 and loads[1] is not None and pg.inner_text("#file-name") == first,
+              f"11/5 G5：同じファイルを選び直すと、もう一度読み込む（ドロップと同じく前の画面の番号を送る）"
+              f"（読み込み {len(loads)}回・前の番号 {'あり' if len(loads) > 1 and loads[1] else 'なし'}）")
+        # 読めなかったとき：読み込みの枠が見えたまま。直さずに同じファイルを選び直しても、もう一度読む
+        pg2 = browser.new_page(viewport={"width": 1280, "height": 720})
+        n = []
+        pg2.on("request", lambda r: n.append(r.url) if "/api/load" in r.url else None)
+        pg2.goto(url)
+        pg2.set_input_files("#file-input", str(bad))
+        pg2.wait_for_selector("#load-error:not([hidden])")
+        v2 = pg2.evaluate(left)
+        check(pg2.is_visible("#drop-zone") and v2 == ["", 0] and len(n) == 1,
+              f"11/5 G5：読めなかったあとも、ファイルを選ぶ欄は空（同じファイルを選び直せる）（欄 {v2!r}・読み込み {len(n)}回）")
+        if shots is not None:
+            shots.mkdir(parents=True, exist_ok=True)
+            pg.screenshot(path=str(shots / "G5_reload_same_file.png"))
+        pg.close()
+        pg2.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 # 11/5 夜 F6：1920×1080 で撮る動画の文字。測る要素（会話の吹き出し・話し手・状態の1行・返事の札・凡例・図の注意書き）
 TEXT_SIZE_SELS = [".bubble.human .said", ".bubble.claude .said", ".bubble.app .said", ".bubble .who", ".status-line",
                   ".status-line .st-chip", "#reply-message", "#reply-message .range-lines", ".legend", ".legend.kinds",
@@ -2182,6 +2235,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check_3d_labels_inside(b, check, shots, out)
             check_3d_fit_stable(b, check, shots, out)
             check_load_while_waiting(b, check, shots, out)
+            check_reload_same_file(b, check, shots, out)
             check_dialog(b, check, shots, errors, updown_cfg["DEMO_C_PLACE.JBI"])
             check_talk(b, check, shots, errors, out)
             check_updown_unconfirmed(b, check, shots, errors)
