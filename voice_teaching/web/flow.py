@@ -256,7 +256,15 @@ class WebFlow:
             self._remember(e, r)  # 回数の変更：プログラムが候補まで作った。解釈の係（Claude）は呼ばない
         elif r.status == "ok":
             f = s.facts
-            if f is not None and f.op in ("move", "speed") and s.candidate is not None:
+            if f is not None and f.op == "undo":
+                # Only whole-utterance cancellation, not a vague mention of it.
+                # An AI omission cannot leave a cancelled proposal approvable.
+                if ut.is_explicit_cancellation(f.raw) and not f.question:
+                    r = s.undo()
+                else:
+                    r = Reply("ask", "今の変更候補を取り消しますか？ 取り消す場合は「取り消して」と言ってください", facts=f)
+                    s.log.append(("聞き返し", r.message))
+            elif f is not None and f.op in ("move", "speed") and s.candidate is not None:
                 # 承認待ちの候補がある：解釈の係（Claude）には送らない（呼ぶ前に断る）
                 r = s.pending_reply(f)
             elif f is not None and f.op in ("move", "speed") and (f.position or s.selected) is None:

@@ -763,6 +763,15 @@ def combine_axes(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceF
                    **_merged_extras(previous, answer))
 
 
+def is_explicit_cancellation(text: str) -> bool:
+    """Whole cancellation requests only; a mention or uncertainty is not consent."""
+    t = unicodedata.normalize("NFKC", text).strip()
+    return bool(re.fullmatch(
+        r"(?:(?:やっぱり|やはり|じゃあ|では)[\s、]*|(?:今の|この)提案[はを])?"
+        r"(?:取り消して|取消して|キャンセル(?:して)?|元に戻して|もとに戻して|やめて)"
+        r"(?:ください)?[\s。.!！]*|さっきのを戻して[\s。.!！]*", t))
+
+
 def is_explicit_direction_answer(previous: UtteranceFacts, answer: UtteranceFacts) -> bool:
     """Axis/sign alone answering a missing direction for an explicitly pinned move.
 

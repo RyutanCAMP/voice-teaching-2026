@@ -377,10 +377,11 @@ def read_count(text: str, blocks: list[Block], last_evidence=()) -> CountReading
         return CountReading(reason=COUNT_NEGATED.format(word=neg), stop=COUNT_NEGATED.format(word=neg),
                             target=target, target_note=note)
     # Read the complete numeric token before the integer regex can match its tail.
-    if re.search(r"(?:[0-9]+\.[0-9]+|[+\-][0-9]+)\s?回", t):
+    if re.search(r"(?:[0-9]*\.[0-9]+|[+\-][0-9]+|[0-9]+(?:[eE][+\-]?[0-9]+|[,、点][0-9]+))\s?回", t):
         msg = "回数は正の整数で、もう一度指定してください。変更候補は作りません"
         return CountReading(reason=msg, stop=msg, target=target, target_note=note)
-    if re.search(r"回\s?(?:くらい|ぐらい|程度|ほど|前後)", t):
+    if (re.search(r"回\s?(?:くらい|ぐらい|程度|ほど|前後)", t)
+            or re.search(r"約|およそ|だいたい|大体|ざっと", t)):
         nums = {_kanji_int(x) for x in _COUNT.findall(t)}
         if len(nums) == 1 and None not in nums:
             n = next(iter(nums))

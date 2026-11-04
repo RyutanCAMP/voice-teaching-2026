@@ -57,7 +57,12 @@ def test_p1a_claude_text_is_never_shown_in_a_change_turn(tmp_path, reply):
     a = r["ask"]
     assert a["reply_by"] == "app" and reply not in a["reply"]  # プログラムの定型文（数はプログラムが数えたもの）
     assert r["state"]["candidate"] is None and r["state"]["approval"] is None  # 範囲はボタンで決める
-    assert "範囲の確認中" in r["state"]["status_line"]
+    # 11/5 P0: a detected interpretation mismatch stops before the range.
+    if (a.get("change_record") or {}).get("mismatch"):
+        assert r["state"]["repeat_range"] is None and not r["state"]["can_approve"]
+        assert "候補 なし" in r["state"]["status_line"]
+    else:
+        assert "範囲の確認中" in r["state"]["status_line"]
 
 
 @pytest.mark.parametrize("reply", [

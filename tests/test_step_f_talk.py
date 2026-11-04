@@ -59,14 +59,15 @@ def test_scene_3_through_one_entry(tmp_path):
     assert c["state"]["approval"] is None and not c["state"]["can_export"]  # 承認は確認表示のボタンだけ
 
 
-def test_claude_count_mismatch_is_shown_as_error_but_range_comes_from_the_program(tmp_path):
+def test_claude_count_mismatch_stops_before_range_confirmation(tmp_path):
     w, f, sid = start(tmp_path, T.answer("同じ動きをくり返しています。" + T.ASKED, BLOCK))
     w.talk(sid, "このロボット、何をしている？")
     f.add(T.answer("ボタンを押す動作を2回から5回に変更しますか？", BLOCK, "change_request",
                    {"kind": "repeat", "from_count": 2, "to_count": 5}))
     r = w.talk(sid, "じゃあ、3回にして")
     assert r["ask"]["reply_by"] == "app" and r["ask"]["reply"] == talk.COUNT_MISMATCH  # 検証エラー（書き換えない）
-    assert r["state"]["repeat_range"]["total"] == 3  # 範囲の確認の数は、プログラムが利用者の文から読んだ数
+    # 11/5 P0: an interpretation mismatch must not advance past a clarification.
+    assert r["state"]["repeat_range"] is None and r["state"]["candidate"] is None
 
 
 def test_negated_count_makes_no_range(tmp_path):
@@ -76,7 +77,8 @@ def test_negated_count_makes_no_range(tmp_path):
 
 
 def test_pending_candidate_blocks_new_change_requests(tmp_path):
-    w, f, sid = start(tmp_path)
+    w, f, sid = start(tmp_path, T.answer("回数のご希望ですね。", BLOCK, "change_request",
+                                      {"kind": "repeat", "from_count": 2, "to_count": 3}))
     r = w.talk(sid, "じゃあ、3回にして")
     w.repeat_choose(sid, "yes", r["state"]["repeat_range"]["turn"])
     n = calls(f)
@@ -122,14 +124,15 @@ def test_explanation_never_creates_candidates(tmp_path):
     assert r["via"] == ["ask"] and r["state"]["candidate"] is None and r["state"]["repeat_range"] is None
 
 
-def test_without_key_count_change_still_reaches_the_range_button(tmp_path):
+def test_without_key_count_change_stops_before_the_range_button(tmp_path):
     from voice_teaching import claude_explain as cx
     from voice_teaching.web.flow import WebFlow
     from voice_teaching.claude_interpreter import MockInterpreter
     w = WebFlow(interpreter=MockInterpreter(), explainer=cx.Explainer(None, "claude-sonnet-5-5"))
     sid = w.load(T.demo_bytes())["session_id"]
     r = w.talk(sid, "じゃあ、3回にして")
-    assert r["state"]["repeat_range"]["total"] == 3 and r["state"]["candidate"] is None
+    assert r["ask"]["status"] == "no_key"
+    assert r["state"]["repeat_range"] is None and r["state"]["candidate"] is None
 
 
 @pytest.mark.parametrize("bad", [None, "", "   ", 3])
@@ -178,7 +181,8 @@ def test_a_real_new_instruction_after_approval_still_cancels_it(tmp_path):
 
 
 def test_approve_word_during_range_confirmation_explains_the_two_steps(tmp_path):
-    w, f, sid = start(tmp_path)
+    w, f, sid = start(tmp_path, T.answer("回数のご希望ですね。", BLOCK, "change_request",
+                                      {"kind": "repeat", "from_count": 2, "to_count": 3}))
     r = w.talk(sid, "じゃあ、3回にして")
     turn = r["state"]["repeat_range"]["turn"]
     r = w.talk(sid, "承認して", "voice")

@@ -12,7 +12,7 @@ def repeat_candidate(w, sid):
     assert out['state']['can_approve']
 
 
-@pytest.mark.parametrize('text', ['2.3回にして', '0.3回にして', '3.5回にして', '２．３回にして', '-3回にして'])
+@pytest.mark.parametrize('text', ['2.3回にして', '0.3回にして', '3.5回にして', '２．３回にして', '-3回にして', '2、3回にして', '3e3回にして', '2点3回にして'])
 def test_fraction_never_becomes_integer(tmp_path, text):
     w, fake = T.flow(tmp_path)
     sid = w.load(T.demo_bytes())['session_id']
@@ -20,10 +20,11 @@ def test_fraction_never_becomes_integer(tmp_path, text):
     assert not fake.requests
     assert not r['state']['candidate'] and not r['state']['repeat_range']
     assert not r['state']['can_approve']
-    assert '整数' in r['ask']['reply']
+    visible = ((r.get('ask') or {}).get('reply', '') + (r.get('hear') or {}).get('message', ''))
+    assert '整数' in visible or (text == '2点3回にして' and visible)
 
 
-@pytest.mark.parametrize('text', ['3回くらい', '3回くらいにして', '三回ぐらいにして', '3回程度にして'])
+@pytest.mark.parametrize('text', ['3回くらい', '3回くらいにして', '三回ぐらいにして', '3回程度にして', '約3回にして', 'だいたい3回にして'])
 def test_approximate_count_needs_confirmation(tmp_path, text):
     w, fake = T.flow(tmp_path)
     sid = w.load(T.demo_bytes())['session_id']
@@ -61,6 +62,27 @@ def test_negated_cancel_keeps_candidate(tmp_path, text):
     old = w.state(sid)['state']['candidate']
     r = w.talk(sid, text)
     assert r['state']['candidate'] == old
+
+
+@pytest.mark.parametrize('text', ['キャンセルするか迷っている', 'キャンセルかな', '多分キャンセル'])
+def test_uncertain_cancellation_is_a_question_not_an_action(tmp_path, text):
+    w, fake = T.flow(tmp_path)
+    sid = w.load(T.demo_bytes())['session_id']
+    repeat_candidate(w, sid)
+    old = w.state(sid)['state']['candidate']
+    r = w.talk(sid, text)
+    assert r['state']['candidate'] == old and r['hear']['status'] == 'ask'
+    assert not fake.requests
+
+
+@pytest.mark.parametrize('text', ['取り消して', 'やっぱりやめて', 'キャンセル', '元に戻して'])
+def test_explicit_cancellation_stays_available(tmp_path, text):
+    w, fake = T.flow(tmp_path)
+    sid = w.load(T.demo_bytes())['session_id']
+    repeat_candidate(w, sid)
+    r = w.talk(sid, text)
+    assert not r['state']['candidate'] and not r['state']['can_approve']
+    assert not fake.requests
 
 
 def test_explicit_position_amount_followed_by_axis(tmp_path):
