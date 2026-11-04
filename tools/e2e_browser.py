@@ -1072,6 +1072,113 @@ def check_export_path_short(browser, check, shots: Path | None, out: Path) -> No
         srv.server_close()
 
 
+def check_heading_matches(browser, check, shots: Path | None, out: Path) -> None:
+    """11/5 夜 N4：大きな見出し（#next-action）が、今の操作と合う。
+    (a) 声で入った文を確かめるときは、本当のボタン［送る］の名前で言う（古い「次へ」を言わない）。
+    (b) 会話のあと（位置を選ぶ前）は、話す・書くこともできると言う（「点か番号を押してください」だけにしない）。
+    (c) 指示の答えを待っている間は、待っていると言う（「🎤 を押して話してください」と言わない）。
+    目立たせるボタンは1つまで。モックの解釈の係（遅らせる）と台本の答え（tools/demo_mock.py）。本物の Claude は呼ばない。"""
+    import time
+    sys.path.insert(0, str(REPO / "tools"))
+    import demo_mock as dm
+    from voice_teaching import claude_explain as cx
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import server
+
+    class SlowInterpreter:
+        """モックを包み、解釈に少し時間をかける（待っている間の見出しを見るため）。"""
+
+        def __init__(self):
+            self.inner = MockInterpreter()
+
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+
+        def decide(self, *a, **k):
+            time.sleep(1.2)
+            return self.inner.decide(*a, **k)
+
+    head = lambda pg: pg.inner_text("#next-action")  # noqa: E731
+    # (a)(c) 位置の指示（DEMO_C_PLACE・C00003・声で「Zプラス方向に10mm」）
+    srv = server.make_server(port=0, interpreter=SlowInterpreter(), updown_config=None)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    try:
+        pg = browser.new_page(viewport={"width": 1280, "height": 720})
+        pg.add_init_script(FAKE_RECOGNITION)
+        pg.add_init_script("window.__fakeText = 'Zプラス方向に10mm'")
+        pg.goto(url)
+        pg.set_input_files("#file-input", str(REPO / "samples/dummy" / "DEMO_C_PLACE.JBI"))
+        pg.wait_for_selector("#job-area:not([hidden])")
+        pg.locator("#position-chips button", has_text="C00003").click()
+        until(pg, lambda: pg.inner_text("#voice-position strong") == "C00003")
+        pg.click("#mic-button")
+        if pg.is_visible("#consent-yes"):
+            pg.click("#consent-yes")
+        until(pg, lambda: pg.is_enabled("#voice-stop"))
+        pg.click("#voice-stop")
+        until(pg, lambda: pg.input_value("#text-input") == "Zプラス方向に10mm")
+        pg.wait_for_timeout(200)
+        h = head(pg)
+        check(h == "文を確かめて［送る］" and "次へ" not in h and pg.inner_text("#text-send") == "送る"
+              and "primary" in (pg.get_attribute("#text-send", "class") or "") and _primaries(pg) == 1,
+              f"11/5 N4(a)：声で入った文を確かめるときの見出しは、本当のボタン［送る］の名前で言う（目立つのは［送る］だけ）：{h}")
+        pg.click("#text-send")
+        until(pg, lambda: pg.input_value("#text-input") == "" and pg.is_disabled("#text-send"), 3000)
+        h = head(pg)
+        check(h == "少しお待ちください" and _primaries(pg) <= 1,
+              f"11/5 N4(c)：指示の答えを待っている間は、待っていると言う（🎤 を押すように言わない）：{h}")
+        until(pg, lambda: pg.is_enabled("#open-confirm"), 6000)
+        check(head(pg) == "動きを確かめてください", f"11/5 N4(c)：答えのあとは、ふだんの見出しに戻る：{head(pg)}")
+        if shots is not None:
+            shots.mkdir(parents=True, exist_ok=True)
+            pg.screenshot(path=str(shots / "N4_after_send.png"))
+        pg.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+    # (b) 会話（DEMO_BUTTON_REPEAT・台本の答え）。位置を選ばずに「じゃあ、3回にして」まで
+    cx.PRICES[dm.MOCK_MODEL] = cx.Price(input=0.0, output=0.0, cache_write_5m=0.0, cache_write_1h=0.0, cache_read=0.0)
+    ex = cx.Explainer("mock-no-network", dm.MOCK_MODEL, client=dm.ScriptClient(), usage_log=cx.UsageLog(out / "n4_usage.jsonl"))
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None, explainer=ex)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    try:
+        pg = browser.new_page(viewport={"width": 1280, "height": 720})
+        pg.add_init_script(FAKE_RECOGNITION)
+        pg.goto(url)
+        pg.set_input_files("#file-input", str(REPO / "samples/dummy/DEMO_BUTTON_REPEAT.JBI"))
+        pg.wait_for_selector("#job-area:not([hidden])")
+        until(pg, lambda: pg.is_enabled("#text-send"))
+        talk = "話しかけるか、点か番号を押してください"
+        fill_text(pg, "このロボット、何をしている？")
+        pg.click("#text-send")
+        pg.wait_for_selector("#ask-turns .bubble.claude:not(.thinking)")
+        pg.wait_for_timeout(200)
+        h = head(pg)
+        check(h == talk and _primaries(pg) <= 1,
+              f"11/5 N4(b)：会話の最初の答えのあと（位置を選ぶ前）は、話す・書くこともできると言う：{h}")
+        fill_text(pg, "ボタンを押してるんだよ")
+        pg.click("#text-send")
+        pg.wait_for_selector("#ask-turns .talk-choice")
+        pg.locator("#ask-turns .talk-choice", has_text="この動きです").click()
+        pg.wait_for_selector("#ask-turns .bubble.taught")
+        pg.wait_for_timeout(200)
+        h = head(pg)
+        check(h == talk, f"11/5 N4(b)：教えたあと（「じゃあ、3回にして」の前）も、話す・書くことができると言う：{h}")
+        fill_text(pg, "じゃあ、3回にして")
+        pg.click("#text-send")
+        pg.wait_for_selector("#range-yes", timeout=5000)
+        pg.wait_for_timeout(200)
+        h = head(pg)
+        check(h == "この範囲を繰り返しますか？" and _primaries(pg) <= 1,
+              f"11/5 N4：範囲の確認の見出しは変えない：{h}")
+        pg.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 def check_text_size_1080(browser, check, shots: Path | None, out: Path) -> None:
     """11/5 夜 F6：1920×1080（デモの動画を撮る大きさ）で、会話・話し手・状態の1行・返事の札・凡例・図の注意書きの文字を大きく。
     1280×720・1366×768・1440×900 の文字の大きさは前のまま。1920×1080 でもページはスクロールせず、3D は小さくならず、
@@ -2549,6 +2656,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check_export_twice(b, check, shots, out)
             check_opening_click_through(b, check, shots, out)
             check_export_path_short(b, check, shots, out)
+            check_heading_matches(b, check, shots, out)
             check_dialog(b, check, shots, errors, updown_cfg["DEMO_C_PLACE.JBI"])
             check_talk(b, check, shots, errors, out)
             check_updown_unconfirmed(b, check, shots, errors)

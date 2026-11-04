@@ -418,7 +418,8 @@ function renderSteps() {
     text = "JOBファイルをドロップしてください";
     primary = "drop-zone";
   } else if (step === 2) {
-    text = dialogStep() === "pick" ? "位置を選んでください" : "点か番号を押してください";
+    // 指示の欄はステップ2でも出ている（入口は1つ）：位置を選ばずに話す・書くこともできる（11/5 夜 N4）
+    text = dialogStep() === "pick" ? "位置を選んでください" : state.sending ? WAIT_TEXT : "話しかけるか、点か番号を押してください";
   } else if (step === 3 && dialogStep()) {
     // Claude との会話の途中：選択肢はどれも同じ重さ（目立たせない）。声でも答えられる
     const go = st.dialog.choices.length === 1 && st.dialog.choices[0].id === "go";
@@ -436,7 +437,7 @@ function renderSteps() {
       text = asking ? askText : "どうぞ、話してください";
       primary = "voice-stop";
     } else if ($("text-input").value.trim()) {
-      text = "文を確かめて「次へ」";
+      text = "文を確かめて［送る］";  // ボタンの名前は［送る］（11/5 夜 N4）
       primary = "text-send";
     } else if (asking) {  // 聞き返しの見出しは、Chrome の案内より先に出す
       text = askText;
@@ -453,9 +454,11 @@ function renderSteps() {
       text = "🎤 を押して話してください";
       primary = "mic-button";
     } else {
-      text = "動かし方を書いて「次へ」";
+      text = "動かし方を書いて［送る］";
       primary = "text-send";
     }
+    // 答えを待っている間は、待っていると言う（見出しだけ。目立たせるボタンはふだんのまま。11/5 夜 N4）
+    if (state.sending && !recording()) text = WAIT_TEXT;
   } else if (st.blocked_reason) {
     text = "この変更はできません";
     primary = "undo-button";
@@ -502,7 +505,9 @@ $("text-input").addEventListener("input", renderSteps);
 //（小さなマイクが真ん中へ大きくなって戻る）。動きを減らす設定のときは、動かさずにすぐ切り替える
 // 唐川さんの確定文（11/5 UI 最終仕様）。ロボットを動かす命令ではなく、動きについて話す（Safety P2-4 の「直接命令に読める」を避ける）
 const HERO_TITLE = "ロボットの動きについて話しかけてください";
-const HERO_REPLACES = ["点か番号を押してください", "🎤 を押して話してください", "動かし方を書いて「次へ」"];
+const HERO_REPLACES = ["話しかけるか、点か番号を押してください", "🎤 を押して話してください", "動かし方を書いて［送る］"];
+// 答えを待っている間の見出し（11/5 夜 N4）
+const WAIT_TEXT = "少しお待ちください";
 
 function isHero() {
   const st = state.st;
