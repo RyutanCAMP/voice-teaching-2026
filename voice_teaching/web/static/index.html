@@ -116,11 +116,15 @@
 
   <!-- 右：今のステップの操作だけ -->
   <aside class="side">
+    <!-- PC 版（幅 1100px 以上）は右の列を3段にする（UI 修正 11/4・唐川さんの依頼書）：
+         上＝状態の1行と見出し（いつも見える）／中＝会話・範囲・候補（ここだけスクロール）／下＝今の操作の帯（いつも見える）。
+         並べ方だけを変えた。隠す・出す決まり（どのステップで、どのカードを出すか）は app.js のまま -->
     <p id="status-line" class="status-line" aria-live="polite" hidden></p>
     <p id="next-action" class="next-action" aria-live="polite">JOBファイルをドロップしてください</p>
     <!-- 見出しの下の1行の案内（CHECKER_030 S30-3：実機の JOB の承認のあと）。文は app.js の決まった文だけ -->
     <p id="next-hint" class="next-hint" hidden></p>
 
+    <div id="side-scroll" class="side-scroll">
     <section id="select-panel" class="card" aria-label="位置を選ぶ">
       <div id="position-chips" class="chips"></div>
       <p id="chips-note" class="fine" hidden>薄い番号の位置は、ここでは変更できません（理由は番号に重ねると出ます）。</p>
@@ -137,12 +141,14 @@
       <div id="dialog-evidence" class="evidence"></div>
       <p id="dialog-estimated" class="dlg-est" hidden></p>
       <div id="dialog-choices" class="choices dlg-choices"></div>
-      <p id="dialog-note" class="fine">Claude は意味を読んで候補を出し、聞き返すだけです。座標の変更・検査・数字はプログラムが行い、承認は確認表示のボタンだけです。</p>
+      <details class="more"><summary>詳しく</summary>
+        <p id="dialog-note" class="fine">Claude は意味を読んで候補を出し、聞き返すだけです。座標の変更・検査・数字はプログラムが行い、承認は確認表示のボタンだけです。</p>
+      </details>
     </section>
 
     <!-- 入口は1つ（11/4 唐川さんの指示③）：声も文字も下の「指示の欄」1つから /api/talk へ。会話の流れはこの欄に出す。旧「Claude に聞く」の入力欄は無くした -->
     <!-- PC 版の画面（docs/UI_PC_LAYOUT.md）：会話の欄は右側。3D は左でいつも見える。入口は1つ（/api/talk・Step F） -->
-    <!-- 図の下に置く（右側は今のステップのカードだけにする）。Claude に聞く（読み取りだけ）。答えでジョブ・変更候補・承認は変わらない。文は explain.js がテキストのノードで作る -->
+    <!-- Claude に聞く（読み取りだけ）。答えでジョブ・変更候補・承認は変わらない。文は explain.js がテキストのノードで作る -->
     <section id="ask-panel" class="card dialog" aria-label="会話" hidden>
       <div class="dlg-head">
         <span class="dlg-title">会話</span>
@@ -155,10 +161,42 @@
         <span class="memory-head">覚えていること</span>
         <ul id="ask-memory" class="memory-list"></ul>
       </div>
-      <p id="ask-usage" class="fine"></p>
-      <button type="button" id="ask-reset" class="link small" disabled>会話をやり直す</button>
-      <p class="fine">Claude は動作の説明と作業目的の推定だけをします。数・状態・変更の案内はアプリが出します。承認と出力はボタンだけです。</p>
+      <!-- トークン数・料金・会話のやり直し・役割の説明は「詳しく」の中（いつもは閉じている） -->
+      <details class="more"><summary>詳しく</summary>
+        <p id="ask-usage" class="fine"></p>
+        <button type="button" id="ask-reset" class="link small" disabled>会話をやり直す</button>
+        <p class="fine">Claude は動作の説明と作業目的の推定だけをします。数・状態・変更の案内はアプリが出します。承認と出力はボタンだけです。</p>
+      </details>
     </section>
+
+    <!-- 指示の結果（聞き返し・止めた理由・回数の変更の範囲の確認）。会話の流れの最後の吹き出しとして中の段に出す。
+         出す・隠すは指示の欄（#instruction-panel）と同じ（app.js が合わせる） -->
+    <section id="reply-panel" class="reply-panel" aria-label="指示の結果">
+      <div id="reply-message" class="reply" aria-live="polite" hidden></div>
+    </section>
+
+    <section id="candidate-panel" class="card" aria-label="確かめて承認">
+      <div id="candidate-view"></div>
+      <div id="approval-panel" aria-label="承認と出力">
+        <p id="approval-status" class="approved" hidden></p>
+        <!-- 承認のあとの3つの状態（台本 Ver.6.1 Scene 3-3）。文はサーバーの決まった文（state.after_approval）だけ -->
+        <dl id="approval-states" class="approval-states" hidden></dl>
+        <p id="approval-note" class="fine" hidden></p>
+        <p id="approval-exported" class="fine approval-exported" hidden></p>
+        <p id="export-note" class="fine" hidden>出力先：<code id="out-dir"></code>（.JBI.txt）。実機での取り違えを完全に防ぐものではありません。実機には入れないでください。</p>
+        <div id="export-result" aria-live="polite" hidden></div>
+      </div>
+    </section>
+    </div><!-- /side-scroll -->
+
+    <!-- 下の帯：今の操作（いつも見える）。候補のボタンは「確かめて承認」のカードと同じときに出す（app.js が合わせる） -->
+    <div id="dock" class="dock">
+      <div id="dock-actions" class="dock-actions" aria-label="確かめて承認・出力">
+        <p id="export-review-only" class="review-only" hidden>変更案の確認のみ。実機用JOBは出力できません</p>
+        <button type="button" id="open-confirm" class="wide" disabled>確認して承認へ</button>
+        <button type="button" id="export-button" class="wide" disabled>シミュレーション用に出力（合成ジョブだけ・実機に入れない）</button>
+        <button type="button" id="undo-button" class="link" disabled>元に戻す</button>
+      </div>
     <section id="instruction-panel" class="card" aria-label="音声で指示">
       <div id="instruction-slot">
         <button type="button" id="voice-position" class="position-pill" title="位置を選び直す"></button>
@@ -195,27 +233,10 @@
           <input type="text" id="text-input" maxlength="500" placeholder="Zプラス方向に10mm" disabled>
           <button type="submit" id="text-send" disabled>送る</button>
         </form>
-        <p class="fine">1回に動かせる量：<span id="max-shift-label"></span></p>
-        <div id="reply-message" class="reply" aria-live="polite" hidden></div>
+        <p class="fine max-shift">1回に動かせる量：<span id="max-shift-label"></span></p>
       </div>
     </section>
-
-    <section id="candidate-panel" class="card" aria-label="確かめて承認">
-      <div id="candidate-view"></div>
-      <button type="button" id="open-confirm" class="wide" disabled>確認して承認へ</button>
-      <div id="approval-panel" aria-label="承認と出力">
-        <p id="approval-status" class="approved" hidden></p>
-        <!-- 承認のあとの3つの状態（台本 Ver.6.1 Scene 3-3）。文はサーバーの決まった文（state.after_approval）だけ -->
-        <dl id="approval-states" class="approval-states" hidden></dl>
-        <p id="approval-note" class="fine" hidden></p>
-        <p id="approval-exported" class="fine approval-exported" hidden></p>
-        <p id="export-review-only" class="review-only" hidden>変更案の確認のみ。実機用JOBは出力できません</p>
-        <button type="button" id="export-button" class="wide" disabled>シミュレーション用に出力（合成ジョブだけ・実機に入れない）</button>
-        <p id="export-note" class="fine" hidden>出力先：<code id="out-dir"></code>（.JBI.txt）。実機での取り違えを完全に防ぐものではありません。実機には入れないでください。</p>
-        <div id="export-result" aria-live="polite" hidden></div>
-      </div>
-      <button type="button" id="undo-button" class="link" disabled>元に戻す</button>
-    </section>
+    </div><!-- /dock -->
   </aside>
 
   <!-- 詳細表示（同じ画面の中の切り替え。最初は閉じている） -->

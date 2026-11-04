@@ -320,6 +320,10 @@ function renderSteps() {
     const approvedNow = !!(state.st && state.st.approval);
     $(id).hidden = id === "instruction-panel" ? !(step === 2 || step === 3 || (step === 4 && approvedNow)) : Number(n) !== step;
   }
+  // 置く場所だけ（UI 修正 11/4）：指示の結果の欄は中の段に、候補のボタンは下の帯に移した。
+  // 出す・隠すは元のカードと同じにする（指示の結果＝指示の欄と同じ、候補のボタン＝「確かめて承認」のカードと同じ）
+  $("reply-panel").hidden = $("instruction-panel").hidden;
+  $("dock-actions").hidden = $("candidate-panel").hidden;
   // ステップ4では、マイク（録音）を出さない・押せない（録音と承認・出力が重ならない。今までの決まり）。承認のあとは文字の欄だけ
   $("voice-input-slot").hidden = step === 4;
   if (step === 4) $("mic-button").disabled = true;
@@ -1794,6 +1798,61 @@ $("copy-url").addEventListener("click", async () => {
     $("voice-status").textContent = "Chrome で " + url + " を開いてください";
   }
 });
+// ---- 右の列の中の段のスクロール（表示だけ。UI 修正 11/4）----
+// PC 版では右の列の中の段（会話・指示の結果・候補）だけがスクロールする。新しく出たもの・変わったものが見えるところへ送る。
+// - 指示の結果（範囲の確認など）・候補のカードの中身が変わった：そのカードを見せる（収まれば下の端まで。範囲のボタン・承認の1行が見える。
+//   収まらなければ候補は上の端から（止まった理由・変わる値）、範囲の確認は下の端（ボタン）を見せる）
+// - それ以外（会話の吹き出しが増えた）：いちばん新しい吹き出しを見せる
+// 文・ボタン・出す隠すの決まりは変えない。狭い画面（縦に並べる）では何もしない
+const sideScroll = $("side-scroll");
+const followText = { reply: "", cand: "", talk: "" };
+let followWant = null;
+let followCardAt = -1e9;  // 候補・範囲のカードを見せた時刻。直後に届く会話の知らせ（同期の答え）でカードから離れない
+
+function zoneText(id) {
+  const e = $(id);
+  return e.hidden ? "" : e.innerText;
+}
+
+function revealIn(box, target, align) {
+  const br = box.getBoundingClientRect(), r = target.getBoundingClientRect();
+  const top = r.top - br.top + box.scrollTop, bottom = top + r.height;
+  const max = box.scrollHeight - box.clientHeight;
+  let y = r.height <= box.clientHeight - 8 || align === "bottom" ? bottom - box.clientHeight + 8 : top - 8;
+  box.scrollTop = Math.max(0, Math.min(max, y));
+}
+
+function followLatest() {
+  followWant = null;
+  if (getComputedStyle(sideScroll).overflowY !== "auto" || sideScroll.scrollHeight <= sideScroll.clientHeight) return;
+  const reply = zoneText("reply-panel"), cand = zoneText("candidate-panel");
+  const replyNew = reply !== followText.reply && reply !== "", candNew = cand !== followText.cand && cand !== "";
+  const talk = zoneText("ask-panel") + "|" + zoneText("dialog-panel");
+  const talkNew = talk !== followText.talk;
+  followText.reply = reply;
+  followText.cand = cand;
+  followText.talk = talk;
+  if (candNew || replyNew) followCardAt = performance.now();
+  if (candNew) {
+    // 出力のあと：出力の結果。承認のあと：「〇〇さんが承認しました」と3つの状態。承認の前：候補のカードを上の端から（止まった理由・変わる値）
+    if (!$("export-result").hidden) return revealIn(sideScroll, $("export-result"), "bottom");
+    if (!$("approval-status").hidden) return revealIn(sideScroll, $("approval-panel"), "top");
+    return revealIn(sideScroll, $("candidate-panel"), "top");
+  }
+  if (replyNew) return revealIn(sideScroll, $("reply-message"), "bottom");
+  if (!talkNew) return;  // 何も新しくない（同じ中身の描き直し）：今の位置のまま
+  if (performance.now() - followCardAt < 1500) return;
+  const bubbles = [...sideScroll.querySelectorAll("#ask-turns > li, #dialog-turns > li")].filter((e) => e.offsetParent !== null);
+  const panel = document.body.classList.contains("in-dialog") && !$("dialog-panel").hidden ? $("dialog-panel") : null;
+  if (panel) return revealIn(sideScroll, panel, "bottom");  // 会話の途中（位置の確認など）は、選択肢まで見せる
+  const last = bubbles.filter((e) => e.closest("#ask-turns")).pop() || bubbles.pop();
+  if (last) revealIn(sideScroll, last, "top");
+}
+
+new MutationObserver(() => {
+  if (!followWant) followWant = requestAnimationFrame(followLatest);
+}).observe(sideScroll, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["hidden"] });
+
 $("voice-stop").addEventListener("click", () => voice.stop());  // 話し終わった（認識文が入ると、マイクは OFF）
 $("voice-cancel").addEventListener("click", () => {
   state.live = false;

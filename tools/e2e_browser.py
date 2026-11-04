@@ -1041,7 +1041,8 @@ def check_demo3d(browser, url, check, shots: Path | None, errors: list) -> None:
           "比較の再生：変更後の MOVJ は 30行目（3行足したあとの行番号。サーバーの線のまま）")
     check(not any(w in t for t in bt + at for w in banned), "比較の再生：時間・安全や距離を断定する言葉を出さない")
     tabs = pg.locator(".view-tab").first.bounding_box()
-    check(tabs is not None and tabs["height"] < 40, f"比較の再生：「いま」の表示が出ても、図の向きのボタンは1行のまま（高さ {tabs and round(tabs['height'])}px）")
+    # UI 修正 11/4：ボタンの高さは 44px 以上（依頼書2章）。1行のままかどうかは、2行に折り返した高さ（約 64px）より低いことで見る
+    check(tabs is not None and tabs["height"] < 52, f"比較の再生：「いま」の表示が出ても、図の向きのボタンは1行のまま（高さ {tabs and round(tabs['height'])}px）")
     check(not boxes_overlap(pg, "#play-now", "#fig-3d svg") and not boxes_overlap(pg, "#play-now", ".view-tabs"),
           "比較の再生：「いま」の表示は図の上の帯に出し、図（点・回数の窓）と図の向きのボタンに重ねない")
     # 再生しながらでも、安全の表示（候補の注意・確認して承認へ）は隠さない
@@ -1512,6 +1513,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check_dialog(b, check, shots, errors, updown_cfg["DEMO_C_PLACE.JBI"])
             check_talk(b, check, shots, errors, out)
             check_updown_unconfirmed(b, check, shots, errors)
+            check_above_fold(b, check, shots, errors, out, log)
 
             # SpeechRecognition が無いブラウザー
             pg2 = b.new_page()
@@ -2046,13 +2048,13 @@ def check_updown_unconfirmed(browser, check, shots: Path | None, errors: list) -
               f"上下の設定なし：「上下の向き：未確認（Z＋・Z−で指示）」と出す（{pg.inner_text('#updown-status')!r}）")
         det = pg.inner_text("#updown-detail") if pg.is_visible("#updown-detail") else ""
         check(det == "上下の向き：未確認（HC20DT）", f"S30-1：設定なしのサーバーでもロボット名（--robot）を出す（{det!r}）")
-        side = len("".join(pg.evaluate("""() => [...document.querySelectorAll('.side > :not(#ask-panel):not(#status-line)')]
+        side = len("".join(pg.evaluate("""() => [...document.querySelectorAll('.side > :not(#ask-panel):not(#status-line):not(#side-scroll), #side-scroll > :not(#ask-panel)')]
             .filter((e) => e.offsetParent !== null).map((e) => e.innerText).join('')""").split()))  # 会話の欄（PC 版で右側）は数えない
         check(side <= 80, f"上下の設定なし：次にすることを足しても、音声のカードの右側の文字は80文字まで（{side}文字）")
         # 不一致・変更済みの表示の文に入れ替えても 80文字まで（表示の文だけを入れ替えて数える。サーバーの状態は変えない）
         for other in ("上下の向き：確認した座標系・ツールと違います", "上下の向き：設定が変わっています"):
             pg.evaluate("t => { document.querySelector('#updown-status').textContent = t; }", other)
-            side2 = len("".join(pg.evaluate("""() => [...document.querySelectorAll('.side > :not(#ask-panel):not(#status-line)')]
+            side2 = len("".join(pg.evaluate("""() => [...document.querySelectorAll('.side > :not(#ask-panel):not(#status-line):not(#side-scroll), #side-scroll > :not(#ask-panel)')]
             .filter((e) => e.offsetParent !== null).map((e) => e.innerText).join('')""").split()))  # 会話の欄（PC 版で右側）は数えない
             check(side2 <= 80, f"上下の向き「{other}」の表示でも、音声のカードの右側の文字は80文字まで（{side2}文字）")
         pg.evaluate("t => { document.querySelector('#updown-status').textContent = t; }", "上下の向き：未確認（Z＋・Z−で指示）")
@@ -2125,6 +2127,170 @@ def check_updown_unconfirmed(browser, check, shots: Path | None, errors: list) -
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+# ---- UI 修正 11/4（唐川さんの依頼書 UI_FIX_REQUEST_9db4044・REVIEW_UI U1〜U4）：重要な操作をスクロールなしで見せる ----
+# measure.js（依頼書に同梱）の考え方：要素の全体が画面の中にあり、上の帯にもフッターにも隠れない。
+# ここではさらに、右の列の中の段（スクロールする入れ物）に切られていないこと、真ん中の点がほかの要素に覆われていないことも確かめる。
+FOLD_JS = """(sels) => {
+  const vh = innerHeight, vw = innerWidth;
+  const top = document.querySelector('.top').getBoundingClientRect().bottom;
+  const foot = vh - document.querySelector('.foot').getBoundingClientRect().top;
+  const out = {};
+  for (const s of sels) {
+    const e = document.querySelector(s);
+    if (!e || e.closest('[hidden]') || e.offsetParent === null) { out[s] = '出ていない'; continue; }
+    const b = e.getBoundingClientRect();
+    let why = '';
+    if (b.width === 0 || b.height === 0) why = '大きさ0';
+    else if (b.top < top - 0.5) why = `上の帯に隠れる（上 ${Math.round(b.top)}・帯 ${Math.round(top)}）`;
+    else if (b.bottom > vh - foot + 0.5) why = `フッターに隠れる・画面の外（下 ${Math.round(b.bottom)}・画面 ${Math.round(vh - foot)}）`;
+    else if (b.left < 0 || b.right > vw) why = '横に外れる';
+    for (let a = e.parentElement; a && !why; a = a.parentElement) {
+      const o = getComputedStyle(a).overflowY;
+      if (o === 'auto' || o === 'scroll' || o === 'hidden') {
+        const c = a.getBoundingClientRect();
+        if (b.top < c.top - 0.5 || b.bottom > c.bottom + 0.5) why = `入れ物（${a.id || a.className}）に切られる`;
+      }
+    }
+    if (!why) {
+      const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+      if (!hit || !(hit === e || e.contains(hit) || hit.contains(e))) why = 'ほかの要素に覆われる';
+    }
+    out[s] = why ? 'NG ' + why : `OK ${Math.round(b.top)}-${Math.round(b.bottom)}`;
+  }
+  return out;
+}"""
+# ボタンの文字 14px 以上・高さ 44px 以上（見えているボタン。詳細表示の中と、吹き出しの中の根拠の行のリンク（explain.js が作る）は除く）
+BUTTON_SIZE_JS = """() => {
+  const bad = [];
+  for (const e of document.querySelectorAll('button')) {
+    if (e.closest('[hidden], #engineer-view, .bubble .evidence, details:not([open])') || e.offsetParent === null) continue;
+    const b = e.getBoundingClientRect();
+    if (b.width === 0 || b.height === 0 || b.bottom < 0 || b.top > innerHeight) continue;
+    const fs = parseFloat(getComputedStyle(e).fontSize);
+    if (fs < 14 || b.height < 43.5) bad.push(`${e.id || e.textContent.trim().slice(0, 10)}（${fs}px・高さ ${Math.round(b.height)}px）`);
+  }
+  return bad;
+}"""
+PAGE_SCROLL_JS = """() => [document.documentElement.scrollWidth, document.documentElement.scrollHeight, innerWidth, innerHeight]"""
+# 3D の大きさ：直す前（434165d）に同じ手順で測った値。これより小さくしない（候補のあとは、動きの並び・凡例の分だけ前から小さかった）
+FIG_BEFORE = {(1280, 720): {"before_candidate": (689, 360), "candidate": (689, 230)},
+              (1440, 900): {"before_candidate": (738, 492), "candidate": (738, 492)}}
+
+
+def check_above_fold(browser, check, shots: Path | None, errors: list, out: Path, log=print) -> dict:
+    """S1〜S6（依頼書2章）× 1280×720・1440×900 で、重要な操作がスクロールなしで全部見えるか。表（OK/NG）を返す。
+    モックの台本の答え（tools/demo_mock.py の ScriptClient。本物の Claude は呼ばない）を使う。"""
+    sys.path.insert(0, str(REPO / "tools"))
+    import demo_mock as dm
+    from voice_teaching import claude_explain as cx
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import server
+
+    cx.PRICES[dm.MOCK_MODEL] = cx.Price(input=0.0, output=0.0, cache_write_5m=0.0, cache_write_1h=0.0, cache_read=0.0)
+    ex = cx.Explainer("mock-no-network", dm.MOCK_MODEL, client=dm.ScriptClient(),
+                      usage_log=cx.UsageLog(out / "fold_usage.jsonl"))
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None, explainer=ex)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    table: dict = {}
+    head = ["#status-line", "#next-action"]
+    entry = ["#text-input", "#text-send", "#mic-button"]
+
+    def stage(pg, w, h, name, sels, fig_kind, extra_ok=True, extra_what=""):
+        pg.wait_for_timeout(450)  # 吹き出しのふわっと出る動き・スクロールが終わってから測る
+        r = pg.evaluate(FOLD_JS, sels)
+        bad = {k: v for k, v in r.items() if not v.startswith("OK")}
+        sw, sh, iw, ih = pg.evaluate(PAGE_SCROLL_JS)
+        fig = pg.locator("#fig-3d").bounding_box()
+        need = FIG_BEFORE[(w, h)][fig_kind]
+        fig_ok = fig is not None and fig["width"] >= need[0] and fig["height"] >= need[1]
+        small = pg.evaluate(BUTTON_SIZE_JS)
+        ok = not bad and sw <= iw and sh <= ih and fig_ok and not small and extra_ok
+        table[(name, f"{w}x{h}")] = "OK" if ok else "NG"
+        check(not bad, f"{name}（{w}×{h}）：{'・'.join(sels)} がスクロールなしで全部見える{'' if not bad else '：' + str(bad)}")
+        check(sw <= iw and sh <= ih, f"{name}（{w}×{h}）：ページに縦横のスクロールが出ない（{sw}×{sh}・画面 {iw}×{ih}）")
+        check(fig_ok, f"{name}（{w}×{h}）：3D は直す前より小さくしない（{fig and round(fig['width'])}×{fig and round(fig['height'])}・"
+                      f"直す前 {need[0]}×{need[1]}）")
+        check(not small, f"{name}（{w}×{h}）：見えているボタンは文字 14px 以上・高さ 44px 以上：{small}")
+        if extra_what:
+            check(extra_ok, f"{name}（{w}×{h}）：{extra_what}")
+        if shots is not None:
+            shots.mkdir(parents=True, exist_ok=True)
+            pg.screenshot(path=str(shots / f"FOLD_{w}x{h}_{name.split()[0]}.png"))
+
+    from voice_teaching import sim
+    saved_out_dir = sim.DEFAULT_OUT_DIR
+    try:
+        for w, h in [(1280, 720), (1440, 900)]:
+            sim.DEFAULT_OUT_DIR = out / f"fold_sim_{w}"  # 出力は一時フォルダ（大きさごとに分ける。同じ名前は上書きしない決まりのため）
+            # ---- 位置の変更（サンプル DEMO_C_PLACE → C00003 → 「Zプラス方向に10mm」→ 確認表示 → 承認 → 出力） ----
+            pg = browser.new_page(viewport={"width": w, "height": h})
+            pg.add_init_script(FAKE_RECOGNITION)
+            pg.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
+            pg.goto(url)
+            pg.click("#sample-button")
+            pg.wait_for_selector("#job-area:not([hidden])")
+            until(pg, lambda: pg.is_visible("#status-line"))
+            stage(pg, w, h, "S1a 読込直後", head + entry, "before_candidate")
+            pg.locator("#position-chips button", has_text="C00003").click()
+            until(pg, lambda: pg.inner_text("#voice-position strong") == "C00003")
+            stage(pg, w, h, "S1b 位置を選んだあと", head + entry, "before_candidate")
+            pg.fill("#text-input", "Zプラス方向に10mm")
+            pg.click("#text-send")
+            until(pg, lambda: pg.is_enabled("#open-confirm"))
+            change = pg.inner_text("#candidate-view .cand-change") if pg.locator("#candidate-view .cand-change").count() else ""
+            ch = " ".join(change.split())
+            stage(pg, w, h, "S4 候補表示", head + ["#open-confirm", "#candidate-view .cand-change"], "candidate",
+                  "300.000" in ch and "310.000" in ch, f"Z の変更前→変更後が見える（{ch}）")
+            pg.click("#open-confirm")
+            pg.wait_for_selector("#confirm-overlay:not([hidden])")
+            stage(pg, w, h, "S5 確認表示", ["#approve-button", "#approver-name"], "candidate")
+            pg.fill("#approver-name", "テスト")
+            pg.click("#approve-button")
+            until(pg, lambda: pg.is_visible("#approval-status"))
+            st = pg.inner_text("#approval-status")
+            stage(pg, w, h, "S6 承認後", head + ["#export-button", "#approval-status", "#text-input", "#text-send"], "candidate",
+                  "テスト さんが承認しました" in st and pg.is_hidden("#mic-button"),
+                  f"「テスト さんが承認しました」が出て、承認のあとは文字の欄だけ（🎤 は出さない）：{st}")
+            pg.click("#export-button")
+            pg.wait_for_selector("#export-result:not([hidden])")
+            stage(pg, w, h, "S7 出力後", head + ["#export-result", "#text-input", "#text-send"], "candidate",
+                  "出力しました" in pg.inner_text("#export-result"), "出力の結果が出る")
+            pg.close()
+
+            # ---- 回数の変更（DEMO_BUTTON_REPEAT → C00001 → 質問 → 「じゃあ3回にして」→ 範囲の確認） ----
+            pg = browser.new_page(viewport={"width": w, "height": h})
+            pg.add_init_script(FAKE_RECOGNITION)
+            pg.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
+            pg.goto(url)
+            pg.set_input_files("#file-input", str(REPO / "samples/dummy/DEMO_BUTTON_REPEAT.JBI"))
+            pg.wait_for_selector("#job-area:not([hidden])")
+            pg.locator("#position-chips button", has_text="C00001").click()
+            until(pg, lambda: pg.inner_text("#voice-position strong") == "C00001")
+            pg.fill("#text-input", "このロボット、何してる？")
+            pg.click("#text-send")
+            pg.wait_for_selector("#ask-turns .bubble.claude:not(.thinking)")
+            stage(pg, w, h, "S2 会話のあと", head + entry + ["#ask-turns > li:last-child"], "before_candidate")
+            pg.fill("#text-input", "じゃあ3回にして")
+            pg.click("#text-send")
+            pg.wait_for_selector("#range-yes")
+            stage(pg, w, h, "S3 範囲の確認", head + ["#range-yes", "#range-no"], "before_candidate")
+            pg.click("#range-yes")
+            until(pg, lambda: pg.is_enabled("#open-confirm"))
+            stage(pg, w, h, "S4r 回数の候補", head + ["#open-confirm", "#candidate-view .cand-change"], "candidate")
+            pg.close()
+    finally:
+        sim.DEFAULT_OUT_DIR = saved_out_dir
+        srv.shutdown()
+        srv.server_close()
+    names = sorted({k[0] for k in table}, key=lambda s: s.split()[0])
+    log("UI 修正 11/4：スクロールなしで見えるか（S1〜S7・2つの画面の大きさ）")
+    log("| 状態 | 1280x720 | 1440x900 |")
+    for n in names:
+        log(f"| {n} | {table.get((n, '1280x720'), '—')} | {table.get((n, '1440x900'), '—')} |")
+    return table
 
 
 def check_four_steps(browser, url, check, shots: Path | None) -> None:
@@ -2263,7 +2429,7 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     check(pg.inner_text("#mic-label") == "マイク OFF" and pg.get_attribute("#mic-button", "aria-pressed") == "false",
           "マイクは最初 OFF と出る")
     # 右側の文字の量は、操作のカード（会話の欄は PC 版の画面で右側に移したので数えない）
-    side = len("".join(pg.evaluate("""() => [...document.querySelectorAll('.side > :not(#ask-panel):not(#status-line)')]
+    side = len("".join(pg.evaluate("""() => [...document.querySelectorAll('.side > :not(#ask-panel):not(#status-line):not(#side-scroll), #side-scroll > :not(#ask-panel)')]
         .filter((e) => e.offsetParent !== null).map((e) => e.innerText).join('')""").split()))
     check(all(pg.is_visible(s) for s in ["#voice-position", "#mic-button", "#text-input", "#text-send"])
           and pg.inner_text("#text-send") == "送る" and side <= 80,
