@@ -87,7 +87,76 @@ export class View3D {
       const fspan = Math.hypot(fhi[0] - flo[0], fhi[1] - flo[1], fhi[2] - flo[2]);
       this.span = Math.max(fspan * 1.8, this.span * 0.5, 1);
     }
+    // 枠に収める割合とずれは、JOB の点（と focus）が変わったときだけ決め直す。選ぶ・候補・元に戻す・再生では図を動かさない
+    const fitKey = JSON.stringify([data.points.map((p) => [p.name, p.xyz]), fp.map((p) => p.name)]);
+    if (fitKey !== this.fitKey) { this.fitKey = fitKey; this._fit(fp.length >= 2); }
     this.render();
+  }
+
+  // 最初の向き（DEFAULT_YAW・DEFAULT_PITCH・拡大なし）で、点・点の名前・床・軸と軸の文字が枠（W×H）に収まるように、
+  // 縮める割合（fitK・1 より大きくはしない）と、真ん中に寄せるずれ（fitX・fitY、画面の px）を決める（11/5 夜 F7）。
+  // 回す・拡大するときは、この割合とずれのまま（回している間に大きさは変えない）。focus のとき（区間を大きく見せる）は今のまま。
+  // JOB の点だけで決める（変更後の点・右上の窓は、出る前から場所を空けておく。候補が出ても図が動かないように）
+  _fit(focus) {
+    this.fitK = 1; this.fitX = 0; this.fitY = 0;
+    if (focus) return;
+    const view = [this.yaw, this.pitch, this.zoom];
+    this.yaw = DEFAULT_YAW; this.pitch = DEFAULT_PITCH; this.zoom = 1;
+    const d = this.data, M = 10;
+    // 世界座標で決まる所（縮めると近づく）と、そのまわりの文字の余白（px のまま）
+    const marks = [];
+    const pts = d.points;
+    for (const p of pts) {  // 同じ所の点は名前を「 / 」でつないで1つに出す
+      const label = pts.filter((q) => q.xyz.every((v, i) => v === p.xyz[i])).map((q) => q.name).join(" / ");
+      marks.push([p.xyz, -20, 14 + textWidth(label), -24, 20]);
+    }
+    const fl = this._floorFrame();
+    for (const c of fl.corners) marks.push([c, 0, 0, 0, 0]);
+    for (const dv of fl.axes) marks.push([[fl.o[0] + dv[0] * 1.25, fl.o[1] + dv[1] * 1.25, fl.o[2] + dv[2] * 1.25], -28, 28, -18, 18]);
+    marks.push([fl.o, -28, 28, -18, 18]);
+    const at = Object.fromEntries(d.points.map((p) => [p.name, p.xyz]));
+    for (const t of d.taught || []) {  // 人が教えた意味の札（点の上に出す）
+      for (const n of t.positions || []) if (at[n] && typeof t.text === "string") {
+        const w = textWidth(`✓ ${t.text}（人が教えた）`) + 16;
+        marks.push([at[n], -w / 2, w / 2, -44, 0]);
+      }
+    }
+    const base = marks.map(([v, ...pad]) => [this.project(v), pad]);
+    // 縮める割合 k のときの、文字の余白を含めた広がり（文字の余白は縮まない）
+    const box = (k) => {
+      const xs = base.map(([q]) => this.W / 2 + (q[0] - this.W / 2) * k), ys = base.map(([q]) => this.H / 2 + (q[1] - this.H / 2) * k);
+      return [Math.min(...base.map(([, p], j) => xs[j] + p[0])), Math.max(...base.map(([, p], j) => xs[j] + p[1])),
+        Math.min(...base.map(([, p], j) => ys[j] + p[2])), Math.max(...base.map(([, p], j) => ys[j] + p[3]))];
+    };
+    // 右上の窓（回数の窓・変更の拡大の窓）の下には、点・名前を入れない
+    const inset = { x0: this.W - 156, y1: 148 };  // 回数の窓（〜y 104）と変更の拡大の窓（〜y 144）の両方
+    // 割合 k で枠に収まり、右上の窓に重ならない、真ん中に最も近いずれ（無ければ null）
+    const place = (k) => {
+      const b = box(k);
+      const ax = [M - b[0], this.W - M - b[1]], ay = [M - b[2], this.H - M - b[3]];
+      if (ax[0] > ax[1] || ay[0] > ay[1]) return null;
+      const cx = this.W / 2 - (b[0] + b[1]) / 2, cy = this.H / 2 - (b[2] + b[3]) / 2;
+      const rects = base.map(([q, p]) => [this.W / 2 + (q[0] - this.W / 2) * k + p[1], this.H / 2 + (q[1] - this.H / 2) * k + p[2]]);
+      const free = (ox, oy) => rects.every(([x1, y0]) => x1 + ox <= inset.x0 || y0 + oy >= inset.y1);
+      let best = null, bestD = Infinity;
+      const N = 24;
+      for (let i = 0; i <= N; i++) for (let j = 0; j <= N; j++) {
+        const ox = ax[0] + (ax[1] - ax[0]) * i / N, oy = ay[0] + (ay[1] - ay[0]) * j / N;
+        const dd = Math.hypot(ox - cx, oy - cy);
+        if (dd < bestD && free(ox, oy)) { best = [ox, oy]; bestD = dd; }
+      }
+      if (best && free(cx, cy)) best = [cx, cy];
+      return best;
+    };
+    let k = 1, off = place(1);
+    if (!off) {  // 収まる最も大きい割合（0.3 より小さくはしない）
+      let lo = 0.3, hi = 1;
+      for (let i = 0; i < 16; i++) { const mid = (lo + hi) / 2; if (place(mid)) lo = mid; else hi = mid; }
+      k = lo; off = place(lo) || [this.W / 2 - (box(lo)[0] + box(lo)[1]) / 2, this.H / 2 - (box(lo)[2] + box(lo)[3]) / 2];
+    }
+    this.fitK = k;
+    [this.fitX, this.fitY] = off;
+    [this.yaw, this.pitch, this.zoom] = view;
   }
 
   reset() {
@@ -111,8 +180,9 @@ export class View3D {
     const up = z * cp + y1 * sp, depth = y1 * cp - z * sp;
     const D = this.span * 2.6;
     const f = D / (D + depth);
-    const k = (Math.min(this.W, this.H) * 0.82 / this.span) * this.zoom;
-    return [this.W / 2 + x1 * k * f, this.H / 2 - up * k * f, depth];
+    const k = (Math.min(this.W, this.H) * 0.82 / this.span) * (this.fitK || 1);
+    // 拡大は図の真ん中を中心に（ずれ fitX・fitY も一緒に大きくする）
+    return [this.W / 2 + (x1 * k * f + (this.fitX || 0)) * this.zoom, this.H / 2 + (-up * k * f + (this.fitY || 0)) * this.zoom, depth];
   }
 
   render() {
@@ -386,11 +456,24 @@ export class View3D {
   }
 
   // 床の格子と、X・Y・Z の軸（向きを知るため）
-  _floor(svg) {
+  // 床の四隅・軸の根元（点から遠く見える角）・軸の向き。描く（_floor）のと、枠に収める（_fit）のに使う
+  _floorFrame() {
     const z0 = this.lo[2] - this.span * 0.08;
     const pad = this.span * 0.15;
     const x0 = this.lo[0] - pad, x1 = this.hi[0] + pad, y0 = this.lo[1] - pad, y1 = this.hi[1] + pad;
     const step = niceStep(Math.max(x1 - x0, y1 - y0));
+    const pts = this.data.points.map((p) => this.project(p.xyz));
+    const mx = pts.reduce((a, q) => a + q[0], 0) / pts.length, my = pts.reduce((a, q) => a + q[1], 0) / pts.length;
+    const corners = [[x0, y0, z0], [x1, y0, z0], [x0, y1, z0], [x1, y1, z0]];
+    const far = (c) => { const q = this.project(c); return Math.hypot(q[0] - mx, q[1] - my); };
+    const o = corners.reduce((a, c) => (far(c) > far(a) ? c : a));
+    const sx = o[0] === x0 ? 1 : -1, sy = o[1] === y0 ? 1 : -1;  // 角から床の内側へ向けて描く（＋の向きは矢印の先の文字で示す）
+    const axes = [[sx * step, 0, 0], [0, sy * step, 0], [0, 0, step]];
+    return { z0, x0, x1, y0, y1, step, pts, corners, o, sx, sy, axes };
+  }
+
+  _floor(svg) {
+    const { z0, x0, x1, y0, y1, step, pts, o, sx, sy } = this._floorFrame();
     const g = svgEl("g", { class: "floor" });
     const line = (a, b, attrs) => {
       const p = this.project(a), q = this.project(b);
@@ -399,12 +482,6 @@ export class View3D {
     for (let x = Math.ceil(x0 / step) * step; x <= x1; x += step) line([x, y0, z0], [x, y1, z0], { stroke: "#1b2a47", "stroke-width": 1 });
     for (let y = Math.ceil(y0 / step) * step; y <= y1; y += step) line([x0, y, z0], [x1, y, z0], { stroke: "#1b2a47", "stroke-width": 1 });
     // 軸（床の角から、格子1目盛りの長さ）
-    const pts = this.data.points.map((p) => this.project(p.xyz));
-    const mx = pts.reduce((a, q) => a + q[0], 0) / pts.length, my = pts.reduce((a, q) => a + q[1], 0) / pts.length;
-    const corners = [[x0, y0, z0], [x1, y0, z0], [x0, y1, z0], [x1, y1, z0]];
-    const far = (c) => { const q = this.project(c); return Math.hypot(q[0] - mx, q[1] - my); };
-    const o = corners.reduce((a, c) => (far(c) > far(a) ? c : a));
-    const sx = o[0] === x0 ? 1 : -1, sy = o[1] === y0 ? 1 : -1;  // 角から床の内側へ向けて描く（＋の向きは矢印の先の文字で示す）
     const axes = [["X", [sx * step, 0, 0], "#ff7b7f"], ["Y", [0, sy * step, 0], "#4fd08f"], ["Z", [0, 0, step], "#5aa9ff"]];
     // 軸の文字は、点と点の名前に重ならない所に置く（軸の線の上を、先の方から根元の方へずらして探す）
     const taken = pts.flatMap((q) => [

@@ -702,6 +702,158 @@ def check_text_size_1080(browser, check, shots: Path | None, out: Path) -> None:
         srv.server_close()
 
 
+# 3D の図の中の文字のうち、見える枠（svg の四角・#fig-3d の四角・画面の重なり）から出ているもの。
+# cutOnly のときは、枠の端で切れている（一部だけ見える）ものだけ（区間を大きく見せる図では、区間の外は図の外に出てよい）
+TEXT3D_OUTSIDE_JS = """(cutOnly) => {
+  const svg = document.querySelector('#fig-3d svg');
+  if (!svg) return ['svg なし'];
+  const a = svg.getBoundingClientRect(), h = document.querySelector('#fig-3d').getBoundingClientRect();
+  const L = Math.max(a.left, h.left, 0), R = Math.min(a.right, h.right, innerWidth);
+  const T = Math.max(a.top, h.top, 0), B = Math.min(a.bottom, h.bottom, innerHeight);
+  return [...svg.querySelectorAll('text')].filter((t) => t.textContent.trim()).map((t) => [t.textContent, t.getBoundingClientRect()])
+    .filter(([, r]) => r.width > 0 && (r.left < L - 0.5 || r.right > R + 0.5 || r.top < T - 0.5 || r.bottom > B + 0.5)
+      && (!cutOnly || (r.right > L && r.left < R && r.bottom > T && r.top < B)))
+    .map(([s, r]) => `${s}（${Math.round(r.left)},${Math.round(r.top)}-${Math.round(r.right)},${Math.round(r.bottom)} 枠 ${Math.round(L)},${Math.round(T)}-${Math.round(R)},${Math.round(B)}）`); }"""
+
+
+def check_3d_labels_inside(browser, check, shots: Path | None, out: Path) -> None:
+    """11/5 夜 F7：3D の文字（軸の X−・Y+・点の名前・回数の窓・注意）が、見える 3D の枠の中に切れずに収まる。
+    1280×720・1366×768・1440×900・1920×1080 で、DEMO_C_PLACE（読み込んだ直後・候補・再生中）と
+    DEMO_BUTTON_REPEAT（読み込んだ直後・再生中・範囲の確認）。回数の変更の候補（data.focus で区間の3点を大きく見せる図。
+    区間の外の点は図の外に出てよい・view3d.js の setData）では、枠の端で切れる文字が無いこと。文字を小さくして収めるのではない（大きさは check_text_size_1080 と
+    check_ui_contrast で見る）。モックの台本の答え（tools/demo_mock.py の ScriptClient。本物の Claude は呼ばない）。"""
+    sys.path.insert(0, str(REPO / "tools"))
+    import demo_mock as dm
+    from voice_teaching import claude_explain as cx
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import server
+    cx.PRICES[dm.MOCK_MODEL] = cx.Price(input=0.0, output=0.0, cache_write_5m=0.0, cache_write_1h=0.0, cache_read=0.0)
+    ex = cx.Explainer("mock-no-network", dm.MOCK_MODEL, client=dm.ScriptClient(), usage_log=cx.UsageLog(out / "f7_usage.jsonl"))
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None, explainer=ex)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    try:
+        for (w, h) in [(1280, 720), (1366, 768), (1440, 900), (1920, 1080)]:
+            for job in ("DEMO_C_PLACE", "DEMO_BUTTON_REPEAT"):
+                pg = browser.new_page(viewport={"width": w, "height": h})
+                pg.add_init_script(FAKE_RECOGNITION)
+                pg.goto(url)
+                pg.set_input_files("#file-input", str(REPO / "samples/dummy" / f"{job}.JBI"))
+                pg.wait_for_selector("#job-area:not([hidden])")
+                until(pg, lambda: pg.is_enabled("#text-send") or pg.is_visible("#kbd-button"))
+
+                def stage(name, cut_only=False):
+                    pg.wait_for_timeout(400)
+                    bad = pg.evaluate(TEXT3D_OUTSIDE_JS, cut_only)
+                    what = "枠の端で切れる文字が無い（区間を大きく見せる図）" if cut_only else "文字が枠の中に収まる"
+                    check(not bad, f"11/5 F7（{w}×{h}・{job}・{name}）：3D の{what}（はみ出し {bad or 'なし'}）")
+                    if shots is not None and w in (1280, 1920):
+                        shots.mkdir(parents=True, exist_ok=True)
+                        pg.screenshot(path=str(shots / f"F7_{w}_{job}_{name}.png"))
+
+                def playback(name, cut_only=False):
+                    pg.click("#play-button")
+                    until(pg, lambda: pg.locator("#fig-3d .marker, #fig-3d .dest-mark").count() > 0)
+                    pg.wait_for_timeout(300)
+                    stage(name, cut_only)
+                    if pg.is_enabled("#play-stop"):
+                        pg.click("#play-stop")
+
+                stage("load")
+                if job == "DEMO_C_PLACE":
+                    pg.locator("#position-chips button", has_text="C00003").click()
+                    until(pg, lambda: pg.inner_text("#voice-position strong") == "C00003")
+                    fill_text(pg, "Zプラス方向に10mm")
+                    pg.click("#text-send")
+                    until(pg, lambda: pg.get_attribute("#step-4", "aria-current") == "step")
+                    stage("candidate")
+                    playback("candidate_playback")
+                else:
+                    playback("load_playback")
+                    fill_text(pg, "じゃあ、3回にして")
+                    pg.click("#text-send")
+                    pg.wait_for_selector("#range-yes", timeout=5000)
+                    stage("range")
+                    pg.click("#range-yes")
+                    until(pg, lambda: pg.is_enabled("#open-confirm"))
+                    stage("repeat_candidate", True)
+                    playback("repeat_playback", True)
+                pg.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+# 3D の点の画面の上の真ん中（名前 → [x, y]）。押しやすい大きさの透明な円の四角の中心
+PT3_CENTERS_JS = """() => Object.fromEntries([...document.querySelectorAll('#fig-3d g.pt3')].map((g) => {
+  const r = g.querySelector('circle').getBoundingClientRect(); return [g.dataset.names, [r.left + r.width / 2, r.top + r.height / 2]]; }))"""
+
+
+def check_3d_fit_stable(browser, check, shots: Path | None, out: Path) -> None:
+    """11/5 夜 F7 の続き：3D を枠に収める割合とずれは、1つの JOB を読んでいる間は変わらない。
+    DEMO_C_PLACE：位置を選んだ → 候補（C00003・「Zプラス方向に10mm」）→ 再生 →［元に戻す］で、点の画面の位置が同じ（1px 以内）。
+    DEMO_BUTTON_REPEAT：読み込んだ直後と範囲の確認で同じ。4つの大きさで。候補が出たときに図が跳ぶと、撮影で選んだ点が逃げて見える。
+    モックの台本の答え（tools/demo_mock.py の ScriptClient。本物の Claude は呼ばない）。"""
+    sys.path.insert(0, str(REPO / "tools"))
+    import demo_mock as dm
+    from voice_teaching import claude_explain as cx
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import server
+    cx.PRICES[dm.MOCK_MODEL] = cx.Price(input=0.0, output=0.0, cache_write_5m=0.0, cache_write_1h=0.0, cache_read=0.0)
+    ex = cx.Explainer("mock-no-network", dm.MOCK_MODEL, client=dm.ScriptClient(), usage_log=cx.UsageLog(out / "f7s_usage.jsonl"))
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None, explainer=ex)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+
+    def moved(a, b):
+        return {n: (round(a[n][0] - b[n][0]), round(a[n][1] - b[n][1])) for n in a
+                if n not in b or abs(a[n][0] - b[n][0]) > 1 or abs(a[n][1] - b[n][1]) > 1} if set(a) == set(b) else {"点の組が違う": (sorted(a), sorted(b))}
+    try:
+        for (w, h) in [(1280, 720), (1366, 768), (1440, 900), (1920, 1080)]:
+            for job in ("DEMO_C_PLACE", "DEMO_BUTTON_REPEAT"):
+                pg = browser.new_page(viewport={"width": w, "height": h})
+                pg.add_init_script(FAKE_RECOGNITION)
+                pg.goto(url)
+                pg.set_input_files("#file-input", str(REPO / "samples/dummy" / f"{job}.JBI"))
+                pg.wait_for_selector("#job-area:not([hidden])")
+                until(pg, lambda: pg.is_enabled("#text-send") or pg.is_visible("#kbd-button"))
+                pg.wait_for_timeout(300)
+
+                def same(ref, name):
+                    pg.wait_for_timeout(400)
+                    got = pg.evaluate(PT3_CENTERS_JS)
+                    diff = moved(got, ref)
+                    check(not diff, f"11/5 F7（{w}×{h}・{job}・{name}）：3D の点が動かない（1px より動いた点 {diff or 'なし'}）")
+
+                if job == "DEMO_C_PLACE":
+                    pg.locator("#position-chips button", has_text="C00003").click()
+                    until(pg, lambda: pg.inner_text("#voice-position strong") == "C00003")
+                    pg.wait_for_timeout(400)
+                    ref = pg.evaluate(PT3_CENTERS_JS)
+                    fill_text(pg, "Zプラス方向に10mm")
+                    pg.click("#text-send")
+                    until(pg, lambda: pg.get_attribute("#step-4", "aria-current") == "step")
+                    same(ref, "位置を選んだ → 候補")
+                    pg.click("#play-button")
+                    until(pg, lambda: pg.locator("#fig-3d .marker, #fig-3d .dest-mark").count() > 0)
+                    same(ref, "位置を選んだ → 候補の再生中")
+                    if pg.is_enabled("#play-stop"):
+                        pg.click("#play-stop")
+                    pg.click("#undo-button")
+                    until(pg, lambda: pg.locator("#fig-3d .after-pt").count() == 0)
+                    same(ref, "位置を選んだ → 元に戻す")
+                else:
+                    ref = pg.evaluate(PT3_CENTERS_JS)
+                    fill_text(pg, "じゃあ、3回にして")
+                    pg.click("#text-send")
+                    pg.wait_for_selector("#range-yes", timeout=5000)
+                    same(ref, "読み込んだ直後 → 範囲の確認")
+                pg.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 def check_review_only(browser, url, check, shots: Path | None) -> None:
     """実機の JOB（合成ジョブでない）：確認表示と承認のあとに「変更案の確認のみ」の帯。出力ボタンを出さず、出力を促さない。
     合成ジョブでは帯を出さず、今どおり出力ボタンが出る（唐川さんの指示・内部 QA の再レビュー P1-1・P2-6）。"""
@@ -1933,6 +2085,8 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check_answer_after_approval(b, check, shots, out)
             check_send_while_waiting(b, check, shots, out)
             check_text_size_1080(b, check, shots, out)
+            check_3d_labels_inside(b, check, shots, out)
+            check_3d_fit_stable(b, check, shots, out)
             check_dialog(b, check, shots, errors, updown_cfg["DEMO_C_PLACE.JBI"])
             check_talk(b, check, shots, errors, out)
             check_updown_unconfirmed(b, check, shots, errors)
