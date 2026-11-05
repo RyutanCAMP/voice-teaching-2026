@@ -56,7 +56,7 @@ def test_karakawa_mic_utterance_goes_to_the_direction_check(tmp_path):
     assert "上は Zプラス で合っていますか？" in msg, msg
     assert "「たい」" not in msg and "分かりませんでした" not in msg, msg
     assert labels(r) == ["合っている", "違う"]
-    assert not w.approve(sid, "QA")["ok"]  # 確かめる前は承認できるものが無い
+    assert not w.approve(sid, "QA", candidate_gen=w.candidate_gen_of(sid))["ok"]  # 確かめる前は承認できるものが無い
     assert len(fake.requests) == 0  # 読み取りはプログラム。Claude は呼ばない
     # ［合っている］を押して初めて候補（C00003 Z +3）。承認はまだ
     yes = next(c["text"] for c in hear(r)["choices"] if c["label"] == "合っている")
@@ -363,8 +363,9 @@ def test_spoken_numbers_do_not_bypass_the_pending_candidate(tmp_path):
         w, _, sid = A.place_flow(tmp_path / str(i))
         w.talk(sid, "Zプラス3ミリ")
         r = w.talk(sid, t, "voice")
-        out.append((hear(r).get("message"), r["state"]["candidate"]["delta"]))
-    assert out[0] == out[1] and out[0][1] == "+3.000", out
+        out.append((hear(r).get("message"), r["state"]["candidate"]))
+    # 統合（シクロ 11/6）：P0（H02）で、言い直し（やっぱり＋量）は古い候補を無効にする。「十ミリ」と「10ミリ」は同じに扱う
+    assert out[0] == out[1] and out[0][1] is None, out
 
 
 @pytest.mark.parametrize("bad_value", ["二〇〇.000", "２００.000", "200.000x"])

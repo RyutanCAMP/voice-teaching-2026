@@ -589,3 +589,15 @@ def test_after_approval_plain_button_request_keeps_approval(tmp_path, text):
     w, _, sid = approved_move(tmp_path)
     w.talk(sid, text)
     assert w.state(sid)["state"]["can_export"], text
+
+
+# ---- 15. Safety 再検証（1d434f3・5回目 CONDITIONAL PASS）の Medium ----
+@pytest.mark.parametrize("text", ["何これ？", "なにこれ？", "なんだこれ？", "どういうこと？", "どうなってるの？", "なんで？", "どうして？",
+                                  "なんでそっち？", "どうしてそっちに動くの？", "なんで高いの？", "なんでこんなに動くの？", "なぜ3回も？",
+                                  "何回もやるの？", "何でこうなるの", "いいです", "大丈夫です"])
+def test_after_approval_fifth_round(tmp_path, out_dir, text):
+    w, fake, sid = approved_move(tmp_path)
+    gen = w.candidate_gen_of(sid)
+    fake.add(T.answer("C00005 へ直線で動きます。", [21]), T.answer("C00005 へ直線で動きます。", [21]))
+    w.talk(sid, text)
+    assert not w.state(sid)["state"]["can_export"] and not w.export(sid, candidate_gen=gen)["ok"], text
