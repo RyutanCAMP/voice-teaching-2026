@@ -994,6 +994,52 @@ _FOLLOWUP_HEAD = {ud.MISMATCH: "このジョブの座標系・ツール番号・
                   ud.CHANGED: "上下の向きの設定が、確認したあとで変わっているため"}
 
 
+def updown_ask_message(facts: UtteranceFacts, updown: "ud.UpdownStatus | None") -> str:
+    """上下の向きが未確認のときの、会話の聞き返し（唐川さんの決定 11/5）。意図を受け止めてから、分からないことだけを聞く。
+
+    - 数（mm）と上下の言葉（上に・上げ・下へ など）は、プログラムが発話から読んで入れる。Claude には作らせない
+    - Zプラス・Zマイナスのどちらかは決めない（例は両方を出す）。候補は作らない（pre_check の聞き返しのまま）
+    - 状態の表示（ud.MSG_UNCONFIRMED。state.updown・候補の表示）は変えない。不一致・変更済みは今の状態ごとの文
+    - 上と下の両方がある・量に符号が付いているなど、決まった形にならないときは、意図の言葉なしの決まった文（UPDOWN_UNSET_PLAIN）
+    - 「3Dの矢印を見ながら確認できます」は出さない（画面は 3D と 2D を切り替えられ、サーバーからは 3D が出ているか確かめられない）
+    - 「何mm」とは聞かない（この聞き返しのあとの「3ミリ」だけの答えは、前の発話に足さない。CHECKER_026 再修正 P0-1）
+    """
+    st = _updown(updown)
+    if st.status != ud.UNCONFIRMED:
+        return st.message
+    words = list(_UP.finditer(facts.text)) + list(_DOWN.finditer(facts.text))
+    ups, downs = bool(_UP.search(facts.text)), bool(_DOWN.search(facts.text))
+    if ups == downs or not words:
+        return UPDOWN_UNSET_PLAIN
+    m = min(words, key=lambda x: x.start())
+    w = "上" if ups else "下"
+    said = m.group(0)
+    phrase = {"上げ": "上げたい", "下げ": "下げたい"}.get(said)
+    if phrase is None:
+        phrase = f"{said}{'に' if said.endswith('方向') else ''}動かしたい"
+    a = facts.amount
+    head = f"この設備では、まだ「{w}」の方向が決まっていません。"
+    if a is not None and a.unit == "mm" and a.sign is None and not facts.unclear_amounts:
+        v = _num(a.value)
+        return (f"{v}mm{phrase}んですね。{head}ZプラスとZマイナスのどちらになりますか？ "
+                f"「Zプラス{v}ミリ」か「Zマイナス{v}ミリ」のように、向きと量を一緒に言ってください")
+    if a is not None and a.sign is not None:
+        return UPDOWN_UNSET_PLAIN
+    return (f"{phrase}んですね。{head}ZプラスとZマイナスのどちらに、どれだけ動かしますか？ "
+            "「Zプラス3ミリ」か「Zマイナス3ミリ」のように、向きと量を一緒に言ってください")
+
+
+UPDOWN_UNSET_MARK = "の方向が決まっていません。"
+UPDOWN_UNSET_PLAIN = ("この設備では、まだ「上」「下」の方向が決まっていません。ZプラスとZマイナスのどちらになりますか？ "
+                      "「Zプラス3ミリ」か「Zマイナス3ミリ」のように、向きと量を一緒に言ってください")
+
+
+def is_updown_unset_ask(text: object) -> bool:
+    """上下の向きが未確認のときの、会話の聞き返しの文か（updown_ask_message が作る形）。テスト・表示の見分けに使う。"""
+    return (isinstance(text, str) and "この設備では、まだ「" in text and UPDOWN_UNSET_MARK in text
+            and "ZプラスとZマイナスのどちら" in text and "「Zプラス" in text and "「Zマイナス" in text)
+
+
 def updown_word(facts: UtteranceFacts) -> str:
     """発話の中の上下の言葉（「下げて」「上に」）。示すためだけ。見つからなければ「上」「下」。"""
     m = _UPDOWN_WORD.search(facts.text)
@@ -1259,7 +1305,7 @@ def _pre_check_core(facts: UtteranceFacts, selected: str | None = None,
                         choices)
         if facts.vertical and not st.confirmed:
             # 上下の向きが確認できていない：上・下を Z にしない。状態ごとの案内（未確認・不一致・変更済み）。選択肢は出さない
-            return _ask(st.message)
+            return _ask(updown_ask_message(facts, st))
         v = _amount_check(facts, "mm", "何mm動かしますか？")
         if v is not OK:
             return v

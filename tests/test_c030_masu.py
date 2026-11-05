@@ -75,7 +75,9 @@ def test_masu_is_two_choices_when_the_plain_instruction_passes(text, mode, sourc
     assert r["status"] == "ask" and r["state"]["candidate"] is None
     if mode == "none" and ut.read_utterance(text).vertical:
         # 上下の向きが未確認：上げ・下げの「〜ます」は、「〜して動かします」と同じく上下の案内（2択も候補も出さない）
-        assert r["choices"] == [] and r["message"] == w._entries[sid].session.updown.message, r["message"]
+        assert r["choices"] == [] and (ut.is_updown_unset_ask(r["message"])
+                                        if w._entries[sid].session.updown.status == "unconfirmed"
+                                        else r["message"] == w._entries[sid].session.updown.message), r["message"]  # 11/5 唐川さんの決定：未確認の会話の聞き返しは ut.updown_ask_message（状態の文は MSG_UNCONFIRMED のまま）
         return
     assert [c["label"] for c in r["choices"]] == LABELS, (text, mode, r["message"])
     assert r["message"].endswith("変更をご希望ですか？ それとも操作の説明でしょうか？")

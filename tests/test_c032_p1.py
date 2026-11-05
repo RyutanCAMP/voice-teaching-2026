@@ -127,7 +127,8 @@ def test_masu_endings_are_confirmed_with_two_choices(said, restated):
         assert f.shimasu_text == restated
     r = hear(DEMO_C, said)
     assert r["state"]["candidate"] is None and r["status"] == "ask"
-    assert "ご希望ですか" in r["message"] or "上下の向き" in r["message"], (said, r["message"])
+    assert ("ご希望ですか" in r["message"] or "上下の向き" in r["message"]
+            or ut.is_updown_unset_ask(r["message"])), (said, r["message"])
 
 
 @pytest.mark.parametrize("said", ["3mm下げません", "下げます3mm", "3mm下げましたね", "3mm下げましょう"])

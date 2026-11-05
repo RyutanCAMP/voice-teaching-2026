@@ -240,7 +240,7 @@ def test_unconfirmed_updown_without_amount_asks_direction_and_amount(tmp_path, t
     assert not r["state"]["candidate"]
     assert msg.startswith(f"{word}"), msg  # 言っていない量を入れない
     assert f"この設備では、まだ「{word}」の方向が決まっていません。" in msg, msg
-    assert "ZプラスとZマイナスのどちらに、何mm動かしますか？" in msg, msg
+    assert "ZプラスとZマイナスのどちらに、どれだけ動かしますか？" in msg, msg
 
 
 @pytest.mark.parametrize("text", ["上に3mm", "3mm下げて", "上に三ミリ", "上に3cm"])
