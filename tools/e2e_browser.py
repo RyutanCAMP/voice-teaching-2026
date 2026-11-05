@@ -98,6 +98,167 @@ def _primaries(page):
     return page.locator("button.primary:not([disabled]):visible, .drop-zone.primary:visible").count()
 
 
+HEADER_JS = """() => {
+  const top = document.querySelector('header.top') || document.querySelector('header');
+  const vis = (e) => e && !e.closest('[hidden]') && e.getClientRects().length > 0;
+  const rect = (e) => { const r = e.getBoundingClientRect();
+    return { x: r.left, y: r.top, w: r.width, h: r.height, r: r.right, b: r.bottom, cy: r.top + r.height / 2 }; };
+  const box = (s) => { const e = document.querySelector(s); return vis(e) ? rect(e) : null; };
+  const qs = [...top.querySelectorAll('button')].filter(vis).map((e) => e.textContent.trim());
+  const cs = (s) => { const st = getComputedStyle(document.querySelector(s));
+    return [st.fontSize, st.fontWeight, st.color, st.backgroundColor, st.borderTopLeftRadius, st.borderTopColor, st.paddingLeft]; };
+  const tip = document.querySelector('[data-tip=status]');
+  const before = tip ? getComputedStyle(tip, '::before') : null;
+  const chips = [...document.querySelectorAll('#status-line .st-chip')].filter(vis).map((e) => Object.assign(rect(e), { t: e.textContent.trim() }));
+  // ⓘ の丸（::before）の左の端：ボタンの左の端 + 丸の left + 平行移動（translate）の分
+  let circleX = null;
+  if (tip && vis(tip)) {
+    const m = new DOMMatrixReadOnly(before.transform === 'none' ? undefined : before.transform);
+    circleX = tip.getBoundingClientRect().left + parseFloat(before.left) + m.m41;
+  }
+  return { header: box('header'), sw: top.scrollWidth, cw: top.clientWidth, texts: qs,
+    doc: [document.documentElement.scrollWidth, innerWidth],
+    items: Object.fromEntries(['.logo-mark', '.logo', '#mode-banner', '#interp-badge', '#status-line', '[data-tip=status]',
+      '#help-button', '#engineer-toggle'].map((s) => [s, box(s)])),
+    chips, chip: chips.length ? chips[chips.length - 1] : null, circleX,
+    help: cs('#help-button'), eng: cs('#engineer-toggle'),
+    tipText: tip ? tip.textContent.trim() : null, tipLabel: tip ? tip.getAttribute('aria-label') : null,
+    circle: before ? [parseFloat(before.width), before.borderTopStyle] : null };
+}"""
+
+
+def _overlap(a, b) -> float:
+    """2つの四角の重なりの面積（px²）。どちらかが無ければ 0"""
+    if not a or not b:
+        return 0.0
+    return max(0.0, min(a["r"], b["r"]) - max(a["x"], b["x"])) * max(0.0, min(a["b"], b["b"]) - max(a["y"], b["y"]))
+
+
+def _r1(v):
+    return None if v is None or v is False else round(v, 1)
+
+
+def check_header_help(browser, url, check, shots: Path | None) -> None:
+    """ヘッダーの「?」2つの直し（案3）：使い方は「詳細表示」と同じ見た目の文字ボタン、アプリの記録の説明はチップの直後の ⓘ。
+    360×800・390×844・1150×800・1280×720・1280×800・1920×1080 の、読み込み前・読み込み後・変更候補ありで確かめる：
+    ⓘ はどの幅でも最後のチップと同じ行のすぐ右（チップが2行に折り返しても）・押せる所は 44×44 以上で、チップ・「使い方」・
+    「詳細表示」と重ならない・横スクロールが出ない。1280px 以上ではヘッダーが1行で折り返さない。
+    使い方の小窓の開閉・Esc でフォーカスを戻す・外を押して閉じる、記録の説明の吹き出しも確かめる。"""
+    def layout(pg, tag, phase):
+        r = pg.evaluate(HEADER_JS)
+        hb, eb = r["items"]["#help-button"], r["items"]["#engineer-toggle"]
+        check(r["doc"][0] <= r["doc"][1] and r["sw"] <= r["cw"],
+              f"{tag}・{phase}：横スクロールが出ない（ページ {r['doc'][0]}/{r['doc'][1]}・ヘッダー {r['sw']}/{r['cw']}）")
+        check(hb and eb and _overlap(hb, eb) == 0 and not [c["t"] for c in r["chips"] if _overlap(c, hb) or _overlap(c, eb)],
+              f"{tag}・{phase}：チップ・「使い方」・「詳細表示」は重ならない")
+        return r
+
+    def tip_checks(pg, tag, w, phase):
+        r = layout(pg, tag, phase)
+        it, chip = r["items"]["[data-tip=status]"], r["chip"]
+        hb, eb = r["items"]["#help-button"], r["items"]["#engineer-toggle"]
+        check(r["tipText"] == "i" and r["tipLabel"] == "アプリの記録の説明" and r["circle"] and r["circle"][1] != "none",
+              f"{tag}・{phase}：記録の説明は丸の中の「i」（ⓘ）・名前は「アプリの記録の説明」（{r['tipText']}・{r['tipLabel']}・{r['circle']}）")
+        check(r["circle"] and r["circle"][0] >= 20, f"{tag}・{phase}：ⓘ の丸はほかの「?」に近い大きさ（{r['circle'] and r['circle'][0]}px）")
+        check(bool(it and chip and abs(it["cy"] - chip["cy"]) <= 3 and it["y"] < chip["b"] and it["b"] > chip["y"]),
+              f"{tag}・{phase}：ⓘ は最後のチップ「{chip and chip['t']}」と同じ行（縦の中心のずれ "
+              f"{_r1(it and chip and it['cy'] - chip['cy'])}px）")
+        gap = it["x"] - chip["r"] if it and chip else None
+        vgap = r["circleX"] - chip["r"] if chip and r["circleX"] is not None else None
+        check(gap is not None and vgap is not None and 0 <= gap <= 8 and 0 <= vgap <= 8,
+              f"{tag}・{phase}：ⓘ は最後のチップのすぐ右（押せる所のすきま {_r1(gap)}px・丸のすきま {_r1(vgap)}px。"
+              f"最後のチップの右 {chip and round(chip['r'])}px・ⓘ の左 {it and round(it['x'])}px）")
+        check(bool(it and it["w"] >= 44 and it["h"] >= 44),
+              f"{tag}・{phase}：ⓘ の押せる所は 44×44 以上（{it and (round(it['w'], 1), round(it['h'], 1))}）")
+        hits = [c["t"] for c in r["chips"] if _overlap(it, c) > 0] + [n for n, b in (("使い方", hb), ("詳細表示", eb)) if _overlap(it, b) > 0]
+        check(bool(it) and not hits, f"{tag}・{phase}：ⓘ の押せる所は、チップ・「使い方」・「詳細表示」と重ならない（重なり：{hits}）")
+        check(bool(it and it["x"] >= 0 and it["r"] <= w),
+              f"{tag}・{phase}：ⓘ の押せる所は画面の横の内側（{it and (round(it['x']), round(it['r']))}）")
+        bad = pg.evaluate(BUTTON_SIZE_JS)
+        check(not [b for b in bad if "使い方" in b or "help-button" in b or b.startswith("i（")],
+              f"{tag}・{phase}：「使い方」と ⓘ は文字 14px 以上・高さ 44px 以上（{bad}）")
+        pg.hover("[data-tip=status]")
+        until(pg, lambda: pg.is_visible("#tip-pop"))
+        t = pg.inner_text("#tip-pop")
+        check("アプリの記録" in t and "会話の答えでは変わりません" in t, f"{tag}・{phase}：ⓘ に合わせると、アプリの記録の説明が出る（{t!r}）")
+        pg.mouse.move(5, pg.viewport_size["height"] - 5)
+        until(pg, lambda: not pg.is_visible("#tip-pop"))
+        return r
+
+    # 1150×800：PC の並びで記録のチップが2行に折り返す幅（ⓘ が上の行のチップと重ならないこと）
+    for (w, h) in [(360, 800), (390, 844), (1150, 800), (1280, 720), (1280, 800), (1920, 1080)]:
+        pc = w >= 1100
+        one_line = w >= 1280  # ヘッダーが1行で折り返さないことを確かめる幅
+        clip = {"x": 0, "y": 0, "width": w, "height": 90 if pc else 240}
+        pg = browser.new_page(viewport={"width": w, "height": h})
+        pg.add_init_script(FAKE_RECOGNITION)
+        pg.goto(url)
+        tag = f"案3 ヘッダー（{w}×{h}）"
+        r = layout(pg, tag, "読み込み前")
+        check(not any(t in ("?", "？") or "?" in t or "？" in t for t in r["texts"]),
+              f"{tag}：ヘッダーに「?」「？」のボタンが無い（{r['texts']}）")
+        check(pg.inner_text("#help-button").strip() == "使い方" and "link" in (pg.get_attribute("#help-button", "class") or "").split(),
+              f"{tag}：使い方のボタンは「使い方」の文字ボタン")
+        check(r["help"] == r["eng"], f"{tag}：「使い方」は「詳細表示」と同じ見た目（{r['help']} / {r['eng']}）")
+        hb, eb = r["items"]["#help-button"], r["items"]["#engineer-toggle"]
+        check(bool(hb and eb and abs(hb["cy"] - eb["cy"]) <= 1 and abs(hb["h"] - eb["h"]) <= 1 and hb["r"] <= eb["x"]),
+              f"{tag}：「使い方」と「詳細表示」は同じ高さで横に並ぶ（{hb} / {eb}）")
+        check(bool(eb and eb["r"] >= w - 40), f"{tag}：読み込む前も「使い方」「詳細表示」は右の端（詳細表示の右 {eb and round(eb['r'])}px）")
+        check(r["items"]["[data-tip=status]"] is None, f"{tag}：読み込む前（記録が出ていない）は ⓘ を出さない")
+        # 使い方の小窓：押して開く → Esc で閉じて「使い方」にフォーカスが戻る → もう一度押して開く・押して閉じる → 外を押して閉じる
+        check(pg.is_hidden("#help-pop") and pg.get_attribute("#help-button", "aria-expanded") == "false", f"{tag}：使い方の小窓は最初は閉じている")
+        pg.click("#help-button")
+        check(pg.is_visible("#help-pop") and pg.get_attribute("#help-button", "aria-expanded") == "true"
+              and "承認は確認表示のボタンだけです" in pg.inner_text("#help-pop"), f"{tag}：「使い方」を押すと小窓が開く")
+        pb = pg.locator("#help-pop").bounding_box()
+        check(pb is not None and pb["x"] >= 0 and pb["x"] + pb["width"] <= w, f"{tag}：小窓は画面の横の内側（{pb}）")
+        pg.keyboard.press("Escape")
+        check(pg.is_hidden("#help-pop") and pg.get_attribute("#help-button", "aria-expanded") == "false"
+              and pg.evaluate("document.activeElement.id") == "help-button", f"{tag}：Esc で閉じて「使い方」にフォーカスが戻る")
+        pg.click("#help-button")
+        pg.click("#help-button")
+        check(pg.is_hidden("#help-pop") and pg.get_attribute("#help-button", "aria-expanded") == "false", f"{tag}：もう一度押すと閉じる")
+        pg.click("#help-button")
+        pg.click(".logo")  # 小窓の外（アプリ名。押しても何も起きない所）
+        check(pg.is_hidden("#help-pop"), f"{tag}：小窓の外を押すと閉じる")
+        if shots is not None:
+            shots.mkdir(parents=True, exist_ok=True)
+            pg.screenshot(path=str(shots / f"H3_{w}x{h}_before.png"), clip=clip)
+        # サンプルを読み込んだあと：アプリの記録のチップと、その直後の ⓘ
+        pg.click("#sample-button")
+        pg.wait_for_selector("#job-area:not([hidden])")
+        until(pg, lambda: pg.is_visible("#status-line") and pg.is_visible("[data-tip=status]"))
+        pg.wait_for_timeout(300)
+        r = tip_checks(pg, tag, w, "読み込み後")
+        if one_line:
+            it, st = r["items"]["[data-tip=status]"], r["items"]["#status-line"]
+            check(bool(it and r["items"]["#help-button"] and it["r"] <= r["items"]["#help-button"]["x"]), f"{tag}：ⓘ は「使い方」より左")
+            vis = {k: v for k, v in r["items"].items() if v and k != ".logo"}
+            cys = [v["cy"] for v in vis.values()]
+            check(bool(r["sw"] <= r["cw"] and st and st["h"] <= 40 and max(cys) - min(cys) <= 8 and r["header"]["h"] <= 72),
+                  f"{tag}：ヘッダーは1行で折り返さない（高さ {round(r['header']['h'])}px・記録の高さ {st and round(st['h'])}px・"
+                  f"中心のずれ {round(max(cys) - min(cys), 1)}px・横 {r['sw']}/{r['cw']}）")
+        if shots is not None:
+            pg.screenshot(path=str(shots / f"H3_{w}x{h}_loaded.png"), clip=clip)
+        # 変更候補あり：C00005（PL=0 の MOVL。止まらない位置）を選んで文字を送る
+        pg.locator("#position-chips button", has_text="C00005").first.click()
+        until(pg, lambda: pg.inner_text("#voice-position strong") == "C00005")
+        fill_text(pg, "Zプラス方向に10mm")
+        pg.click("#text-send")
+        until(pg, lambda: pg.get_attribute("#step-4", "aria-current") == "step")
+        until(pg, lambda: "候補 あり" in pg.inner_text("#status-line"))
+        pg.wait_for_timeout(300)
+        r = tip_checks(pg, tag, w, "変更候補あり")
+        if one_line:
+            st = r["items"]["#status-line"]
+            check(bool(r["header"]["h"] <= 72 and st and st["h"] <= 40),
+                  f"{tag}・変更候補あり：ヘッダーは1行で折り返さない（高さ {round(r['header']['h'])}px・記録の高さ {st and round(st['h'])}px）")
+        if shots is not None:
+            pg.evaluate("window.scrollTo(0, 0)")
+            pg.screenshot(path=str(shots / f"H3_{w}x{h}_candidate.png"), clip=clip)
+        pg.close()
+
+
 def check_ux_polish(browser, url, check, shots: Path | None) -> None:
     """UX 監査の直し（feat/ux-polish）：版・使い方の小窓・サンプルで試す・390px・1280×720・止まった候補・読めなかった言葉。"""
     def shot(page, name, full=False):
@@ -127,7 +288,7 @@ def check_ux_polish(browser, url, check, shots: Path | None) -> None:
     pg.click("#help-button")
     pop = pg.inner_text("#help-pop") if pg.is_visible("#help-pop") else ""
     check("Y座標を3ミリ下げて" in pop and "承認は確認表示のボタンだけです" in pop
-          and pg.get_attribute("#help-button", "aria-expanded") == "true", "「？」で使い方の小窓が開く")
+          and pg.get_attribute("#help-button", "aria-expanded") == "true", "「使い方」で使い方の小窓が開く")
     shot(pg, "9_help.png")
     pg.keyboard.press("Escape")
     check(pg.is_hidden("#help-pop"), "Esc で使い方の小窓が閉じる")
@@ -2821,6 +2982,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
                 pg4.screenshot(path=str(shots / "6b_confirm_xyz.png"))
             pg4.close()
 
+            check_header_help(b, url, check, shots)
             check_ux_polish(b, url, check, shots)
             check_c026(b, url, check, shots)
             check_review_only(b, url, check, shots)
