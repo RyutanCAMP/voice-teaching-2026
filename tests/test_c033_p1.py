@@ -142,8 +142,9 @@ def test_p1b_several_changes_keep_a_pending_candidate_and_the_approval(tmp_path)
     w.approve(sid, "テスト", candidate_gen=w.candidate_gen_of(sid))
     before = w.state(sid)["state"]
     r = w.talk(sid, "3回にして、あと3ミリ下げて")
-    assert r["via"] == ["several"]
-    assert r["state"]["candidate"] == before["candidate"] and r["state"]["approval"] == before["approval"]
+    # P0（11/5 夜・Safety 再検証）：承認のあとの、相づち・否定の無い質問ではない文は保留。どちらの変更も受け付けない（候補はそのまま）。
+    # 承認の記録は残るが、保留の間は出力できない（前は承認がそのまま使えた。止める側への変更。唐川さんの確認事項）
+    assert r["state"]["candidate"] == before["candidate"] and r["state"]["hold"] is True and not r["state"]["can_export"]
 
 
 # ---- 「登録」「保存」：作業目的の意味付けと、ジョブの変更・出力を分ける（11/4 の決定4） ----

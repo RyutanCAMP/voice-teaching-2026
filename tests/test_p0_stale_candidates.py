@@ -522,3 +522,44 @@ def test_after_approval_doubt_question_holds(tmp_path, out_dir, text):
     w.talk(sid, text)
     st = w.state(sid)["state"]
     assert not st["can_export"] and st["candidate"] is not None, text
+
+
+# ---- 13. Safety 再検証（5381f22・3回目）：ボタンの言葉の道・回数の道・止める理由の道でも、承認を残さない ----
+@pytest.mark.parametrize("text", ["承認しなきゃよかった", "承認は早かった", "出力しないで", "まだ出力しないで", "出力はまだ", "保存しないで",
+                                  "書き出さないで", "OK、でもちょっと", "前に5ミリ", "え？", "は？", "あれ？", "んん？", "ほんと？",
+                                  "本当に？", "そうなの"])
+def test_after_approval_third_round_move(tmp_path, out_dir, text):
+    w, fake, sid = approved_move(tmp_path)
+    gen = w.candidate_gen_of(sid)
+    fake.add(T.answer("C00005 へ直線で動きます。", [21]), T.answer("C00005 へ直線で動きます。", [21]))
+    w.talk(sid, text)
+    st = w.state(sid)["state"]
+    assert not st["can_export"] and not w.export(sid, candidate_gen=gen)["ok"], (text, st["status_line"])
+    assert files(out_dir) == []
+
+
+@pytest.mark.parametrize("text", ["4回にして", "4回", "5回にして", "4回がいい", "4回でいい", "4回でお願い"])
+def test_after_approval_third_round_count(tmp_path, out_dir, text):
+    w, fake, sid = pending_three(tmp_path)
+    approve(w, sid)
+    gen = w.candidate_gen_of(sid)
+    fake.add(T.answer("回数の変更ですね。", [21], intent="change_request", change={"kind": "repeat"}))
+    w.talk(sid, text)
+    st = w.state(sid)["state"]
+    assert not st["can_export"] and not w.export(sid, candidate_gen=gen)["ok"], (text, st["status_line"])
+    assert files(out_dir) == []
+
+
+def test_filming_flow_still_works(tmp_path, out_dir):
+    """撮影の流れ：30mm は止める → 5mm の候補 → ボタンで承認 →「はい」→ 出力。"""
+    w, fake = T.flow(tmp_path)
+    sid = w.load(DEMO_C)["session_id"]
+    w.select(sid, "C00005")
+    r = w.talk(sid, "Zプラス方向に30ミリ")
+    assert r["state"]["candidate"] is None
+    r = w.talk(sid, "Zプラス方向に5ミリ")
+    assert r["state"]["candidate"] and r["state"]["can_approve"] and not r["state"]["hold"]
+    approve(w, sid)
+    w.talk(sid, "はい")
+    assert w.export(sid, candidate_gen=w.candidate_gen_of(sid))["ok"]
+    assert files(out_dir)

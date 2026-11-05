@@ -1364,8 +1364,9 @@ class WebFlow:
         if v.kind == stale.QUESTION_ABOUT_CANCEL:
             return self._stale_out(e, text, source, "ok", M_HOWCX, v.kind)
         if (said_by_person and v.kind == stale.OTHER and self._approved(e) and not stale.is_ack(said) and not stale.is_plain_question(said)
-                and self._talk_route(e, text) in ("approved", "ask")):
-            # 承認済みの候補があるとき、承認を残す文は、はっきりした相づちと、否定・取消の言葉の無い質問だけ（Safety 再検証：
+                and not stale.is_plain_button_request(said) and self._talk_route(e, text) != "hear"):
+            # 承認済みの候補があるとき、承認を残す文は、はっきりした相づち・否定の無い質問・否定の無い「出力して」だけ。
+            # 指示の道（hear）は今までどおり承認を取り消す。ほかの道（相づち・説明・ボタンの案内・回数）は保留（Safety 再検証：
             # 言葉の一覧に足す直し方では「消しといて」「中止」「違くない？」などが抜ける）。ほかの文は保留にして確かめる
             e.hold = True
             s.log.append(("保留", "承認のあとの文が相づち・ふつうの質問ではないため、変更候補を保留にしました（承認・出力はできません）"))
