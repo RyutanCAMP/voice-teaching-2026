@@ -1444,3 +1444,40 @@ body.hero #kbd-button { min-width: 0; width: 44px; padding-inline: 0; }
   .sel-line { margin-top: 0; min-height: 24px; }
   .play-row { margin-top: 0; }
 }
+
+/* ===== Issue #7（11/6 撮影日・唐川さんの赤入れ）：ミニマル化。表示だけを変える（隠す・出す決まり・安全の判定は app.js とサーバーのまま） ===== */
+/* 上の帯：シミュレーションの印は短い「SIM」（正式な名前は読み上げ・小さな説明）。本物の Claude のモデル名はアプリ情報（モックの印は出す） */
+.mode-banner .mb-long { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.top .mode-banner { font-size: 11px; letter-spacing: 0.14em; padding: 2px 9px; cursor: help; }
+.top .interp-badge.claude { display: none; }
+/* アプリの記録：止める・取り消した・保留・範囲の確認のときだけ上の帯に出す（ふだんは候補のポップアップと確認表示に出る。全文はアプリ情報） */
+body:not(.st-alert) .top .status-wrap { display: none; }
+.app-info-line { margin: 8px 0 0; overflow-wrap: anywhere; color: var(--sub); }
+.app-info-line:empty { display: none; }
+.app-info-body .op-replay { margin-left: 10px; }
+/* 最下部：版・出力の案内はアプリ情報へ移した（帯は出さない） */
+.foot { display: none; }
+/* 左：常に出していた説明の行を出さない（上下の向き・1回の上限・止めた理由は、話したときの答えと候補の注意で必ず出る） */
+.pos-row #updown-status, .pos-row #updown-status + .tip, .instr .max-shift, .select-head, #talk-first, .mic-cta-row .tip { display: none !important; }
+.pos-row { justify-content: center; }
+/* 会話の欄の相手の名前：本物の Claude は「Claude」だけ。モックの印は出す */
+#ask-model:not(.mock), #dialog-engine:not(.mock) { display: none; }
+/* 3D：上の帯を細く、図の向きは小さな文字のタブ（押せる大きさ 44px は保つ）。図を広く */
+@media (min-width: 1100px) {
+  .stage-head { padding-bottom: 2px; margin-bottom: 2px; border-bottom: none; align-items: center; }
+  .stage .view-tabs { background: transparent; border-color: transparent; gap: 2px; }
+  .stage .view-tab { font-size: 12px; padding: 0 10px; color: var(--sub); }
+  .stage .view-tab[aria-selected="true"] { background: rgba(219, 232, 255, 0.14); color: #eaf2ff; border: 1px solid rgba(219, 232, 255, 0.35); }
+  .play-row > .tip[data-tip="play"] { display: none; }
+}
+/* 図の注意：短い1行（目安・本体は描かない・離れて見えても当たらないとは限らない・実機の動作と干渉は保証しない）はいつも出す。全文は ⓘ */
+.fig-notes-min { display: flex; align-items: center; gap: 6px; margin: 2px 2px 0; min-height: 30px; }
+.figure-short { margin: 0; font-size: 12px; line-height: 1.4; color: #b6c4dc; }
+.fig-notes-more { position: relative; flex: none; }
+.fig-notes-more > summary { list-style: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px;
+  border-radius: 50%; border: 1px solid var(--line); color: #a9cbff; font-size: 13px; font-style: italic; font-weight: 700; cursor: pointer; }
+.fig-notes-more > summary::-webkit-details-marker { display: none; }
+.fig-notes-more > summary:focus-visible { outline: 2px solid var(--glow); outline-offset: 2px; }
+.fig-notes-more[open] > .figure-notes { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 9; width: min(620px, 70vw); margin: 0;
+  padding: 12px 14px; border-radius: 12px; background: #0d1628; border: 1px solid var(--line); box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+  font-size: 13px; line-height: 1.6; color: var(--text); }

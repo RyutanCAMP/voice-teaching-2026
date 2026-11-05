@@ -147,6 +147,8 @@ async function refreshInfo() {
   const r = await post({ session_id: ask.sessionId, info: true });
   ask.hasKey = !!(r && r.ok && r.has_key);
   $("ask-model").textContent = r && r.ok ? (r.has_key ? speaker(r.model) : "") : "";
+  // Issue #7：本物の Claude のモデル名はアプリ情報に出す。会話の欄の印は、モックのときだけ出す（取り違えないため）
+  $("ask-model").classList.toggle("mock", !!(r && r.ok && /^claude-mock/.test(r.model || "")));
   $("ask-nokey").textContent = r && r.ok && !r.has_key ? r.notice : (r && !r.ok ? r.error : "");
   $("ask-nokey").hidden = !$("ask-nokey").textContent;
   if (r && r.ok) renderTalk(r.talk);
@@ -156,7 +158,8 @@ async function refreshInfo() {
 
 // 話し手の名前。tools/demo_mock.py の台本の答え（claude-mock-…）は、本物の Claude と見分けがつくように出す
 function speaker(model) {
-  return /^claude-mock/.test(model || "") ? "モック（台本の答え・本物の Claude ではありません）" : "Claude（" + model + "）";
+  // 本物の Claude は「Claude」だけ（モデル名はアプリ情報。Issue #7）。モックはいつも分かるように書く
+  return /^claude-mock/.test(model || "") ? "モック（台本の答え・本物の Claude ではありません）" : "Claude";
 }
 
 // 質問の上限（11/5 確定版 4・U-02）：［会話をやり直す］は「詳しく」の中（会話の欄のいちばん上）にあり、会話が長いと

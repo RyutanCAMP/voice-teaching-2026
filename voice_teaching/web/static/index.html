@@ -31,8 +31,9 @@
   <div class="brand">
     <span class="logo-mark" aria-hidden="true"><svg viewBox="0 0 32 32" width="30" height="30"><path d="M4 16h3M9 11v10M14 6v20M19 10v12M24 13v6M28 15v2" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></span>
     <h1 class="logo"><span class="logo-en"><span class="logo-thin">Voice</span> Teaching</span></h1>
-    <p id="mode-banner" class="mode-banner" data-mode="simulation">シミュレーションモード</p>
-    <!-- 解釈のしかた（本物の Claude かモックか）は、いつも見える（正直な表示。アプリ情報に畳まない） -->
+    <!-- Issue #7（11/6 赤入れ）：シミュレーションの印は短い「SIM」でいつも出す（読み上げ・小さな説明は正式な名前） -->
+    <p id="mode-banner" class="mode-banner" data-mode="simulation" title="シミュレーションモード：実機への出力・転送・ロボットの起動はしません" aria-label="シミュレーションモード（実機への出力・転送・ロボットの起動はしません）"><span class="mb-short" aria-hidden="true">SIM</span><span class="mb-long">シミュレーションモード</span></p>
+    <!-- 解釈のしかた：モックのときはいつも見える（本物の Claude と取り違えないため）。本物の Claude のモデル名はアプリ情報に出す（Issue #7） -->
     <p id="interp-badge" class="interp-badge" hidden>解釈：—</p>
   </div>
   <ol class="steps" id="steps" aria-label="手順" aria-hidden="true">
@@ -51,6 +52,12 @@
     <summary class="icon-btn" aria-label="アプリ情報を開く" title="アプリ情報"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 10.5v6M12 7.4v.2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></summary>
     <div class="app-info-body">
     <p class="fine">シミュレーション用のアプリです。実機への出力・転送・起動はしません。詳しい情報は［詳細表示］にあります。</p>
+    <!-- Issue #7：上の帯から外したもの（解釈のモデル名・アプリの記録の全文・版・出力の案内・オープニング）をここに置く -->
+    <p id="app-info-interp" class="fine app-info-line"></p>
+    <p id="app-info-status" class="fine app-info-line"></p>
+    <p id="readonly-note" class="fine app-info-line">元のジョブは変えません。実機用の出力・転送・ロボットの起動はしません。</p>
+    <p class="fine app-info-line"><span id="app-version" class="ver">Ver.__VT_VERSION__</span>
+    <button type="button" id="opening-replay" class="link small op-replay" hidden title="起動の演出をもう一度（音あり）">▶ オープニング</button></p>
     </div>
   </details>
   <div class="help-wrap">
@@ -322,7 +329,13 @@
         <span class="lg stopped" id="legend-stopped" hidden>灰色の点線と ✕＝変更できない案（参考・承認できません）</span>
       </div>
     </div>
+    <!-- Issue #7：図の注意は、短い1行をいつも出し、全文は ⓘ で開く（短い1行だけでも「目安・実機の動作と干渉は保証しない・離れて見えても当たらないとは限らない」が分かる） -->
+    <div class="fig-notes-min">
+      <p id="figure-short" class="fine figure-short">線は命令の順を結んだ目安です（ロボット本体は描いていません）。離れて見えても当たらないとは限りません。実機の動作・干渉は保証しません。</p>
+      <details class="fig-notes-more"><summary class="tip" aria-label="図の注意をすべて読む" title="図の注意をすべて読む">i</summary>
     <p class="fine figure-notes"><span id="play-note">点を命令の順に直線で結んだ目安です。ロボット本体の動きではありません。</span> <span id="view3d-note">3D はジョブの X・Y・Z をそのまま点で描いたもので、ロボット本体・関節は描いていません。動作や干渉を保証するシミュレーターではありません。</span> <span id="figure-note">この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。参考表示であり、実際のロボットの動きではありません。</span></p>
+      </details>
+    </div>
   </section>
 
   <!-- 詳細表示（同じ画面の中の切り替え。最初は閉じている） -->
@@ -394,9 +407,7 @@
 </main>
 
 <footer class="foot">
-  <span id="app-version" class="ver">Ver.__VT_VERSION__</span>
-  <p id="readonly-note">元のジョブは変えません。実機用の出力・転送・ロボットの起動はしません。</p>
-  <button type="button" id="opening-replay" class="link small op-replay" hidden title="起動の演出をもう一度（音あり）">▶ オープニング</button>
+  <!-- Issue #7：版・出力の案内・オープニングは、撮影中の画面に要らないのでアプリ情報（上の帯の ⓘ）へ移した -->
 </footer>
 
 <div id="confirm-overlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-title" hidden>

@@ -343,6 +343,11 @@ function renderState() {
   $("interp-badge").classList.toggle("claude", claude);
   $("interp-badge").title = st.mock_notice;
   $("interp-badge").hidden = false;
+  // Issue #7：上の帯から外したもの（モデル名・アプリの記録の全文）をアプリ情報に出す。文はサーバーの文のまま
+  $("app-info-interp").textContent = $("interp-badge").textContent;
+  $("app-info-status").textContent = st.status_line || "";
+  // 上の帯のアプリの記録は、止める・取り消した・保留・範囲の確認のときだけ出す（ふだんの候補・承認・出力は候補のポップアップに出る）
+  document.body.classList.toggle("st-alert", /保留|取り消しました|参考の表示だけ|範囲の確認中|承認できません/.test(st.status_line || ""));
   $("voice-position").replaceChildren(el("strong", {}, st.selected || "位置は未選択"), el("span", {}, st.selected ? "変える" : "選ぶ"));
   renderSelLine(st.selected);
   renderUpdown(st.updown);
