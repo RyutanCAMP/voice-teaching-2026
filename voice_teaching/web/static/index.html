@@ -41,9 +41,13 @@
     <li id="step-4" class="step"><span class="num">4</span><span class="label">確かめて承認</span></li>
   </ol>
   <!-- 状態の1行（CHECKER_033 P1-A）：サーバーの文（state.status_line）をそのまま、区切り（／）ごとの小さなチップにして出す。文は変えない（app.js） -->
-  <p id="status-line" class="status-line" aria-live="polite" hidden></p><button type="button" class="tip" data-tip="status">?</button>
+  <!-- 記録の説明（案3）：チップの直後にくっついた小さな ⓘ（CSS の丸の中の「i」）。説明の中身は highlight.js の TIPS.status のまま -->
+  <div class="status-wrap">
+    <p id="status-line" class="status-line" aria-live="polite" hidden></p><button type="button" class="tip tip-info" data-tip="status" aria-label="アプリの記録の説明">i</button>
+  </div>
   <div class="help-wrap">
-    <button type="button" id="help-button" class="help-btn" aria-expanded="false" aria-controls="help-pop" aria-label="使い方" title="使い方">？</button>
+    <!-- 使い方（案3）：丸の「？」をやめ、隣の「詳細表示」と同じ見た目の文字ボタンにする -->
+    <button type="button" id="help-button" class="link" aria-expanded="false" aria-controls="help-pop">使い方</button>
     <div id="help-pop" class="help-pop" role="dialog" aria-label="使い方" hidden>
       <p class="help-head">たとえば、こう話します</p>
       <!-- 例は上下の向きの状態で変える（app.js が state.updown で入れ直す）。既定は未確認：上下の言葉を例に出さない -->

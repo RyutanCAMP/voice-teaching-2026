@@ -98,6 +98,95 @@ def _primaries(page):
     return page.locator("button.primary:not([disabled]):visible, .drop-zone.primary:visible").count()
 
 
+HEADER_JS = """() => {
+  const top = document.querySelector('header.top') || document.querySelector('header');
+  const vis = (e) => e && !e.closest('[hidden]') && e.getClientRects().length > 0;
+  const box = (s) => { const e = document.querySelector(s); if (!vis(e)) return null; const r = e.getBoundingClientRect();
+    return { x: r.left, y: r.top, w: r.width, h: r.height, r: r.right, b: r.bottom, cy: r.top + r.height / 2 }; };
+  const qs = [...top.querySelectorAll('button')].filter(vis).map((e) => e.textContent.trim());
+  const cs = (s) => { const st = getComputedStyle(document.querySelector(s));
+    return [st.fontSize, st.fontWeight, st.color, st.backgroundColor, st.borderTopLeftRadius, st.borderTopColor, st.paddingLeft]; };
+  const tip = document.querySelector('[data-tip=status]');
+  const before = tip ? getComputedStyle(tip, '::before') : null;
+  return { header: box('header'), sw: top.scrollWidth, cw: top.clientWidth, texts: qs,
+    items: Object.fromEntries(['.logo-mark', '.logo', '#mode-banner', '#interp-badge', '#status-line', '[data-tip=status]',
+      '#help-button', '#engineer-toggle'].map((s) => [s, box(s)])),
+    chip: box('#status-line .st-chip:last-of-type'),
+    help: cs('#help-button'), eng: cs('#engineer-toggle'),
+    tipText: tip ? tip.textContent.trim() : null, tipLabel: tip ? tip.getAttribute('aria-label') : null,
+    circle: before ? [parseFloat(before.width), before.borderTopStyle] : null };
+}"""
+
+
+def check_header_help(browser, url, check, shots: Path | None) -> None:
+    """ヘッダーの「?」2つの直し（案3）：使い方は「詳細表示」と同じ見た目の文字ボタン、アプリの記録の説明はチップの直後の小さな ⓘ。
+    1280×800・1920×1080 でヘッダーが折り返さないこと、使い方の小窓の開閉・Esc でフォーカスを戻すこと、記録の説明の吹き出しを確かめる。"""
+    for (w, h) in [(1280, 800), (1920, 1080)]:
+        pg = browser.new_page(viewport={"width": w, "height": h})
+        pg.add_init_script(FAKE_RECOGNITION)
+        pg.goto(url)
+        tag = f"案3 ヘッダー（{w}×{h}）"
+        r = pg.evaluate(HEADER_JS)
+        check(not any(t in ("?", "？") or "?" in t or "？" in t for t in r["texts"]),
+              f"{tag}：ヘッダーに「?」「？」のボタンが無い（{r['texts']}）")
+        check(pg.inner_text("#help-button").strip() == "使い方" and "link" in (pg.get_attribute("#help-button", "class") or "").split(),
+              f"{tag}：使い方のボタンは「使い方」の文字ボタン")
+        check(r["help"] == r["eng"], f"{tag}：「使い方」は「詳細表示」と同じ見た目（{r['help']} / {r['eng']}）")
+        hb, eb = r["items"]["#help-button"], r["items"]["#engineer-toggle"]
+        check(hb and eb and abs(hb["cy"] - eb["cy"]) <= 1 and abs(hb["h"] - eb["h"]) <= 1 and hb["r"] <= eb["x"],
+              f"{tag}：「使い方」と「詳細表示」は同じ高さで横に並ぶ（{hb} / {eb}）")
+        check(eb and eb["r"] >= w - 40, f"{tag}：読み込む前も「使い方」「詳細表示」は右の端（詳細表示の右 {eb and round(eb['r'])}px）")
+        # 使い方の小窓：押して開く → Esc で閉じて「使い方」にフォーカスが戻る → もう一度押して開く・押して閉じる → 外を押して閉じる
+        check(pg.is_hidden("#help-pop") and pg.get_attribute("#help-button", "aria-expanded") == "false", f"{tag}：使い方の小窓は最初は閉じている")
+        pg.click("#help-button")
+        check(pg.is_visible("#help-pop") and pg.get_attribute("#help-button", "aria-expanded") == "true"
+              and "承認は確認表示のボタンだけです" in pg.inner_text("#help-pop"), f"{tag}：「使い方」を押すと小窓が開く")
+        pb = pg.locator("#help-pop").bounding_box()
+        check(pb is not None and pb["x"] >= 0 and pb["x"] + pb["width"] <= w, f"{tag}：小窓は画面の横の内側（{pb}）")
+        pg.keyboard.press("Escape")
+        check(pg.is_hidden("#help-pop") and pg.get_attribute("#help-button", "aria-expanded") == "false"
+              and pg.evaluate("document.activeElement.id") == "help-button", f"{tag}：Esc で閉じて「使い方」にフォーカスが戻る")
+        pg.click("#help-button")
+        pg.click("#help-button")
+        check(pg.is_hidden("#help-pop") and pg.get_attribute("#help-button", "aria-expanded") == "false", f"{tag}：もう一度押すと閉じる")
+        pg.click("#help-button")
+        pg.mouse.click(w // 2, h - 120)
+        check(pg.is_hidden("#help-pop"), f"{tag}：小窓の外を押すと閉じる")
+        if shots is not None:
+            shots.mkdir(parents=True, exist_ok=True)
+            pg.screenshot(path=str(shots / f"H3_{w}_before.png"), clip={"x": 0, "y": 0, "width": w, "height": 90})
+        # サンプルを読み込んだあと：アプリの記録のチップと、その直後の ⓘ
+        pg.click("#sample-button")
+        pg.wait_for_selector("#job-area:not([hidden])")
+        until(pg, lambda: pg.is_visible("#status-line") and pg.is_visible("[data-tip=status]"))
+        pg.wait_for_timeout(300)
+        r = pg.evaluate(HEADER_JS)
+        it, st, chip = r["items"]["[data-tip=status]"], r["items"]["#status-line"], r["chip"]
+        check(r["tipText"] == "i" and r["tipLabel"] == "アプリの記録の説明" and r["circle"] and r["circle"][1] != "none",
+              f"{tag}：記録の説明は丸の中の「i」（ⓘ）・名前は「アプリの記録の説明」（{r['tipText']}・{r['tipLabel']}・{r['circle']}）")
+        gap = it and chip and (it["x"] + (it["w"] - r["circle"][0]) / 2) - chip["r"]
+        check(it and chip and 0 <= gap <= 8 and abs(it["cy"] - chip["cy"]) <= 3,
+              f"{tag}：ⓘ は最後のチップのすぐ右（すきま {gap and round(gap, 1)}px・縦の中心のずれ {it and chip and round(it['cy'] - chip['cy'], 1)}px）")
+        check(it and hb and it["r"] <= r["items"]["#help-button"]["x"], f"{tag}：ⓘ は「使い方」より左")
+        vis = {k: v for k, v in r["items"].items() if v and k != ".logo"}
+        cys = [v["cy"] for v in vis.values()]
+        check(r["sw"] <= r["cw"] and st and st["h"] <= 40 and max(cys) - min(cys) <= 8 and r["header"]["h"] <= 72,
+              f"{tag}：ヘッダーは1行で折り返さない（高さ {round(r['header']['h'])}px・記録の高さ {st and round(st['h'])}px・"
+              f"中心のずれ {round(max(cys) - min(cys), 1)}px・横 {r['sw']}/{r['cw']}）")
+        bad = pg.evaluate(BUTTON_SIZE_JS)
+        check(not [b for b in bad if "使い方" in b or "help-button" in b or b.startswith("i（")],
+              f"{tag}：「使い方」と ⓘ は文字 14px 以上・高さ 44px 以上（{bad}）")
+        pg.hover("[data-tip=status]")
+        until(pg, lambda: pg.is_visible("#tip-pop"))
+        t = pg.inner_text("#tip-pop")
+        check("アプリの記録" in t and "会話の答えでは変わりません" in t, f"{tag}：ⓘ に合わせると、アプリの記録の説明が出る（{t!r}）")
+        pg.mouse.move(5, h - 5)
+        until(pg, lambda: not pg.is_visible("#tip-pop"))
+        if shots is not None:
+            pg.screenshot(path=str(shots / f"H3_{w}_loaded.png"), clip={"x": 0, "y": 0, "width": w, "height": 90})
+        pg.close()
+
+
 def check_ux_polish(browser, url, check, shots: Path | None) -> None:
     """UX 監査の直し（feat/ux-polish）：版・使い方の小窓・サンプルで試す・390px・1280×720・止まった候補・読めなかった言葉。"""
     def shot(page, name, full=False):
@@ -127,7 +216,7 @@ def check_ux_polish(browser, url, check, shots: Path | None) -> None:
     pg.click("#help-button")
     pop = pg.inner_text("#help-pop") if pg.is_visible("#help-pop") else ""
     check("Y座標を3ミリ下げて" in pop and "承認は確認表示のボタンだけです" in pop
-          and pg.get_attribute("#help-button", "aria-expanded") == "true", "「？」で使い方の小窓が開く")
+          and pg.get_attribute("#help-button", "aria-expanded") == "true", "「使い方」で使い方の小窓が開く")
     shot(pg, "9_help.png")
     pg.keyboard.press("Escape")
     check(pg.is_hidden("#help-pop"), "Esc で使い方の小窓が閉じる")
@@ -2821,6 +2910,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
                 pg4.screenshot(path=str(shots / "6b_confirm_xyz.png"))
             pg4.close()
 
+            check_header_help(b, url, check, shots)
             check_ux_polish(b, url, check, shots)
             check_c026(b, url, check, shots)
             check_review_only(b, url, check, shots)
