@@ -188,7 +188,6 @@ def test_state_and_safety_claims_stay_hidden(reply):
     assert talk.reply_mvp_problem(reply) is not None
 
 
-@pytest.mark.xfail(strict=True, reason=P0 + " 言葉の切れ端を引用する（「っぱりいいや」）")
 def test_clarification_does_not_quote_a_broken_fragment(tmp_path):
     w, _, sid = pending_three(tmp_path)
     r = w.talk(sid, "やっぱりいいや")

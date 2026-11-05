@@ -318,15 +318,39 @@ def _negation_words(text: str, heard: str | None = None) -> tuple[tuple[str, ...
     for m in _NEGATION_RE.finditer(folded):
         if _inside_katakana_word(text, m.start(), m.end()):
             continue  # 「ワイヤー」の「イヤ」、「ダメージ」の「ダメ」は打ち消しではない
-        start = m.start()
-        while start > 0 and m.start() - start < 4 and ("ぁ" <= text[start - 1] <= "ゖ" or _script(text[start - 1]) == "kanji") \
-                and text[start - 1] not in PARTICLES and text[start - 2:start] != "とか":
-            start -= 1
+        start = _negation_start(text, m.start())
         word = (heard or text)[start:m.end()]  # 示すのは聞こえたとおりの書き方（「さげません」）
         target = of_undo if any(a < m.end() and m.start() < b for a, b in undo) else out
         if word not in target:
             target.append(word)
     return tuple(out), tuple(of_undo)
+
+
+_NEGATION_WORD_MAX = 8  # 打ち消しの言葉を示すときに、前へさかのぼる字の数の上限
+
+
+def _negation_start(text: str, i: int) -> int:
+    """打ち消し（text[i:] で見つけたもの）を示すときの、言葉のまとまりの始まり。示すためだけ（見つけるかどうかは変えない）。
+
+    前の動きの言葉（ひらがな・漢字）ごと示す（「下げないで」「移動しないで」）。助詞・「とか」の所で止める。
+    ただし、文の初め・区切りのすぐ後の「も」「は」などは助詞ではなく言葉の一部として読む（「もういいや」）。
+    言葉の途中で切った切れ端（「っぱりいいや」）は示さない：まとまりの始まりまで（上限 8字）さかのぼり、
+    それでも始まりに届かなければ、見つけた打ち消しの言葉だけを示す。
+    """
+    def joins(k: int) -> bool:  # text[k - 1] が、同じ言葉のまとまりの字か
+        c = text[k - 1]
+        if not ("ぁ" <= c <= "ゖ" or _script(c) == "kanji"):
+            return False
+        if k >= 2 and text[k - 2:k] == "とか":
+            return False
+        return not (c in PARTICLES and k >= 2 and _script(text[k - 2]) != "other")
+
+    start = i
+    while start > 0 and i - start < _NEGATION_WORD_MAX and joins(start):
+        start -= 1
+    if start == 0 or not joins(start):
+        return start  # まとまりの始まりに届いた
+    return i  # 長すぎて始まりに届かない：切れ端を示さず、打ち消しの言葉だけ
 
 
 def _inside_katakana_word(text: str, start: int, end: int) -> bool:
