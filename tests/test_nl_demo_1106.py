@@ -1048,3 +1048,39 @@ def test_ambiguous_two_times_is_not_a_dead_end_question(tmp_path, text):
     h = r.get("hear") or {}
     assert not r["state"]["candidate"] and not h.get("choices"), h
     assert "回数を変えるときは" in h.get("message", ""), h
+
+
+# ---- QA 003 M1：速度の問いへの答え「下げて」は、速度の答えとして読む（位置の Z・向きの確かめにしない） ----
+@pytest.mark.parametrize("confirm_first", [False, True])
+@pytest.mark.parametrize("answer", ["下げて", "上げて"])
+def test_updown_answer_to_speed_question_is_a_speed_answer(tmp_path, answer, confirm_first):
+    w, _, sid = A.place_flow(tmp_path)
+    if confirm_first:
+        _confirm_facing(w, sid)
+        w.undo(sid)
+    q = w.talk(sid, "速度を10%")
+    assert "速度を上げますか、下げますか？" in hear_msg(q), hear_msg(q)
+    r = w.talk(sid, answer)
+    c = r["state"]["candidate"]
+    assert not (c and c["target"].endswith(" Z")), (c, hear_msg(r))
+    assert not _facing_buttons(r) and "Zマイナス で合っていますか" not in hear_msg(r), hear_msg(r)
+    assert not r["state"]["approval"]
+
+
+# ---- QA 003 M2：向きの確かめのボタンは、選び直し・元に戻す・［説明です］・回数の変更のあとは使えない ----
+@pytest.mark.parametrize("between", ["select", "undo", "explain", "repeat"])
+def test_facing_button_is_refused_after_other_operations(tmp_path, between):
+    w, _, sid = A.place_flow(tmp_path)
+    q = w.talk(sid, "3ミリ下げて")
+    yes = _facing_buttons(q)["合っている"]
+    if between == "select":
+        w.select(sid, "C00005")
+    elif between == "undo":
+        w.undo(sid)
+    elif between == "explain":
+        w.hear(sid, ut.EXPLAIN_CHOICE_TEXT, "text")
+    else:
+        w.talk(sid, "3回繰り返して")
+    r = w.hear(sid, yes, "text")
+    assert not r["state"]["candidate"] and not r["state"]["facing"]["confirmed"], (between, r["message"])
+    assert "もう使えません" in r["message"], r["message"]
