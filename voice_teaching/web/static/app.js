@@ -37,6 +37,7 @@ const state = {
   dialogNotice: false,  // 最後の結果が会話の層の答え（会話が終わっても、止めた・聞き返した理由を会話のカードに残す）
   convo: false,         // 会話を始めた（最初に送った）。false の間は ① 初期の画面（大きなマイク）。見せ方だけに使う
   sending: false,       // 答えを待っている（「考えています」）。その間は送らず、書いた文は入力欄に残す（11/5 F3）
+  closed: false,        // サーバーがこの画面を閉じた（別の JOB が読み込まれた。Q-7）。承認・出力のボタンを押せなくする
 };
 const SAMPLE_NAME = "DEMO_C_PLACE.JBI";  // 「サンプルで試す」で読む架空のジョブ（サーバーが決まった1つを読む）
 
@@ -88,11 +89,29 @@ async function postJson(path, body) {
       headers: previousHeader({ "Content-Type": "application/json" }),
       body: JSON.stringify(body),
     });
-    return await r.json();
+    const res = await r.json();
+    if (res && res.session_closed === true && body && body.session_id === state.sessionId) markClosed(res.error);
+    return res;
   } catch (e) {
     return { ok: false, error: NO_SERVER };
   }
 }
+
+// サーバーがこの画面を閉じた（別の JOB が読み込まれた。唐川さんの決定 Q-7）：サーバーの文を出し、承認・出力を押せなくする。
+// 断るのはサーバー（ここは見せ方だけ）
+const SESSION_CLOSED_TEXT = "この画面の作業は終わりました（新しいジョブが読み込まれたため）。変更候補・承認は使えません。新しい画面で続けてください";
+const LOAD_FAILED_CLOSED_TEXT = "前の作業画面は終わりました。変更候補・承認は使えません。ジョブを読み込み直してください";
+function markClosed(message) {
+  if (!state.sessionId) return;
+  state.closed = true;
+  const text = typeof message === "string" && message ? message : SESSION_CLOSED_TEXT;
+  const box = $("reply-message");  // 読み込んだあとは読み込みの欄が隠れるので、返事の欄に出す（見た目は今の返事の欄のまま）
+  box.className = "reply stop";
+  box.replaceChildren(el("p", { class: "session-closed" }, text));
+  box.hidden = false;
+  updateLocks();
+}
+window.addEventListener("vt:session-closed", (ev) => markClosed(ev.detail && ev.detail.error));
 
 function recording() {
   return state.voiceState !== "idle";
@@ -143,11 +162,14 @@ async function loadFile(f) {
 // 読み込みの結果を画面に出す（ファイルから読んでも、サンプルでも同じ）
 function applyLoad(res, fileName) {
   state.sessionId = null; state.view = null; state.st = null;
+  state.closed = false;
   announceSession();
   closeConfirm();
   stopPlayback();
   if (!res.ok) {
     $("load-error").replaceChildren(friendly("load", res.error || "理由が分かりません"));
+    // 読み直しに失敗しても、サーバーは前の画面を閉じた（Q-5）。終わったことをはっきり出す
+    if (res.session_closed === true) $("load-error").append(el("p", { class: "reason" }, LOAD_FAILED_CLOSED_TEXT));
     $("load-error").hidden = false;
     $("job-area").hidden = true;
     $("problems-panel").hidden = true;
@@ -1020,6 +1042,7 @@ function renderCandidate() {
   const c = st.candidate;
   const host = $("candidate-view");
   $("open-confirm").disabled = !c || recording();
+  if (state.closed) $("open-confirm").disabled = true;  // サーバーが閉じた画面（Q-7）：確認表示も開かない
   $("compare-button").disabled = !c || recording();
   $("undo-button").disabled = !c || recording();
   if (!c) {
@@ -1165,6 +1188,7 @@ function openConfirm() {
   $("confirm-error").hidden = true;
   $("approve-button").disabled = !st.can_approve || recording();
   $("approver-name").disabled = !st.can_approve;
+  if (state.closed) $("approve-button").disabled = true;  // サーバーが閉じた画面（Q-7）
   $("confirm-overlay").hidden = false;
   // 止まった候補の赤い帯がいちばん上に見えるように、上から出す（ボタンへ移るときにスクロールさせない）
   document.querySelector("#confirm-overlay .confirm-box").scrollTop = 0;
@@ -1247,6 +1271,7 @@ function renderApproval() {
   // 「出力しました」と食い違うため（11/5 夜 H1）。上書きしない決まりはサーバーのまま。1回目の失敗のあとは押せる
   $("export-button").disabled = !st.can_export || !!st.exported || state.exporting || recording();
   $("approve-button").disabled = !st.can_approve || state.approving || recording();  // 承認を送っている間は押せない（11/5 夜 N2）
+  if (state.closed) { $("export-button").disabled = true; $("approve-button").disabled = true; }  // サーバーが閉じた画面（Q-7）
   // 結果の欄（成功・失敗とも）は、出力したときの候補と承認のものだけ。元に戻した・新しい候補・別のジョブで消す（11/5 確定版 1）
   if (!$("export-result").hidden && $("export-result").dataset.owner !== exportOwner()) {
     $("export-result").hidden = true;
