@@ -159,7 +159,16 @@ _ACK = re.compile(r"(?:はい|うん|ok|okay|オーケー|おっけー|了解|�
                   r"|お願いします|それでお願いします|よし|いいね|いいです|大丈夫です)[!！。.、]*", re.I)
 # 前の候補を否定している・止めたいかもしれない言葉（質問の形でも、承認を残す理由にしない）
 _DOUBT = re.compile(r"違|ちが|ちゃう|ない|無い|おかし|なし|無し|ナシ|いら|要ら|間違|まちが|やめ|止め|とめ|戻|もど|消|けし|待|まっ|ストップ"
-                    r"|キャンセル|取り消|取消|とりけ|撤回|中止|リセット|ダメ|だめ|嫌|いや|うそ|嘘")
+                    r"|キャンセル|取り消|取消|とりけ|撤回|中止|リセット|ダメ|だめ|嫌|いや|うそ|嘘|でも|けど|早かっ|よかった|まだ"
+                    r"|^(?:え|は|あれ|ん+|ほんと|本当|まじ|マジ|そうなの|そう)(?:に|っ)?[?？!！。]*$")
+
+
+def is_plain_button_request(text: object) -> bool:
+    """否定・疑いの無い、ボタンで行う操作の頼み（「出力して」「承認して」）。ボタンで行う案内を返すだけで、承認は残す。"""
+    if not isinstance(text, str):
+        return False
+    t = _norm(text)
+    return bool(_BUTTON.search(t)) and not _DOUBT.search(t) and not _M_BEFORE.search(t) and not _values(t)
 
 
 def is_ack(text: object) -> bool:
