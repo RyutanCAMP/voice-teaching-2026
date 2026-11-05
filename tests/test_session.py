@@ -167,10 +167,22 @@ def test_no_amount_asks_then_answer_continues(s):
     assert s.propose(SHIFT_10).status == "ok"
 
 
-def test_kanji_amount_never_becomes_candidate(s):
-    assert s.hear("C00005をXプラス方向に十ミリ移動して").status == "ask"
+def test_unreadable_kanji_amount_never_becomes_candidate(s):
+    # 読めない漢数字（1字ずつの「一五」）は、今までどおり候補にしない。Claude が数を出しても使わない
+    assert s.hear("C00005をXプラス方向に一五ミリ移動して").status == "ask"
     assert s.propose(SHIFT_10).status == "stop"
     assert s.candidate is None
+    assert s.original_bytes == ORIGINAL
+
+
+def test_kanji_amount_is_read_by_the_program_not_by_claude(s):
+    # 11/6 から（唐川さんの実マイク「十ミリ」）：正しい形の漢数字はプログラムが 10mm と読む。Claude の別の量は使わない
+    assert s.hear("C00005をXプラス方向に十ミリ移動して").status == "ok"
+    assert s.propose({**SHIFT_10, "delta_mm": 5}).status != "ok"
+    assert s.candidate is None
+    # 断られた発話の中では出し直さない決まり（CLAUDE.md）。新しい発話として聞き直せば、プログラムの読んだ 10mm と同じ提案は通る
+    assert s.hear("C00005をXプラス方向に十ミリ移動して").status == "ok"
+    assert s.propose(SHIFT_10).status == "ok"
     assert s.original_bytes == ORIGINAL
 
 
