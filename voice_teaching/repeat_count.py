@@ -82,6 +82,10 @@ class RepeatRequest:
     add: int | None         # 「3回追加」「3回ふやして」の数（合計か追加かが分からない）
     one_more: bool = False  # 「もう1回ふやして」（今の回数 +1）
     position: str | None = None  # 位置を1つだけ言った（「C00001を3回」）：その位置を含む区間だけを示す
+    # 「…の動きを」と、位置の動きを言った（「c0001とC0002の動きを3回繰り返して」）。言った位置が区間とぴったり合わないとき、
+    # 両方を含む区間を示して確かめてよいのは、このときだけ。「C00002からC00003を3回」「C00002とC00003を3回」のように
+    # 範囲・位置そのものを言ったときは、今どおり言った範囲のまま調べて止める（P1-c：言った範囲を区間に広げない）
+    motion: bool = False
 
 
 def to_digits(text: str) -> str:
@@ -146,7 +150,7 @@ def read(text: str) -> RepeatRequest | None:
             said_count=int(g["said"]) if g.get("said") else None,
             total=int(g["total"]) if g.get("total") else None,
             add=int(g["add"]) if g.get("add") else None,
-            one_more=form is _FORM_ONE_MORE, position=_pos(g.get("p")))
+            one_more=form is _FORM_ONE_MORE, position=_pos(g.get("p")), motion="の動き" in t)
     return None
 
 

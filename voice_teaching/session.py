@@ -267,8 +267,9 @@ class Session:
             except jbi.JbiError as e:
                 # 「C0001とC0002の動きを3回繰り返して」：言った位置がくり返しの区間とぴったり合わない。両方を含む区間が
                 # 1つだけなら、その区間を示して確かめる（候補にも範囲の確認にもしない。唐川さんの指示 11/5 c）
+                # 「…の動きを」と言ったときだけ（範囲・位置そのものを言ったときは、今どおり言った範囲で止める。P1-c）
                 blocks = [b for b in self._job.find_repeat_blocks() if req.start in b.positions and req.end in b.positions]
-                if len(blocks) != 1:
+                if not req.motion or len(blocks) != 1:
                     return stop_job(str(e))
                 block, confirm_block = blocks[0], True
         else:
