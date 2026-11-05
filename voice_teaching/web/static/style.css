@@ -1389,3 +1389,13 @@ body:has(#export-result[data-ok="true"]:not([hidden])) #export-note { display: n
 @media (min-width: 1100px) and (max-width: 1499px) {
   .stage { backdrop-filter: none; }  /* 位置の基準を画面にする（backdrop-filter があると fixed の基準が 3D の欄になる） */
 }
+/* 承認のあとの文字の欄（説明の質問）をふさがない：ポップアップの下の端は入力の欄より上 */
+@media (min-width: 1100px) and (max-width: 1499px) {
+  .cand-pop { bottom: 150px; }
+}
+@media (min-width: 1100px) and (max-width: 1499px) and (max-height: 800px) {
+  .cand-pop { bottom: 128px; }
+}
+@media (min-width: 1100px) and (max-width: 1499px) {
+  .cand-pop { top: 112px; }  /* ヘッダーが2行になっても、解釈の印・アプリの記録を隠さない */
+}
