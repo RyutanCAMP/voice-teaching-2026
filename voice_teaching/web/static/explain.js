@@ -258,6 +258,8 @@ async function talkSend(text, source) {
       showUsage(t.ask);
     }
     if (t.hear && t.hear.message) {
+      // Claude の言い添え（前後の会話を踏まえた一言。サーバーが検査したものだけ）。確かめ・案・止めた理由は次のアプリの文
+      if (t.hear.claude_lead && t.hear.claude_lead.text) addTurn(speaker(t.hear.claude_lead.model), t.hear.claude_lead.text, "claude");
       // 指示の道の答え（範囲の確認・候補・止めた理由など）も、会話の流れに出す（文はサーバーのもの）
       addTurn("アプリ", t.hear.message, "app");
       scrollDown();
