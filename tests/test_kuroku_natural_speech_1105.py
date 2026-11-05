@@ -440,7 +440,7 @@ def test_self_correction_asks_the_last_wording_by_button(tmp_path, said, final, 
 
 
 @pytest.mark.parametrize("said", [
-    "10ミリ、いや5ミリ", "上に、いや下に3ミリ", "Zプラス3ミリ、いや", "Zプラス3ミリ、やっぱりやめた", "Zプラス3ミリ承認して、いや5ミリ",
+    "上に、いや下に3ミリ", "Zプラス3ミリ、いや", "Zプラス3ミリ、やっぱりやめた", "Zプラス3ミリ承認して、いや5ミリ",
     "Zプラス3ミリ、いや5ミリ、いや4ミリ", "Zプラス3ミリ動かさないで、いや5ミリ", "Yマイナス、違うプラス、3ミリ", "Zプラス3ミリ、いや5ミリくらい",
     "Zプラス3ミリ、いや右に5ミリ", "Zプラス3ミリ、いやYとZに5ミリ", "いや、Zプラス3ミリ",
 ])
@@ -466,3 +466,15 @@ def test_self_correction_is_not_offered_with_a_pending_candidate(tmp_path):
     r = w.talk(sid, "Zプラス10ミリ、いや5ミリ", "voice")
     assert "最後の言い方" not in hear(r).get("message", "") and not labels(r)
     assert r["state"]["candidate"]["delta"] == "+3.000"
+
+
+@pytest.mark.parametrize("said,n", [("10ミリ、いや5ミリ", "5"), ("10ミリ、ごめん、5ミリ", "5"), ("十ミリ、いや三ミリ", "3")])
+def test_self_correction_without_axis_asks_only_axis_and_direction(tmp_path, said, n):
+    """「10ミリ、いや5ミリ」：最後の量だけ分かった。軸と向きだけを聞く（候補・ボタンなし。1つの向きを勧めない）。"""
+    w, fake, sid = A.place_flow(tmp_path)
+    r = w.talk(sid, said, "voice")
+    msg = hear(r).get("message", "")
+    assert not cand(r) and not labels(r)
+    assert msg.startswith(f"言い直しのあとの量は {n}mm ですね。どの軸の、どちらの向きですか？"), msg
+    assert f"Xプラス{n}ミリ" in msg and f"Zマイナス{n}ミリ" in msg
+    assert len(fake.requests) == 0

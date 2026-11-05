@@ -1445,6 +1445,8 @@ def pre_check(facts: UtteranceFacts, selected: str | None = None,
 # 承認待ちの候補があるときは使わない（Session が候補の無いときだけ呼ぶ。候補があるときの言い直しは P0 の扱い）
 _CORRECTION_MARK = re.compile(r"[、,，\s]*(?:じゃなかった|じゃなくて|ではなくて|ではなく|じゃなく|まちがえた|間違えた|ちがう|違う|ごめん|いや|やっぱり)[、,，\s]*")
 SELF_CORRECTION_MESSAGE = "言い直しがありました。最後の言い方「{text}」で指示しますか？（ボタンで選んでください。違うときは、もう一度言ってください）"
+SELF_CORRECTION_AXIS_MESSAGE = ("言い直しのあとの量は {n}mm ですね。どの軸の、どちらの向きですか？"
+                                "（「Xプラス{n}ミリ」「Zマイナス{n}ミリ」のように、軸と向きと量を一緒に言ってください）")
 
 
 def _correction_parts(f: UtteranceFacts) -> dict | None:
@@ -1459,8 +1461,8 @@ def _correction_parts(f: UtteranceFacts) -> dict | None:
 
 def self_correction(facts: UtteranceFacts) -> Verdict | None:
     """「Zプラス10ミリ、いや5ミリ」→「Zプラス5ミリ」でよいかをボタンで確かめる。決まらなければ None。"""
-    if facts.question or facts.op != "move":
-        return None
+    if facts.question or not (facts.op == "move" or (facts.op is None and not facts.kinds and facts.amounts)):
+        return None  # 移動の指示（または「10ミリ、いや5ミリ」のように量だけの発話）のときだけ
     t = _spoken(normalize(facts.raw)).strip()
     marks = list(_CORRECTION_MARK.finditer(t))
     if len(marks) != 1:
@@ -1472,6 +1474,10 @@ def self_correction(facts: UtteranceFacts) -> Verdict | None:
     if a is None or b is None or not any(a.values()):
         return None
     merged = {k: a[k] if a[k] is not None else b[k] for k in a}
+    if merged["amount"] is not None and merged["amount"].unit == "mm" and (merged["axis"] is None or merged["sign"] is None):
+        # 「10ミリ、いや5ミリ」：最後の量だけ分かった。足りない軸と向きだけを聞く（候補・ボタンなし。例は1つの向きを勧めない）
+        n = _num(merged["amount"].value)
+        return _ask(SELF_CORRECTION_AXIS_MESSAGE.format(n=n))
     if merged["axis"] is None or merged["sign"] is None or merged["amount"] is None or merged["amount"].unit != "mm":
         return None
     v = merged["amount"].value
