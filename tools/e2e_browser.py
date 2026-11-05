@@ -3413,9 +3413,13 @@ def check_updown_unconfirmed(browser, check, shots: Path | None, errors: list) -
         until(pg, lambda: pg.is_visible("#reply-message") and ut.is_updown_unset_ask(pg.inner_text("#reply-message")))
         check("3mm下げたいんですね。" in pg.inner_text("#reply-message") and "この設備では、まだ「下」の方向が決まっていません。"
               in pg.inner_text("#reply-message"), "上下の設定なし：「3ミリ下げて」の聞き返しは、言った量と向きを受け止める文")
-        check(pg.locator("#reply-message button.choice").count() == 0 and not pg.is_enabled("#open-confirm")
+        # d（11/5 唐川さんの決定）：画面で初めての向きの言葉は、向きの確かめのボタン［合っている］［違う］だけを出す
+        # （Z を決める選択肢は出さない。押すまで候補にしない）
+        btns = [pg.locator("#reply-message button.choice").nth(i).inner_text()
+                for i in range(pg.locator("#reply-message button.choice").count())]
+        check(btns == ["合っている", "違う"] and not pg.is_enabled("#open-confirm")
               and pg.get_attribute("#step-4", "aria-current") != "step",
-              "上下の設定なし：「3ミリ下げて」は候補にせず、案内で聞き返す（選択肢も出さない）")
+              f"上下の設定なし：「3ミリ下げて」は候補にせず、向きの確かめのボタンだけで聞き返す（Z を決める選択肢は出さない）：{btns}")
         if shots is not None:
             pg.screenshot(path=str(shots / "m2_unconfirmed.png"))
         fill_text(pg, "Zマイナス3ミリ")
