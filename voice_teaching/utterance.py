@@ -236,8 +236,50 @@ _HIRA_AXIS = re.compile(r"(?<![ぁ-ゖ])(えっくす|わい|ぜっと)(?=\s?(?:
 # 数のすぐ後のひらがなの「みり」（音声認識の揺れ「3みり」）は「ミリ」（クローク 11/5 夜）。数のすぐ後だけ（量を補わない）
 _HIRA_MIRI = re.compile(r"(?<=[0-9])(\s?)みり")
 
+# 漢数字・ひらがなの数（唐川さんの実マイク 11/6：「十ミリ」が数として読めず止まった）。発話を読むときだけ算用数字にする
+# （JOB ファイルの検査 jbi は変えない）。単位（ミリ・ミリメートル・mm・センチ・%）がすぐ後にあるときだけ。正しい形（「十」「三」「十五」
+# 「百二十」）だけを読み、「一五」のような1字ずつの読み・「十十」は読まない（今どおり聞き返す）。小数（「三点五」）は読まない。
+# ひらがなの「に」（2）は助詞と区別できないので読まない（「Zプラスにじゅうミリ」は「に十」とも「二十」とも読める）。「し」「く」「ご」も1字では読まない
+_UNIT_AHEAD = r"(?=\s?(?:ミリメートル|ミリ|みり|MM|センチ|CM|%|パーセント))"
+_KANJI_DIGIT = {"〇": 0, "零": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+_KANJI_FORM = re.compile(r"(?:([一二三四五六七八九])?百)?(?:([一二三四五六七八九])?十)?([一二三四五六七八九])?|[〇零]")
+# すぐ前が数・小数点（「三点五」「3.五」「３・五」）のときは読まない（「三点五ミリ」の「五」だけを 5 にしない）
+_KANJI_NUM_AHEAD = re.compile(r"(?<![〇零一二三四五六七八九十百千万点.・0-9])([〇零一二三四五六七八九十百]+)" + _UNIT_AHEAD)
+_KANA_DIGIT = {"いち": 1, "さん": 3, "よん": 4, "ろく": 6, "なな": 7, "しち": 7, "はち": 8, "きゅう": 9}
+_KANA_ONES = {**_KANA_DIGIT, "に": 2, "ご": 5}  # 「じゅうに」「じゅうご」の後ろだけ
+_KANA_NUM_AHEAD = re.compile(
+    r"(?:(?<![ぁ-ゖー点.・0-9])|(?<=[をへでと]))"
+    rf"((?:(?:{'|'.join(_KANA_DIGIT)})?じゅう(?:{'|'.join(_KANA_ONES)})?)|{'|'.join(_KANA_DIGIT)})" + _UNIT_AHEAD)
+
+
+def _kanji_value(s: str) -> int | None:
+    m = _KANJI_FORM.fullmatch(s)
+    if m is None or not s:
+        return None
+    if s in ("〇", "零"):
+        return 0
+    h = (_KANJI_DIGIT[m.group(1)] if m.group(1) else 1) if "百" in s else 0
+    t = (_KANJI_DIGIT[m.group(2)] if m.group(2) else 1) if "十" in s else 0
+    return h * 100 + t * 10 + (_KANJI_DIGIT[m.group(3)] if m.group(3) else 0)
+
+
+def _kana_value(s: str) -> int:
+    if "じゅう" not in s:
+        return _KANA_DIGIT[s]
+    a, _, b = s.partition("じゅう")
+    return (_KANA_DIGIT[a] if a else 1) * 10 + (_KANA_ONES[b] if b else 0)
+
+
+def _spoken_numbers(text: str) -> str:
+    def kanji(m: re.Match) -> str:
+        v = _kanji_value(m.group(1))
+        return m.group(0) if v is None else str(v)
+    text = _KANJI_NUM_AHEAD.sub(kanji, text)
+    return _KANA_NUM_AHEAD.sub(lambda m: str(_kana_value(m.group(1))), text)
+
 
 def _spoken(text: str) -> str:
+    text = _spoken_numbers(text)
     text = _HIRA_MIRI.sub(lambda m: m.group(1) + "ミリ", text)
     text = _HIRA_SIGN.sub(lambda m: {"ぷらす": "プラス", "まいなす": "マイナス"}[m.group(0)], text)
     text = _HIRA_AXIS.sub(lambda m: {"えっくす": "X", "わい": "Y", "ぜっと": "Z"}[m.group(1)], text)

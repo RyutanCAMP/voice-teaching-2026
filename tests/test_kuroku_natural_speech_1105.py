@@ -172,7 +172,7 @@ def test_millimetre_word_amount():
 
 
 @pytest.mark.parametrize("text", ["Zプラス3メートル", "Zプラス3センチメートル", "Zプラス3ミリメートルくらい",
-                                  "Zプラス3ミリメートルメートル", "Zプラス三ミリメートル", "Zプラス3"])
+                                  "Zプラス3ミリメートルメートル", "Zプラス一五ミリメートル", "Zプラス3"])
 def test_other_units_still_stop(tmp_path, text):
     w, _, sid = A.place_flow(tmp_path)
     r = w.talk(sid, text, "voice")
@@ -299,3 +299,85 @@ def test_round2_still_no_candidate(tmp_path, text):
 
 def test_filler_words_stay_within_the_cap():
     assert len(ut.FILLER_WORDS) <= 30  # tests/test_unknown_words.py の上限（変えない）
+
+
+# ---- 9. 漢数字・ひらがなの数（唐川さんの実マイク 11/6：「十ミリ」が数として読めず止まった） ----
+# 発話を読むときだけ算用数字にする（JOB ファイルの検査は変えない）。単位がすぐ後にあるときだけ。正しい形だけ
+PAIRS_NUM = [
+    ("Zプラス十ミリ", "Zプラス10ミリ"),
+    ("Zプラス三ミリ", "Zプラス3ミリ"),
+    ("Zプラス十五ミリ", "Zプラス15ミリ"),
+    ("Zプラス二十ミリ", "Zプラス20ミリ"),
+    ("Zプラス二十一ミリ", "Zプラス21ミリ"),   # 上限で断る（同じに）
+    ("Zプラス百ミリ", "Zプラス100ミリ"),       # 上限で断る（同じに）
+    ("Zプラス三ミリメートル", "Zプラス3ミリ"),
+    ("Zプラス三mm", "Zプラス3mm"),
+    ("Zプラス十ミリ動かしたい", "Zプラス10ミリ動かして"),
+    ("Yマイナス十ミリ", "Yマイナス10ミリ"),
+    ("Zプラスじゅうミリ", "Zプラス10ミリ"),
+    ("Zプラス じゅうごミリ", "Zプラス 15ミリ"),
+    ("Zプラス さんミリ", "Zプラス 3ミリ"),
+    ("ゼットプラスさんミリ", "Zプラス3ミリ"),
+    ("Zぷらす3みり", "Zプラス3ミリ"),
+    ("Zプラス１０ミリ", "Zプラス10ミリ"),
+    ("Zプラス三センチ", "Zプラス3センチ"),     # センチは今どおり聞き返す（同じに）
+    ("この位置を上に十ミリ上げて", "この位置を上に10ミリ上げて"),
+]
+
+
+@pytest.mark.parametrize("spoken,digits", PAIRS_NUM)
+def test_spoken_numbers_are_read_like_digits(tmp_path, spoken, digits):
+    assert outcome(tmp_path / "a", spoken) == outcome(tmp_path / "b", digits), (spoken, digits)
+
+
+def test_karakawa_mic_ju_miri_asks_only_the_direction(tmp_path):
+    """「じゃあこの位置を十ミリ上げて」（C00005）：10mm は分かった。上下の向きだけをボタンで確かめる。"""
+    w, fake = T.flow(tmp_path)
+    sid = w.load(A.DEMO_C)["session_id"]
+    w.select(sid, "C00005")
+    r = w.talk(sid, "じゃあこの位置を十ミリ上げて", "voice")
+    msg = hear(r).get("message", "")
+    assert not cand(r)
+    assert msg.startswith("10mm上げたいんですね。"), msg
+    assert "上は Zプラス で合っていますか？" in msg and labels(r) == ["合っている", "違う"], msg
+    yes = next(c["text"] for c in hear(r)["choices"] if c["label"] == "合っている")
+    c = w.hear(sid, yes, "text")["state"]["candidate"]
+    assert c["target"] == "C00005 Z" and c["delta"] == "+10.000" and "210.000" in c["after_line"], c
+    assert len(fake.requests) == 0
+
+
+@pytest.mark.parametrize("text", [
+    "Zプラス十か十五ミリ", "Zプラス十ミリか十五ミリ", "Zプラス一五ミリ", "Zプラス十十ミリ", "Zプラス三点五ミリ",
+    "Zプラスにじゅうミリ", "Zプラスにミリ", "Zプラスしミリ", "Zプラス十", "Zプラス三十ミリ", "Zプラス十ミリくらい",
+    "十ミリ", "Zプラス約十ミリ", "Zプラス十ミリと五ミリ", "Zプラス二十五ミリ", "Zプラス十ミリ上げたくない",
+])
+def test_spoken_numbers_never_make_an_unsafe_candidate(tmp_path, text):
+    w, _, sid = A.place_flow(tmp_path)
+    r = w.talk(sid, text, "voice")
+    assert not cand(r), (text, hear(r).get("message"))
+
+
+def test_spoken_numbers_do_not_bypass_the_pending_candidate(tmp_path):
+    out = []
+    for i, t in enumerate(("やっぱり十ミリ", "やっぱり10ミリ")):
+        w, _, sid = A.place_flow(tmp_path / str(i))
+        w.talk(sid, "Zプラス3ミリ")
+        r = w.talk(sid, t, "voice")
+        out.append((hear(r).get("message"), r["state"]["candidate"]["delta"]))
+    assert out[0] == out[1] and out[0][1] == "+3.000", out
+
+
+@pytest.mark.parametrize("bad_value", ["二〇〇.000", "２００.000", "200.000x"])
+@pytest.mark.parametrize("said", ["Zプラス十ミリ", "Zプラス10ミリ"])
+def test_job_file_numbers_are_still_strict(tmp_path, bad_value, said):
+    """JOB ファイルの検査は変えない：位置の値が漢数字・全角・余計な字のとき、その位置は使えず、変更の候補もできない。"""
+    bad = A.DEMO_C.replace(b"C00005=400.000,150.000,200.000", f"C00005=400.000,150.000,{bad_value}".encode("utf-8"))
+    assert bad != A.DEMO_C
+    w, _ = T.flow(tmp_path)
+    r = w.load(bad)
+    if not r.get("ok"):
+        return  # 読み込みで断るのも可
+    sid = r["session_id"]
+    w.select(sid, "C00005")
+    r2 = w.talk(sid, said, "voice")
+    assert not cand(r2), (bad_value, said, hear(r2))

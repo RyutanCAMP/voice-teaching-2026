@@ -79,7 +79,7 @@ def test_decimal_amount():
 # ---- 5. 量が分からない指示は聞き返す ----
 @pytest.mark.parametrize("text", [
     "C00005をXプラス方向に移動して",          # 量が無い
-    "C00005をXプラス方向に十ミリ移動して",     # 漢数字
+    "C00005をXプラス方向に一五ミリ移動して",   # 読めない漢数字（1字ずつ）。「十ミリ」は 11/6 から 10mm と読む（唐川さんの実マイク）
     "C00005をX方向に半分だけ移動して",   # 半分
     "C00005をX方向に少し移動して",       # 少し
     "C00005をXプラス方向に10移動して",         # 単位が無い数字
@@ -98,10 +98,14 @@ def test_no_amount_question_text():
     assert "何mm" in v.message
 
 
-def test_kanji_amount_is_not_read_as_number():
+def test_kanji_amount_is_read_only_in_its_proper_form():
+    # 11/6 から（唐川さんの実マイク「十ミリ」）：単位のすぐ前の正しい形の漢数字は、プログラムが算用数字として読む
     f = read_utterance("C00005をXプラス方向に十ミリ移動して")
-    assert f.amounts == ()
-    assert f.unclear_amounts
+    assert [a.value for a in f.amounts] == [10.0] and not f.unclear_amounts
+    # 正しい形でないもの（1字ずつ・小数）は、今までどおり数として読まない
+    for text in ("C00005をXプラス方向に一五ミリ移動して", "C00005をXプラス方向に三点五ミリ移動して"):
+        f = read_utterance(text)
+        assert f.amounts == () and f.unclear_amounts, text
 
 
 # ---- 軸と向き ----
