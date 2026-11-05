@@ -1438,6 +1438,51 @@ def pre_check(facts: UtteranceFacts, selected: str | None = None,
     return _ask(f"「{t}」でよいですか？", ((t, t),))
 
 
+# ---- 1つの発話の中の言い直し（「Zプラス10ミリ、いや5ミリ」。唐川さん 11/6：最後の意思を理解して聞き返す） ----
+# 言い直しの印がちょうど1つあり、印の後ろ（最後の意思）を優先して、足りない軸・符号・量・位置だけを前から足すと、
+# 軸・符号・量・位置がそれぞれ1つに決まるときだけ、その文をボタンで確かめる（候補にしない。ボタンの文はふつうの指示として全部の検査を通る）。
+# 上下・右左・あいまいな量・知らない言葉・打ち消しが残るとき、数が決まらないときは None（今どおり打ち消しで止める）。
+# 承認待ちの候補があるときは使わない（Session が候補の無いときだけ呼ぶ。候補があるときの言い直しは P0 の扱い）
+_CORRECTION_MARK = re.compile(r"[、,，\s]*(?:じゃなかった|じゃなくて|ではなくて|ではなく|じゃなく|まちがえた|間違えた|ちがう|違う|ごめん|いや|やっぱり)[、,，\s]*")
+SELF_CORRECTION_MESSAGE = "言い直しがありました。最後の言い方「{text}」で指示しますか？（ボタンで選んでください。違うときは、もう一度言ってください）"
+
+
+def _correction_parts(f: UtteranceFacts) -> dict | None:
+    if (set(f.kinds) - {"move", "select"} or f.unknown_words or f.negations or f.undo_negations or f.unclear_amounts or f.vertical or f.sides
+            or f.relative_dir or f.speed_signs or f.repeat or f.place_ref or f.bad_positions or f.stray_signs
+            or len(f.axes) > 1 or len(set(f.axis_signs)) > 1 or len(f.amounts) > 1 or len(f.positions) > 1):
+        return None
+    sign = f.axis_signs[0] if f.axis_signs else (f.amounts[0].sign if f.amounts and f.amounts[0].sign else None)
+    return {"axis": f.axes[0] if f.axes else None, "sign": sign,
+            "amount": f.amounts[0] if f.amounts else None, "position": f.positions[0] if f.positions else None}
+
+
+def self_correction(facts: UtteranceFacts) -> Verdict | None:
+    """「Zプラス10ミリ、いや5ミリ」→「Zプラス5ミリ」でよいかをボタンで確かめる。決まらなければ None。"""
+    if facts.question or facts.op != "move":
+        return None
+    t = _spoken(normalize(facts.raw)).strip()
+    marks = list(_CORRECTION_MARK.finditer(t))
+    if len(marks) != 1:
+        return None
+    before, after = t[: marks[0].start()].strip(), t[marks[0].end():].strip(" 、。,.!！")
+    if not before or not after:
+        return None
+    a, b = _correction_parts(read_utterance(after)), _correction_parts(read_utterance(before))
+    if a is None or b is None or not any(a.values()):
+        return None
+    merged = {k: a[k] if a[k] is not None else b[k] for k in a}
+    if merged["axis"] is None or merged["sign"] is None or merged["amount"] is None or merged["amount"].unit != "mm":
+        return None
+    v = merged["amount"].value
+    text = (f"{merged['position']}を" if merged["position"] else "") + \
+        f"{merged['axis']}{'プラス' if merged['sign'] > 0 else 'マイナス'}{_num(v)}ミリ"
+    final = read_utterance(text)
+    if final.unknown_words or final.negations or len(final.amounts) != 1 or final.amounts[0].value != v:
+        return None
+    return Verdict("ask", SELF_CORRECTION_MESSAGE.format(text=text), ((f"「{text}」で指示する", text),))
+
+
 _SHORT_POS = re.compile(r"C\s?([0-9]{1,4})")
 
 
