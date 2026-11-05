@@ -116,6 +116,12 @@ class UtteranceFacts:
     # 文の終わりの「動かします」「移動します」「ずらします」を外した指示の文（CHECKER_026 M3）。候補にせず、
     # 変更の希望か操作の説明かを確かめる。答えと合わせたとき・疑問の形のときは None
     shimasu_text: str | None = None
+    # 単位の無い・違う数のすぐ前の符号（「Z+3」の +、「Yプラスの方向にマイナス3」の マイナス）。この発話の中のもの。
+    # 量は作らないので向きには使わないが、捨てない（Safety High-1）。軸・量の符号と両方あれば、向きの指定が2つとして止める
+    unclear_signs: tuple[int, ...] = ()
+    # 前の発話で言った、量の符号（単位の無い数の符号・答えで置き換えた量の符号）。答えと合わせたときに残す（Safety High-1・Medium-2）。
+    # 今の向きと食い違えば、候補にせず確かめる。前の符号を、今の向きとして使うことはしない（推測しない）
+    earlier_signs: tuple[int, ...] = ()
 
     @property
     def position(self) -> str | None:
@@ -579,7 +585,7 @@ def _read(raw: str, question: bool) -> UtteranceFacts:
     # 量
     amounts: list[Amount] = []
     unclear: list[str] = []
-    unclear_signs = 0  # 単位の無い・違う数のすぐ前の符号（「Z+3」の +）。はぐれた符号ではなく、量の側の符号として数える
+    unclear_signs: list[int] = []  # 単位の無い・違う数のすぐ前の符号（「Z+3」の +）。はぐれた符号ではなく、量の側の符号として残す
     for m in _NUM_RE.finditer(rest):
         before = rest[: m.start()]
         after = rest[m.end():]
@@ -597,7 +603,9 @@ def _read(raw: str, question: bool) -> UtteranceFacts:
             unclear.append(f"「{m.group(0)}{word}」{NOT_UNIT_NOTE}")
             # 「Z+3」「Zのマイナス5」：符号は数に付いている（足りないのは単位）。符号の付く所ではなく、単位を聞き返す。
             # 量は作らない（単位を補わない）ので、この符号は向きとしても使わない
-            unclear_signs += _SIGN_BEFORE.search(before) is not None
+            us = _SIGN_BEFORE.search(before)
+            if us is not None:
+                unclear_signs.append(_SIGN[us.group(1)])
             continue
         sm = _SIGN_BEFORE.search(before)
         amounts.append(Amount(
@@ -762,7 +770,8 @@ def _read(raw: str, question: bool) -> UtteranceFacts:
         speed_signs=tuple(speed_signs),
         refers_to_selection=bool(_THIS.search(rest)),
         stray_signs=(len(_SIGN_TOKEN.findall(rest)) - sum(a.sign is not None for a in amounts) - placed_axis_signs
-                     - unclear_signs),
+                     - len(unclear_signs)),
+        unclear_signs=tuple(unclear_signs),
         vertical=vertical,
         explicit_axes=tuple(a for a in axes if a in explicit),
         value_axes=tuple(coord),
@@ -800,6 +809,9 @@ def combine_axes(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceF
                    undo_negations=tuple(dict.fromkeys(previous.undo_negations + answer.undo_negations)),
                    # 答えの「〜します」を外した文だけで［変更したい］を作らない（前に言った軸を捨てることになる）。今どおり聞き返す
                    shimasu_text=None,
+                   # 前に言った量の符号は捨てない（Safety High-1）
+                   earlier_signs=(previous.earlier_signs + previous.unclear_signs
+                                  + tuple(a.sign for a in previous.amounts if a.sign is not None) + answer.earlier_signs),
                    **_merged_extras(previous, answer))
 
 
@@ -903,6 +915,11 @@ def merge_answer(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceF
         undo_negations=tuple(dict.fromkeys(previous.undo_negations + answer.undo_negations)),
         # 答えと合わせた文から［変更したい］の2択は作らない（ボタンの文は1つの発話から作る）
         shimasu_text=None,
+        # 前に言った量の符号は捨てない（答えの量で置き換えるときは、前の量の符号を earlier_signs に移す。Safety High-1）
+        unclear_signs=answer.unclear_signs if has_amount_info else previous.unclear_signs,
+        earlier_signs=(previous.earlier_signs + previous.unclear_signs
+                       + tuple(a.sign for a in previous.amounts if a.sign is not None)) if has_amount_info
+        else previous.earlier_signs,
         **_merged_extras(previous, answer),
     )
 
@@ -1200,6 +1217,12 @@ def _pre_check_core(facts: UtteranceFacts, selected: str | None = None,
         return _place_check(facts, selected)
     if op in ("move", "speed") and facts.stray_signs > 0:
         return _ask("プラス・マイナスがどこに付くか分かりません。「Xのマイナス5ミリ」のように、軸のすぐ後に言ってください")
+    if op in ("move", "speed") and facts.unclear_signs and (
+            facts.axis_signs or facts.speed_signs or len(facts.unclear_signs) > 1
+            or any(a.sign is not None for a in facts.amounts)):
+        # 「Yプラスの方向にマイナス3」：単位の無い数にも向きが付いていて、向きの指定が2つ。mm まで言ったときと同じく、
+        # どちらも選ばない。止めて言い直してもらう（答えとして次の発話に足さない。足すと片方の符号が消える。Safety High-1）
+        return _stop(TWO_SIGNS_STOP)
     if op == "move":
         if len(facts.amounts) > 1 or len(facts.axes) > 1:
             moves = _split_moves(facts.raw)
@@ -1253,14 +1276,49 @@ def _pre_check_core(facts: UtteranceFacts, selected: str | None = None,
             return _ask_slot(f"{ax}方向のプラスですか、マイナスですか？（「{ax}のマイナス」のように向きも言ってください）", choices)
         if facts.requested_value() is None:
             return _ask("向きの指定が2つあります。どちらの向きか、もう一度指示してください")
+        v = _earlier_sign_check(facts)
+        if v is not OK:
+            return v
     elif op == "speed":
         v = _amount_check(facts, "%", "今の速度に対して、何%変えますか？")
         if v is not OK:
             return v
         if facts.requested_value() is None:
             return _ask_slot("速度を上げますか、下げますか？（向きが分からないか、2つあります）")
+        v = _earlier_sign_check(facts)
+        if v is not OK:
+            return v
     elif "select" in facts.kinds and not facts.positions and not facts.refers_to_selection:
         return _ask("どの位置ですか？ 位置番号（C と5桁の数字）で言ってください")
+    return OK
+
+
+TWO_SIGNS_STOP = ("向きの指定が2つあります（方向と、数の前のプラス・マイナス）。どちらの向きも選ばずに止めました。"
+                  "軸と向きと量を一緒に、もう一度言ってください")  # 例は出さない（片方の向きを勧めない）
+_SIGN_WORD = {1: "プラス", -1: "マイナス"}
+
+
+def _earlier_sign_check(facts: UtteranceFacts) -> Verdict:
+    """前の発話で言った量の符号（earlier_signs）と、今の向きが食い違わないか（Safety High-1・Medium-2）。
+
+    食い違えば候補にせず、食い違いを示して確かめる。前の符号を、今の向きとして使うことはしない（推測しない）。
+    文の符号・軸・数はプログラムが読んだもの。
+    """
+    if not facts.earlier_signs:
+        return OK
+    value = facts.requested_value()
+    if value is None:
+        return OK  # 向きが決まっていない：ほかの聞き返しで扱う
+    now = 1 if value > 0 else -1
+    first = facts.earlier_signs[0]
+    if len(set(facts.earlier_signs)) > 1 or first != now:
+        a = facts.amount
+        ex = ""
+        if facts.op == "move" and facts.axis and a is not None:
+            v = _num(a.value)
+            ex = f"（例：{facts.axis}プラス{v}ミリ／{facts.axis}マイナス{v}ミリ）"
+        return _ask(f"最初は{_SIGN_WORD[first]}、今は{_SIGN_WORD[now]}と聞こえました。どちらですか？ "
+                    f"軸と向きと量を一緒に、もう一度言ってください{ex}")
     return OK
 
 
@@ -1291,12 +1349,14 @@ def _split_moves(raw: str) -> list[tuple[str, float]] | None:
 def _amount_check(facts: UtteranceFacts, unit: str, missing_question: str) -> Verdict:
     if facts.unclear_amounts and all(_NO_UNIT_ITEM.fullmatch(u) for u in facts.unclear_amounts):
         # 単位が無いだけ（「Z+3」）：足りない単位をやさしく聞く。単位を補った候補は作らない（数字はプログラムが読んだまま）
-        nums = "".join(f"「{_NO_UNIT_ITEM.fullmatch(u).group(1)}」" for u in facts.unclear_amounts)
+        found = [_NO_UNIT_ITEM.fullmatch(u).group(1) for u in facts.unclear_amounts]
+        nums = "".join(f"「{n}」" for n in found)
+        # 例は符号・上げ下げを含まない形（言った向きと逆の例を出さない。Safety Medium-1）。数は言ったまま
         if unit == "mm":
             return _ask(f"量がはっきりしません。{nums}に単位が付いていません。"
-                        "ミリ（mm）を付けて、もう一度言ってもらえますか？（例：Zマイナス3ミリ）")
+                        f"「{found[0]}ミリ」のように、単位も付けて、もう一度言ってもらえますか？")
         return _ask(f"量がはっきりしません。{nums}に単位が付いていません。"
-                    "%を付けて、もう一度言ってもらえますか？（例：速度を10%下げて）")
+                    f"「{found[0]}%」のように、単位も付けて、もう一度言ってもらえますか？")
     if facts.unclear_amounts:
         return _ask(f"量がはっきりしません（{'・'.join(facts.unclear_amounts)}）。"
                     f"算用数字と {'mm（ミリ）' if unit == 'mm' else '%'} で量を言ってください")
