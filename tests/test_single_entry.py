@@ -53,7 +53,8 @@ def test_entry_card_at_step_4_only_after_approval():
     js = (STATIC / "app.js").read_text(encoding="utf-8")
     assert 'id === "instruction-panel" ? !(step === 2 || step === 3 || (step === 4 && approvedNow))' in js
     # ステップ4では、マイクを出さない・押せない（承認のあとも文字の欄だけ）
-    assert '$("voice-input-slot").hidden = step === 4;' in js and "|| currentStep() === 4;" in js
+    assert '$("voice-input-slot").hidden = step === 4;' in js and "step === 4;" in js[js.index("function micLocked(step)"):]
+    assert '$("mic-button").disabled = micLocked(step);' in js and '$("mic-button").disabled = micLocked(currentStep());' in js
     # 録音中は、確認表示・承認・出力のボタンを押せない
     for b in ('$("open-confirm").disabled = !c || recording();', '$("approve-button").disabled = !st.can_approve || recording();',
               '$("export-button").disabled = !st.can_export || !!st.exported || state.exporting || recording();'):
