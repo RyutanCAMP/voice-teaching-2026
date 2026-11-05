@@ -982,6 +982,8 @@ class Verdict:
     # 答えを待つ形の質問（「何mm動かしますか？」「どの方向に…？」など。ふつうの指示なら、次の答えを前の発話に足す）。
     # 「〜します」の発話には答えを足さないので、_shimasu_check がこの印を見て、言い直してもらう文に変える（QA P1-A）
     needs_answer: bool = False
+    # 4桁以下の位置番号の確かめ（「c0004」→「C00004 のことですか？」）。プログラムが読んだ位置。ジョブに無ければ Session が止める
+    confirm_position: str | None = None
 
 
 # 「上・下 ＝ Z±」は、上下の向きの設定（voice_teaching/updown.py）の照合に通ったときだけ使う（CHECKER_026 M2・11章）。
@@ -1118,12 +1120,15 @@ EXPLAIN_LABEL = "説明です"
 # 位置番号を足さない。承認・候補・会話の状態も変えない
 EXPLAIN_CHOICE_TEXT = EXPLAIN_LABEL
 EXPLAIN_REPLY = "分かりました。変更はしません"
+# 4桁以下の位置番号の確かめの［違う］が送る文（何もしない。［説明です］と同じ扱い）
+NOT_THIS_POSITION_TEXT = "その位置ではありません"
 _EXPLAIN_STRIP = re.compile(r"[\s　。．.!！、,]+")
 
 
 def is_explain_choice(text: object) -> bool:
     """［説明です］の選択肢の文（「説明です」だけ。前後の空白・句読点は無視）か。"""
-    return isinstance(text, str) and _EXPLAIN_STRIP.sub("", unicodedata.normalize("NFKC", text)) == EXPLAIN_CHOICE_TEXT
+    return isinstance(text, str) and _EXPLAIN_STRIP.sub("", unicodedata.normalize("NFKC", text)) in (
+        EXPLAIN_CHOICE_TEXT, NOT_THIS_POSITION_TEXT)
 
 
 def is_shimasu_confirmation(v: Verdict) -> bool:
@@ -1238,6 +1243,28 @@ def pre_check(facts: UtteranceFacts, selected: str | None = None,
     return _ask(f"「{t}」でよいですか？", ((t, t),))
 
 
+_SHORT_POS = re.compile(r"C\s?([0-9]{1,4})")
+
+
+def _short_position(facts: UtteranceFacts) -> Verdict | None:
+    """4桁以下の位置番号が1つだけ（「c0004を3ミリ上にあげて」）：勝手に5桁にせず、ボタンで確かめる（唐川さんの決定 11/5）。
+
+    番号の値はプログラムが読む（c0004 → 4 → C00004）。［はい、C00004］は、同じ発話の番号を5桁に書き直した文を送り、
+    今までどおりの検査を全部通す（位置を選ぶだけで、承認ではない）。［違う］は何もしない。ジョブに無い番号は Session が止める。
+    """
+    if len(facts.bad_positions) != 1 or facts.positions:
+        return None
+    m = _SHORT_POS.fullmatch(facts.bad_positions[0])
+    if m is None:
+        return None
+    canon = f"C{int(m.group(1)):05d}"
+    text = _spoken(normalize(facts.raw)).replace(facts.bad_positions[0], canon, 1)
+    if canon not in text:
+        return None
+    return Verdict("ask", f"{canon} のことですか？", ((f"はい、{canon}", text), ("違う", NOT_THIS_POSITION_TEXT)),
+                   confirm_position=canon)
+
+
 def _place_rewrite(facts: UtteranceFacts, position: str) -> str | None:
     """「C00006の置くところを下に3mm」→「C00006を下に3mm」。場所の言葉を位置番号に置き換えた文。作れなければ None。"""
     raw = facts.question_text or facts.shimasu_text or facts.raw
@@ -1301,6 +1328,9 @@ def _pre_check_core(facts: UtteranceFacts, selected: str | None = None,
     if len(ops) > 1:
         return _ask("1回の指示では、1つのことだけを行います。1つずつ指示してください")
     if facts.bad_positions:
+        short = _short_position(facts)
+        if short is not None:
+            return short
         return _ask(f"位置番号 {'・'.join(facts.bad_positions)} の形が分かりません。C と5桁の数字で言ってください")
     if len(facts.positions) > 1:
         return _ask(f"位置が {len(facts.positions)}つ（{'・'.join(facts.positions)}）あります。"

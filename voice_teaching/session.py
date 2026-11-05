@@ -162,6 +162,9 @@ class Session:
         self._log("発話", f"{'音声' if source == 'voice' else '文字'}：{text}")
         st = self.updown_status()
         v = ut.pre_check(facts, self.selected, st)
+        if v.confirm_position is not None and v.confirm_position not in self._job.positions:
+            # 4桁以下の位置番号の確かめ：ジョブに無い番号なら、ボタンを出さずに止める（唐川さんの決定 11/5）
+            v = ut.Verdict("stop", f"{v.confirm_position} はこのジョブにありません")
         if v.status == "ask" and facts.question and v.choices and facts.op in ("move", "speed"):
             v = self._check_question(facts, v)  # 疑問の形の確かめ（2026-11-03 夜）
         if ut.is_shimasu_confirmation(v):
