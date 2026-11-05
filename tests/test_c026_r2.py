@@ -236,13 +236,15 @@ def test_p0_merge_answer_drops_no_field():
                                                    if f.name not in ("raw", "text")})
     answer = ut.UtteranceFacts(raw="答え", text="答え")
     m = ut.merge_answer(prev, answer)
-    # 答えと合わせたときに、わざと空にする項目（確かめの選択肢の文は作り直さない）
-    cleared = {"question_text", "shimasu_text"}
+    # 答えと合わせたときに、わざと空にする項目（確かめの選択肢の文は作り直さない）。
+    # said_signs は「その発話の向きの言葉」なので答えのものにし、前の発話の言葉は earlier_signs に移して残す（QA 002 N1）
+    cleared = {"question_text", "shimasu_text", "said_signs"}
     for n in names:
         if n in ("raw", "text") or n in cleared:
             continue
         assert getattr(m, n) == getattr(prev, n), n
     assert m.question_text is None and m.shimasu_text is None
+    assert m.said_signs == answer.said_signs and set(prev.said_signs) <= set(m.earlier_signs)
 
 
 def test_p0_combine_axes_keeps_explicit_axes_and_vertical():

@@ -119,8 +119,11 @@ class UtteranceFacts:
     # 単位の無い・違う数のすぐ前の符号（「Z+3」の +、「Yプラスの方向にマイナス3」の マイナス）。この発話の中のもの。
     # 量は作らないので向きには使わないが、捨てない（Safety High-1）。軸・量の符号と両方あれば、向きの指定が2つとして止める
     unclear_signs: tuple[int, ...] = ()
-    # 前の発話で言った、量の符号（単位の無い数の符号・答えで置き換えた量の符号）。答えと合わせたときに残す（Safety High-1・Medium-2）。
-    # 今の向きと食い違えば、候補にせず確かめる。前の符号を、今の向きとして使うことはしない（推測しない）
+    # この発話に出た、向きの言葉の全部（+ − プラス マイナス、上げ・上に・下げ・下に、速く・遅く、増や・減ら）。
+    # 読み取りのどの道（軸・量・はぐれた符号・単位の無い数・区切りのある数・漢数字の前 など）を通ったかに関係なく数える（QA 002 N1）
+    said_signs: tuple[int, ...] = ()
+    # 前の発話（答えを待っていた聞き返しのもと）で言った、向きの言葉の全部。答えと合わせたときに said_signs から移して残す。
+    # 互いに食い違えば止める。今の向きと1つでも食い違えば、候補にせず止めて確かめる。前の向きを今の向きとして使うことはしない
     earlier_signs: tuple[int, ...] = ()
 
     @property
@@ -782,6 +785,7 @@ def _read(raw: str, question: bool) -> UtteranceFacts:
         stray_signs=(len(_SIGN_TOKEN.findall(rest)) - sum(a.sign is not None for a in amounts) - placed_axis_signs
                      - len(unclear_signs)),
         unclear_signs=tuple(unclear_signs),
+        said_signs=_said_signs(rest, rest_no_speed, bool(coord)),
         vertical=vertical,
         explicit_axes=tuple(a for a in axes if a in explicit),
         value_axes=tuple(coord),
@@ -791,6 +795,28 @@ def _read(raw: str, question: bool) -> UtteranceFacts:
         repeat=repeat, place_ref=place.group(0) if place else None, place_as_destination=place_dest,
         relative_dir=tuple(dict.fromkeys(m.group(0) for m in _RELATIVE_DIR.finditer(rest))),
     )
+
+
+def _said_signs(rest: str, rest_no_speed: str, coord: bool) -> tuple[int, ...]:
+    """発話に出た向きの言葉の全部（読んだ道に関係なく）。示すためではなく、答えと合わせたときの食い違いを見つけるため。"""
+    out = [_SIGN[t] for t in _SIGN_TOKEN.findall(rest)]
+    out += [1] * len(_UP.findall(rest)) + [-1] * len(_DOWN.findall(rest))
+    out += [1] * len(_FASTER.findall(rest)) + [-1] * len(_SLOWER.findall(rest))
+    if coord:
+        out += [1] * len(_VALUE_UP.findall(rest_no_speed)) + [-1] * len(_VALUE_DOWN.findall(rest_no_speed))
+    return tuple(out)
+
+
+def _carried_signs(previous: UtteranceFacts) -> tuple[int, ...]:
+    """答えと合わせるときに残す、前の発話の向きの言葉（前に残したものと、前の発話そのものの言葉）。"""
+    return tuple(dict.fromkeys(previous.earlier_signs + previous.said_signs))
+
+
+def signs_conflict(previous: UtteranceFacts, answer: UtteranceFacts) -> bool:
+    """聞き返しのもとの発話で言った向きの言葉と、新しい指示（ボタンの文・全部の言い直し）の向きの言葉が食い違うか（Safety 002 Medium-1）。"""
+    before = set(_carried_signs(previous))
+    now = set(answer.said_signs)
+    return bool(before and now and (len(before) > 1 or now - before))
 
 
 def _merged_extras(previous: UtteranceFacts, answer: UtteranceFacts) -> dict:
@@ -819,9 +845,8 @@ def combine_axes(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceF
                    undo_negations=tuple(dict.fromkeys(previous.undo_negations + answer.undo_negations)),
                    # 答えの「〜します」を外した文だけで［変更したい］を作らない（前に言った軸を捨てることになる）。今どおり聞き返す
                    shimasu_text=None,
-                   # 前に言った量の符号は捨てない（Safety High-1）
-                   earlier_signs=(previous.earlier_signs + previous.unclear_signs
-                                  + tuple(a.sign for a in previous.amounts if a.sign is not None) + answer.earlier_signs),
+                   # 前に言った向きの言葉は全部残す（QA 002 N1）
+                   earlier_signs=tuple(dict.fromkeys(_carried_signs(previous) + answer.earlier_signs)),
                    **_merged_extras(previous, answer))
 
 
@@ -868,7 +893,12 @@ def is_direction_answer(previous: UtteranceFacts, answer: UtteranceFacts, select
     - 前の発話に軸が無く、位置が決まっている（口で言った位置、または画面で選んでいる位置。選び直すと聞き返しは捨てる）
     - 前の発話の軸が1つで、答えの軸と同じ（「Yの方向に10mm」→「Yマイナス」）。違う軸なら足さない
     前の量に符号があるとき・あいまいな量・上下・右左があるときは足さない。答えに量・位置・ためらい・疑問があれば足さない。
+
+    ただし、聞き返しのもとの発話で言った向きの言葉と、新しい指示（ボタンの文・全部の言い直し）の向きの言葉が食い違うときは、
+    前の発話と合わせる（真を返す）。合わせた事実は pre_check が食い違いとして止めて確かめる（候補にしない。Safety 002 Medium-1）。
     """
+    if (previous.op in ("move", "speed") and answer.op == previous.op and signs_conflict(previous, answer)):
+        return True
     if not (previous.op == "move" and previous.amount is not None and previous.amount.sign is None
             and not previous.unclear_amounts and not previous.axis_signs and not previous.sides
             and not previous.vertical and not previous.speed_signs):
@@ -925,11 +955,11 @@ def merge_answer(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceF
         undo_negations=tuple(dict.fromkeys(previous.undo_negations + answer.undo_negations)),
         # 答えと合わせた文から［変更したい］の2択は作らない（ボタンの文は1つの発話から作る）
         shimasu_text=None,
-        # 前に言った量の符号は捨てない（答えの量で置き換えるときは、前の量の符号を earlier_signs に移す。Safety High-1）
         unclear_signs=answer.unclear_signs if has_amount_info else previous.unclear_signs,
-        earlier_signs=(previous.earlier_signs + previous.unclear_signs
-                       + tuple(a.sign for a in previous.amounts if a.sign is not None)) if has_amount_info
-        else previous.earlier_signs,
+        # 前の発話の向きの言葉は、読み取りのどの道を通ったかに関係なく、全部 earlier_signs に残す（QA 002 N1）。
+        # said_signs は答えの発話の言葉だけ（次に合わせるときに、また earlier_signs に移す）
+        said_signs=answer.said_signs,
+        earlier_signs=_carried_signs(previous),
         **_merged_extras(previous, answer),
     )
 
@@ -1017,6 +1047,8 @@ def updown_ask_message(facts: UtteranceFacts, updown: "ud.UpdownStatus | None") 
     st = _updown(updown)
     if st.status != ud.UNCONFIRMED:
         return st.message
+    if "%" in facts.text or _SPEED.search(facts.text) or any(a.unit == "%" for a in facts.amounts):
+        return st.message  # 速度の話（「10%下げて」）を、位置の上下として受け止めない（QA 002 N3・Safety 002 Low-2）
     words = list(_UP.finditer(facts.text)) + list(_DOWN.finditer(facts.text))
     ups, downs = bool(_UP.search(facts.text)), bool(_DOWN.search(facts.text))
     if ups == downs or not words:
@@ -1283,6 +1315,10 @@ def _pre_check_core(facts: UtteranceFacts, selected: str | None = None,
         # 「Yプラスの方向にマイナス3」：単位の無い数にも向きが付いていて、向きの指定が2つ。mm まで言ったときと同じく、
         # どちらも選ばない。止めて言い直してもらう（答えとして次の発話に足さない。足すと片方の符号が消える。Safety High-1）
         return _stop(TWO_SIGNS_STOP)
+    if op in ("move", "speed") and facts.earlier_signs:
+        v = _earlier_sign_check(facts)
+        if v is not OK:
+            return v
     if op == "move":
         if len(facts.amounts) > 1 or len(facts.axes) > 1:
             moves = _split_moves(facts.raw)
@@ -1333,21 +1369,19 @@ def _pre_check_core(facts: UtteranceFacts, selected: str | None = None,
             if a is not None and a.unit == "mm":
                 v = _num(a.value)
                 choices = ((f"{ax}のプラス {v}mm", f"{w}{ax}プラスに{v}mm"), (f"{ax}のマイナス {v}mm", f"{w}{ax}マイナスに{v}mm"))
-            return _ask_slot(f"{ax}方向のプラスですか、マイナスですか？（「{ax}のマイナス」のように向きも言ってください）", choices)
+            said = ""
+            if len(set(facts.earlier_signs)) == 1:  # 前に言った向きを示す（それを今の向きとしては使わない。Safety 002 Medium-1）
+                said = f"最初は「{_SIGN_WORD[facts.earlier_signs[0]]}」と聞こえました"
+            tail = f"（{said}。「{ax}のマイナス」のように向きも言ってください）" if said else f"（「{ax}のマイナス」のように向きも言ってください）"
+            return _ask_slot(f"{ax}方向のプラスですか、マイナスですか？{tail}", choices)
         if facts.requested_value() is None:
             return _ask("向きの指定が2つあります。どちらの向きか、もう一度指示してください")
-        v = _earlier_sign_check(facts)
-        if v is not OK:
-            return v
     elif op == "speed":
         v = _amount_check(facts, "%", "今の速度に対して、何%変えますか？")
         if v is not OK:
             return v
         if facts.requested_value() is None:
             return _ask_slot("速度を上げますか、下げますか？（向きが分からないか、2つあります）")
-        v = _earlier_sign_check(facts)
-        if v is not OK:
-            return v
     elif "select" in facts.kinds and not facts.positions and not facts.refers_to_selection:
         return _ask("どの位置ですか？ 位置番号（C と5桁の数字）で言ってください")
     return OK
@@ -1363,28 +1397,39 @@ TWO_SIGNS_STOP = ("向きの指定が2つあります（方向と、数の前の
 _SIGN_WORD = {1: "プラス", -1: "マイナス"}
 
 
-def _earlier_sign_check(facts: UtteranceFacts) -> Verdict:
-    """前の発話で言った量の符号（earlier_signs）と、今の向きが食い違わないか（Safety High-1・Medium-2）。
+EARLIER_TWO_SIGNS_STOP = ("前の指示に、向きの言葉が2つ（プラスとマイナス、または上と下）ありました。どちらの向きも選ばずに止めました。"
+                          "軸と向きと量を一緒に、もう一度言ってください")
 
-    食い違えば候補にせず、食い違いを示して確かめる。前の符号を、今の向きとして使うことはしない（推測しない）。
-    文の符号・軸・数はプログラムが読んだもの。
+
+def _earlier_sign_check(facts: UtteranceFacts) -> Verdict:
+    """前の発話で言った向きの言葉（earlier_signs）と、今の向きの言葉が食い違わないか（QA 002 N1・Safety 002 Medium-1）。
+
+    - 前の言葉どうしが食い違う（「Yプラス方向にマイナス」）：答えと合わせずに止める
+    - 今の言葉（答えの発話の言葉・読んだ向き）のどれか1つでも前と食い違う：候補にせず、食い違いを示して止める
+    どちらも _stop（次の発話を答えとして足さない。もう一度はっきり言えば、ふつうの指示として読む）。
+    前の向きを、今の向きとして使うことはしない（推測しない）。文の符号・数はプログラムが読んだもの。
     """
-    if not facts.earlier_signs:
+    before = list(dict.fromkeys(facts.earlier_signs))
+    if not before:
         return OK
-    value = facts.requested_value()
-    if value is None:
-        return OK  # 向きが決まっていない：ほかの聞き返しで扱う
-    now = 1 if value > 0 else -1
-    first = facts.earlier_signs[0]
-    if len(set(facts.earlier_signs)) > 1 or first != now:
-        a = facts.amount
-        ex = ""
-        if facts.op == "move" and facts.axis and a is not None:
-            v = _num(a.value)
-            ex = f"（例：{facts.axis}プラス{v}ミリ／{facts.axis}マイナス{v}ミリ）"
-        return _ask(f"最初は{_SIGN_WORD[first]}、今は{_SIGN_WORD[now]}と聞こえました。どちらですか？ "
-                    f"軸と向きと量を一緒に、もう一度言ってください{ex}")
-    return OK
+    if len(before) > 1:
+        return _stop(EARLIER_TWO_SIGNS_STOP)
+    first = before[0]
+    now = (list(facts.said_signs) + [a.sign for a in facts.amounts if a.sign is not None]
+           + list(facts.axis_signs) + list(facts.speed_signs) + list(facts.unclear_signs))
+    other = next((x for x in now if x != first), None)
+    if other is None:
+        return OK
+    a = facts.amount
+    head = f"最初は{_SIGN_WORD[first]}、今は{_SIGN_WORD[other]}と聞こえました。どちらですか？ "
+    if facts.op == "speed":
+        ex = f"（例：速度を{_num(a.value)}%上げて／速度を{_num(a.value)}%下げて）" if a is not None and a.unit == "%" else ""
+        return _stop(head + f"速度を上げるか下げるかと量を一緒に、もう一度言ってください{ex}")
+    ex = ""
+    if facts.axis and a is not None and a.unit == "mm":
+        v = _num(a.value)
+        ex = f"（例：{facts.axis}プラス{v}ミリ／{facts.axis}マイナス{v}ミリ）"
+    return _stop(head + f"軸と向きと量を一緒に、もう一度言ってください{ex}")
 
 
 _SPLIT_MOVES = re.compile(r"[、,，。]|そして|それから")
