@@ -20,7 +20,7 @@ def approved_state(data, tmp_path, monkeypatch):
     w.select(sid, "C00005")
     r = w.hear(sid, "Zマイナス3ミリ")
     assert r["state"]["candidate"] is not None and r["state"]["can_approve"]
-    r = w.approve(sid, "テスト")
+    r = w.approve(sid, "テスト", candidate_gen=w.candidate_gen_of(sid))
     return w, sid, r["state"]
 
 
@@ -33,7 +33,7 @@ def test_real_job_can_be_reviewed_but_not_exported(tmp_path, monkeypatch):
     assert NOT_SYNTHETIC != DEMO_C
     w, sid, st = approved_state(NOT_SYNTHETIC, tmp_path, monkeypatch)
     assert st["exportable"] is False and st["can_export"] is False
-    r = w.export(sid)
+    r = w.export(sid, candidate_gen=w.candidate_gen_of(sid))
     assert r.get("ok") is not True and not list(Path(tmp_path).iterdir())  # 出力は今どおり断る
 
 

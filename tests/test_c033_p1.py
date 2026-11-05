@@ -95,7 +95,7 @@ def test_status_line_follows_the_program_state(tmp_path):
     w.select(sid, "C00005")
     w.talk(sid, "Zマイナス3ミリ")
     assert "変更の候補 あり（まだ動作データは変えていません）／承認 まだ" in w.state(sid)["state"]["status_line"]
-    w.approve(sid, "テスト")
+    w.approve(sid, "テスト", candidate_gen=w.candidate_gen_of(sid))
     assert "承認 済み（ボタンで承認）／出力 まだ" in w.state(sid)["state"]["status_line"]
 
 
@@ -139,7 +139,7 @@ def test_p1b_several_changes_keep_a_pending_candidate_and_the_approval(tmp_path)
     sid = w.load(K.DEMO_C)["session_id"]
     w.select(sid, "C00005")
     w.talk(sid, "Zマイナス3ミリ")
-    w.approve(sid, "テスト")
+    w.approve(sid, "テスト", candidate_gen=w.candidate_gen_of(sid))
     before = w.state(sid)["state"]
     r = w.talk(sid, "3回にして、あと3ミリ下げて")
     assert r["via"] == ["several"]

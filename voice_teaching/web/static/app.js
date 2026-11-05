@@ -81,6 +81,11 @@ function friendly(kind, reason) {
   return box;
 }
 
+// P0 H02・H16：承認・出力のボタンは、表示中の状態の候補の世代を送る（サーバーは今の世代と違えば断る）
+function candidateGen() {
+  return state.st && Number.isInteger(state.st.candidate_gen) ? state.st.candidate_gen : null;
+}
+
 async function postJson(path, body) {
   try {
     const r = await fetch(path, {
@@ -1246,7 +1251,7 @@ async function onApproveClick() {
   $("approve-button").disabled = true;
   let res;
   try {
-    res = await postJson("/api/approve", { session_id: state.sessionId, approver: name });
+    res = await postJson("/api/approve", { session_id: state.sessionId, approver: name, candidate_gen: candidateGen() });
   } finally {
     state.approving = false;
   }
@@ -1325,7 +1330,7 @@ $("export-button").addEventListener("click", async () => {
   $("export-button").disabled = true;
   let res;
   try {
-    res = await postJson("/api/export", { session_id: state.sessionId });
+    res = await postJson("/api/export", { session_id: state.sessionId, candidate_gen: candidateGen() });
   } finally {
     state.exporting = false;
   }

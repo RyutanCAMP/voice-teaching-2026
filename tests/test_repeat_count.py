@@ -491,9 +491,9 @@ def test_end_to_end_two_to_three(counting):
     st = r["state"]
     assert st["can_approve"] is True and st["approval"] is None and st["can_export"] is False
     assert "2回 → 3回" in st["confirmation_text"] and "承認は画面のボタン" in st["confirmation_text"]
-    a = w.approve(sid, "e2e確認")
+    a = w.approve(sid, "e2e確認", candidate_gen=w.candidate_gen_of(sid))
     assert a["ok"] is True, a
-    x = w.export(sid)
+    x = w.export(sid, candidate_gen=w.candidate_gen_of(sid))
     assert x["ok"] is True and x["file_name"] == "DEMO_BUTTON_REPEAT_SIM.JBI.txt", x
     out = lines(Path(x["path"]).read_bytes())
     old = lines(DEMO)
@@ -604,21 +604,21 @@ def test_voice_yes_does_not_approve(text):
     to_candidate(w, sid)
     r = w.hear(sid, text, source="voice")
     assert r["state"]["approval"] is None and r["state"]["can_export"] is False
-    assert w.export(sid)["ok"] is False
+    assert w.export(sid, candidate_gen=w.candidate_gen_of(sid))["ok"] is False
 
 
 def test_new_instruction_after_approval_cancels_it():
     w, sid = start()
     to_candidate(w, sid)
-    assert w.approve(sid, "確認者")["ok"]
+    assert w.approve(sid, "確認者", candidate_gen=w.candidate_gen_of(sid))["ok"]
     r = w.hear(sid, "比較して")
-    assert r["state"]["approval"] is None and w.export(sid)["ok"] is False
+    assert r["state"]["approval"] is None and w.export(sid, candidate_gen=w.candidate_gen_of(sid))["ok"] is False
 
 
 def test_export_needs_approval(tmp_path):
     w, sid = start()
     to_candidate(w, sid)
-    x = w.export(sid)
+    x = w.export(sid, candidate_gen=w.candidate_gen_of(sid))
     assert x["ok"] is False and "承認" in x["error"]
     assert not (tmp_path / "sim").exists() or list((tmp_path / "sim").iterdir()) == []
 
@@ -626,7 +626,7 @@ def test_export_needs_approval(tmp_path):
 def test_approve_needs_a_name():
     w, sid = start()
     to_candidate(w, sid)
-    assert w.approve(sid, "  ")["ok"] is False
+    assert w.approve(sid, "  ", candidate_gen=w.candidate_gen_of(sid))["ok"] is False
 
 
 def test_non_synthetic_job_is_never_exported(tmp_path):
@@ -634,8 +634,8 @@ def test_non_synthetic_job_is_never_exported(tmp_path):
     assert not sim._is_synthetic(data)
     w, sid = start(data=data)
     to_candidate(w, sid)
-    w.approve(sid, "確認者")
-    x = w.export(sid)
+    w.approve(sid, "確認者", candidate_gen=w.candidate_gen_of(sid))
+    x = w.export(sid, candidate_gen=w.candidate_gen_of(sid))
     assert x["ok"] is False and "合成ジョブ" in x["error"]
     assert not (tmp_path / "sim").exists() or list((tmp_path / "sim").iterdir()) == []
 
@@ -662,9 +662,9 @@ def test_updown_change_blocks_repeat_approval(make_updown):
     to_candidate(w, sid)
     assert w._entries[sid].session.candidate_updown.confirmed  # 候補を作ったときは確認済み
     Path(path).write_bytes(Path(path).read_bytes() + b"\n")  # 設定が1バイトでも変われば、照合の結果が変わる
-    a = w.approve(sid, "確認者")
+    a = w.approve(sid, "確認者", candidate_gen=w.candidate_gen_of(sid))
     assert a["ok"] is False and a["error"] == UPDOWN_CHANGED_APPROVE
-    assert w.export(sid)["ok"] is False
+    assert w.export(sid, candidate_gen=w.candidate_gen_of(sid))["ok"] is False
 
 
 def test_repeat_approval_refuses_when_the_rebuilt_bytes_differ(monkeypatch):
@@ -676,7 +676,7 @@ def test_repeat_approval_refuses_when_the_rebuilt_bytes_differ(monkeypatch):
         sp = real(job, start_, end_, total)
         return sim.SimRepeatProposal(**{**sp.__dict__, "new_bytes": sp.new_bytes + b"X"})
     monkeypatch.setattr(flow_mod.sim, "simulate_repeat", tampered)
-    a = w.approve(sid, "確認者")
+    a = w.approve(sid, "確認者", candidate_gen=w.candidate_gen_of(sid))
     assert a["ok"] is False and "合わない" in a["error"]
 
 
@@ -969,14 +969,14 @@ def test_export_runs_the_diff_check(monkeypatch, tmp_path):
     monkeypatch.setattr(sim, "_repeat_diff_ok", spy)
     w, sid = start()
     to_candidate(w, sid)
-    assert w.approve(sid, "確認者")["ok"]
+    assert w.approve(sid, "確認者", candidate_gen=w.candidate_gen_of(sid))["ok"]
     calls.clear()
     monkeypatch.setattr(sim, "_repeat_diff_ok", lambda *a, **k: False)
-    x = w.export(sid)
+    x = w.export(sid, candidate_gen=w.candidate_gen_of(sid))
     assert x["ok"] is False and "ほかにも違い" in x["error"]
     assert not (tmp_path / "sim").exists() or list((tmp_path / "sim").iterdir()) == []
     monkeypatch.setattr(sim, "_repeat_diff_ok", spy)
-    x = w.export(sid)
+    x = w.export(sid, candidate_gen=w.candidate_gen_of(sid))
     assert x["ok"] is True and calls == [END]
 
 

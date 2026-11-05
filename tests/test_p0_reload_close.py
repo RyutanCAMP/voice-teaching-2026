@@ -47,8 +47,8 @@ def dump(x) -> str:
 def all_ops(w, sid, turn=1):
     """古い番号で、画面から呼べるすべての操作。"""
     return {
-        "approve": lambda: w.approve(sid, "QA"),
-        "export": lambda: w.export(sid),
+        "approve": lambda: w.approve(sid, "QA", candidate_gen=w.candidate_gen_of(sid)),
+        "export": lambda: w.export(sid, candidate_gen=w.candidate_gen_of(sid)),
         "repeat": lambda: w.repeat_choose(sid, "yes", turn),
         "dialog": lambda: w.choose(sid, "pos:C00003", turn),
         "hear": lambda: w.hear(sid, "C00001からC00003の作業を2回から3回にして"),
@@ -106,8 +106,8 @@ def test_old_session_stays_refused_after_many_reloads(tmp_path, out):
     sid = old
     for _ in range(3):
         sid = w.load(T.demo_bytes(), previous=sid)["session_id"]
-    refused(w.approve(old, "QA"))
-    refused(w.export(old))
+    refused(w.approve(old, "QA", candidate_gen=w.candidate_gen_of(old)))
+    refused(w.export(old, candidate_gen=w.candidate_gen_of(old)))
     assert files(out) == []
 
 
@@ -120,7 +120,7 @@ def test_old_range_button_after_reload_makes_no_candidate(tmp_path, out, with_pr
     turn = h["state"]["repeat_range"]["turn"]
     new = (w.load(T.demo_bytes(), previous=old) if with_previous else w.load(T.demo_bytes()))["session_id"]
     refused(w.repeat_choose(old, "yes", turn))
-    refused(w.approve(old, "QA"))
+    refused(w.approve(old, "QA", candidate_gen=w.candidate_gen_of(old)))
     st = w.state(new)["state"]
     assert st["candidate"] is None and st["repeat_range"] is None and not st["can_approve"]
     assert files(out) == []
@@ -145,8 +145,8 @@ def test_old_shift_candidate_cannot_be_approved_after_reload(tmp_path, out, with
     w, _ = T.flow(tmp_path)
     old = pending_shift(w)
     w.load(T.demo_bytes(), previous=old) if with_previous else w.load(T.demo_bytes())
-    refused(w.approve(old, "QA"))
-    refused(w.export(old))
+    refused(w.approve(old, "QA", candidate_gen=w.candidate_gen_of(old)))
+    refused(w.export(old, candidate_gen=w.candidate_gen_of(old)))
     assert files(out) == []
 
 
@@ -157,10 +157,10 @@ def test_approved_not_exported_then_reload_refuses_old_export(tmp_path, out, wit
     w, _ = T.flow(tmp_path)
     old = w.load(T.demo_bytes())["session_id"]
     T.repeat_to_three(w, old)
-    assert w.approve(old, "QA")["ok"]
+    assert w.approve(old, "QA", candidate_gen=w.candidate_gen_of(old))["ok"]
     data = T.demo_bytes() if same_job else T.OTHER.read_bytes()
     w.load(data, previous=old) if with_previous else w.load(data)
-    refused(w.export(old))
+    refused(w.export(old, candidate_gen=w.candidate_gen_of(old)))
     assert files(out) == []
 
 
@@ -168,12 +168,12 @@ def test_stale_export_does_not_take_the_new_file_name(tmp_path, out):
     w, _ = T.flow(tmp_path)
     old = w.load(T.demo_bytes())["session_id"]
     T.repeat_to_three(w, old)
-    assert w.approve(old, "QA")["ok"]
+    assert w.approve(old, "QA", candidate_gen=w.candidate_gen_of(old))["ok"]
     new = w.load(T.demo_bytes(), previous=old)["session_id"]
     T.repeat_to_three(w, new)
-    assert w.approve(new, "QA")["ok"]
-    refused(w.export(old))
-    r = w.export(new)
+    assert w.approve(new, "QA", candidate_gen=w.candidate_gen_of(new))["ok"]
+    refused(w.export(old, candidate_gen=w.candidate_gen_of(old)))
+    r = w.export(new, candidate_gen=w.candidate_gen_of(new))
     assert r["ok"], r
     assert [p.name for p in files(out)] == [r["file_name"]]
 
@@ -185,7 +185,7 @@ def test_failed_reload_still_closes_the_old_session(tmp_path, out, with_previous
     w, _ = T.flow(tmp_path)
     old = w.load(T.demo_bytes())["session_id"]
     T.repeat_to_three(w, old)
-    assert w.approve(old, "QA")["ok"]
+    assert w.approve(old, "QA", candidate_gen=w.candidate_gen_of(old))["ok"]
     r = w.load(bad, previous=old) if with_previous else w.load(bad)
     assert r["ok"] is False and r["error"]
     assert r.get("session_closed") is True  # 画面が「前の作業画面は終わりました」を出すための印
@@ -209,8 +209,8 @@ def test_new_session_works_after_reload(tmp_path, out, with_previous):
     new = (w.load(T.demo_bytes(), previous=old) if with_previous else w.load(T.demo_bytes()))["session_id"]
     assert w.state(new)["ok"] is True
     assert T.repeat_to_three(w, new)["state"]["can_approve"]
-    assert w.approve(new, "QA")["ok"]
-    r = w.export(new)
+    assert w.approve(new, "QA", candidate_gen=w.candidate_gen_of(new))["ok"]
+    r = w.export(new, candidate_gen=w.candidate_gen_of(new))
     assert r["ok"], r
     assert [p.name for p in files(out)] == [r["file_name"]]
 
@@ -221,7 +221,7 @@ def test_new_session_works_after_failed_reload(tmp_path, out):
     w.load(BAD, previous=old)
     new = w.load(T.demo_bytes())["session_id"]
     T.repeat_to_three(w, new)
-    assert w.approve(new, "QA")["ok"] and w.export(new)["ok"]
+    assert w.approve(new, "QA", candidate_gen=w.candidate_gen_of(new))["ok"] and w.export(new, candidate_gen=w.candidate_gen_of(new))["ok"]
 
 
 # ---- 8. 人が教えた意味の引き継ぎ（同じ中身の読み直し・E2-1）は今までどおり ----
@@ -282,13 +282,13 @@ def test_concurrent_stale_request_waiting_for_the_lock_is_refused(tmp_path, out,
     old = w.load(T.demo_bytes())["session_id"]
     T.repeat_to_three(w, old)
     if what == "export":
-        assert w.approve(old, "QA")["ok"]
+        assert w.approve(old, "QA", candidate_gen=w.candidate_gen_of(old))["ok"]
     e = w._entries[old]
     e.lock = GateLock()
     result, loaded = {}, {}
     e.lock.acquire()  # テストが錠を持つ：古い要求は錠の前で止まる
     try:
-        call = (lambda: w.approve(old, "QA")) if what == "approve" else (lambda: w.export(old))
+        call = (lambda: w.approve(old, "QA", candidate_gen=w.candidate_gen_of(old))) if what == "approve" else (lambda: w.export(old, candidate_gen=w.candidate_gen_of(old)))
         a = threading.Thread(target=lambda: result.update(r=call()), name="stale-approve")
         a.start()
         assert e.lock.waiting.wait(5)  # 古い要求がエントリを見つけ、錠を待っている
@@ -349,10 +349,12 @@ def test_http_old_session_is_refused_after_reload(running, tmp_path, monkeypatch
     srv, fake = running
     old = post(srv, "/api/load", T.demo_bytes())["session_id"]
     h = post(srv, "/api/hear", {"session_id": old, "text": "C00001からC00003の作業を2回から3回にして"})
-    post(srv, "/api/repeat", {"session_id": old, "choice": "yes", "turn": h["state"]["repeat_range"]["turn"]})
-    assert post(srv, "/api/approve", {"session_id": old, "approver": "QA"})["ok"]
+    rp = post(srv, "/api/repeat", {"session_id": old, "choice": "yes", "turn": h["state"]["repeat_range"]["turn"]})
+    gen = rp["state"]["candidate_gen"]
+    assert post(srv, "/api/approve", {"session_id": old, "approver": "QA", "candidate_gen": gen})["ok"]
     new = post(srv, "/api/load", T.demo_bytes(), headers={"X-VT-Previous-Session": old})["session_id"]
-    for path, body in [("/api/approve", {"approver": "QA"}), ("/api/export", {}), ("/api/state", {}),
+    for path, body in [("/api/approve", {"approver": "QA", "candidate_gen": gen}), ("/api/export", {"candidate_gen": gen}),
+                       ("/api/state", {}),
                        ("/api/hear", {"text": "3回にして"}), ("/api/talk", {"text": "3回にして"}),
                        ("/api/select", {"position": "C00002"}), ("/api/undo", {}), ("/api/compare", {}),
                        ("/api/dialog", {"choice": "x", "turn": 1}), ("/api/repeat", {"choice": "yes", "turn": 1}),

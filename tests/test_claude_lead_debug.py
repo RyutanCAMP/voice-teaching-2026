@@ -32,7 +32,7 @@ def test_debug_launcher_uses_enabled_and_keeps_lock_down(monkeypatch):
         def serve_forever(self):
             made["lead"] = self.flow.claude_lead
             made["locked"] = getattr(self.flow, "debug_review_only", False)
-            made["approve"] = self.flow.approve("x", "唐川")
+            made["approve"] = self.flow.approve("x", "唐川", candidate_gen=self.flow.candidate_gen_of("x"))
             raise KeyboardInterrupt
 
         def server_close(self):

@@ -78,12 +78,12 @@ def test_full_flow_exports_two_line_diff(wf, tmp_path):
     c = wf.compare(sid)
     assert c["status"] == "ok" and c["state"]["candidate"]["line_no"] == 13
 
-    a = wf.approve(sid, "テスト太郎")
+    a = wf.approve(sid, "テスト太郎", candidate_gen=wf.candidate_gen_of(sid))
     assert a["ok"] is True, a
     assert a["state"]["approval"]["approved_by"] == "テスト太郎"
     assert a["state"]["can_export"] is True
 
-    e = wf.export(sid)
+    e = wf.export(sid, candidate_gen=wf.candidate_gen_of(sid))
     assert e["ok"] is True, e
     out = Path(e["path"])
     assert out.parent == tmp_path / "sim"
@@ -157,7 +157,7 @@ def test_words_never_approve(wf, no_approve_from_words, words):
     assert "ボタン" in r["message"]
     assert r["state"]["approval"] is None
     assert r["state"]["can_export"] is False
-    assert wf.export(sid)["ok"] is False
+    assert wf.export(sid, candidate_gen=wf.candidate_gen_of(sid))["ok"] is False
 
 
 def test_start_words_are_stopped(wf, no_approve_from_words):
@@ -169,7 +169,7 @@ def test_start_words_are_stopped(wf, no_approve_from_words):
 # ---- 3. 承認の前は出力しない ----
 def test_export_before_approve_is_refused(wf, tmp_path):
     sid, _ = candidate_ready(wf)
-    e = wf.export(sid)
+    e = wf.export(sid, candidate_gen=wf.candidate_gen_of(sid))
     assert e["ok"] is False and "承認" in e["error"]
     assert not (tmp_path / "sim").exists() or list((tmp_path / "sim").iterdir()) == []
 
@@ -177,21 +177,21 @@ def test_export_before_approve_is_refused(wf, tmp_path):
 def test_approve_needs_name(wf):
     sid, _ = candidate_ready(wf)
     for who in ["", "   ", None]:
-        a = wf.approve(sid, who)
+        a = wf.approve(sid, who, candidate_gen=wf.candidate_gen_of(sid))
         assert a["ok"] is False and "名前" in a["error"]
         assert a["state"]["approval"] is None
 
 
 def test_approve_without_candidate_is_refused(wf):
     sid = load(wf)
-    a = wf.approve(sid, "テスト太郎")
+    a = wf.approve(sid, "テスト太郎", candidate_gen=wf.candidate_gen_of(sid))
     assert a["ok"] is False and "候補" in a["error"]
 
 
 # ---- 4. 承認の後で候補が変わったら、承認を取り消す ----
 def approved(wf):
     sid, _ = candidate_ready(wf)
-    assert wf.approve(sid, "テスト太郎")["ok"] is True
+    assert wf.approve(sid, "テスト太郎", candidate_gen=wf.candidate_gen_of(sid))["ok"] is True
     return sid
 
 
@@ -201,7 +201,7 @@ def test_new_instruction_after_approve_cancels_approval(wf, tmp_path):
     assert r["state"]["approval"] is None
     assert r["state"]["can_export"] is False
     assert any("承認を取り消" in x["text"] for x in r["state"]["log"])
-    assert wf.export(sid)["ok"] is False
+    assert wf.export(sid, candidate_gen=wf.candidate_gen_of(sid))["ok"] is False
     assert not (tmp_path / "sim").exists() or list((tmp_path / "sim").iterdir()) == []
 
 
@@ -209,14 +209,14 @@ def test_undo_after_approve_cancels_approval(wf):
     sid = approved(wf)
     r = wf.undo(sid)
     assert r["state"]["approval"] is None and r["state"]["candidate"] is None
-    assert wf.export(sid)["ok"] is False
+    assert wf.export(sid, candidate_gen=wf.candidate_gen_of(sid))["ok"] is False
 
 
 def test_select_after_approve_cancels_approval(wf):
     sid = approved(wf)
     r = wf.select(sid, "C00005")
     assert r["state"]["approval"] is None
-    assert wf.export(sid)["ok"] is False
+    assert wf.export(sid, candidate_gen=wf.candidate_gen_of(sid))["ok"] is False
 
 
 def test_compare_after_approve_keeps_approval(wf):
@@ -231,8 +231,8 @@ def test_non_synthetic_bytes_are_refused_at_export(wf, tmp_path):
     sid = load(wf, data)
     wf.select(sid, "C00004")
     assert wf.hear(sid, "この位置をYプラス方向に10mm移動して")["status"] == "ok"
-    assert wf.approve(sid, "テスト太郎")["ok"] is True
-    e = wf.export(sid)
+    assert wf.approve(sid, "テスト太郎", candidate_gen=wf.candidate_gen_of(sid))["ok"] is True
+    e = wf.export(sid, candidate_gen=wf.candidate_gen_of(sid))
     assert e["ok"] is False
     assert "合成ジョブ" in e["error"]
     assert not (tmp_path / "sim").exists() or list((tmp_path / "sim").iterdir()) == []
@@ -240,8 +240,8 @@ def test_non_synthetic_bytes_are_refused_at_export(wf, tmp_path):
 
 def test_second_export_does_not_overwrite(wf):
     sid = approved(wf)
-    assert wf.export(sid)["ok"] is True
-    e = wf.export(sid)
+    assert wf.export(sid, candidate_gen=wf.candidate_gen_of(sid))["ok"] is True
+    e = wf.export(sid, candidate_gen=wf.candidate_gen_of(sid))
     assert e["ok"] is False and "上書き" in e["error"]
 
 
@@ -278,8 +278,8 @@ def test_speed_is_not_changed_without_limit(wf):
 
 def test_unknown_session_is_refused(wf):
     assert wf.hear("nope", "C00004をYプラス方向に10mm移動して")["ok"] is False
-    assert wf.approve("nope", "テスト太郎")["ok"] is False
-    assert wf.export("nope")["ok"] is False
+    assert wf.approve("nope", "テスト太郎", candidate_gen=wf.candidate_gen_of("nope"))["ok"] is False
+    assert wf.export("nope", candidate_gen=wf.candidate_gen_of("nope"))["ok"] is False
 
 
 def test_old_sessions_are_dropped(tmp_path):
@@ -303,7 +303,7 @@ def test_sessions_are_not_saved_to_disk(tmp_path, monkeypatch):
     sid = load(w)
     w.select(sid, "C00004")
     w.hear(sid, "この位置をYプラス方向に10mm移動して")
-    w.approve(sid, "テスト太郎")
+    w.approve(sid, "テスト太郎", candidate_gen=w.candidate_gen_of(sid))
     assert list(tmp_path.iterdir()) == []
 
 
@@ -377,17 +377,22 @@ def test_http_full_flow(running, tmp_path):
     assert post(running, "/api/select", {"session_id": sid, "position": "C00004"})[1]["status"] == "ok"
     _, r = post(running, "/api/hear", {"session_id": sid, "text": "この位置をYプラス方向に10mm移動して", "source": "voice"})
     assert r["status"] == "ok" and r["state"]["can_approve"] is True
+    gen = r["state"]["candidate_gen"]  # 承認・出力のボタンは、表示中の候補の世代を送る（P0 H02・H16）
     _, r = post(running, "/api/compare", {"session_id": sid})
     assert r["status"] == "ok"
-    _, r = post(running, "/api/export", {"session_id": sid})
+    _, r = post(running, "/api/export", {"session_id": sid, "candidate_gen": gen})
     assert r["ok"] is False
     _, r = post(running, "/api/hear", {"session_id": sid, "text": "承認して", "source": "voice"})
     assert r["status"] == "stop" and r["state"]["approval"] is None
     _, r = post(running, "/api/approve", {"session_id": sid, "approver": ""})
     assert r["ok"] is False
     _, r = post(running, "/api/approve", {"session_id": sid, "approver": "テスト太郎"})
+    assert r["ok"] is False  # 候補の世代が無い要求は断る
+    _, r = post(running, "/api/approve", {"session_id": sid, "approver": "テスト太郎", "candidate_gen": gen})
     assert r["ok"] is True
     _, r = post(running, "/api/export", {"session_id": sid})
+    assert r["ok"] is False  # 候補の世代が無い要求は断る
+    _, r = post(running, "/api/export", {"session_id": sid, "candidate_gen": gen})
     assert r["ok"] is True
     assert Path(r["path"]).read_bytes() != ORIGINAL
     assert sorted(p.name for p in (tmp_path / "sim").iterdir()) == ["DEMO_PLACE_SIM.JBI.txt"]

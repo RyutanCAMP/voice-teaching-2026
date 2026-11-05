@@ -175,8 +175,8 @@ class Handler(BaseHTTPRequestHandler):
             # 回数の変更の範囲の確認のボタン（［この範囲を繰り返す］［違う］）。候補を作るだけで、承認はしない
             "/api/repeat": lambda r: flow.repeat_choose(r.get("session_id"), r.get("choice"), r.get("turn")),
             # 承認は画面の承認ボタンからだけ。/api/hear からは呼ばない
-            "/api/approve": lambda r: flow.approve(r.get("session_id"), r.get("approver")),
-            "/api/export": lambda r: flow.export(r.get("session_id")),
+            "/api/approve": lambda r: flow.approve(r.get("session_id"), r.get("approver"), candidate_gen=r.get("candidate_gen")),
+            "/api/export": lambda r: flow.export(r.get("session_id"), candidate_gen=r.get("candidate_gen")),
             # Claude に聞く（読み取りだけ）。答えでジョブ・候補・承認は変わらない。キーは返さない
             # 人が教えた意味（この画面の中だけ）：sync で確かめ直し、choose・token で「どの動きのことですか？」のボタン
             "/api/ask": lambda r: flow.ask(r.get("session_id"), r.get("text"), r.get("reset", False), r.get("info", False),

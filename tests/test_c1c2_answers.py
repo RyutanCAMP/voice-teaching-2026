@@ -196,7 +196,7 @@ def test_c2_never_approves(tmp_path):
     w, _, sid = place(tmp_path)
     w.talk(sid, "10mm動かして")
     w.talk(sid, "Yマイナス")
-    assert not w.export(sid)["ok"]  # 承認はボタンだけ。承認していなければ出力しない
+    assert not w.export(sid, candidate_gen=w.candidate_gen_of(sid))["ok"]  # 承認はボタンだけ。承認していなければ出力しない
 
 
 # ---- 6.「あと N 回」：合計 N 回として扱わず、今の回数を踏まえて確かめる ----

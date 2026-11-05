@@ -66,7 +66,7 @@ def test_backchannel_question_and_button_words_after_approval_keep_it(tmp_path):
     sid = w.load(K.DEMO_C)["session_id"]
     w.select(sid, "C00005")
     w.talk(sid, "Zマイナス3ミリ")
-    w.approve(sid, "テスト")
+    w.approve(sid, "テスト", candidate_gen=w.candidate_gen_of(sid))
     approval = w.state(sid)["state"]["approval"]
     for text in ["はい", "OK", "保存して", "出力して", "このロボット、何をしている？", "3回にして、あと3ミリ下げて"]:
         r = w.talk(sid, text)

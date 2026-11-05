@@ -354,8 +354,8 @@ def test_5_reloaded_sim_output_stays_confirmed(make_updown):
     path = make_updown()
     w, sid = start(path)
     assert cand(w.hear(sid, "3ミリ下げて")) == ("C00005 Z", "-3.000")
-    assert w.approve(sid, "唐川")["ok"]
-    out = w.export(sid)
+    assert w.approve(sid, "唐川", candidate_gen=w.candidate_gen_of(sid))["ok"]
+    out = w.export(sid, candidate_gen=w.candidate_gen_of(sid))
     assert out["ok"], out
     data = Path(out["path"]).read_bytes()
     assert b"//NAME DEMO_C_PLACE_SIM" in data and b"C00005=400.000,150.000,197.000" in data
@@ -451,12 +451,12 @@ def test_7_config_change_after_approval_cancels_and_refuses_export(make_updown):
     path = make_updown()
     w, sid = start(path)
     w.hear(sid, "3ミリ下げて")
-    a = w.approve(sid, "唐川")
+    a = w.approve(sid, "唐川", candidate_gen=w.candidate_gen_of(sid))
     assert a["ok"] and a["state"]["approval"]["updown_status"] == "confirmed"
     assert a["state"]["approval"]["updown_fingerprint"] == a["state"]["updown"]["fingerprint"]
     assert a["state"]["approval"]["updown_confirmed_by"] == a["state"]["updown"]["confirmed_by"]
     rewrite(path, BROKEN["empty_evidence"])
-    out = w.export(sid)
+    out = w.export(sid, candidate_gen=w.candidate_gen_of(sid))
     assert not out["ok"] and out["error"] == flow_mod.UPDOWN_CHANGED_EXPORT
     st = out["state"]
     assert st["approval"] is None and st["can_export"] is False and st["exported"] is None
@@ -465,7 +465,7 @@ def test_7_config_change_after_approval_cancels_and_refuses_export(make_updown):
     assert any("承認を取り消しました" in x["text"] for x in st["log"])
     # 候補は残るが、設定が候補を作ったときと違うので承認できない
     assert st["can_approve"] is False
-    r = w.approve(sid, "唐川")
+    r = w.approve(sid, "唐川", candidate_gen=w.candidate_gen_of(sid))
     assert not r["ok"] and r["error"] == flow_mod.UPDOWN_CHANGED_APPROVE
 
 
@@ -473,11 +473,11 @@ def test_7_state_request_after_change_removes_approval(make_updown):
     path = make_updown()
     w, sid = start(path)
     w.hear(sid, "Zマイナス3ミリ")
-    assert w.approve(sid, "唐川")["ok"]
+    assert w.approve(sid, "唐川", candidate_gen=w.candidate_gen_of(sid))["ok"]
     path.write_bytes(path.read_bytes() + b"\n")  # 1バイト（中身の意味は同じ）でも変われば承認を消す
     st = w.state(sid)["state"]
     assert st["approval"] is None and st["can_export"] is False
-    assert not w.export(sid)["ok"]
+    assert not w.export(sid, candidate_gen=w.candidate_gen_of(sid))["ok"]
 
 
 @pytest.mark.parametrize("action", ["add", "remove"])
@@ -494,7 +494,7 @@ def test_7_config_added_or_removed_between_candidate_and_approval(action, make_u
         path.unlink()
     st = w.state(sid)["state"]
     assert st["can_approve"] is False
-    r = w.approve(sid, "唐川")
+    r = w.approve(sid, "唐川", candidate_gen=w.candidate_gen_of(sid))
     assert not r["ok"] and r["error"] == flow_mod.UPDOWN_CHANGED_APPROVE
 
 
@@ -502,17 +502,17 @@ def test_7_approval_record_and_log_keep_fingerprint_and_person(make_updown, tmp_
     path = make_updown()
     w, sid = start(path)
     w.hear(sid, "3ミリ下げて")
-    a = w.approve(sid, "唐川")
+    a = w.approve(sid, "唐川", candidate_gen=w.candidate_gen_of(sid))
     fp = a["state"]["updown"]["fingerprint"]
     logs = [x["text"] for x in a["state"]["log"] if x["kind"] == "承認"]
     assert any(fp in t and "テスト（一時フォルダの仮の設定）" in t for t in logs)
-    out = w.export(sid)
+    out = w.export(sid, candidate_gen=w.candidate_gen_of(sid))
     assert out["ok"]
     assert any(fp in x["text"] for x in out["state"]["log"] if x["kind"] == "出力")
     # 設定なしで明示の軸の候補を承認した記録は「未確認」
     w2, sid2 = start(tmp_path / "none.json")
     w2.hear(sid2, "Zマイナス3ミリ")
-    a2 = w2.approve(sid2, "唐川")
+    a2 = w2.approve(sid2, "唐川", candidate_gen=w2.candidate_gen_of(sid2))
     assert a2["state"]["approval"]["updown_status"] == "unconfirmed"
     assert a2["state"]["approval"]["updown_fingerprint"] is None
     assert any("未確認" in x["text"] for x in a2["state"]["log"] if x["kind"] == "承認")

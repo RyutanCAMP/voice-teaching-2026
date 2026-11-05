@@ -134,7 +134,7 @@ def test_natural_direction_candidate_needs_the_button(tmp_path):
     w, _, sid = A.place_flow(tmp_path)
     r = w.talk(sid, "C00003をY-の方向に10mm")
     assert r["state"]["candidate"] and r["state"]["approval"] is None
-    assert not w.export(sid)["ok"]
+    assert not w.export(sid, candidate_gen=w.candidate_gen_of(sid))["ok"]
 
 
 # ---- 2. 動きの説明の「終わります」は出す。状態の言い切りは隠す ----
@@ -855,7 +855,7 @@ def test_facing_yes_continues_the_same_utterance(tmp_path):
     assert c and c["target"] == "C00003 Y" and "+10.000mm" in r["message"] and not r["state"]["approval"]
     assert r["state"]["facing"] == {"confirmed": True, "message": FACING_STATE}
     assert "この画面で確かめた向きです" in c["warnings"]
-    assert not w.export(sid)["ok"]  # 承認はボタンだけ
+    assert not w.export(sid, candidate_gen=w.candidate_gen_of(sid))["ok"]  # 承認はボタンだけ
 
 
 @pytest.mark.parametrize("text,target,delta", [

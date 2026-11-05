@@ -30,8 +30,8 @@ def start(cfg, data=DEMO_C, select="C00005"):
 def outcome(w, sid):
     st = w.state(sid)["state"]
     c = st["candidate"]
-    a = w.approve(sid, "唐川")
-    x = w.export(sid)
+    a = w.approve(sid, "唐川", candidate_gen=w.candidate_gen_of(sid))
+    x = w.export(sid, candidate_gen=w.candidate_gen_of(sid))
     return (None if c is None else (c["target"], c["delta"], bool(c["blocked_reason"])),
             st["can_approve"], bool(a.get("ok")), bool(x.get("ok")))
 
@@ -70,8 +70,8 @@ def test_not_synthetic_job_is_not_exported_with_confirmed_updown(make_updown):
     assert w.state(sid)["state"]["updown"]["status"] == "confirmed"
     r = w.hear(sid, "3ミリ下げて")
     assert r["state"]["candidate"]["target"] == "C00005 Z"  # 上・下を Z として読むところだけが設定で変わる
-    assert w.approve(sid, "唐川")["ok"] is True  # 承認はボタンだけ（ここでは API を直接呼ぶ）
-    x = w.export(sid)
+    assert w.approve(sid, "唐川", candidate_gen=w.candidate_gen_of(sid))["ok"] is True  # 承認はボタンだけ（ここでは API を直接呼ぶ）
+    x = w.export(sid, candidate_gen=w.candidate_gen_of(sid))
     assert x["ok"] is False and "合成ジョブ以外は出力しません" in x["error"]
 
 

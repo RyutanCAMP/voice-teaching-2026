@@ -524,7 +524,7 @@ def test_e2_4_repeat_two_to_three_approved_keeps_meaning_on_all_cycles(tmp_path)
     m = meanings(w, sid)
     assert [(x["text"], x["lines"][0], x["lines"][-1]) for x in m] == [("ボタンを押している", 21, 29)]
     assert "3回" in m[0]["target"] or m[0]["target"] == "21〜29行目の動き（C00001→C00002→C00003）"
-    assert w.approve(sid, "テスト")["ok"] is True
+    assert w.approve(sid, "テスト", candidate_gen=w.candidate_gen_of(sid))["ok"] is True
     assert [x["lines"][-1] for x in meanings(w, sid)] == [29]
     # 元に戻しても残る（元のデータにも同じ区間がある）
     w.undo(sid)
@@ -549,7 +549,7 @@ def test_e2_5_meaning_does_not_change_hear_results(tmp_path, steps):
         outs = []
         for kind, arg in steps:
             r = {"hear": lambda a: w.hear(sid, a, "text"), "select": lambda a: w.select(sid, a),
-                 "approve": lambda a: w.approve(sid, a)}[kind](arg)
+                 "approve": lambda a: w.approve(sid, a, candidate_gen=w.candidate_gen_of(sid))}[kind](arg)
             r.get("state", {}).pop("session_id", None)
             for item in (r.get("state") or {}).get("log", []):
                 item.pop("at", None)

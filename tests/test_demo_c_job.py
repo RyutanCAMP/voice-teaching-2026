@@ -56,8 +56,8 @@ def test_full_simulation_flow_changes_only_the_place_point(tmp_path):
     assert cand["before_line"] == "C00005=400.000,150.000,200.000,180.00,0.00,0.00"
     assert cand["after_line"] == "C00005=400.000,150.000,210.000,180.00,0.00,0.00"
     assert wf.compare(sid)["status"] == "ok"
-    assert wf.approve(sid, "テスト")["ok"] is True
-    e = wf.export(sid)
+    assert wf.approve(sid, "テスト", candidate_gen=wf.candidate_gen_of(sid))["ok"] is True
+    e = wf.export(sid, candidate_gen=wf.candidate_gen_of(sid))
     assert e["ok"] is True, e
     out = Path(e["path"])
     assert out.name == "DEMO_C_PLACE_SIM.JBI.txt"

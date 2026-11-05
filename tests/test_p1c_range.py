@@ -84,7 +84,7 @@ def test_no_range_said_keeps_the_conversation_and_the_range_check(tmp_path):
 def test_said_range_after_approval_does_not_make_a_widened_candidate(tmp_path):
     w, f, sid = start(tmp_path)
     T.repeat_to_three(w, sid)
-    w.approve(sid, "テスト")
+    w.approve(sid, "テスト", candidate_gen=w.candidate_gen_of(sid))
     before = w.state(sid)["state"]["candidate"]
     st = w.talk(sid, "C00002からC00003を3回にして")["state"]
     assert st["repeat_range"] is None and st["candidate"] == before  # 広がった範囲の確認も、新しい候補も作らない
