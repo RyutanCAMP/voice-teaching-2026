@@ -105,7 +105,7 @@ def test_natural_direction_reads_one_axis_and_one_sign(text):
     "右のY-の方向に10mm",                # A1-37 右左
     "Y-の方向に1cm", "Y-の方向に1センチ",  # A1-38 単位違い（換算しない）
     "Y-の方向に10",                      # A1-39 単位なし
-    "Y-の方向に十ミリ",                  # A1-40 漢数字
+    "Y-の方向に一五ミリ",                # A1-40 読めない漢数字（「十ミリ」は 11/6 から 10mm と読む）
     "Y-の方向に.5mm", "Y-の方向に10,5mm",  # A1-41 区切りのある数字
     "Y-の方向に1.0000001mm",             # A1-42 細かすぎる小数
     "Y-の方向に0mm",                     # A1-43 移動量0
@@ -263,7 +263,7 @@ def test_unconfirmed_updown_never_makes_a_candidate(tmp_path, text):
     assert not ut.contains_forbidden(msg)
 
 
-@pytest.mark.parametrize("text", ["上に三ミリ", "上に3cm"])
+@pytest.mark.parametrize("text", ["上に一五ミリ", "上に3cm"])  # 「上に三ミリ」は 11/6 から 3mm と読む
 def test_unconfirmed_updown_does_not_quote_an_unclear_amount(tmp_path, text):
     """量がはっきりしないときは、量を言い切らない（「3mm上に動かしたい」と読み替えない）。"""
     w, _, sid = A.place_flow(tmp_path)

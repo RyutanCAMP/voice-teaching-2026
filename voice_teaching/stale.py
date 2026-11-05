@@ -156,19 +156,32 @@ def _empty_rest(t: str) -> bool:
 
 
 _ACK = re.compile(r"(?:はい|うん|ok|okay|オーケー|おっけー|了解|りょうかい|わかった|分かった|わかりました|分かりました|ありがとう(?:ございます)?"
-                  r"|お願いします|それでお願いします|よし|いいね|いいです|大丈夫です)[!！。.、]*", re.I)
+                  r"|お願いします|それでお願いします|よし|いいね)[!！。.、]*", re.I)  # 「いいです」「大丈夫です」は断りにもなるので入れない
 # 前の候補を否定している・止めたいかもしれない言葉（質問の形でも、承認を残す理由にしない）
 _DOUBT = re.compile(r"違|ちが|ちゃう|ない|無い|おかし|なし|無し|ナシ|いら|要ら|間違|まちが|やめ|止め|とめ|戻|もど|消|けし|待|まっ|ストップ"
                     r"|キャンセル|取り消|取消|とりけ|撤回|中止|リセット|ダメ|だめ|嫌|いや|うそ|嘘|でも|けど|早かっ|よかった|まだ"
                     r"|^(?:え|は|あれ|ん+|ほんと|本当|まじ|マジ|そうなの|そう)(?:に|っ)?[?？!！。]*$")
 
 
+# 承認を残してよいボタンの頼み（許す形の一覧。文の全体が一致するときだけ。Safety 再検証4回目：否定の一覧で除く形は漏れる）
+_PLAIN_BUTTON = re.compile(r"(?:では|じゃあ|それでは)?(?:シミュレーション用に)?(?:出力|承認|書き出し)(?:を)?"
+                           r"(?:して|します|お願いします|おねがいします)(?:ください|下さい)?[。.!！]*")
+# 承認を残してよい質問：疑問の言葉があり、承認した中身（向き・正しさ・危険）を疑う言葉が無いもの（許す形）
+_INTERROGATIVE = re.compile(r"何|なに|なん|どこ|なぜ|どうして|どう|いつ|どれ|どの|どんな|いくつ|どのくらい")
+_CONTENT_DOUBT = re.compile(r"逆|反対|ぎゃく|はんたい|プラス|マイナス|ぷらす|まいなす|上|下|うえ|した|誤|あやま|変|へん|危|あぶ|ぶつか|当た|あた"
+                            r"|大丈夫|だいじょうぶ|本当|ほんと|いいの|よいの|良いの|合って|正し|おかし|安全|問題"
+                            # 驚き・理由を問う疑い（Safety 再検証5回目 M-1）：承認した中身への疑いになりやすい
+                            r"|なんで|何で|どうして|何これ|なにこれ|なんだこれ|どういうこと|どうなって|そっち|あっち|右|左|前|後ろ|うしろ"
+                            r"|こんなに|そんなに|も[?？]|回も|高い|低い|多い|少な|大き|小さ|遠|近")
+
+
+def _hira(t: str) -> str:
+    return "".join(chr(ord(c) - 0x60) if "ァ" <= c <= "ヶ" else c for c in t)
+
+
 def is_plain_button_request(text: object) -> bool:
-    """否定・疑いの無い、ボタンで行う操作の頼み（「出力して」「承認して」）。ボタンで行う案内を返すだけで、承認は残す。"""
-    if not isinstance(text, str):
-        return False
-    t = _norm(text)
-    return bool(_BUTTON.search(t)) and not _DOUBT.search(t) and not _M_BEFORE.search(t) and not _values(t)
+    """ボタンで行う操作の頼みそのもの（「出力して」「承認して」）。ボタンで行う案内を返すだけで、承認は残す。"""
+    return isinstance(text, str) and bool(_PLAIN_BUTTON.fullmatch(_norm(text)))
 
 
 def is_ack(text: object) -> bool:
@@ -177,11 +190,14 @@ def is_ack(text: object) -> bool:
 
 
 def is_plain_question(text: object) -> bool:
-    """否定・取消・止める言葉の無い、ふつうの質問か（「何をしているの？」「なぜ3回？」）。承認のあとでも承認を残してよい文。"""
+    """中身を疑わない、ふつうの質問か（「何をしているの？」「どこへ動くの？」）。承認のあとでも承認を残してよい文。
+    疑問の言葉が要る（「これ逆？」「マイナス？」は保留）。否定・取消・向き・正しさ・危険の言葉があれば保留"""
     if not isinstance(text, str):
         return False
     t = _norm(text)
-    return bool(_ASKING.search(t)) and not _DOUBT.search(t) and not _M_BEFORE.search(t) and not _M_AFTER.search(t)
+    h = _hira(t)
+    return (bool(_ASKING.search(t)) and bool(_INTERROGATIVE.search(t)) and not _DOUBT.search(t) and not _DOUBT.search(h)
+            and not _CONTENT_DOUBT.search(t) and not _CONTENT_DOUBT.search(h) and not _M_BEFORE.search(t) and not _M_AFTER.search(t))
 
 
 def is_keep(text: object) -> bool:

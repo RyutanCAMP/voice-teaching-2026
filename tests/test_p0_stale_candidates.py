@@ -563,3 +563,41 @@ def test_filming_flow_still_works(tmp_path, out_dir):
     w.talk(sid, "はい")
     assert w.export(sid, candidate_gen=w.candidate_gen_of(sid))["ok"]
     assert files(out_dir)
+
+
+# ---- 14. Safety 再検証（6a38914・4回目）：許す形の一覧（ボタンの頼み・中身を疑わない質問）だけが承認を残す ----
+ROUND4 = ["出力不要", "出力は不要", "出力NG", "出力不可", "出力禁止", "出力せず", "出力するな", "出力すんな", "出力せんで", "出力やだ",
+          "出力は後で", "出力はあとで", "出力は後回し", "出力は保留", "出力は中断", "出力ナイ", "承認は保留", "承認を無効にして", "承認無効",
+          "承認ミス", "誤承認", "承認は誤り", "承認やり直し", "承認し直し", "これ逆？", "方向が逆？", "逆だよね？", "向きは反対？", "マイナス？",
+          "上？", "下だよね？", "誤ってる？", "誤り？", "変？", "変だよね？", "本当にいいの？", "これで本当にいいの？", "これでいいの？",
+          "危険？", "ぶつかる？", "大丈夫？"]
+
+
+@pytest.mark.parametrize("text", ROUND4)
+def test_after_approval_fourth_round(tmp_path, out_dir, text):
+    w, fake, sid = approved_move(tmp_path)
+    gen = w.candidate_gen_of(sid)
+    fake.add(T.answer("C00005 へ直線で動きます。", [21]), T.answer("C00005 へ直線で動きます。", [21]))
+    w.talk(sid, text)
+    st = w.state(sid)["state"]
+    assert not st["can_export"] and not w.export(sid, candidate_gen=gen)["ok"], (text, st["status_line"])
+    assert files(out_dir) == []
+
+
+@pytest.mark.parametrize("text", ["出力して", "出力してください", "承認して", "では出力お願いします"])
+def test_after_approval_plain_button_request_keeps_approval(tmp_path, text):
+    w, _, sid = approved_move(tmp_path)
+    w.talk(sid, text)
+    assert w.state(sid)["state"]["can_export"], text
+
+
+# ---- 15. Safety 再検証（1d434f3・5回目 CONDITIONAL PASS）の Medium ----
+@pytest.mark.parametrize("text", ["何これ？", "なにこれ？", "なんだこれ？", "どういうこと？", "どうなってるの？", "なんで？", "どうして？",
+                                  "なんでそっち？", "どうしてそっちに動くの？", "なんで高いの？", "なんでこんなに動くの？", "なぜ3回も？",
+                                  "何回もやるの？", "何でこうなるの", "いいです", "大丈夫です"])
+def test_after_approval_fifth_round(tmp_path, out_dir, text):
+    w, fake, sid = approved_move(tmp_path)
+    gen = w.candidate_gen_of(sid)
+    fake.add(T.answer("C00005 へ直線で動きます。", [21]), T.answer("C00005 へ直線で動きます。", [21]))
+    w.talk(sid, text)
+    assert not w.state(sid)["state"]["can_export"] and not w.export(sid, candidate_gen=gen)["ok"], text

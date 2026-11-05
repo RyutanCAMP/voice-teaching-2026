@@ -169,10 +169,11 @@ class UtteranceFacts:
 _POS_RE = re.compile(r"(?<![A-Z0-9])C\s?([0-9]+)(?![0-9.])")
 _NUM_RE = re.compile(r"([0-9]+(?:\.[0-9]+)?)")
 _SIGN_BEFORE = re.compile(r"(マイナス|プラス|[+\-])\s?$")
-_UNIT_AFTER = re.compile(r"^\s?(MM|ミリ|%)")
+# 「3ミリメートル」は「3ミリ」と同じ量（クローク 11/5 夜。実マイクの言い方）。「メートル」「センチメートル」は今どおり聞き返す
+_UNIT_AFTER = re.compile(r"^\s?(MM|ミリメートル|ミリ|%)")
 _OTHER_UNIT_AFTER = re.compile(r"^\s?(センチ|CM|M(?![A-Z])|メートル|パーセント|割|度|倍)")
 _KANJI_AMOUNT = re.compile(r"[〇零一二三四五六七八九十百千万]+\s?(ミリ|MM|センチ|CM|%|パーセント|割)")
-_VAGUE = re.compile(r"そこそこ|半分|少し|すこし|ちょっと|ちょい|わずか|僅か|倍|もう少し|適当")
+_VAGUE = re.compile(r"そこそこ|半分|もうちょっと|もうちょい|少し|すこし|ちょっと|ちょい|わずか|僅か|倍|もう少し|適当")
 # 軸と向き。1つ目の形（案1-a。設計書 docs/DESIGN_NATURAL_DIRECTION_20261105.md は、このブランチには無く、
 # ブランチ docs/direction-words-design（59fec81）にある）：「軸 → 符号 → 方向」の順で、間に入ってよいのは
 # 「軸」「の」（各1回まで）と空白だけ（「Y-の方向」「Yのマイナス方向」「Y軸マイナス方向」「Yの-の方向」）。
@@ -209,7 +210,11 @@ _APPROVE = re.compile(
     r"|(^|[、。,\s])はい([、。,!！\s]|$)")
 _START = re.compile(r"起動|スタート|運転開始|動作開始|実行して|再生して")
 # 「ここの位置」「そこの点」（唐川さんの実マイク 11/3：「ここの位置を3ミリ下げてくれる」）も、選んでいる位置を指す言葉（11/4 の決定）
-_THIS = re.compile(r"ここの位置|ここの点|そこの位置|そこの点|この位置|この点|この命令|ここ|その位置|その点|そこ")
+# 「今の位置」「選んでいる位置」「選択中の位置」「この場所」も同じ（クローク 11/5 夜）。「これ」は、すぐ後が読点・空白・「を」のときだけ
+# （「これ、3ミリ上げたいんだけど」「これを3ミリ上げて」。11/6 の指示）。「これでいい」（承認の言葉の形）・「これは」は入れない。
+# 「それ」は「それから」（つなぎ）・「それでいい」と取り違えるので入れない
+_THIS = re.compile(r"ここの位置|ここの点|そこの位置|そこの点|この位置|この点|この命令|今の位置|選んでいる位置|選択中の位置|この場所"
+                   r"|ここ|その位置|その点|そこ|これ(?=\s?[、,，]|\s|を)")
 
 _SIGN = {"+": 1, "プラス": 1, "-": -1, "マイナス": -1}
 _SIGN_TOKEN = re.compile(r"マイナス|プラス|[+\-]")
@@ -229,7 +234,54 @@ _HIRA_SIGN = re.compile(r"ぷらす|まいなす")
 _HIRA_AXIS = re.compile(r"(?<![ぁ-ゖ])(えっくす|わい|ぜっと)(?=\s?(?:プラス|マイナス|[+\-]|の\s?(?:プラス|マイナス|[+\-])|方向|軸))")
 
 
+# 数のすぐ後のひらがなの「みり」（音声認識の揺れ「3みり」）は「ミリ」（クローク 11/5 夜）。数のすぐ後だけ（量を補わない）
+_HIRA_MIRI = re.compile(r"(?<=[0-9])(\s?)みり")
+
+# 漢数字・ひらがなの数（唐川さんの実マイク 11/6：「十ミリ」が数として読めず止まった）。発話を読むときだけ算用数字にする
+# （JOB ファイルの検査 jbi は変えない）。単位（ミリ・ミリメートル・mm・センチ・%）がすぐ後にあるときだけ。正しい形（「十」「三」「十五」
+# 「百二十」）だけを読み、「一五」のような1字ずつの読み・「十十」は読まない（今どおり聞き返す）。小数（「三点五」）は読まない。
+# ひらがなの「に」（2）は助詞と区別できないので読まない（「Zプラスにじゅうミリ」は「に十」とも「二十」とも読める）。「し」「く」「ご」も1字では読まない
+_UNIT_AHEAD = r"(?=\s?(?:ミリメートル|ミリ|みり|MM|センチ|CM|%|パーセント))"
+_KANJI_DIGIT = {"〇": 0, "零": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+_KANJI_FORM = re.compile(r"(?:([一二三四五六七八九])?百)?(?:([一二三四五六七八九])?十)?([一二三四五六七八九])?|[〇零]")
+# すぐ前が数・小数点（「三点五」「3.五」「３・五」）のときは読まない（「三点五ミリ」の「五」だけを 5 にしない）
+_KANJI_NUM_AHEAD = re.compile(r"(?<![〇零一二三四五六七八九十百千万点.・0-9])([〇零一二三四五六七八九十百]+)" + _UNIT_AHEAD)
+_KANA_DIGIT = {"いち": 1, "さん": 3, "よん": 4, "ろく": 6, "なな": 7, "しち": 7, "はち": 8, "きゅう": 9}
+_KANA_ONES = {**_KANA_DIGIT, "に": 2, "ご": 5}  # 「じゅうに」「じゅうご」の後ろだけ
+_KANA_NUM_AHEAD = re.compile(
+    r"(?:(?<![ぁ-ゖー点.・0-9])|(?<=[をへでと]))"
+    rf"((?:(?:{'|'.join(_KANA_DIGIT)})?じゅう(?:{'|'.join(_KANA_ONES)})?)|{'|'.join(_KANA_DIGIT)})" + _UNIT_AHEAD)
+
+
+def _kanji_value(s: str) -> int | None:
+    m = _KANJI_FORM.fullmatch(s)
+    if m is None or not s:
+        return None
+    if s in ("〇", "零"):
+        return 0
+    h = (_KANJI_DIGIT[m.group(1)] if m.group(1) else 1) if "百" in s else 0
+    t = (_KANJI_DIGIT[m.group(2)] if m.group(2) else 1) if "十" in s else 0
+    return h * 100 + t * 10 + (_KANJI_DIGIT[m.group(3)] if m.group(3) else 0)
+
+
+def _kana_value(s: str) -> int:
+    if "じゅう" not in s:
+        return _KANA_DIGIT[s]
+    a, _, b = s.partition("じゅう")
+    return (_KANA_DIGIT[a] if a else 1) * 10 + (_KANA_ONES[b] if b else 0)
+
+
+def _spoken_numbers(text: str) -> str:
+    def kanji(m: re.Match) -> str:
+        v = _kanji_value(m.group(1))
+        return m.group(0) if v is None else str(v)
+    text = _KANJI_NUM_AHEAD.sub(kanji, text)
+    return _KANA_NUM_AHEAD.sub(lambda m: str(_kana_value(m.group(1))), text)
+
+
 def _spoken(text: str) -> str:
+    text = _spoken_numbers(text)
+    text = _HIRA_MIRI.sub(lambda m: m.group(1) + "ミリ", text)
     text = _HIRA_SIGN.sub(lambda m: {"ぷらす": "プラス", "まいなす": "マイナス"}[m.group(0)], text)
     text = _HIRA_AXIS.sub(lambda m: {"えっくす": "X", "わい": "Y", "ぜっと": "Z"}[m.group(1)], text)
     text = _SPOKEN_AXIS.sub(lambda m: {"エックス": "X", "ワイ": "Y", "ゼット": "Z", "ズィー": "Z"}[m.group(1) or m.group(2)], text)
@@ -247,7 +299,9 @@ TE_FORMS = ("して", "て")                                                   #
 REQUESTS = ("ください", "お願いします", "おねがいします")                    # 読んだ言葉・助詞・て の後
 POLITE_AFTER_TE = ("下さい",)                                               # 「下げて下さい」：て のすぐ後だけ（下（Z）とは読まない）
 FINALS = ("ね", "よ")                                                       # 文の終わりだけ。助詞の後はだめ（「はね」）
-HESITATIONS = ("えーと", "ええと", "えっと", "あのー", "あの")               # 1つだけで区切られていれば、どこでも
+# 1つだけで区切られていれば、どこでも。「えーっと」「えっとー」「あのう」「えー」は実マイク・話し言葉の揺れ（クローク 11/5 夜）。
+# FILLER_WORDS は 30語まで（tests/test_unknown_words.py）。これで上限。足すときは上限の判断（唐川さん）から
+HESITATIONS = ("えーっと", "えっとー", "えーと", "ええと", "えっと", "あのー", "あのう", "あの", "えー")
 OPENERS = ("それでは", "じゃあ", "では", "まず")                             # 文の初め（読んだ言葉より前）に1つだけで
 FILLER_WORDS = PARTICLES + TE_FORMS + REQUESTS + POLITE_AFTER_TE + FINALS + HESITATIONS + OPENERS
 # 読み取りで使った動きの言葉のすぐ後の言い終わり（「下げる」「下げます」「ずらす」「移動させて」）。2026-11-03 シクロの判断
@@ -317,7 +371,7 @@ _COORD_VALUE_WORD = re.compile(r"(?<![A-Z])[XYZ]\s?(?:の\s?)?(?:座標値|座�
 _CONNECTOR = re.compile(r"そして|それから")  # 2つの変更の区切り（_SPLIT_MOVES）
 _VERB_TAIL = re.compile(f"(?<=上げ|下げ|増や|減ら|動か|ずら|寄せ|移動)(?:{_alt(VERB_ENDINGS)})")
 _QUESTION_VERB_TAIL = re.compile(f"(?<=戻|消|較|択)(?:{_alt(QUESTION_ONLY_ENDINGS)})")
-_AMOUNT_PREFIX = re.compile(f"(?:{_alt(AMOUNT_PREFIXES)})" + r"(?=\s?[0-9]+(?:\.[0-9]+)?\s?(?:MM|ミリ|%))")
+_AMOUNT_PREFIX = re.compile(f"(?:{_alt(AMOUNT_PREFIXES)})" + r"(?=\s?[0-9]+(?:\.[0-9]+)?\s?(?:MM|ミリメートル|ミリ|%))")
 # 位置番号のすぐ後の「位置」（「C00005の位置を下に3mm」）。「この位置」「その位置」は _THIS で読む
 _POSITION_WORD = re.compile(r"^\s?(?:の\s?)?位置")
 # 「ここここ」「そこそこ」：同じ指す言葉の繰り返しは、指す言葉として読まない（そこそこ は、あいまいな量として読む）
@@ -531,8 +585,31 @@ _SHIMASU_VERB = re.compile(f"(?:{'|'.join(SHIMASU_AFTER)})$")
 _MASU_END = re.compile(rf"(?<={'|'.join(MASU_AFTER)})(?:ておき)?ます[ねよ]?[\s　。．.!！]*$")
 # 「下げてくれる」「下げてもらえる」（唐川さんの実マイク 11/3）：お願いとも、できるかの質問とも読める。
 # 「〜ます」と同じく外して2択で確かめる（候補にしない。安全の決まりは緩めない）。「くれない」「もらえない」は外さない
-_KURERU_END = re.compile(r"(?<=て)(?:くれる|くれます|もらえる|もらえます)[ねよ]?[\s　。．.!！]*$")
-_NI_SHIMASU_END = re.compile(r"([0-9０-９]+(?:[.．][0-9０-９]+)?\s*(?:mm|ＭＭ|MM|ｍｍ|ミリ))\s*に(?:しておき|し)ます[ねよ]?[\s　。．.!！]*$", re.I)
+# 博多弁・北九州の「〜てくれん（？）」「〜てくれんね」「〜てくれんかいな」「〜てくれんやろか」「〜てもらえん」（＝〜してくれない？）も、
+# お願いとも質問とも読めるので同じ2択（クローク 11/5 夜。候補にしない）
+_KURERU_END = re.compile(r"(?<=て)(?:くれる|くれます|もらえる|もらえます"
+                         r"|(?:くれ|もらえ)ん(?:ね|と|です|か(?:いな|ね)?|やろ(?:か|う)?)?)[ねよ]?[\s　。．.!！]*$")
+_NI_SHIMASU_END = re.compile(r"([0-9０-９]+(?:[.．][0-9０-９]+)?\s*(?:mm|ＭＭ|MM|ｍｍ|ミリメートル|ミリ))\s*に(?:しておき|し)ます[ねよ]?[\s　。．.!！]*$", re.I)
+# 文の終わりの希望の言い方（クローク 11/5 夜。唐川さんの実マイク「この位置を上に3mm上げたい」→「「たい」が分かりませんでした」）。
+# 動きの言葉のすぐ後の、文の終わりの「〜たい」「〜たいです」「〜たいんだけど」「〜てほしい」「〜てもらいたい」「〜ていただきたい」は、
+# 同じ文の「〜て」（お願い）と同じに読む（「上げたい」→「上げて」。言葉は足さない）。読んだあとの検査は「〜て」と全く同じ。
+# 「〜ます」「〜てくれる」と違い2択にしないのは、変更の希望であることがはっきりしているため（回数の「3回にしたい」と同じ扱い）。
+# 外さないもの：「たくない」（打ち消し）・「たかった」・「たいかな」「たいと思う」「たいな」「たいけど」（ためらい・言いさし）・疑問の形
+WISH_AFTER = ("動かさせ", "移動させ", "動かし", "ずらし", "移動し", "上げ", "下げ", "あげ", "さげ", "寄せ")
+# 言い終わりの続き：「です」「んです（けど・が）」「んだけど」「のですが」、博多弁の「っちゃけど」「っちゃん」
+_WISH_TAIL = r"(?:です|んです(?:けど|が)?|んだけど|のですが|っちゃけど|っちゃん)?"
+# 話し言葉・博多弁の頼み方：「上げとって」「上げといて」「動かしちゃって」「動かしてやって」「動かしてみて」「動かしときー」
+# （＝〜しておいて・〜してしまって。お願い）。同じ文の「〜て」と同じに読む。「動かしよって」（〜している）は入れない
+_DIALECT_REQUEST = r"とって|といて|ときー?|ちゃって|てやって|てみて"
+_WISH_END = re.compile(f"(?:{_alt(WISH_AFTER)})"
+                       rf"(?P<wish>(?:たい|て(?:ほしい|もらいたい|いただきたい)){_WISH_TAIL}|{_DIALECT_REQUEST})"
+                       r"[\s　。．.!！]*$")
+
+
+def _strip_wish(text: str) -> str | None:
+    """「この位置を上に3mm上げたい」→「この位置を上に3mm上げて」。文の終わりが希望の言い方でなければ None。"""
+    m = _WISH_END.search(text)
+    return None if m is None else text[: m.start("wish")] + "て"
 
 
 def _strip_shimasu(text: str) -> str | None:
@@ -578,6 +655,10 @@ def read_utterance(raw: str) -> UtteranceFacts:
         plain = _strip_shimasu(plain) or plain
         f = _read(plain, question=True)
         return replace(f, raw=raw, question=True, question_text=plain or None)
+    wish = _strip_wish(raw)
+    if wish is not None:
+        # 希望の言い方：「〜て」の文として読む（聞こえた文 raw は変えずに残す）
+        return replace(read_utterance(wish), raw=raw)
     request = _strip_shimasu(raw)
     if request is not None:
         # 言い終わりの「〜します」（CHECKER_026 M3）：外した文を読み、候補にせず確かめる印を付ける（pre_check が確かめる）
@@ -1178,12 +1259,20 @@ def facing_rewrite(text: str, include_updown: bool) -> str:
     """
     t = _spoken(normalize(text))
     t = _HIRA_VERB.sub(lambda m: {"さげ": "下げ", "あげ": "上げ"}[m.group(1)], t)
+    # 書き換えた軸の言葉の前には空白を入れる（クローク 11/5 夜）。「3mm上げて」→「3MMZプラス方向に…」のように英字が続くと、
+    # 軸の文字（前が英字でないときだけ読む）が読めず「「Z」「方向」が分かりませんでした」で止まっていた
     if include_updown and not _COORD_VALUE.search(t):
-        t = _UPDOWN_VERB.sub(lambda m: f"{_sign_word('Z', 1 if m.group(1) == '上げ' else -1)}方向に動か"
-                             f"{_FACING_VERB_END[m.group(2)]}", t)
-        t = _UPDOWN_TO.sub(lambda m: f"{_sign_word('Z', 1 if (m.group(1) or m.group(4)) == '上' else -1)}方向"
+        # 「上に3mm上げて」（唐川さんの実マイク）：向きの言葉と動きの言葉が同じ向きを言っているときは、動きの言葉を
+        # 向きの無い「動かして」にする（向きを2つ数えて「向きの指定が2つあります」にしない）。向きが違う「上に3mm下げて」は今どおり2つ
+        to = {(m.group(1) or m.group(4)) for m in _UPDOWN_TO.finditer(t)}
+        verb = {m.group(1)[0] for m in _UPDOWN_VERB.finditer(t)}
+        same = len(to) == 1 and to == verb
+        t = _UPDOWN_VERB.sub(lambda m: (f"動か{_FACING_VERB_END[m.group(2)]}" if same else
+                                        f" {_sign_word('Z', 1 if m.group(1) == '上げ' else -1)}方向に動か"
+                                        f"{_FACING_VERB_END[m.group(2)]}"), t)
+        t = _UPDOWN_TO.sub(lambda m: f" {_sign_word('Z', 1 if (m.group(1) or m.group(4)) == '上' else -1)}方向"
                            f"{m.group(3) or ''}", t)
-    return _SIDE_WORD.sub(lambda m: f"{_sign_word(*FACING_SIDES[m.group(1)])}方向{m.group(3) or ''}", t)
+    return _SIDE_WORD.sub(lambda m: f" {_sign_word(*FACING_SIDES[m.group(1)])}方向{m.group(3) or ''}", t)
 
 
 def front_back_ask(facts: UtteranceFacts) -> Verdict | None:
