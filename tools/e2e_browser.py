@@ -3000,6 +3000,234 @@ def until(pg, cond, timeout_ms: int = 5000) -> None:
         waited += 50
 
 
+# 3D の台座の目印・正面の矢印（唐川さんの決定 2026-11-05 夜。docs/DECISION_3D_ROBOT_BASE_20261105.md）。図の中の様子を集める（viewBox の単位）
+ROBOT3D_JS = """(host) => {
+  const svg = document.querySelector(host + ' svg');
+  if (!svg) return null;
+  // 画面の px → viewBox の単位（図は枠の中で縦横の比を保って真ん中に置かれるので、getScreenCTM で戻す）
+  const vb = svg.viewBox.baseVal, m = svg.getScreenCTM();
+  const toVb = (r) => ({ x0: (r.left - m.e) / m.a, x1: (r.right - m.e) / m.a, y0: (r.top - m.f) / m.d, y1: (r.bottom - m.f) / m.d });
+  const box = (e) => toVb(e.getBoundingClientRect());
+  const num = (e, a) => parseFloat(e.getAttribute(a));
+  const line = (e) => e ? [num(e, 'x1'), num(e, 'y1'), num(e, 'x2'), num(e, 'y2')] : null;
+  const origin = svg.querySelector('.robot-origin');
+  const ring = svg.querySelector('g.robot-base polygon');
+  const ringC = ring ? (() => { const ps = ring.getAttribute('points').trim().split(/\\s+/).map((s) => s.split(',').map(Number));
+    return [ps.reduce((a, p) => a + p[0], 0) / ps.length, ps.reduce((a, p) => a + p[1], 0) / ps.length]; })() : null;
+  const lab = (cls) => [...svg.querySelectorAll('text.' + cls)].map((t) => [t.textContent, box(t)]);
+  const others = [...svg.querySelectorAll('g.pt3 > text, text.moved-label, text.repeat-label, text.axis3, text.axis, text.hint3')].map((t) => [t.textContent, box(t)])
+    .concat([...svg.querySelectorAll('g.taught-mark, g.inset')].map((g) => [g.textContent.slice(0, 12), box(g)]))
+    .concat([...svg.querySelectorAll('g.pt3')].map((g) => ['点 ' + g.dataset.names, box(g.querySelector('circle'))]))
+    .concat([...svg.querySelectorAll('circle.after-pt')].map((c) => ['変更後の点', box(c)]));
+  const rl = lab('robot-label');
+  const ov = (a, b) => a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0;
+  const overlaps = [];
+  for (const [s, r] of rl) for (const [t, q] of others) if (ov(r, q)) overlaps.push([s, t]);
+  for (let i = 0; i < rl.length; i++) for (let j = i + 1; j < rl.length; j++) if (ov(rl[i][1], rl[j][1])) overlaps.push([rl[i][0], rl[j][0]]);
+  // 点が押せる（台座の印・矢印・札・ほかの点の下に隠れていない）：点の真ん中で一番上にあるのが、その点の g.pt3。
+  // 変更候補の変更後の点（オレンジの点と輪）・再生の印が変更前の点に重なるのは今までどおり（候補の間は選び直せない）
+  const topAt = (g) => { const r = g.querySelector('circle').getBoundingClientRect(); return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); };
+  const hidden = [...svg.querySelectorAll('g.pt3')].filter((g) => {
+    const e = topAt(g);
+    if (e && e.closest('g.pt3') === g) return false;
+    if (!e || e.closest('g.pt3, .robot-base') || (e.closest('g') && e.closest('g').querySelector(':scope > text.robot-label'))) return true;
+    return !(e.matches('circle.after-pt, circle.marker, .dest-mark') || e.closest('g.inset') || (e.matches('line, circle') && e.getAttribute('stroke') === '#ff6a1a'));
+  }).map((g) => { const e = topAt(g); return g.dataset.names + '（上にあるもの：' + (e ? e.outerHTML.slice(0, 90) : 'なし') + '）'; });
+  const inFrame = (r) => r.x0 >= -0.5 && r.y0 >= -0.5 && r.x1 <= vb.width + 0.5 && r.y1 <= vb.height + 0.5;
+  const out = [...svg.querySelectorAll('g.pt3')].map((g) => [g.dataset.names, box(g.querySelector('circle'))])
+    .concat(origin ? [['台座の印', box(origin)]] : []).concat(ring ? [['台座の輪', box(ring)]] : [])
+    .concat([...svg.querySelectorAll('.robot-front, .robot-front-head')].map((e) => ['正面の矢印', box(e)]))
+    .filter(([, r]) => !inFrame(r)).map(([n]) => n);
+  const ax = (n) => { const e = svg.querySelector('line.axis-line[data-axis="' + n + '"]'); return e ? [line(e), Number(e.dataset.sign)] : null; };
+  const pt = (n) => { const g = [...svg.querySelectorAll('g.pt3')].find((x) => x.dataset.names.split(' ').includes(n));
+    if (!g) return null; const c = g.querySelector('circle'); return [num(c, 'cx'), num(c, 'cy')]; };
+  const pts = Object.fromEntries([...svg.querySelectorAll('g.pt3')].map((g) => [g.dataset.names, [num(g.querySelector('circle'), 'cx'), num(g.querySelector('circle'), 'cy')]]));
+  return { W: vb.width, H: vb.height, origin: origin ? [num(origin, 'cx'), num(origin, 'cy')] : null, ringC,
+    front: line(svg.querySelector('line.robot-front')), axX: ax('X'), axY: ax('Y'),
+    labels: lab('robot-label').map(([s]) => s), overlaps, hidden, out,
+    pt: { C00000: pt('C00000'), C00004: pt('C00004'), C00001: pt('C00001'), C00002: pt('C00002') }, pts,
+    client: Object.fromEntries([...svg.querySelectorAll('g.pt3')].map((g) => { const r = g.querySelector('circle').getBoundingClientRect();
+      return [g.dataset.names, [r.left + r.width / 2, r.top + r.height / 2]]; })),
+    model: svg.querySelectorAll('.robot-model, .robot-part, .robot-caption, .robot-caption-g').length,
+    clickable: [...svg.querySelectorAll('g.robot-base, g.robot-base *')].filter((e) => getComputedStyle(e).pointerEvents !== 'none').length };
+}"""
+
+BASE2D_JS = """(host) => {
+  const svg = document.querySelector(host + ' svg');
+  if (!svg) return null;
+  const o = svg.querySelector('.base2d'), f = svg.querySelector('.front2d');
+  const t = [...svg.querySelectorAll('text.base2d-label')].map((e) => e.textContent);
+  return { origin: !!o, front: f ? [f.getAttribute('x1'), f.getAttribute('y1'), f.getAttribute('x2'), f.getAttribute('y2')].map(Number) : null, labels: t }; }"""
+
+MODEL_WORDS = ("HC20 を模した", "メーカーの形状データ", "目安の静止モデル", "ロボットの姿勢は、実機・ジョブの動きと関係ありません")
+
+
+def _cos(u, v):
+    import math
+    nu, nv = math.hypot(*u), math.hypot(*v)
+    return (u[0] * v[0] + u[1] * v[1]) / (nu * nv) if nu and nv else 0.0
+
+
+def check_3d_robot_base(browser, check, shots: Path | None, out: Path) -> None:
+    """唐川さんの決定（2026-11-05 夜の2回目。docs/DECISION_3D_ROBOT_BASE_20261105.md）：3D に、ロボット座標の原点（台座の中心）の
+    黄色の丸「ロボット（台座の中心）」と、原点から X＋ の矢印「ロボットの正面（X＋）」を出す。HC20 のモデル（腕・関節・胴体）と
+    表示・非表示のボタンは出さない。正面の矢印は床の X の軸の＋の向き（床の Y の軸はジョブの点で確かめる）。
+    最初の視点と［視点を戻す］で台座と全部の点が枠に入る・札がほかの札と重ならない・点を押せる・2D の3つの図の原点と X＋ の印・
+    注意書き（干渉を保証しない文が残り、モデル用の文が無い）。1280×720 と 1920×1080。モックの台本の答え（本物の Claude は呼ばない）。"""
+    sys.path.insert(0, str(REPO / "tools"))
+    import demo_mock as dm
+    from voice_teaching import claude_explain as cx
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import server
+    cx.PRICES[dm.MOCK_MODEL] = cx.Price(input=0.0, output=0.0, cache_write_5m=0.0, cache_write_1h=0.0, cache_read=0.0)
+    ex = cx.Explainer("mock-no-network", dm.MOCK_MODEL, client=dm.ScriptClient(), usage_log=cx.UsageLog(out / "base_usage.jsonl"))
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None, explainer=ex)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    want_labels = sorted(["ロボット（台座の中心）", "ロボットの正面（X＋）"])
+
+    def marks(tag, r, job):
+        """台座の丸・正面の矢印・札・点を押せる・全体が枠に入る"""
+        if r is None:
+            check(False, f"台座（{tag}）：3D の図が無い")
+            return
+        check(r["model"] == 0, f"台座（{tag}）：HC20 のモデル（腕・関節・胴体）とモデルの札は出さない：{r['model']}")
+        o, rc = r["origin"], r["ringC"]
+        check(bool(o and rc) and abs(o[0] - rc[0]) < 3 and abs(o[1] - rc[1]) < 3,
+              f"台座（{tag}）：黄色の丸と床の輪が、原点（台座の中心）の同じ所にある：丸 {o}・輪 {rc}")
+        check(r["clickable"] == 0, f"台座（{tag}）：台座の印・矢印は押しても何も起きない（pointer-events なし）：{r['clickable']}")
+        fr, axx = r["front"], r["axX"]
+        fv = [fr[2] - fr[0], fr[3] - fr[1]] if fr else [0, 0]
+        xv = [(axx[0][2] - axx[0][0]) * axx[1], (axx[0][3] - axx[0][1]) * axx[1]] if axx else [0, 0]
+        check(bool(o and fr and axx) and abs(fr[0] - o[0]) < 1 and abs(fr[1] - o[1]) < 1 and _cos(fv, xv) > 0.97,
+              f"台座（{tag}）：正面の矢印は原点から出て、床の X の軸の＋の向きを指す（cos {round(_cos(fv, xv), 3)}）")
+        # ジョブの点はどれも X＞0：原点から点の真ん中へは、正面の矢印の側（投影した点で確かめる）
+        if o and r["pts"]:
+            cx_ = sum(v[0] for v in r["pts"].values()) / len(r["pts"]); cy_ = sum(v[1] for v in r["pts"].values()) / len(r["pts"])
+            c = _cos([cx_ - o[0], cy_ - o[1]], fv)
+            check(c > 0, f"台座（{tag}）：X＞0 のジョブの点は、原点から見て正面の矢印の側にある（cos {round(c, 3)}）")
+        # 床の Y の軸は、ジョブの点で確かめる（Y だけが違う2点：DEMO_C_PLACE C00001→C00004・DEMO_BUTTON_REPEAT C00000→C00004）
+        a, b = ("C00001", "C00004") if job == "DEMO_C_PLACE" else ("C00000", "C00004")
+        pa, pb, axy = r["pt"][a], r["pt"][b], r["axY"]
+        yv = [(axy[0][2] - axy[0][0]) * axy[1], (axy[0][3] - axy[0][1]) * axy[1]] if axy else [0, 0]
+        c = _cos([pb[0] - pa[0], pb[1] - pa[1]], yv) if pa and pb else 0
+        check(c > 0.95, f"台座（{tag}）：床の Y の軸の＋は、ジョブの点の Y＋ の向き（{a}→{b}、cos {round(c, 3)}）")
+        check(sorted(r["labels"]) == want_labels, f"台座（{tag}）：台座と正面の札が出る：{r['labels']}")
+        check(not r["overlaps"], f"台座（{tag}）：台座の札・正面の札が、点・名前・変更の札・回数の札・窓・軸の文字と重ならない：{r['overlaps']}")
+        check(not r["hidden"], f"台座（{tag}）：ジョブの点はどれも、台座の印・矢印・札に隠れず押せる：{r['hidden']}")
+        check(not r["out"], f"台座（{tag}）：台座の印・矢印とジョブの点が、全部枠に入る（はみ出し {r['out']}）")
+
+    try:
+        for (w, h) in [(1280, 720), (1920, 1080)]:
+            for job in ("DEMO_C_PLACE", "DEMO_BUTTON_REPEAT"):
+                tag = f"{w}×{h}・{job}"
+                pg = browser.new_page(viewport={"width": w, "height": h})
+                pg.add_init_script(FAKE_RECOGNITION)
+                pg.goto(url)
+                pg.set_input_files("#file-input", str(REPO / "samples/dummy" / f"{job}.JBI"))
+                pg.wait_for_selector("#job-area:not([hidden])")
+                until(pg, lambda: pg.is_enabled("#text-send") or pg.is_visible("#kbd-button"))
+                pg.wait_for_timeout(400)
+                r0 = pg.evaluate(ROBOT3D_JS, "#fig-3d")
+                marks(f"{tag}・読み込んだ直後", r0, job)
+                ovl = label_overlaps_page(pg)
+                check(not ovl, f"台座（{tag}・読み込んだ直後）：点の名前どうしが重ならない：{ovl}")
+                outside = pg.evaluate(TEXT3D_OUTSIDE_JS, False)
+                check(not outside, f"台座（{tag}）：3D の文字が枠の中に収まる：{outside}")
+                heads = pg.evaluate("""() => [...document.querySelectorAll('#figure-panel .stage-head button')].map((b) => b.id || b.dataset.view)""")
+                check(heads == ["view-reset", "3d", "yz", "xz", "xy"] and pg.locator("#model-toggle").count() == 0,
+                      f"台座（{tag}）：3D の上の欄は元の並び（視点を戻す・3D・Y・Z・X・Z・X・Y。モデルのボタンは無い）：{heads}")
+                notes = pg.inner_text("#figure-panel .figure-notes")
+                body = pg.inner_text("body")
+                check("ロボット本体・関節は描いていません" in notes and "動作や干渉を保証するシミュレーターではありません" in notes
+                      and "当たらないとは限りません" in notes and "腕やツールの根元は描いていません" in notes and "参考表示であり" in notes
+                      and not any(x in body for x in MODEL_WORDS)
+                      and not pg.evaluate("(ws) => [...document.querySelectorAll('[title],[aria-label]')].some((e) => ws.some((w) => (e.title + (e.getAttribute('aria-label') || '')).includes(w)))", list(MODEL_WORDS)),
+                      f"台座（{tag}）：干渉を保証しない注意書きが出て、モデル用の文はどこにも無い")
+                tip = pg.evaluate("() => { const t = document.querySelector('#fig-3d g.robot-base > title'); return t ? t.textContent : null; }")
+                check(tip == "台座の印は、ロボット座標の原点（0,0,0）の位置です。ロボットの大きさ・形ではありません。",
+                      f"台座（{tag}）：台座の印にマウスを重ねると、原点の位置でありロボットの大きさ・形ではないと出る：{tip}")
+                if r0 is None:
+                    pg.close()
+                    continue
+                if shots is not None:
+                    shots.mkdir(parents=True, exist_ok=True)
+                    pg.screenshot(path=str(shots / f"BASE_{w}_{job}_load.png"))
+                # 回してから［視点を戻す］
+                fb = pg.locator("#fig-3d svg").bounding_box()
+                sx, sy = fb["x"] + 30, fb["y"] + fb["height"] - 60
+                pg.mouse.move(sx, sy)
+                pg.mouse.down()
+                pg.mouse.move(sx + 120, sy - 40, steps=6)
+                pg.mouse.up()
+                pg.wait_for_timeout(200)
+                r1 = pg.evaluate(ROBOT3D_JS, "#fig-3d")
+                check(r1["front"] != r0["front"] and pg.is_visible("#view-reset"), f"台座（{tag}）：回すと向きが変わり［視点を戻す］が出る")
+                fr1, ax1 = r1["front"], r1["axX"]
+                c1 = _cos([fr1[2] - fr1[0], fr1[3] - fr1[1]], [(ax1[0][2] - ax1[0][0]) * ax1[1], (ax1[0][3] - ax1[0][1]) * ax1[1]]) if fr1 and ax1 else 0
+                check(c1 > 0.97, f"台座（{tag}・回したあと）：正面の矢印は床の X の軸の＋の向きのまま（cos {round(c1, 3)}）")
+                pg.click("#view-reset")
+                pg.wait_for_timeout(200)
+                r2 = pg.evaluate(ROBOT3D_JS, "#fig-3d")
+                same = bool(r2["front"]) and all(abs(a - b) < 1 for a, b in zip(r2["front"], r0["front"])) and all(
+                    n in r2["pts"] and abs(r2["pts"][n][0] - r0["pts"][n][0]) < 1 and abs(r2["pts"][n][1] - r0["pts"][n][1]) < 1 for n in r0["pts"])
+                check(same and not r2["out"], f"台座（{tag}）：［視点を戻す］で最初の視点に戻る（台座と全部の点が枠に入る。はみ出し {r2['out']}）")
+                # 点を押して選べる
+                c2 = r2["client"].get("C00002")
+                if c2:
+                    pg.mouse.click(c2[0], c2[1])
+                    pg.wait_for_timeout(500)
+                check(pg.inner_text("#voice-position strong") == "C00002", f"台座（{tag}）：3D の点 C00002 を押して選べる")
+                # 2D の3つの図（大きな図と、詳細表示の小さな図）
+                for view, front in (("yz", False), ("xz", True), ("xy", True)):
+                    pg.click(f'.view-tab[data-view="{view}"]')
+                    pg.wait_for_timeout(150)
+                    b2 = pg.evaluate(BASE2D_JS, "#fig-main")
+                    ok = bool(b2 and b2["origin"] and (b2["front"] is not None) == front and "ロボット（台座の中心）" in b2["labels"])
+                    if ok and front:
+                        ok = b2["front"][2] > b2["front"][0] and abs(b2["front"][3] - b2["front"][1]) < 0.5 and "ロボットの正面（X＋）" in b2["labels"]
+                    if ok and not front:
+                        ok = any("X＋" in s for s in b2["labels"])
+                    check(ok, f"台座（{tag}・2D {view}）：原点の印と札、X＋（正面）の向きの印が出る：{b2}")
+                    th = pg.evaluate(BASE2D_JS, f"#fig-{view}")
+                    check(bool(th and th["origin"] and (th["front"] is not None) == front), f"台座（{tag}・小さな図 {view}）：原点と X＋ の印が出る：{th}")
+                    ov2 = pg.evaluate("""() => { const svg = document.querySelector('#fig-main svg');
+                      const r = (e) => e.getBoundingClientRect(); const ov = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+                      const mine = [...svg.querySelectorAll('text.base2d-label')], others = [...svg.querySelectorAll('g.pt text, g.pt circle, text.axis')]
+                        .concat([...svg.querySelectorAll(':scope > text')].filter((t) => !t.classList.contains('base2d-label')));
+                      const out = []; for (const a of mine) for (const b of others) if (ov(r(a), r(b))) out.push([a.textContent, b.textContent || b.tagName]);
+                      const vb = r(svg); for (const a of mine) { const q = r(a); if (q.left < vb.left - 0.5 || q.right > vb.right + 0.5 || q.top < vb.top - 0.5 || q.bottom > vb.bottom + 0.5) out.push([a.textContent, '枠の外']); }
+                      return out; }""")
+                    check(not ov2, f"台座（{tag}・2D {view}）：原点・正面の札が、点・名前・軸の文字と重ならず、図の中：{ov2}")
+                pg.click('.view-tab[data-view="3d"]')
+                pg.wait_for_timeout(200)
+                if job == "DEMO_C_PLACE":  # 読み込み直して（上で C00002 を選んだため）、C00003 を Zプラス方向に5mm
+                    pg.goto(url)
+                    pg.set_input_files("#file-input", str(REPO / "samples/dummy" / f"{job}.JBI"))
+                    pg.wait_for_selector("#job-area:not([hidden])")
+                    pg.locator("#position-chips button", has_text="C00003").click()
+                    until(pg, lambda: pg.inner_text("#voice-position strong") == "C00003")
+                    fill_text(pg, "Zプラス方向に5mm")
+                    pg.click("#text-send")
+                    until(pg, lambda: pg.get_attribute("#step-4", "aria-current") == "step")
+                    pg.wait_for_timeout(300)
+                    r5 = pg.evaluate(ROBOT3D_JS, "#fig-3d")
+                    marks(f"{tag}・変更候補（C00003 Z+5mm）", r5, job)
+                    ovl = label_overlaps_page(pg)
+                    check(not ovl, f"台座（{tag}・変更候補）：点の名前と変更の札が重ならない：{ovl}")
+                    outside = pg.evaluate(TEXT3D_OUTSIDE_JS, False)
+                    check(not outside and pg.locator("#fig-3d text.moved-label").count() == 1,
+                          f"台座（{tag}・変更候補）：変更の札が出て、文字が枠の中：{outside}")
+                    check(pg.is_visible("#candidate-view") and pg.is_visible("#play-button"),
+                          f"台座（{tag}・変更候補）：候補のカードと再生のボタンが出ている")
+                    if shots is not None:
+                        pg.screenshot(path=str(shots / f"BASE_{w}_{job}_candidate.png"))
+                pg.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> list[str]:
     """通し確認をして、失敗の一覧を返す（空なら全部通った）。shots を渡すと、画面のスクリーンショットをそこに置く。"""
     from playwright.sync_api import sync_playwright
@@ -3244,6 +3472,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check_text_size_1080(b, check, shots, out)
             check_3d_labels_inside(b, check, shots, out)
             check_3d_fit_stable(b, check, shots, out)
+            check_3d_robot_base(b, check, shots, out)
             check_load_while_waiting(b, check, shots, out)
             check_reload_same_file(b, check, shots, out)
             check_voice_error_typing(b, check, shots, out)

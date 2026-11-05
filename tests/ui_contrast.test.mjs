@@ -77,17 +77,24 @@ const [INSET_BG] = pick(/rx: 14, fill: "(#[0-9a-f]{6})"/);
 const [WAS] = pick(/fill: "(#[0-9a-f]{6})", "data-fs": 18/);
 const [NOW] = pick(/"text-anchor": "middle", fill: "(#[0-9a-f]{6})", "data-fs": 30/);
 const [MOVJ] = pick(/movj: \{ kind: "movj", dash: "2 6", width: 0\.72, color: "(#[0-9a-f]{6})"/, hl);
+// 台座の目印・正面の矢印（2026-11-05 夜 唐川さんの決定）
+const [ROBOT] = pick(/const C_ROBOT = "(#[0-9a-f]{6})"/);
 const V3_TEXT = [  // [文字, 地, どこ]
   [LABEL, "fig", "3D の点の名前"], [LABEL_SEL, "fig", "3D の選んだ点の名前"], [AFTER_TEXT, "fig", "3D の動かす点の名前（変更量つき）"],
   [STOPPED, "fig", "3D の止まった候補の名前"], [AX_X, "fig", "3D の軸の文字 X"], [AX_Y, "fig", "3D の軸の文字 Y"], [AX_Z, "fig", "3D の軸の文字 Z"],
   [TAUGHT_TEXT, TAUGHT_BG, "3D の人が教えた印"], [AFTER_TEXT, INSET_BG, "3D の回数の窓（×3）・変更の窓の量"], [WAS, INSET_BG, "3D の回数の窓（×2 →）"],
   [NOW, INSET_BG, "3D の回数の窓（読み込んだ直後の ×2）"],
+  [ROBOT, "fig", "3D の台座と正面の札"],
 ];
 const V3_LINE = [  // [線・点, 地, どこ]
   [LINE, "fig", "3D の線（MOVL）"], [LINE_BEFORE, "fig", "3D の変更前の線"], [AFTER, "fig", "3D の変更後の線"], [STOPPED, "fig", "3D の止まった候補の点線"],
   [MOVJ, "fig", "3D の MOVJ の点線"], [RANGE, "fig", "3D の範囲の線"], [CAND, "fig", "3D の位置の候補の輪"],
   [PT, "fig", "3D の点"], [PT_SEL, "fig", "3D の選んだ点"], [PT_MOVED, "fig", "3D の動かす点（変更前）"],
+  [ROBOT, "fig", "3D の台座の印・正面の矢印"],
 ];
+test("view3d.js の色の意味：台座・正面の色は、変更後のオレンジ・軸の X・Y・Z の色と違う", () => {
+  for (const c of [AFTER, AFTER_TEXT, AX_X, AX_Y, AX_Z, STOPPED]) assert.notEqual(ROBOT.toLowerCase(), c.toLowerCase());
+});
 for (const [fg, bg, where] of V3_TEXT) {
   test(`view3d.js の文字 4.5:1 以上：${where}`, () => {
     const r = ratio(fg, bg);
