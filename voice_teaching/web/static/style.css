@@ -1327,3 +1327,8 @@ body:has(#export-result[data-ok="true"]:not([hidden])) #export-note { display: n
 #fig-3d svg { transition: transform 0.35s ease; transform-origin: 35% 50%; }
 body:has(#candidate-panel:not([hidden])) #fig-3d svg { transform: translateX(-11%) scale(0.86); }
 @media (prefers-reduced-motion: reduce) { #fig-3d svg { transition: none; } }
+/* ポップアップの中の X・Y・Z の表は小さく（変わる値の1行を主役にする。表は確認表示にも全部出る） */
+.cand-pop .xyz table { font-size: 12px; }
+.cand-pop .xyz th, .cand-pop .xyz td { padding: 3px 8px; }
+.cand-pop .cand-card .friendly, .cand-pop .cand-card ul { font-size: 12.5px; }
+body:has(#candidate-panel:not([hidden])) #fig-3d svg { transform: translateX(-15%) scale(0.84); }
