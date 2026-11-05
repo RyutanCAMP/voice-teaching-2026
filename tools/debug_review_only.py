@@ -71,8 +71,7 @@ def main(argv: list[str] | None = None) -> int:
                       explainer=explainer)
     lock_down(srv.flow)
     # Claude の言い添え（指示の道の答えの前の一言。表示だけ）：本物の Claude とキーがあるときだけ。VOICE_TEACHING_CLAUDE_LEAD=0 で使わない
-    srv.flow.claude_lead = (interp.kind == "claude" and explainer.has_key
-                            and os.environ.get(claude_lead.ENV, "").strip() != "0")
+    srv.flow.claude_lead = claude_lead.enabled(interp, explainer, os.environ)
     print("デバッグ専用：承認と出力はサーバーで断ります（候補・3D・会話は使えます）", flush=True)
     print(f"解釈：{'本物の Claude（' + interp.model + '）' if interp.kind == 'claude' else '偽のClaude（モック）'}", flush=True)
     print(f"Claude の言い添え：{'使う' if srv.flow.claude_lead else '使わない'}", flush=True)
