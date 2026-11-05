@@ -381,3 +381,24 @@ def test_job_file_numbers_are_still_strict(tmp_path, bad_value, said):
     w.select(sid, "C00005")
     r2 = w.talk(sid, said, "voice")
     assert not cand(r2), (bad_value, said, hear(r2))
+
+
+# ---- 10. 「これ」（すぐ後が読点・空白・「を」のときだけ選んでいる位置）・「もうちょい」（あいまいな量） ----
+@pytest.mark.parametrize("new,old", [
+    ("これを3ミリ上げて", "この位置を3ミリ上げて"),
+    ("これ、Zプラス3ミリ", "この位置、Zプラス3ミリ"),
+    ("これ、3ミリ上げたいんだけど", "この位置、3ミリ上げて"),
+    ("これ、3ミリ上げたいっちゃけど", "この位置、3ミリ上げて"),
+    ("これ Zプラス3ミリ", "この位置 Zプラス3ミリ"),
+])
+def test_kore_points_to_the_selected_position(tmp_path, new, old):
+    assert outcome(tmp_path / "a", new) == outcome(tmp_path / "b", old)
+    assert outcome(tmp_path / "c", new, select=None) == outcome(tmp_path / "d", old, select=None)
+
+
+@pytest.mark.parametrize("text", ["これでいい", "これ、承認して", "これでZプラス3ミリ", "これはZプラス3ミリ",
+                                  "もうちょい上げて", "もうちょっとZプラス", "もうちょいZプラスに3ミリ", "もうちょい右にずらしとって"])
+def test_kore_and_motto_never_make_a_candidate_on_their_own(tmp_path, text):
+    w, _, sid = A.place_flow(tmp_path)
+    r = w.talk(sid, text, "voice")
+    assert not cand(r) and not r["state"]["approval"], (text, hear(r).get("message"))
