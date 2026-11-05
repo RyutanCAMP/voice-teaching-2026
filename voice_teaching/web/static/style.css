@@ -112,15 +112,17 @@ button.link.primary:not([disabled]) { padding: 10px 18px; text-decoration: none;
 /* 「使い方」と「詳細表示」は同じ見た目の文字ボタン（button.link。案3） */
 #engineer-toggle, #help-button { font-size: 14px; white-space: nowrap; }
 /* 状態のチップ（サーバーの状態の1行。区切り（／）ごとに小さな札。文はそのまま）と、その直後の説明の ⓘ を1つの塊にする（案3）。
-   塊が右へ寄せるので、記録が出ていないときも「使い方」「詳細表示」は右の端 */
-.status-wrap { margin-left: auto; display: flex; align-items: center; min-width: 0; }
-.status-line {
-  margin: 0; display: block; text-align: right; font-size: 12px; line-height: 1.3; color: var(--text);
-  min-width: 0; max-width: 46vw;
-}
+   塊が右へ寄せるので、記録が出ていないときも「使い方」「詳細表示」は右の端。
+   チップと ⓘ は同じ文の流れに並べる（#status-line は inline。チップの間は折り返してよい）。#status-line の終わりの右の余白（44px）で
+   ⓘ の場所を最後のチップと同じ行に取っておき、ⓘ は同じ幅だけ左へ戻してそこに置く：チップが2行になっても、ⓘ はいつも
+   最後のチップの直後（同じ行）に来る */
+.status-wrap { margin-left: auto; display: block; min-width: 0; max-width: 46vw; text-align: right; font-size: 12px; line-height: 1.3; }
+.status-line { margin: 0 44px 0 0; display: inline; font-size: 12px; line-height: 1.3; color: var(--text); }
 .status-line .st-head { display: inline-block; color: var(--sub); margin-right: 4px; vertical-align: middle; }
+/* チップの上下の余白（6px）：チップが2行に折り返したとき（360px・390px、1100〜1240px ほどの幅など）、上の行のチップと
+   下の行の ⓘ の押せる所（44px）が重ならない行の間にする（案3の追加） */
 .status-line .st-chip {
-  display: inline-block; vertical-align: middle; padding: 4px 10px; margin: 2px 0; border-radius: 999px; background: var(--chip);
+  display: inline-block; vertical-align: middle; padding: 4px 10px; margin: 6px 0; border-radius: 999px; background: var(--chip);
   border: 1px solid var(--line); color: var(--text); white-space: nowrap;
 }
 .status-line .st-chip.on { border-color: rgba(255, 122, 46, 0.7); color: var(--accent-text); }
@@ -810,9 +812,7 @@ body.hero #instruction-panel { order: 1; }
   .top .mode-banner { order: 4; }
   .top .interp-badge { order: 5; min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
   .top .mode-banner + .interp-badge { margin-left: -2px; }
-  .top .status-wrap { order: 6; flex-basis: 100%; margin: 0; }
-  .top .status-wrap button.tip-info { margin-right: 0; }  /* 行の右の端：押せる所（44px）を画面の内側に収める */
-  .top .status-line { max-width: none; text-align: left; margin: 0; }
+  .top .status-wrap { order: 6; flex-basis: 100%; margin: 0; max-width: none; text-align: left; }
   .top .mode-banner, .top .interp-badge { font-size: 11px; padding: 2px 9px; }
   .side > * { scroll-margin-top: 150px; }
   .play-now { flex-basis: 100%; order: 3; padding: 4px 8px; }
@@ -832,13 +832,22 @@ body.hero #instruction-panel { order: 1; }
   #text-send { grid-column: 3 / 5; }
 }
 
+/* 360px など特に狭い画面（案3の追加）：1行目（アプリ名・使い方・詳細表示）が収まるよう、横のすきま・ロゴの印・アプリ名の文字だけ
+   少し詰める。「使い方」「詳細表示」の大きさ（文字 14px・高さ 44px）は変えない */
+@media (max-width: 380px) {
+  .top { column-gap: 6px; }
+  .top .logo-mark { width: 30px; height: 30px; }
+  .logo-en { font-size: 16px; letter-spacing: 0.1em; }
+  .logo-ja { font-size: 11px; letter-spacing: 0.04em; }
+}
+
 /* ---- 1100px より狭い画面：縦に並べる（左の列＝声と会話が先、3D は下） ---- */
 @media (max-width: 1099.98px) {
   .work { grid-template-columns: minmax(0, 1fr); }
   .confirm-grid { grid-template-columns: minmax(0, 1fr); }
   .top { flex-wrap: wrap; }
   .load-panel { grid-template-columns: minmax(0, 1fr); }
-  .status-line { max-width: none; }
+  .status-wrap { max-width: none; }
 }
 @media (max-height: 800px) and (max-width: 1099.98px) {
   .fig-3d svg, .fig-main svg { max-height: 50vh; }
@@ -922,7 +931,8 @@ body.hero #instruction-panel { order: 1; }
   .bubble.claude { font-size: 17px; }
   .bubble.app.notice, .bubble.app.record { font-size: 15px; }
   .bubble .who { font-size: 13px; }
-  .status-line { font-size: 14px; }
+  .status-wrap, .status-line { font-size: 14px; }
+  .status-line .st-chip { margin: 5px 0; }  /* 文字 14px のチップでも、折り返したときに ⓘ の押せる所と重ならない行の間（記録の高さは 40px 以内） */
   .reply, .next-hint { font-size: 16px; }
   .range-button-note { font-size: 14px; }
   .cand-heard, .cand-warn { font-size: 15px; }
@@ -956,9 +966,13 @@ button.tip.tip-word::before { width: calc(100% - 10px); height: 24px; }
 .tip-pair { display: inline-flex; gap: 2px; margin-left: 4px; vertical-align: middle; }
 #updown-status[hidden] + button.tip { display: none; }
 .status-line[hidden] + button.tip { display: none; }
-/* アプリの記録の説明（案3）：チップの直後にくっついた小さな ⓘ。押せる所は 44×44 のまま、見た目は 16px の丸の中の「i」 */
-button.tip.tip-info { margin: -12px -14px -12px -11px; font-family: Georgia, "Times New Roman", serif; font-style: italic; font-size: 14px; font-weight: 700; }
-button.tip.tip-info::before { width: 16px; height: 16px; }
+/* アプリの記録の説明（案3）：最後のチップの直後の ⓘ。見た目はほかの「?」と同じ 22px の丸の中の「i」。
+   押せる所は 44×44 のまま。左の負の余白（-44px）は #status-line の右の余白（44px）の中に戻るだけで、チップ・「使い方」・
+   「詳細表示」の押せる所とは重ならない。
+   丸は押せる所の左寄り（左の端から 4px）に置き、チップとの見た目のすきまを小さくする。上下の負の余白は行の高さを広げないため */
+button.tip.tip-info { margin: -12px 0 -12px -44px; padding: 0 14px 0 0; font-family: Georgia, "Times New Roman", serif; font-style: italic;
+  font-size: 14px; font-weight: 700; white-space: nowrap; }
+button.tip.tip-info::before { left: 15px; width: 22px; height: 22px; }
 .tip-pop { position: fixed; z-index: 60; width: min(300px, calc(100vw - 16px)); padding: 10px 30px 10px 12px; border-radius: 12px;
   background: #0f1c33; border: 1px solid rgba(124, 188, 255, 0.55); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55); color: var(--text); }
 .tip-pop[hidden] { display: none; }

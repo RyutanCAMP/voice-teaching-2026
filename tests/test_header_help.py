@@ -5,7 +5,8 @@
 - 使い方の小窓を開く #help-button は、丸の「？」ではなく、隣の #engineer-toggle（「詳細表示」の文字リンク、class="link"）と
   同じ見た目の文字ボタン「使い方」。id・aria-controls・aria-expanded・開閉・Esc で閉じてフォーカスを戻す動きは保つ。
 - ヘッダー以外の .tip の「?」（範囲・位置・マイクなど）は今回は変えない。
-- 画面の動き（1280×800・1920×1080 で折り返さない・開閉・Esc・吹き出し）は tools/e2e_browser.py の check_header_help で確かめる。
+- 画面の動き（360×800・390×844・1150×800・1280×720・1280×800・1920×1080 での ⓘ の位置・重なり・44×44、PC の幅で折り返さない・開閉・Esc・吹き出し）は
+  tools/e2e_browser.py の check_header_help で確かめる。
 """
 import re
 from pathlib import Path
@@ -106,3 +107,19 @@ def test_header_has_no_assertive_words():
     h = header()
     for w in ASSERTIVE:
         assert w not in h, w
+
+
+def test_status_tip_follows_last_chip_on_same_line():
+    """案3の追加（内部レビュー QA P2・Safety 低2件）：チップが2行に折り返しても ⓘ は最後のチップの直後（同じ行）。
+    #status-line を inline にして、終わりの右の余白で ⓘ の場所を取っておき、ⓘ は同じ幅だけ左へ戻す。
+    ⓘ の丸はほかの「?」と同じ 22px。画面での位置・重なり・44×44 は tools/e2e_browser.py の check_header_help で確かめる。"""
+    css = text("style.css")
+    m = re.search(r"\n\.status-line\s*\{([^}]*)\}", css)
+    assert m and re.search(r"display:\s*inline\s*;", m.group(1)), "記録の1行は inline（ⓘ と同じ文の流れ）"
+    reserve = re.search(r"margin:\s*0\s+(\d+)px\s+0\s+0\s*;", m.group(1))
+    assert reserve, "記録の1行の終わりに、ⓘ の場所（右の余白）を取っておく"
+    info = re.search(r"button\.tip\.tip-info\s*\{([^}]*)\}", css).group(1)
+    back = re.search(r"margin:\s*-12px\s+0\s+-12px\s+-(\d+)px\s*;", info)
+    assert back and back.group(1) == reserve.group(1) == "44", "ⓘ は取っておいた幅（ⓘ の押せる所と同じ 44px）だけ左へ戻す"
+    before = re.search(r"button\.tip\.tip-info::before\s*\{([^}]*)\}", css).group(1)
+    assert re.search(r"width:\s*22px", before) and re.search(r"height:\s*22px", before), "ⓘ の丸はほかの「?」と同じ 22px"
