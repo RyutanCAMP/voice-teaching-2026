@@ -94,7 +94,7 @@ def test_negated_cancellation_keeps_candidate(tmp_path, text):
 
 
 # ---- 2. ジョブを読み直したあと、前の画面の番号で承認・出力できる（A4-18） ----
-@pytest.mark.xfail(strict=True, reason=P0 + " A4-18")
+# fix/p0-reload-close（唐川さんの決定 Q-5・Q-7）で直したので xfail を外した。くわしくは tests/test_p0_reload_close.py
 def test_reload_with_previous_invalidates_old_session(tmp_path):
     w, _, sid = pending_three(tmp_path)
     w.load(T.demo_bytes(), previous=sid)
@@ -102,14 +102,12 @@ def test_reload_with_previous_invalidates_old_session(tmp_path):
     assert not w.export(sid)["ok"]
 
 
-@pytest.mark.xfail(strict=True, reason=P0 + " A4-18（previous なし・別のタブ）")
 def test_reload_without_previous_invalidates_old_session(tmp_path):
     w, _, sid = pending_three(tmp_path)
     w.load(T.demo_bytes())
     assert not w.approve(sid, "QA")["ok"]
 
 
-@pytest.mark.xfail(strict=True, reason=P0 + " 古い番号の出力が新しい出力のファイル名を先に取る")
 def test_stale_export_cannot_take_the_new_sessions_file_name(tmp_path, monkeypatch):
     monkeypatch.setattr(sim, "DEFAULT_OUT_DIR", tmp_path / "out")
     w, _, old = pending_three(tmp_path)
