@@ -378,3 +378,33 @@ def test_messages_have_no_assertive_safety_words():
         if name.startswith("M_"):
             text = getattr(F, name)
             assert not any(w in text for w in words), name
+
+
+# ---- 10. クロークさんの申し送り（Issue #5）：承認済みの移動の候補のあとの言い直し ----
+def approved_move(tmp_path, out_dir=None):
+    w, fake = T.flow(tmp_path)
+    sid = w.load(DEMO_C)["session_id"]
+    w.select(sid, "C00005")
+    w.talk(sid, "Yマイナス方向に10mm")
+    assert w.state(sid)["state"]["candidate"]
+    approve(w, sid)
+    return w, fake, sid
+
+
+@pytest.mark.parametrize("text", ["やっぱり5ミリ", "やっぱり5mm", "さっきのは間違い、5ミリ", "違う、5ミリ", "いや、5mm",
+                                  "10mmじゃなくて5mm", "５ミリに変えて", "ヤッパリ5ミリ"])
+def test_approved_move_restated_is_voided(tmp_path, out_dir, text):
+    w, fake, sid = approved_move(tmp_path)
+    gen = w.candidate_gen_of(sid)
+    r = w.talk(sid, text)
+    voided(w, sid, gen)
+    assert "前の承認も取り消しました" in r["hear"]["message"]
+    assert files(out_dir) == [] and not fake.requests
+
+
+def test_approved_move_restated_via_ask_is_voided(tmp_path, out_dir):
+    w, fake, sid = approved_move(tmp_path)
+    gen = w.candidate_gen_of(sid)
+    w.ask(sid, "やっぱり5ミリ")
+    voided(w, sid, gen)
+    assert files(out_dir) == []

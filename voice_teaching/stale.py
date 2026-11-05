@@ -87,8 +87,17 @@ class Verdict:
     rule: str = ""               # どの規則で決めたか（テスト・作業ログ用）
 
 
+# 取消・言い直しの言葉のカタカナ書き（声の認識・打ち間違いで出る）。言葉ごとにひらがなに寄せる
+# （「キャンセル」などのカタカナの言葉は崩さない）
+_KATA = {"ヤッパリ": "やっぱり", "ヤハリ": "やはり", "イヤ": "いや", "チガウ": "ちがう", "チガイマス": "違います",
+         "ヤメテ": "やめて", "ヤメル": "やめる", "トリケシ": "取り消し", "モドシテ": "戻して", "マチガイ": "まちがい",
+         "ジャナクテ": "じゃなくて", "ジャナク": "じゃなく", "デハナク": "ではなく", "ナシ": "なし"}
+_KATA_RE = re.compile("|".join(sorted(_KATA, key=len, reverse=True)))
+
+
 def _norm(text: str) -> str:
-    return unicodedata.normalize("NFKC", text).strip()
+    t = unicodedata.normalize("NFKC", text).strip()
+    return _KATA_RE.sub(lambda m: _KATA[m.group(0)], t)
 
 
 def _clauses(t: str) -> list[str]:
