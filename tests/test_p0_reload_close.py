@@ -283,12 +283,13 @@ def test_concurrent_stale_request_waiting_for_the_lock_is_refused(tmp_path, out,
     T.repeat_to_three(w, old)
     if what == "export":
         assert w.approve(old, "QA", candidate_gen=w.candidate_gen_of(old))["ok"]
+    gen = w.candidate_gen_of(old)  # 世代は錠を取る前に先に取る（QA M-3：錠を待つのは approve・export 自身）
     e = w._entries[old]
     e.lock = GateLock()
     result, loaded = {}, {}
     e.lock.acquire()  # テストが錠を持つ：古い要求は錠の前で止まる
     try:
-        call = (lambda: w.approve(old, "QA", candidate_gen=w.candidate_gen_of(old))) if what == "approve" else (lambda: w.export(old, candidate_gen=w.candidate_gen_of(old)))
+        call = (lambda: w.approve(old, "QA", candidate_gen=gen)) if what == "approve" else (lambda: w.export(old, candidate_gen=gen))
         a = threading.Thread(target=lambda: result.update(r=call()), name="stale-approve")
         a.start()
         assert e.lock.waiting.wait(5)  # 古い要求がエントリを見つけ、錠を待っている

@@ -408,3 +408,117 @@ def test_approved_move_restated_via_ask_is_voided(tmp_path, out_dir):
     w.ask(sid, "やっぱり5ミリ")
     voided(w, sid, gen)
     assert files(out_dir) == []
+
+
+# ---- 11. 独立チェック（11/5 夜 Safety FAIL・QA CONDITIONAL PASS）の再現の文 ----
+SAFETY_LEAKS = ["やっぱりやめた", "やっぱりいいや", "やっぱいいや", "10じゃなくて5", "やっぱり五ミリ", "じゃなくて五ミリ",
+                "とりけして", "トリケシテ", "取りけして", "もどして", "元にもどして", "戻す", "今のナシ", "ナシで", "やっぱなし", "なしなし",
+                "撤回して", "なかったことにして", "消して", "候補を消して", "破棄して", "リセットして", "さっきの間違ってた",
+                "ストップ", "待って", "やっぱ5ミリ", "ヤッパリ5ミリ", "チガウ、5ミリ", "いや5ミリ", "いやいや5ミリ", "いえ、5ミリ",
+                "ごめん5ミリ", "や っぱり5ミリ", "取り下げて", "さっきのはやめて", "今のはやめて", "それはやめて",
+                "今の変更は無しで", "今の変更いらない", "ヤメて", "リセット"]
+
+
+@pytest.mark.parametrize("text", SAFETY_LEAKS)
+def test_after_approval_no_leak_can_export(tmp_path, out_dir, text):
+    """承認済みの古い候補が、どの言い方のあとも出力できない（無効か保留）。"""
+    w, fake, sid = approved_move(tmp_path)
+    gen = w.candidate_gen_of(sid)
+    w.talk(sid, text)
+    st = w.state(sid)["state"]
+    assert not st["can_export"] and not st["can_approve"], (text, st["status_line"])
+    for g in (gen, st["candidate_gen"]):
+        assert not w.export(sid, candidate_gen=g)["ok"], text
+        assert not w.approve(sid, "QA", candidate_gen=g)["ok"], text
+    assert files(out_dir) == []
+
+
+@pytest.mark.parametrize("text", ["3じゃなくて4", "とりけして", "やっぱりやめた"])
+def test_after_approval_count_no_leak(tmp_path, out_dir, text):
+    w, _, sid = pending_three(tmp_path)
+    approve(w, sid)
+    gen = w.candidate_gen_of(sid)
+    w.talk(sid, text)
+    assert not w.export(sid, candidate_gen=gen)["ok"] and not w.state(sid)["state"]["can_export"]
+    assert files(out_dir) == []
+
+
+@pytest.mark.parametrize("text", ["3回と4回ではどう違う？", "何が違う？", "C00003とC00004は何が違うの？", "これは溶接じゃないの？",
+                                  "間違いないですか？", "やっぱりこれで合ってる？", "元に戻すボタンはどこ？"])
+def test_questions_with_marker_words_do_not_hold(tmp_path, text):
+    """QA M-1：言い直しの印の言葉が入った、ふつうの質問は保留にしない（承認の前。候補・世代を変えない）。
+    承認のあとは、否定の言葉の入った質問は保留にする（Safety 再検証を優先。止める側。test_after_approval_doubt_question_holds）"""
+    w, fake, sid = pending_three(tmp_path)
+    gen = w.candidate_gen_of(sid)
+    fake.add(T.answer("C00001〜C00003 の動きをくり返しています。", [21]))
+    w.talk(sid, text, source="voice")
+    st = w.state(sid)["state"]
+    assert st["hold"] is False and st["candidate"] is not None and st["candidate_gen"] == gen and st["voided"] is None, text
+
+
+def test_hold_undo_button_voids_after_hold(tmp_path):
+    """QA L-1：保留になったことを確かめてから［元に戻す］。"""
+    w, _, sid = pending_three(tmp_path)
+    w.talk(sid, "違う")
+    assert w.state(sid)["state"]["hold"] is True
+    gen = w.candidate_gen_of(sid)
+    w.undo(sid)
+    st = w.state(sid)["state"]
+    assert st["candidate"] is None and st["hold"] is False and st["candidate_gen"] > gen
+
+
+# ---- 12. Safety 再検証（e145ff6・2回目）：承認のあとに承認を残すのは、相づちと否定の無い質問だけ ----
+SAFETY_LEAKS_2 = ["消しといて", "けしといて", "戻しといて", "もどしといて", "止めて", "中止", "中止して", "それいらない", "これ要らない",
+                  "さっきのやつナシ", "アンドゥ", "undo", "cancel", "待った", "まった", "ちょいまち", "ちゃう", "マチガエタ",
+                  "さっきのはおかしい", "違くない？", "それ違くない？", "今のはなし？", "さっきの間違ってたよね？", "やっぱり違うんじゃない？",
+                  "すみません、5ミリでした", "言い直す、5ミリ", "ちゃうちゃう、5ミリ", "5ミリじゃなかった？", "うーん"]
+
+
+@pytest.mark.parametrize("text", SAFETY_LEAKS_2)
+def test_after_approval_second_round_no_leak(tmp_path, out_dir, text):
+    w, fake, sid = approved_move(tmp_path)
+    gen = w.candidate_gen_of(sid)
+    fake.add(T.answer("C00005 へ直線で動きます。", [21]), T.answer("C00005 へ直線で動きます。", [21]))
+    w.talk(sid, text)
+    st = w.state(sid)["state"]
+    assert not st["can_export"], (text, st["status_line"])
+    for g in (gen, st["candidate_gen"]):
+        assert not w.export(sid, candidate_gen=g)["ok"], text
+    assert files(out_dir) == []
+
+
+@pytest.mark.parametrize("text", ["はい", "OK", "ありがとう", "このロボット、何をしているの？", "どこへ動くの？", "何回動くの？"])
+def test_after_approval_ack_and_plain_question_keep_approval(tmp_path, out_dir, text):
+    w, fake, sid = approved_move(tmp_path)
+    fake.add(T.answer("C00005 へ直線で動きます。", [21]))
+    w.talk(sid, text)
+    st = w.state(sid)["state"]
+    assert st["approval"] is not None and st["can_export"] and not st["hold"], text
+
+
+@pytest.mark.parametrize("text", ["ここで止まってる？", "動きは決まってるの？", "いいやり方ある？", "けしてぶつからない？",
+                                  "ここではきちんと止まる？"])
+def test_unapproved_questions_do_not_hold(tmp_path, text):
+    """Safety 再検証 M-1：文の途中の「まって」「いいや」「けして」「はき」で保留にしない（承認の前）。"""
+    w, fake, sid = pending_three(tmp_path)
+    fake.add(T.answer("C00001〜C00003 の動きをくり返しています。", [21]))
+    w.talk(sid, text)
+    assert w.state(sid)["state"]["hold"] is False, text
+
+
+def test_after_approval_button_word_keeps_approval(tmp_path):
+    """「出力して」はボタンで行う案内だけ（保留にしない。撮影の流れを止めない）。"""
+    w, _, sid = approved_move(tmp_path)
+    w.talk(sid, "出力して")
+    st = w.state(sid)["state"]
+    assert st["approval"] is not None and st["can_export"]
+
+
+@pytest.mark.parametrize("text", ["何が違う？", "これは溶接じゃないの？", "やっぱりこれで合ってる？"])
+def test_after_approval_doubt_question_holds(tmp_path, out_dir, text):
+    """承認のあとの、否定・言い直しの言葉の入った質問は保留（承認・出力できない。「このままでいい」で解き、ボタンで承認し直す）。"""
+    w, fake, sid = approved_move(tmp_path)
+    fake.add(T.answer("C00005 へ直線で動きます。", [21]))
+    w.talk(sid, text)
+    st = w.state(sid)["state"]
+    assert not st["can_export"] and st["candidate"] is not None, text

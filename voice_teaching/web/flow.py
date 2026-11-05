@@ -927,7 +927,7 @@ class WebFlow:
                 return self._closed_reply(sid, e)
             # 新しい発話（どの道でも。会話の道・回数の変更の希望も）：前の向きの確かめのボタンは使えない（QA 003 M2）
             e.session.forget_facing()
-            pre = self._stale_check(e, text, source)
+            pre = self._stale_check(e, text, source, said_by_person=True)
             route = "stale" if pre is not None else self._talk_route(e, text)
             if route not in ("hear", "stale"):
                 # 指示の道以外（会話・ボタンの案内・変更が2つ・回数）へ回した発話のあとに、前の聞き返しへの答えを当てない
@@ -1145,7 +1145,7 @@ class WebFlow:
             if not isinstance(text, str) or not text.strip() or len(text) > claude_explain.MAX_TEXT:
                 return {**self.explainer.ask(conv, text), "talk": self._talk_state(e, notices)}
             text = text.strip()
-            pre = self._stale_check(e, text, source)
+            pre = self._stale_check(e, text, source, said_by_person=True)
             if pre is not None:
                 # /api/ask にも取消・言い直しが届く（P0 設計 0-2 (2)）：無効・保留にしてから答える。説明の頼みなら説明の節だけを聞く
                 summary, tail = pre.pop("summary", None), pre.pop("tail", "")
@@ -1314,7 +1314,7 @@ class WebFlow:
         return ((M_HAD_APPROVAL if v["had_approval"] else "")
                 + (M_HAD_EXPORT.format(name=v["exported_name"]) if v["exported_name"] else ""))
 
-    def _stale_check(self, e: _Entry, text: str, source: str) -> "dict | None":
+    def _stale_check(self, e: _Entry, text: str, source: str, said_by_person: bool = False) -> "dict | None":
         """取消・言い直し・保留の見分け（プログラム。錠の中で、文を受け取る入口の最初に呼ぶ）。
         候補が無いとき・今の道のままのときは None。扱ったときは、指示の道の答えの形（hear と同じ）を返す。
         取消＋説明なら "explain"（説明の節）・"summary"・"tail" を入れて返す（呼んだ側が使って外す）。"""
@@ -1363,6 +1363,13 @@ class WebFlow:
             return self._stale_out(e, text, source, "ask", msg, v.kind)
         if v.kind == stale.QUESTION_ABOUT_CANCEL:
             return self._stale_out(e, text, source, "ok", M_HOWCX, v.kind)
+        if (said_by_person and v.kind == stale.OTHER and self._approved(e) and not stale.is_ack(said) and not stale.is_plain_question(said)
+                and self._talk_route(e, text) in ("approved", "ask")):
+            # 承認済みの候補があるとき、承認を残す文は、はっきりした相づちと、否定・取消の言葉の無い質問だけ（Safety 再検証：
+            # 言葉の一覧に足す直し方では「消しといて」「中止」「違くない？」などが抜ける）。ほかの文は保留にして確かめる
+            e.hold = True
+            s.log.append(("保留", "承認のあとの文が相づち・ふつうの質問ではないため、変更候補を保留にしました（承認・出力はできません）"))
+            return self._stale_out(e, text, source, "ask", M_UNSURE.format(summary=_summary(s.candidate)), stale.UNSURE)
         return None
 
     @staticmethod

@@ -486,8 +486,13 @@ def test_voice_only_fills_the_input_and_never_sends_or_approves():
 def test_recording_locks_other_operations():
     v = voice_section(static_text()["app.js"])
     locks = v[v.index("function updateLocks()"):v.index("if (!Recognition)")]
-    for i in ["file-input", "text-input", "text-send", "mic-button"]:
+    for i in ["file-input", "text-input", "text-send"]:
         assert f'$("{i}").disabled = rec' in locks, i
+    # マイクは1か所（micLocked）で決める：録音中・JOB が無い・認識が使えない・ステップ4（11/5 夜 実マイクの不具合の直し）
+    assert '$("mic-button").disabled = micLocked(currentStep());' in locks
+    v_all = static_text()["app.js"]
+    ml = v_all[v_all.index("function micLocked(step)"):v_all.index("function updateLocks()")]
+    assert "return recording() || !state.sessionId || !Recognition || step === 4;" in ml
     assert '$("voice-stop").disabled = !rec' in locks
     assert '$("voice-cancel").disabled = !rec' in locks
     js = static_text()["app.js"]
