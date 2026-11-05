@@ -92,7 +92,7 @@ def test_p1a_plain_questions_are_unchanged(make_updown, tmp_path):
 def approved(make_updown, select="C00005"):
     w, sid = start(make_updown(), select=select)
     assert cand(w.hear(sid, "Zマイナス3ミリ")) == ("C00005 Z", "-3.000")
-    assert w.approve(sid, "唐川")["ok"] is True
+    assert w.approve(sid, "唐川", candidate_gen=w.candidate_gen_of(sid))["ok"] is True
     assert w.state(sid)["state"]["approval"] is not None
     return w, sid
 
@@ -123,7 +123,7 @@ def test_p2_dialog_button_after_approval_says_so(make_updown):
     r = w.hear(sid, "そうそう")
     r = w.hear(sid, "Zマイナス3ミリ")  # 会話をやめて新しい指示として読む → 候補
     assert cand(r) == ("C00005 Z", "-3.000")
-    assert w.approve(sid, "唐川")["ok"] is True
+    assert w.approve(sid, "唐川", candidate_gen=w.candidate_gen_of(sid))["ok"] is True
     r = w.hear(sid, "置くところを少し手前に")  # 承認待ちの候補がある：止める
     assert r["message"].startswith(CANCELLED) and r["state"]["approval"] is None
 

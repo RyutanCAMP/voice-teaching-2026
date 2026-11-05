@@ -151,8 +151,8 @@ def test_owner_dialogue_end_to_end_with_mock(counting, tmp_path, monkeypatch):
     assert st["dialog"]["turns"][-1]["text"] == dg.DONE
 
     # 承認はボタン（approve）だけ。出力に「推定」の名前は残らない
-    assert w.approve(sid, "唐川")["ok"] is True
-    out = w.export(sid)
+    assert w.approve(sid, "唐川", candidate_gen=w.candidate_gen_of(sid))["ok"] is True
+    out = w.export(sid, candidate_gen=w.candidate_gen_of(sid))
     assert out["ok"] is True
     data = Path(out["path"]).read_bytes()
     assert "推定".encode() not in data and "置くところ".encode("utf-8") not in data

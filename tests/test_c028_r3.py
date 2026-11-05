@@ -36,7 +36,7 @@ def approved(tmp_path):
     sid = w.load(DEMO_C)["session_id"]
     w.select(sid, "C00005")
     assert w.hear(sid, "Zマイナス3ミリ")["state"]["candidate"] is not None
-    assert w.approve(sid, "唐川")["ok"] is True
+    assert w.approve(sid, "唐川", candidate_gen=w.candidate_gen_of(sid))["ok"] is True
     return w, sid
 
 

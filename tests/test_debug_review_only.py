@@ -33,7 +33,7 @@ def test_control_unlocked_flow_can_approve(tmp_path, monkeypatch):
     monkeypatch.setattr(sim, "DEFAULT_OUT_DIR", tmp_path / "out")
     w = WebFlow(interpreter=MockInterpreter(), updown_config=None)
     sid = _candidate(w)
-    assert w.approve(sid, "QA")["ok"]
+    assert w.approve(sid, "QA", candidate_gen=w.candidate_gen_of(sid))["ok"]
 
 
 def test_python_calls_are_refused(tmp_path, monkeypatch):
@@ -42,8 +42,8 @@ def test_python_calls_are_refused(tmp_path, monkeypatch):
     sid = _candidate(w)
     st = w.state(sid)["state"]
     assert st["candidate"] and st["can_approve"] is False and st["can_export"] is False and st["debug_review_only"]
-    assert not w.approve(sid, "QA")["ok"]
-    assert not w.export(sid)["ok"]
+    assert not w.approve(sid, "QA", candidate_gen=w.candidate_gen_of(sid))["ok"]
+    assert not w.export(sid, candidate_gen=w.candidate_gen_of(sid))["ok"]
     assert w.state(sid)["state"]["approval"] is None
     assert not (tmp_path / "out").exists() or not any((tmp_path / "out").iterdir())
 
@@ -96,8 +96,8 @@ def test_repeat_candidate_cannot_be_approved(tmp_path, monkeypatch):
     sid = w.load(T.demo_bytes())["session_id"]
     out = T.repeat_to_three(w, sid)
     assert out["state"]["candidate"] and out["state"]["can_approve"] is False
-    assert not w.approve(sid, "QA")["ok"]
-    assert not w.export(sid)["ok"]
+    assert not w.approve(sid, "QA", candidate_gen=w.candidate_gen_of(sid))["ok"]
+    assert not w.export(sid, candidate_gen=w.candidate_gen_of(sid))["ok"]
 
 
 def test_words_still_do_not_approve(locked_server):

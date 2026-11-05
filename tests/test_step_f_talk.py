@@ -150,7 +150,7 @@ def test_output_words_after_approval_do_not_cancel_or_export(tmp_path):
     w, f, sid = start(tmp_path, data=DEMO_C)
     w.select(sid, "C00005")
     w.talk(sid, "Zマイナス3ミリ")
-    w.approve(sid, "テスト")
+    w.approve(sid, "テスト", candidate_gen=w.candidate_gen_of(sid))
     r = w.talk(sid, "出力して", "voice")
     assert r["via"] == ["button"] and r["state"]["approval"] is not None  # 承認はそのまま（取り消さない）
     assert not r["state"]["exported"]  # 声では出力しない（出力ボタンだけ）
@@ -163,7 +163,7 @@ def test_words_after_approval_do_not_cancel_or_export(tmp_path, said):
     w, f, sid = start(tmp_path, data=DEMO_C)
     w.select(sid, "C00005")
     w.talk(sid, "Zマイナス3ミリ")
-    w.approve(sid, "テスト")
+    w.approve(sid, "テスト", candidate_gen=w.candidate_gen_of(sid))
     n = calls(f)
     r = w.talk(sid, said, "voice")
     assert r["state"]["approval"] is not None, said  # 承認は取り消さない
@@ -175,7 +175,7 @@ def test_a_real_new_instruction_after_approval_still_cancels_it(tmp_path):
     w, f, sid = start(tmp_path, data=DEMO_C)
     w.select(sid, "C00005")
     w.talk(sid, "Zマイナス3ミリ")
-    w.approve(sid, "テスト")
+    w.approve(sid, "テスト", candidate_gen=w.candidate_gen_of(sid))
     r = w.talk(sid, "Zマイナス2ミリ")
     assert r["state"]["approval"] is None
 
@@ -194,6 +194,6 @@ def test_question_after_approval_is_answered_without_cancelling(tmp_path):
     w, f, sid = start(tmp_path, T.answer("同じ動きをくり返しています。" + T.ASKED, BLOCK), data=DEMO_C)
     w.select(sid, "C00005")
     w.talk(sid, "Zマイナス3ミリ")
-    w.approve(sid, "テスト")
+    w.approve(sid, "テスト", candidate_gen=w.candidate_gen_of(sid))
     r = w.talk(sid, "このロボット、何をしている？")
     assert r["via"] == ["ask"] and r["state"]["approval"] is not None and not r["state"]["exported"]

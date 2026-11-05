@@ -116,8 +116,8 @@ def test_c028_26_flows(name, steps, unconf, conf, mode, source, make_updown, tmp
         return
     if want is None:
         assert got is None or not got[0].endswith("Z"), (name, mode, got, last.get("message"))
-        assert w.approve(sid, "唐川")["ok"] is False or not (got and got[0].endswith("Z"))
-        assert w.export(sid)["ok"] is False
+        assert w.approve(sid, "唐川", candidate_gen=w.candidate_gen_of(sid))["ok"] is False or not (got and got[0].endswith("Z"))
+        assert w.export(sid, candidate_gen=w.candidate_gen_of(sid))["ok"] is False
     else:
         assert got == want, (name, mode, got, last.get("message"))
 
@@ -193,7 +193,7 @@ def test_a_pick_step_still_uses_the_selection(make_updown):
 def test_a_cancelled_approval_drops_the_pending_question(make_updown):
     w, sid = start(make_updown())
     assert cand(w.hear(sid, "Zマイナス3ミリ")) == ("C00005 Z", "-3.000")
-    assert w.approve(sid, "唐川")["ok"] is True
+    assert w.approve(sid, "唐川", candidate_gen=w.candidate_gen_of(sid))["ok"] is True
     w.undo(sid)  # 承認も取り消す
     s = w._entries[sid].session
     assert s._awaiting_answer is None

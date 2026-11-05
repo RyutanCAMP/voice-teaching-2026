@@ -158,8 +158,8 @@ def test_voice_flow_candidate_approve_export_keeps_header_bytes(tmp_path):
     assert c["blocked_reason"] is None
     assert any("ツール番号 8" in x for x in c["warnings"])
     assert w.compare(sid)["status"] == "ok"
-    assert w.approve(sid, "テスト")["ok"] is True
-    e = w.export(sid)
+    assert w.approve(sid, "テスト", candidate_gen=w.candidate_gen_of(sid))["ok"] is True
+    e = w.export(sid, candidate_gen=w.candidate_gen_of(sid))
     assert e["ok"] is True, e
     new = Path(e["path"]).read_bytes()
     a, b = lines(DATA), lines(new)

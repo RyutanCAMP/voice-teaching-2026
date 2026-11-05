@@ -17,7 +17,7 @@ from __future__ import annotations
 import hashlib
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -105,6 +105,26 @@ class Approval:
     updown_status: str | None = None
     updown_fingerprint: str | None = None
     updown_confirmed_by: str | None = None
+    # 取り消した印（P0 H02・H16・読み直し）。取り消し・言い直し・読み直しで承認を捨てる前に立てる。立てたら戻さない。
+    # 比べる・指紋には使わない（同じ中身の承認でも、取り消したのはこの記録だけ）
+    revocation: "Revocation" = field(default_factory=lambda: Revocation(), compare=False, repr=False)
+
+
+class Revocation:
+    """承認の記録ごとの「取り消した」の印（Approval は変えられない形なので、印だけ別に持つ）。"""
+    __slots__ = ("revoked",)
+
+    def __init__(self) -> None:
+        self.revoked = False
+
+
+REVOKED = "この承認は取り消されているため、出力しません（取り消し・言い直し・読み直しのあとの古い承認は使えません）"
+
+
+def revoke(approval: "Approval | None") -> None:
+    """承認を取り消した印を立てる（web/flow.py が承認を捨てる前に呼ぶ）。この記録では、もう出力しない。"""
+    if isinstance(approval, Approval):
+        approval.revocation.revoked = True
 
 
 # ---- 1. 変更候補 ----
@@ -253,6 +273,8 @@ def approve(proposal: "SimProposal | SimRepeatProposal", approved_by: str, updow
 # ---- 3. シミュレーション用の出力 ----
 def export_sim(proposal: SimProposal, approval: Approval) -> Path:
     """承認した変更候補を、シミュレーション専用のフォルダ（DEFAULT_OUT_DIR）に <ジョブ名>_SIM.JBI.txt で書く。"""
+    if isinstance(approval, Approval) and approval.revocation.revoked:
+        raise SimError(REVOKED)  # 取り消した承認を手に持ったまま直接呼んでも書かない（P0 設計 0-2 (1) 層2）
     if isinstance(proposal, SimRepeatProposal):
         return _export_repeat(proposal, approval)
     if not isinstance(proposal, SimProposal) or proposal.mode != "sim":
@@ -326,6 +348,8 @@ def _export_repeat(proposal: SimRepeatProposal, approval: Approval) -> Path:
         raise SimError("シミュレーションの候補ではないため、出力しません")
     if not isinstance(approval, Approval):
         raise SimError("承認されていないため、出力しません")
+    if approval.revocation.revoked:
+        raise SimError(REVOKED)
     if (approval.original_sha256 != _sha(proposal.original_bytes)
             or approval.new_sha256 != _sha(proposal.new_bytes)):
         raise SimError("承認の後でデータが変わったため、出力しません")

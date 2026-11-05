@@ -88,10 +88,10 @@ def test_flow_refuses_to_approve_or_export_blocked_candidate(name, position, tmp
     st = r["state"]
     assert st["candidate"] is not None and st["blocked_reason"], r
     assert st["can_approve"] is False
-    a = wf.approve(sid, "テスト太郎")
+    a = wf.approve(sid, "テスト太郎", candidate_gen=wf.candidate_gen_of(sid))
     assert a["ok"] is False and "実機用の検査で止まった" in a["error"]
     assert wf.state(sid)["state"]["approval"] is None
-    e = wf.export(sid)
+    e = wf.export(sid, candidate_gen=wf.candidate_gen_of(sid))
     assert e["ok"] is False
     assert _files(tmp_path) == []
 
@@ -124,9 +124,10 @@ def test_http_api_refuses_blocked_candidate(running, name, position, tmp_path):
     sid = _post(running, "/api/load", (DUMMY / name).read_bytes())["session_id"]
     h = _post(running, "/api/hear", {"session_id": sid, "text": f"{position}をZプラス方向に5mm移動して", "source": "text"})
     assert h["state"]["blocked_reason"]
-    a = _post(running, "/api/approve", {"session_id": sid, "approver": "テスト太郎"})
+    gen = h["state"]["candidate_gen"]
+    a = _post(running, "/api/approve", {"session_id": sid, "approver": "テスト太郎", "candidate_gen": gen})
     assert a["ok"] is False
-    e = _post(running, "/api/export", {"session_id": sid})
+    e = _post(running, "/api/export", {"session_id": sid, "candidate_gen": gen})
     assert e["ok"] is False
     assert _files(tmp_path) == []
 
@@ -148,8 +149,9 @@ def test_http_api_approves_and_exports_passing_change(running, name, position, b
     assert _post(running, "/api/select", {"session_id": sid, "position": position})["ok"] is True
     h = _post(running, "/api/hear", {"session_id": sid, "text": "この位置を上に10mm", "source": "text"})
     assert h["state"]["blocked_reason"] is None and h["state"]["can_approve"] is True, h
-    assert _post(running, "/api/approve", {"session_id": sid, "approver": "テスト太郎"})["ok"] is True
-    e = _post(running, "/api/export", {"session_id": sid})
+    gen = h["state"]["candidate_gen"]
+    assert _post(running, "/api/approve", {"session_id": sid, "approver": "テスト太郎", "candidate_gen": gen})["ok"] is True
+    e = _post(running, "/api/export", {"session_id": sid, "candidate_gen": gen})
     assert e["ok"] is True, e
     out = Path(e["path"])
     assert out.name == name.replace(".JBI", "_SIM.JBI.txt")

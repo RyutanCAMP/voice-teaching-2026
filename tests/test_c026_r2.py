@@ -129,9 +129,9 @@ def test_p0_two_step_up_down_never_becomes_z(kind, first, second, source, make_u
     r = w.hear(sid, second, source=source)
     assert r["status"] != "ok" and cand(r) is None and not r["candidate_made"], (first, second, r["message"])
     assert r["state"]["can_approve"] is False
-    a = w.approve(sid, "テスト太郎")
+    a = w.approve(sid, "テスト太郎", candidate_gen=w.candidate_gen_of(sid))
     assert a["ok"] is False
-    x = w.export(sid)
+    x = w.export(sid, candidate_gen=w.candidate_gen_of(sid))
     assert x["ok"] is False and x["state"]["exported"] is None
 
 
@@ -552,22 +552,22 @@ def test_p2_1_dialog_shimasu_still_checked_by_session(make_updown, tmp_path):
 def test_p2_3_export_message_after_state_request(make_updown, tmp_path):
     w, sid, _ = start("confirmed", make_updown, tmp_path)
     assert cand(w.hear(sid, "Zマイナス3ミリ")) == ("C00005 Z", "-3.000")
-    assert w.approve(sid, "テスト太郎")["ok"] is True
+    assert w.approve(sid, "テスト太郎", candidate_gen=w.candidate_gen_of(sid))["ok"] is True
     _rewrite(w.updown_config, lambda o: o.__setitem__("evidence", o["evidence"] + "。"))
     st = w.state(sid)
     assert st["state"]["approval"] is None
-    x = w.export(sid)
+    x = w.export(sid, candidate_gen=w.candidate_gen_of(sid))
     assert x["ok"] is False and x["error"] == flow_mod.UPDOWN_CHANGED_EXPORT
 
 
 def test_p2_3_other_cancel_reasons_keep_not_approved(make_updown, tmp_path):
     w, sid, _ = start("confirmed", make_updown, tmp_path)
     w.hear(sid, "Zマイナス3ミリ")
-    w.approve(sid, "テスト太郎")
+    w.approve(sid, "テスト太郎", candidate_gen=w.candidate_gen_of(sid))
     _rewrite(w.updown_config, lambda o: o.__setitem__("evidence", o["evidence"] + "。"))
     w.state(sid)
     w.undo(sid)  # 元に戻した：もう上下の文ではない
-    x = w.export(sid)
+    x = w.export(sid, candidate_gen=w.candidate_gen_of(sid))
     assert x["ok"] is False and x["error"] == flow_mod.NOT_APPROVED
 
 
@@ -589,7 +589,7 @@ def test_s_msg_only_when_approval_was_really_cancelled(make_updown, tmp_path):
     r = w.hear(sid, "Yのマイナス3ミリ")
     assert r["status"] == "stop" and r["message"] == session_mod.PENDING_MESSAGE
     # 承認した：新しい指示で承認を取り消したときだけ、決まった文
-    assert w.approve(sid, "テスト太郎")["ok"] is True
+    assert w.approve(sid, "テスト太郎", candidate_gen=w.candidate_gen_of(sid))["ok"] is True
     r = w.hear(sid, "Yのマイナス3ミリ", source="voice")
     assert r["status"] == "stop" and r["message"] == APPROVAL_CANCELLED and r["state"]["approval"] is None
     assert cand(r) == ("C00005 Z", "-3.000")
@@ -662,7 +662,7 @@ def test_value_change_and_up_down_combinations(texts, unconf, conf, kind, source
     assert cand(r) == want, (texts, kind, r["message"])
     if want is None:
         assert r["status"] != "ok" and r["state"]["can_approve"] is False
-        assert w.approve(sid, "テスト太郎")["ok"] is False and w.export(sid)["ok"] is False
+        assert w.approve(sid, "テスト太郎", candidate_gen=w.candidate_gen_of(sid))["ok"] is False and w.export(sid, candidate_gen=w.candidate_gen_of(sid))["ok"] is False
 
 
 @pytest.mark.parametrize("answer,want", [("上に3ミリ", ("C00004 Z", "+3.000")), ("3ミリ下げて", ("C00004 Z", "-3.000"))])

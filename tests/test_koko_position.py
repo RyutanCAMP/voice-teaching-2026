@@ -70,7 +70,7 @@ def test_koko_on_a_shared_position_is_reference_only_and_cannot_be_approved(tmp_
     c = r["state"]["candidate"]
     assert c is not None and c["blocked_reason"] and "共用" in c["blocked_reason"]
     assert r["state"]["approval"] is None and not r["state"]["can_export"]
-    a = w.approve(sid, "テスト")
+    a = w.approve(sid, "テスト", candidate_gen=w.candidate_gen_of(sid))
     assert not a.get("ok", False) or a["state"]["approval"] is None
     assert w.state(sid)["state"]["approval"] is None and not w.state(sid)["state"]["exported"]
 

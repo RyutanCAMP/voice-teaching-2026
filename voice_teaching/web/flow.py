@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import claude_explain, claude_interpreter, claude_lead, jbi, mock_claude, sim
+from .. import stale
 from .. import claude_talk as talk
 from .. import repeat_count as rc
 from .. import dialog as dg
@@ -64,12 +65,15 @@ def _said_range(text: str) -> bool:
     return bool(_RANGE_SAID.search(_COUNT_FROM_WORDS.sub("", rc.to_digits(text))))
 
 
-def _status_line(has_candidate: bool, blocked: bool, approved: bool, exported: bool, range_pending: bool) -> str:
+def _status_line(has_candidate: bool, blocked: bool, approved: bool, exported: bool, range_pending: bool,
+                 hold: bool = False, voided_why: str | None = None) -> str:
     """いまの状態（プログラムの確定情報だけ）。"""
     if range_pending:
         cand = "範囲の確認中（まだ候補はありません）"
     elif not has_candidate:
-        cand = "なし"
+        cand = f"なし（前の候補は{voided_why}のため取り消しました）" if voided_why else "なし"
+    elif hold:
+        cand = "保留（取り消すか確かめています。承認・出力はできません）"
     elif blocked:
         cand = "参考の表示だけ（変更しません・承認できません）"
     else:
@@ -109,6 +113,43 @@ NOT_SENT = "していません"  # このアプリにはロボットへ送る・
 ORIGINAL_UNKNOWN_NOTE = "元の動作データが読み込んだときと同じか確かめられないため、「元の動作データ」の行は出しません"
 EXPORTED_LINE = "シミュレーション用に出力しました（{name}。実機には入れないでください）"
 _UPDOWN_STATUS_NAMES = {"unconfirmed": "未確認", "mismatch": "不一致", "changed": "変更済み"}
+# P0 H02・H16（docs/DESIGN_P0_STALE_CANDIDATES_20261105.md 4-6）：取消・言い直しで前の候補を無効にしたときの決まった文。
+# {summary} は候補からプログラムが作る。安全や距離を断定する言葉は使わない（K9）
+M_CORR = "言い直しを受け取ったため、前の変更候補（{summary}）を取り消しました。承認・出力はできません。元の動作データは変わっていません。"
+M_CORR_COUNT = "{n}回にする場合は、「{n}回にして」と言い直してください。まだ新しい変更候補は作っていません"
+M_CORR_SAME = "動作データでは今{n}回です。{n}回のままなら、変更はありません"
+M_CORR_DECIMAL = "回数は整数で言ってください。まだ新しい変更候補は作っていません"
+M_CORR_MOVE = "新しい内容は、位置・方向・量（mm）をそろえて、もう一度指示してください。まだ新しい変更候補は作っていません"
+M_CORR_OTHER = "新しい内容を、もう一度指示してください。まだ新しい変更候補は作っていません"
+M_HAD_APPROVAL = "前の承認も取り消しました。"
+M_HAD_EXPORT = "出力したファイル（{name}）は、そのまま残っています（実機には入れないでください）。"
+M_CXEX = "前の変更候補（{summary}）を取り消しました。元の動作データは変わっていません。続けて、読み込んだ元の動作データについて答えます"
+M_CXEX_NOASK = ("前の変更候補（{summary}）を取り消しました。元の動作データは変わっていません。"
+                "説明は、もう一度「何をしているか教えて」と聞いてください")
+M_HOWCX = ("取り消す場合は、［元に戻す］を押すか「取り消して」と言ってください。取り消しても元の動作データは変わりません。"
+           "今の変更候補はそのままです")
+M_UNSURE = ("今の変更候補（{summary}）を取り消しますか？ 取り消す場合は、［元に戻す］を押すか「取り消して」と言ってください。"
+            "残す場合は「このままでいい」と言ってください。確かめるまで、承認・出力はできません")
+M_KEPT = "今の変更候補（{summary}）を残しました。承認はまだです。内容を確かめてから、確認表示の承認ボタンで承認してください"
+M_KEPT_APPROVAL = "前の承認は取り消しました。"
+M_HOLD = "取り消すか確かめている変更候補は、承認・出力できません。「取り消して」か「このままでいい」で答えてください"
+M_NOGEN = "画面の変更候補の番号がないため、承認・出力できません。画面を読み直してから、もう一度ボタンを押してください"
+M_STALEGEN = ("画面に出ていた変更候補は、もう使えません（取り消し・言い直し・読み直しのどれかがありました）。"
+              "今の内容を確かめてから、もう一度ボタンを押してください")
+M_VOIDED = "（{why}のため、前の変更候補 {summary} は取り消してあります）"
+
+
+def _summary(ch) -> str:
+    """候補の要約（プログラムの数のまま）。回数：「C00001〜C00003 の作業を 2回 → 3回」。移動：「C00005 の Y を 150.0 → 140.0」。"""
+    if ch is None:
+        return "なし"
+    if getattr(ch, "kind", None) == "repeat":
+        return f"{ch.start}〜{ch.end} の作業を {ch.before_count}回 → {ch.after_count}回"
+    target = str(getattr(ch, "target", "") or "")
+    parts = target.split()
+    if len(parts) == 2:
+        return f"{parts[0]} の {parts[1]} を {ch.before_value} → {ch.after_value}"
+    return target or "変更の候補"
 
 
 @dataclass
@@ -136,6 +177,14 @@ class _Entry:
     # 閉じた印（Q-7：新しいジョブを読み込んだら、ほかの画面はすべて閉じる）。立てたら戻さない。理由は "replaced"
     closed: bool = False
     closed_reason: str | None = None
+    # P0 H02・H16：候補の世代（候補ができた・変わった・捨てた・無効にしたたびに1つ進める）。承認・出力のボタンは
+    # 画面が見ていた世代を送り、今の世代と違えば断る。approval_gen は承認したときの世代
+    cand_gen: int = 0
+    cand_seen: object | None = None
+    approval_gen: int | None = None
+    # 保留：取消・言い直しかもしれない文で、はっきりしないとき。承認・出力はできない（承認の記録は残すが使えない）
+    hold: bool = False
+    voided: dict | None = None  # 最後に無効にした記録（理由・要約）。新しい候補ができたら消す
 
     # Session に渡すシミュレーション（実機用の検査に断られたときだけ呼ばれる）
     def simulate(self, job: jbi.Job, p: ut.ProposedChange, reason: str) -> jbi.ChangeProposal | None:
@@ -221,6 +270,17 @@ class WebFlow:
     def state(self, sid: object) -> dict:
         return self._run(sid, lambda e: {"ok": True})
 
+    def candidate_gen_of(self, sid: object) -> int | None:
+        """今の候補の世代（読むだけ。状態の candidate_gen と同じ）。閉じた・無い画面は None。"""
+        e = self._live(sid)
+        if e is None:
+            return None
+        with e.lock:
+            if e.closed:
+                return None
+            self._touch_gen(e)
+            return e.cand_gen
+
     # ---- 指示（音声・文字）。ここからは承認・出力を呼ばない ----
     def hear(self, sid: object, text: object, source: object = "text") -> dict:
         if not isinstance(text, str) or not text.strip():
@@ -231,6 +291,12 @@ class WebFlow:
             return {"ok": False, "error": "指示の種類（voice か text）が分かりません"}
 
         def run(e: _Entry) -> dict:
+            pre = self._stale_check(e, text, source)
+            if pre is not None:
+                summary, tail = pre.pop("summary", None), pre.pop("tail", "")
+                if pre.pop("explain", None) is not None:  # /api/hear からの取消＋説明：取り消すだけ（Claude は呼ばない）
+                    pre["message"] = M_CXEX_NOASK.format(summary=summary) + tail
+                return pre
             if e.session.repeat_range is not None and rc.is_range_confirm_word(text):
                 # 範囲の確認の最中の「この範囲を繰り返す」「はい」など：確定せず、範囲の確認を残して案内する（QA P1-A）。
                 # 承認・候補・会話の状態は変えない（候補が無い間だけ範囲の確認がある）
@@ -739,12 +805,20 @@ class WebFlow:
         return self._run(sid, run)
 
     # ---- 承認（画面の承認ボタンからだけ呼ぶ） ----
-    def approve(self, sid: object, approver: object) -> dict:
+    def approve(self, sid: object, approver: object, *, candidate_gen: object) -> dict:
+        """candidate_gen：画面が見ていた候補の世代（状態の candidate_gen）。省略できない。今の世代と違えば断る。"""
         def run(e: _Entry) -> dict:
             s = e.session
+            self._touch_gen(e)
             ch = s.candidate
             if ch is None:
-                return self._fail(e, "承認する変更候補がありません")
+                return self._fail(e, "承認する変更候補がありません" + self._voided_note(e))
+            if isinstance(candidate_gen, bool) or not isinstance(candidate_gen, int):
+                return self._fail(e, M_NOGEN)
+            if candidate_gen != e.cand_gen:
+                return self._fail(e, M_STALEGEN)
+            if e.hold:
+                return self._fail(e, M_HOLD)
             if not isinstance(approver, str) or not approver.strip():
                 return self._fail(e, "承認した人の名前がないため、承認できません")
             if ch.kind == "repeat":
@@ -770,6 +844,7 @@ class WebFlow:
                 return self._fail(e, str(ex))
             e.sim_proposal, e.approval, e.approved_candidate = sp, ap, ch
             e.approval_updown = st
+            e.approval_gen = e.cand_gen
             e.updown_cancelled = False
             e.exported = None
             s.log.append(("承認", f"{ap.approved_by} さんが承認ボタンで承認しました（{ap.approved_at}）。{_updown_note(st)}"))
@@ -794,17 +869,26 @@ class WebFlow:
             return self._fail(e, str(ex))
         e.sim_proposal, e.approval, e.approved_candidate = sp, ap, ch
         e.approval_updown = st
+        e.approval_gen = e.cand_gen
         e.updown_cancelled = False
         e.exported = None
         s.log.append(("承認", f"{ap.approved_by} さんが承認ボタンで承認しました（{ap.approved_at}）。{_updown_note(st)}"))
         return {"ok": True, "state": None}
 
     # ---- シミュレーション用の出力（合成ジョブだけ） ----
-    def export(self, sid: object) -> dict:
+    def export(self, sid: object, *, candidate_gen: object) -> dict:
+        """candidate_gen：画面が見ていた候補の世代。省略できない。承認したときの世代・今の世代と違えば断る。"""
         def run(e: _Entry) -> dict:
+            self._touch_gen(e)
             if not self._approved(e):
                 # 上下の向きの設定が変わって承認を消した（間に状態の要求があっても）なら、その理由を出す
-                return self._fail(e, UPDOWN_CHANGED_EXPORT if e.updown_cancelled else NOT_APPROVED)
+                return self._fail(e, UPDOWN_CHANGED_EXPORT if e.updown_cancelled else NOT_APPROVED + self._voided_note(e))
+            if isinstance(candidate_gen, bool) or not isinstance(candidate_gen, int):
+                return self._fail(e, M_NOGEN)
+            if candidate_gen != e.cand_gen or e.approval_gen != e.cand_gen:
+                return self._fail(e, M_STALEGEN)
+            if e.hold:
+                return self._fail(e, M_HOLD)
             if not self._updown_unchanged(e):  # 設定を読み直す。変わっていれば承認を消して断る
                 self._cancel_approval(e, UPDOWN_CHANGED_WHY)
                 return self._fail(e, UPDOWN_CHANGED_EXPORT)
@@ -843,14 +927,28 @@ class WebFlow:
                 return self._closed_reply(sid, e)
             # 新しい発話（どの道でも。会話の道・回数の変更の希望も）：前の向きの確かめのボタンは使えない（QA 003 M2）
             e.session.forget_facing()
-            route = self._talk_route(e, text)
-            if route != "hear":
+            pre = self._stale_check(e, text, source)
+            route = "stale" if pre is not None else self._talk_route(e, text)
+            if route not in ("hear", "stale"):
                 # 指示の道以外（会話・ボタンの案内・変更が2つ・回数）へ回した発話のあとに、前の聞き返しへの答えを当てない
                 # （Safety F1・QA M-1。11/5）。捨てるのは未確定の聞き返しだけ（候補・承認・選択は変えない）
                 e.session.forget_question()
         ask_out = hear_out = None
         via: list[str] = []
-        if route in ("button", "approved", "several", "purpose_or_change"):
+        if route == "stale":
+            # 取消・言い直し・保留（P0 H02・H16）：前の候補は錠の中で、もう無効・保留にしてある。説明の頼みがあれば、
+            # 説明の節だけを Claude に聞く（読み取りだけ。取消の節は送らない。候補はもう無い）
+            summary, tail = pre.pop("summary", None), pre.pop("tail", "")
+            explain = pre.pop("explain", None)
+            hear_out = pre
+            via.append("hear")
+            if explain is not None:
+                hear_out["message"] = M_CXEX.format(summary=summary) + tail
+                ask_out = self.ask(sid, explain, source=source)
+                if ask_out.get("session_closed"):
+                    return ask_out
+                via.append("ask")
+        elif route in ("button", "approved", "several", "purpose_or_change"):
             f0 = ut.read_utterance(text)
             msg = (STEP_F_APPROVED_NEXT if route == "approved"
                    else STEP_F_ONE_AT_A_TIME if route == "several"
@@ -1047,6 +1145,22 @@ class WebFlow:
             if not isinstance(text, str) or not text.strip() or len(text) > claude_explain.MAX_TEXT:
                 return {**self.explainer.ask(conv, text), "talk": self._talk_state(e, notices)}
             text = text.strip()
+            pre = self._stale_check(e, text, source)
+            if pre is not None:
+                # /api/ask にも取消・言い直しが届く（P0 設計 0-2 (2)）：無効・保留にしてから答える。説明の頼みなら説明の節だけを聞く
+                summary, tail = pre.pop("summary", None), pre.pop("tail", "")
+                explain = pre.pop("explain", None)
+                if explain is None:
+                    out = self._app_reply(e, pre["message"], notices, source, "stale_" + pre["stale"], text)
+                    out["stale"] = pre["stale"]
+                    return out
+                notices = notices + [M_CXEX.format(summary=summary) + tail]
+                text = explain
+                if e.explain is None or e.explain.key != key:
+                    e.explain = claude_explain.Conversation.start(s.original_bytes, s.original, st)
+                conv = e.explain
+                if conv.facts is not None:
+                    conv.facts["change_state"] = self._change_state(e)
             s.forget_question()  # Claude に聞いた発話のあとに、前の聞き返しへの答えを当てない（Safety F1。/api/ask を直接呼んだときも）
             pending = s.candidate is not None
             blocks = talk.repeat_blocks(s.original)
@@ -1144,12 +1258,129 @@ class WebFlow:
             e.session._discard()
             e.session.forget_range()
             e.session.forget_question()
+            sim.revoke(e.approval)  # 閉じた画面の承認は、手に持ったままでも出力できない（P0 設計 0-2 (1) 層2）
             e.sim_proposal = e.approval = e.approved_candidate = e.approval_updown = None
+            e.approval_gen = None
+            e.hold = False
+            e.cand_gen += 1
             e.comparison = None
             e.dialog = dg.Dialog()
             e.explain = None
             if e.talk is not None:
                 e.talk.clear()
+
+    # ---- P0 H02・H16：取消・言い直しで、前の候補を無効にする（docs/DESIGN_P0_STALE_CANDIDATES_20261105.md） ----
+    @staticmethod
+    def _touch_gen(e: _Entry) -> None:
+        """候補が変わっていれば（どの道で変わっても）世代を1つ進める。保留を解き、新しい候補なら無効の記録を消す。"""
+        ch = e.session.candidate
+        if ch is not e.cand_seen:
+            e.cand_gen += 1
+            e.cand_seen = ch
+            e.hold = False
+            if ch is not None:
+                e.voided = None
+
+    def _voided_note(self, e: _Entry) -> str:
+        v = e.voided
+        return M_VOIDED.format(why=v["why"], summary=v["summary"]) if v else ""
+
+    def _invalidate(self, e: _Entry, why: str) -> dict:
+        """前の候補を無効にする（錠の中で呼ぶ）：承認を取り消した印を立てて消す・候補・範囲の確認・会話・答え待ちを捨てる・
+        世代を進める。元の JOB と、出力したファイルには触らない。無効にした記録を返す。"""
+        s = e.session
+        ch = s.candidate
+        exported = e.exported
+        v = {"why": why, "summary": _summary(ch), "had_approval": e.approval is not None,
+             "exported_name": Path(exported).name if exported else None, "kind": getattr(ch, "kind", None),
+             "before_count": getattr(ch, "before_count", None)}
+        self._cancel_approval(e, f"{why}のため")
+        s.undo()  # 答え待ち・範囲の確認・候補を捨てる（今の関数）
+        e.dialog.end()
+        e.dialog.estimated = None
+        e.comparison = None
+        e.exported = None
+        e.hold = False
+        e.cand_gen += 1
+        e.cand_seen = s.candidate
+        v["gen"] = e.cand_gen
+        e.voided = v
+        s.log.append(("取消", f"{why}のため、変更候補を取り消しました（{v['summary']}）。承認・出力はできません。"
+                             "元の動作データは変わっていません"))
+        return v
+
+    @staticmethod
+    def _void_tail(v: dict) -> str:
+        return ((M_HAD_APPROVAL if v["had_approval"] else "")
+                + (M_HAD_EXPORT.format(name=v["exported_name"]) if v["exported_name"] else ""))
+
+    def _stale_check(self, e: _Entry, text: str, source: str) -> "dict | None":
+        """取消・言い直し・保留の見分け（プログラム。錠の中で、文を受け取る入口の最初に呼ぶ）。
+        候補が無いとき・今の道のままのときは None。扱ったときは、指示の道の答えの形（hear と同じ）を返す。
+        取消＋説明なら "explain"（説明の節）・"summary"・"tail" を入れて返す（呼んだ側が使って外す）。"""
+        s = e.session
+        self._touch_gen(e)
+        if not isinstance(text, str) or not text.strip():
+            return None
+        text = text.strip()
+        if e.hold and s.candidate is not None and stale.is_keep(text):
+            had = self._cancel_approval(e, "候補を残すと言われたため（承認はもう一度、承認ボタンで）")
+            e.hold = False
+            msg = (M_KEPT_APPROVAL if had else "") + M_KEPT.format(summary=_summary(s.candidate))
+            return self._stale_out(e, text, source, "ok", msg, stale.KEEP)
+        if s.candidate is None:
+            return None
+        v = stale.classify(text)
+        if v.kind == stale.CANCEL:
+            info = self._invalidate(e, "取消")
+            msg = (APPROVAL_AND_CANDIDATE_CANCELLED if info["had_approval"]
+                   else "変更候補を捨てました。元のジョブは変わっていません")
+            if info["exported_name"]:
+                msg += M_HAD_EXPORT.format(name=info["exported_name"])
+            return self._stale_out(e, text, source, "ok", msg, v.kind)
+        if v.kind == stale.CORRECTION:
+            info = self._invalidate(e, "言い直し")
+            msg = M_CORR.format(summary=info["summary"]) + self._void_tail(info) + self._corr_next(info, v.value)
+            return self._stale_out(e, text, source, "ask", msg, v.kind)
+        if v.kind == stale.CANCEL_EXPLAIN:
+            info = self._invalidate(e, "取消")
+            tail = self._void_tail(info)
+            out = self._stale_out(e, text, source, "ok", M_CXEX.format(summary=info["summary"]) + tail, v.kind)
+            out.update(explain=v.explain, summary=info["summary"], tail=tail)
+            return out
+        if v.kind == stale.UNSURE:
+            e.hold = True
+            s.log.append(("保留", "取り消すか確かめるまで、変更候補を保留にしました（承認・出力はできません）"))
+            if v.asked_form:
+                return None  # 「元に戻しますか」：今の道が［「元に戻します」でよいですか？］で確かめる（押すと取消）。保留のまま
+            msg = M_UNSURE.format(summary=_summary(s.candidate))
+            return self._stale_out(e, text, source, "ask", msg, v.kind)
+        if v.kind == stale.QUESTION_ABOUT_CANCEL:
+            return self._stale_out(e, text, source, "ok", M_HOWCX, v.kind)
+        return None
+
+    @staticmethod
+    def _corr_next(info: dict, value: str | None) -> str:
+        """言い直しのあとに、次にすることの文（新しい候補は作らない）。"""
+        if info["kind"] == "repeat" and value and value.endswith("回"):
+            n = value[:-1]
+            if not n.isdigit():
+                return M_CORR_DECIMAL
+            if info["before_count"] is not None and int(n) == info["before_count"]:
+                return M_CORR_SAME.format(n=int(n))
+            return M_CORR_COUNT.format(n=int(n))
+        if info["kind"] == "shift":
+            return M_CORR_MOVE
+        return M_CORR_OTHER
+
+    def _stale_out(self, e: _Entry, text: str, source: str, status: str, msg: str, kind: str) -> dict:
+        s = e.session
+        s.log.append(("発話", f"{'音声' if source == 'voice' else '文字'}：{text}"))
+        s.log.append(("聞き返し" if status == "ask" else "結果", msg))
+        return {"ok": True, "status": status, "message": msg, "heard": text, "source": source,
+                "facts": _facts(ut.read_utterance(text)),
+                "tool_calls": [], "dialog": False, "blocked_reason": None, "candidate_made": False, "choices": [],
+                "no_change": kind not in stale.INVALIDATING, "stale": kind}
 
     def _closed_reply(self, sid: object, e: "_Entry | None" = None) -> dict:
         """閉じた画面・見つからない画面への要求を断る（状態は変えない・返さない）。
@@ -1250,11 +1481,14 @@ class WebFlow:
             return False
         e.session.forget_question()  # 承認の取り消し：未確定の聞き返しも捨てる（CHECKER_028 A）
         e.updown_cancelled = why == UPDOWN_CHANGED_WHY
+        sim.revoke(e.approval)  # 捨てる前に印を立てる：古い承認を手に持ったまま出力しても書かない（P0 設計 0-2 (1) 層2）
         e.approval = e.sim_proposal = e.approved_candidate = e.approval_updown = None
+        e.approval_gen = None
         e.session.log.append(("承認", f"{why}、承認を取り消しました。もう一度確かめて、承認ボタンで承認してください"))
         return True
 
     def _sync(self, e: _Entry) -> None:
+        self._touch_gen(e)
         if e.approval is not None and not self._approved(e):
             self._cancel_approval(e, "変更候補が変わったため")
         if e.approval is not None and not self._updown_unchanged(e):
@@ -1267,6 +1501,7 @@ class WebFlow:
 
     def _state(self, sid: str, e: _Entry) -> dict:
         s = e.session
+        self._touch_gen(e)
         cand = None
         ch = s.candidate
         if ch is not None:
@@ -1311,10 +1546,14 @@ class WebFlow:
                           "updown_confirmed_by": e.approval.updown_confirmed_by}
                          if approved else None),
             "can_approve": (ch is not None and ch.kind in ("shift", "repeat") and not approved
-                            and not s.candidate_blocked_reason and same_updown),
+                            and not s.candidate_blocked_reason and same_updown and not e.hold),
+            # P0：承認・出力のボタンが送る候補の世代。保留・無効の記録（要約だけ。プログラムが作った文）
+            "candidate_gen": e.cand_gen,
+            "hold": e.hold,
+            "voided": ({"why": e.voided["why"], "summary": e.voided["summary"]} if e.voided and ch is None else None),
             # 出力できるのは合成ジョブ（samples/dummy と同じバイト列）だけ。実機の JOB は承認しても出力ボタンを押せない（画面で明示する）
             "exportable": sim._is_synthetic(s.original_bytes),
-            "can_export": approved and sim._is_synthetic(s.original_bytes),
+            "can_export": approved and sim._is_synthetic(s.original_bytes) and not e.hold,
             "exported": e.exported if approved else None,
             # 承認のあとの3つの状態（台本 Ver.6.1 Scene 3-3）。表示だけ。承認していなければ None
             "after_approval": self._after_approval(e) if approved else None,
@@ -1328,7 +1567,9 @@ class WebFlow:
             "repeat_range": _range_state(s.repeat_range),
             # いまの状態の1行（CHECKER_033 P1-A・唐川さんの方針①）：プログラムの確定情報だけから作る。Claude の文では変わらない
             "status_line": _status_line(ch is not None, bool(s.candidate_blocked_reason) if ch is not None else False,
-                                        approved, bool(e.exported) if approved else False, s.repeat_range is not None),
+                                        approved, bool(e.exported) if approved else False, s.repeat_range is not None,
+                                        hold=e.hold and ch is not None,
+                                        voided_why=e.voided["why"] if e.voided and ch is None else None),
         }
 
     def _dialog_state(self, e: _Entry) -> dict:

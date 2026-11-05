@@ -157,7 +157,7 @@ def test_want_change_goes_through_candidate_confirmation_and_button(source, no_a
     w2, sid2 = new()
     r = w2.hear(sid2, "Yのマイナス3ミリずらします", source=source)
     r2 = press(w2, sid2, r, "変更したい")
-    a = w2.approve(sid2, "テスト太郎")
+    a = w2.approve(sid2, "テスト太郎", candidate_gen=w2.candidate_gen_of(sid2))
     assert a["ok"] is True and a["state"]["approval"]["approved_by"] == "テスト太郎"
 
 
@@ -202,7 +202,7 @@ def test_explanation_keeps_an_existing_candidate_and_approval():
     old = w.hear(sid, "Yのマイナス3ミリずらします")
     r = w.hear(sid, "Yのマイナス3ミリずらして")
     assert cand(r) == ("C00005 Y", "-3.000")
-    assert w.approve(sid, "テスト太郎")["ok"] is True
+    assert w.approve(sid, "テスト太郎", candidate_gen=w.candidate_gen_of(sid))["ok"] is True
     r2 = press(w, sid, old, "説明です")
     assert r2["status"] == "ok" and r2["message"] == EXPLAIN_REPLY
     assert cand(r2) == ("C00005 Y", "-3.000")
@@ -347,7 +347,7 @@ def test_shimasu_in_dialogue_asks_two_choices_and_keeps_the_dialogue():
 def test_s_msg_after_approval():
     w, sid = new()
     assert cand(w.hear(sid, "Xのプラス2ミリ移動して")) == ("C00005 X", "+2.000")
-    assert w.approve(sid, "テスト太郎")["ok"] is True
+    assert w.approve(sid, "テスト太郎", candidate_gen=w.candidate_gen_of(sid))["ok"] is True
     r = w.hear(sid, "Yのマイナス3ミリ移動して")
     assert r["status"] == "stop" and r["message"].startswith(APPROVED_PENDING)
     assert r["message"] == "新しい指示を受け取ったため、前の承認を取り消しました。変更候補は残しています。内容を確認して、もう一度承認してください。"
@@ -367,7 +367,7 @@ def test_s_msg_before_approval_is_unchanged():
 def test_s_msg_question_after_approval():
     w, sid = new()
     assert cand(w.hear(sid, "Xのプラス2ミリ移動して")) == ("C00005 X", "+2.000")
-    assert w.approve(sid, "テスト太郎")["ok"] is True
+    assert w.approve(sid, "テスト太郎", candidate_gen=w.candidate_gen_of(sid))["ok"] is True
     r = w.hear(sid, "Yのマイナス3ミリ移動して？")
     assert r["status"] == "stop" and r["message"].startswith(APPROVED_PENDING)
     # 2回目は、もう承認されていないので今の文
@@ -378,7 +378,7 @@ def test_s_msg_question_after_approval():
 def test_s_msg_place_word_after_approval():
     w, sid = new()
     assert cand(w.hear(sid, "Xのプラス2ミリ移動して")) == ("C00005 X", "+2.000")
-    assert w.approve(sid, "テスト太郎")["ok"] is True
+    assert w.approve(sid, "テスト太郎", candidate_gen=w.candidate_gen_of(sid))["ok"] is True
     r = w.hear(sid, "置くところを少し手前にして")
     assert r["status"] == "stop" and r["message"].startswith(APPROVED_PENDING)
 

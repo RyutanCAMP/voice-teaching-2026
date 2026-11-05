@@ -35,8 +35,8 @@ def pending_three(tmp_path):
 def not_approvable(w, sid):
     st = w.state(sid)["state"]
     assert not st["can_approve"]
-    assert not w.approve(sid, "QA")["ok"]
-    assert not w.export(sid)["ok"]
+    assert not w.approve(sid, "QA", candidate_gen=w.candidate_gen_of(sid))["ok"]
+    assert not w.export(sid, candidate_gen=w.candidate_gen_of(sid))["ok"]
 
 
 def place_flow(tmp_path, confirmed=False):
@@ -52,7 +52,7 @@ def place_flow(tmp_path, confirmed=False):
 
 
 # ---- 1. 古い候補が承認できるまま残る（最優先） ----
-@pytest.mark.xfail(strict=True, reason=P0 + " H02")
+# P0 H02：fix/p0-h02-h16-1105 で直したので xfail を外した（くわしくは tests/test_p0_stale_candidates.py）
 @pytest.mark.parametrize("text", ["さっきの3回じゃなくて2回", "3回じゃなくて4回", "やっぱり2回でいいや"])
 def test_restated_count_leaves_no_approvable_old_candidate(tmp_path, text):
     w, _, sid = pending_three(tmp_path)
@@ -60,15 +60,16 @@ def test_restated_count_leaves_no_approvable_old_candidate(tmp_path, text):
     not_approvable(w, sid)
 
 
-@pytest.mark.xfail(strict=True, reason=P0 + " 別の回数の希望で古い候補が残る")
-@pytest.mark.parametrize("text", ["やっぱり4回にして", "4回にして"])
+# 「やっぱり4回にして」は言い直し（H02）として直した。「4回にして」（印の無い同じ種類の値）は唐川さんの Q-3 の判断待ちで xfail のまま
+@pytest.mark.parametrize("text", ["やっぱり4回にして", pytest.param("4回にして", marks=pytest.mark.xfail(
+    strict=True, reason=P0 + " 別の回数の希望で古い候補が残る（Q-3 待ち）"))])
 def test_different_count_wish_freezes_old_candidate(tmp_path, text):
     w, _, sid = pending_three(tmp_path)
     w.talk(sid, text)
     not_approvable(w, sid)
 
 
-@pytest.mark.xfail(strict=True, reason=P0 + " H16")
+# P0 H16：fix/p0-h02-h16-1105 で直したので xfail を外した
 @pytest.mark.parametrize("text", ["変更は取り消して、何してるか教えて", "取り消して。何してるか教えて",
                                   "キャンセル、それと説明"])
 def test_cancel_plus_question_leaves_no_approvable_candidate(tmp_path, text):
@@ -77,7 +78,7 @@ def test_cancel_plus_question_leaves_no_approvable_candidate(tmp_path, text):
     not_approvable(w, sid)
 
 
-@pytest.mark.xfail(strict=True, reason=P0 + " 自然な取り消しの言い方")
+# 自然な取り消しの言い方：fix/p0-h02-h16-1105 で直したので xfail を外した
 @pytest.mark.parametrize("text", ["今の変更はやめて", "今の変更は取り消して", "変更はやめて", "やっぱりやめる",
                                   "今のなし", "取り消し"])
 def test_natural_cancellation_leaves_no_approvable_candidate(tmp_path, text):
@@ -100,25 +101,25 @@ def test_negated_cancellation_keeps_candidate(tmp_path, text):
 def test_reload_with_previous_invalidates_old_session(tmp_path):
     w, _, sid = pending_three(tmp_path)
     w.load(T.demo_bytes(), previous=sid)
-    assert not w.approve(sid, "QA")["ok"]
-    assert not w.export(sid)["ok"]
+    assert not w.approve(sid, "QA", candidate_gen=w.candidate_gen_of(sid))["ok"]
+    assert not w.export(sid, candidate_gen=w.candidate_gen_of(sid))["ok"]
 
 
 def test_reload_without_previous_invalidates_old_session(tmp_path):
     w, _, sid = pending_three(tmp_path)
     w.load(T.demo_bytes())
-    assert not w.approve(sid, "QA")["ok"]
+    assert not w.approve(sid, "QA", candidate_gen=w.candidate_gen_of(sid))["ok"]
 
 
 def test_stale_export_cannot_take_the_new_sessions_file_name(tmp_path, monkeypatch):
     monkeypatch.setattr(sim, "DEFAULT_OUT_DIR", tmp_path / "out")
     w, _, old = pending_three(tmp_path)
-    assert w.approve(old, "QA")["ok"]
+    assert w.approve(old, "QA", candidate_gen=w.candidate_gen_of(old))["ok"]
     new = w.load(T.demo_bytes(), previous=old)["session_id"]
     T.repeat_to_three(w, new)
-    assert w.approve(new, "QA")["ok"]
-    w.export(old)  # 古い番号（画面からは呼ばない。サーバー側の保証を見る）
-    assert w.export(new)["ok"]
+    assert w.approve(new, "QA", candidate_gen=w.candidate_gen_of(new))["ok"]
+    w.export(old, candidate_gen=w.candidate_gen_of(old))  # 古い番号（画面からは呼ばない。サーバー側の保証を見る）
+    assert w.export(new, candidate_gen=w.candidate_gen_of(new))["ok"]
 
 
 # ---- 3. 回数の読み違い ----

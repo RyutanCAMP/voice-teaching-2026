@@ -48,8 +48,8 @@ def test_cancelled_candidate_cannot_be_approved_or_exported(tmp_path, monkeypatc
     def forbidden(*a, **kw):
         raise AssertionError('Output generation must not be reached')
     monkeypatch.setattr(T.sim, 'export_sim', forbidden)
-    assert not w.approve(sid, 'QA')['ok']
-    assert not w.export(sid)['ok']
+    assert not w.approve(sid, 'QA', candidate_gen=w.candidate_gen_of(sid))['ok']
+    assert not w.export(sid, candidate_gen=w.candidate_gen_of(sid))['ok']
     assert w.repeat_choose(sid, 'yes', old_turn)['status'] == 'stop'
     assert not w.state(sid)['state']['candidate']
 
