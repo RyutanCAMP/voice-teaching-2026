@@ -164,7 +164,13 @@ _UNIT_AFTER = re.compile(r"^\s?(MM|ミリ|%)")
 _OTHER_UNIT_AFTER = re.compile(r"^\s?(センチ|CM|M(?![A-Z])|メートル|パーセント|割|度|倍)")
 _KANJI_AMOUNT = re.compile(r"[〇零一二三四五六七八九十百千万]+\s?(ミリ|MM|センチ|CM|%|パーセント|割)")
 _VAGUE = re.compile(r"そこそこ|半分|少し|すこし|ちょっと|ちょい|わずか|僅か|倍|もう少し|適当")
-_AXIS_RE = re.compile(r"(?<![A-Z])([XYZ])\s?(マイナス|プラス|[+\-])?\s?(方向|軸|に|へ)")
+# 軸と向き。1つ目の形（案1-a。docs/DESIGN_NATURAL_DIRECTION_20261105.md）：「軸 → 符号 → 方向」の順で、間に入ってよいのは
+# 「軸」「の」（各1回まで）と空白だけ（「Y-の方向」「Yのマイナス方向」「Y軸マイナス方向」「Yの-の方向」）。
+# 2つ目の形（今まで）：「Y-方向」「Y軸」「Yに」「Y+へ」。1つの所は1つの形でだけ数える（同じ符号を2回数えない）。
+# 符号の言葉は + − プラス マイナス だけ（長音「ー」・正・負・側・向き・方 は読まない。聞き返す）
+_AXIS_RE = re.compile(r"(?<![A-Z])(?P<axis>[XYZ])\s?(?:"
+                      r"(?:軸\s?)?(?:の\s?)?(?P<sign_dir>マイナス|プラス|[+\-])\s?(?:の\s?)?(?:軸方向|方向)"
+                      r"|(?P<sign>マイナス|プラス|[+\-])?\s?(?:方向|軸|に|へ))")
 # 「Xマイナス5ミリ」「Y +3 mm」「X の -5ミリ」：軸のすぐ後（「の」をはさんでもよい）に符号と数字。符号は量の側（_SIGN_BEFORE）で読むので、ここでは軸だけ
 _AXIS_SIGNED_NUM = re.compile(r"(?<![A-Z])([XYZ])\s?(?:の\s?)?(?=(?:マイナス|プラス|[+\-])\s?[0-9])")
 # 文の終わりの「Zマイナス」「Zのプラス」「Z-」（数字が後に無い）：軸と向き（聞き返しへの答え「Zマイナス」→「3ミリ」のため）
@@ -285,7 +291,8 @@ _VERB_END_CHARS = "げかやらせく動戻消べ較択"
 _WORD_SEP = re.compile(r"[\s、。,，.．!！?？・／/「」『』（）()…~〜]+")
 _WORD = re.compile(r"[^\s、。,，.．!！?？・／/「」『』（）()…~〜]+")
 # 「Yのマイナス方向」「Y軸」「X軸方向」：軸のあとの「方向」「軸」（軸を言っていない「方向」「軸」は、知らない言葉として残す）
-_AXIS_DIRECTION_WORD = re.compile(r"(?<![A-Z])[XYZ]\s?(?:の\s?)?(?:(?:マイナス|プラス|[+\-])\s?)?(?:軸方向|方向|軸)")
+# 「Y-の方向」「Y軸のマイナス方向」も（_AXIS_RE の1つ目の形と同じ並び。ここは取り除くだけで、符号は数えない）
+_AXIS_DIRECTION_WORD = re.compile(r"(?<![A-Z])[XYZ]\s?(?:軸\s?(?=の|マイナス|プラス|[+\-]))?(?:の\s?)?(?:(?:マイナス|プラス|[+\-])\s?(?:の\s?)?)?(?:軸方向|方向|軸)")
 # 「Y座標」「Yの値」「Y座標値」：座標の値の言葉（_COORD_VALUE で読んだときだけ取り除く）
 _COORD_VALUE_WORD = re.compile(r"(?<![A-Z])[XYZ]\s?(?:の\s?)?(?:座標値|座標|値)")
 _CONNECTOR = re.compile(r"そして|それから")  # 2つの変更の区切り（_SPLIT_MOVES）
@@ -581,10 +588,11 @@ def _read(raw: str, question: bool) -> UtteranceFacts:
     axis_signs: list[int] = []
     placed_axis_signs = 0  # 軸に付いた符号の数（「X-方向」の -）
     for m in _AXIS_RE.finditer(rest_no_speed):
-        if m.group(1) not in axes:
-            axes.append(m.group(1))
-        if m.group(2):
-            axis_signs.append(_SIGN[m.group(2)])
+        if m.group("axis") not in axes:
+            axes.append(m.group("axis"))
+        sign = m.group("sign_dir") or m.group("sign")
+        if sign:
+            axis_signs.append(_SIGN[sign])
             placed_axis_signs += 1
     for m in _AXIS_SIGNED_NUM.finditer(rest_no_speed):
         if m.group(1) not in axes:

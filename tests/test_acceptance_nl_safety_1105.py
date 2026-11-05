@@ -3,6 +3,8 @@
 - 基点：fix/cock-p0-conversation 0f32435（本体の検証済み SHA ce7c981）。API は呼ばない（偽の Claude・合成ジョブだけ）
 - xfail(strict=True) は「今のコードで失敗することを確かめた」項目。直したら xfail を外す（strict なので、直ったのに
   外し忘れると落ちる）。印の無いテストは、今も守れている安全の線の回帰テスト
+- 11/5（feat/nl-demo-1106）：案1-a・動きの説明の「終わります」・打ち消しの切れ端・単位の聞き返しの4つは直したので、xfail を外した
+  （くわしい受入テストは tests/test_nl_demo_1106.py）。P0 の分（回数の言い直し・取り消し・読み直し・古い番号の出力）は xfail のまま
 - 期待値は「承認できないこと」だけを決め、候補を捨てるか・保留にするかは決めていない（設計は
   claude-hackathon-idea-lab の docs/review/NL_SAFETY_REVIEW_20261105.md）
 - 同じ Claude が書いたテスト。外部の独立レビュー（チャッピー）の代わりにはならない
@@ -138,7 +140,6 @@ def test_unclear_counts_never_make_a_candidate(tmp_path, text):
 
 
 # ---- 4. 方向の自然な言い方（安全の線は変えない） ----
-@pytest.mark.xfail(strict=True, reason=P0 + " 案1-a 未実装")
 @pytest.mark.parametrize("text", ["Yマイナスの方向に10mm", "Y-の方向に10mm", "Yのマイナス方向に10mm",
                                   "Y軸マイナス方向に10mm"])
 def test_y_minus_direction_variants_make_the_same_candidate(tmp_path, text):
