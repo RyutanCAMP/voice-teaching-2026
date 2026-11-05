@@ -16,7 +16,7 @@
 | 説明（TIPS.status）の中身 | highlight.js は差分なし。test_status_tip_text_unchanged が元の文を完全一致で確かめている |
 | 選択子の参照切れ | app.js を `help-btn` `status-line` `help-button` `nextElementSibling` で検索。app.js は id（#status-line・#help-button）だけで参照、消した .help-btn と、消した `.status-line[hidden] + .help-wrap` を参照する JS は無し |
 | 受入テスト | `PYTHONUTF8=1 PYTHONIOENCODING=utf-8 C:/アプリ/voice-teaching/.venv/Scripts/python.exe -m pytest -q tests/test_header_help.py`（C:\アプリ\vt-header-help で）→ 8 passed |
-| 全体のテスト | 同じ python で `-m pytest -q -p no:cacheprovider --ignore=tests/test_header_help.py` → 9分以上たっても終わらず、結果は取れなかった（未確認事項に記す） |
+| 全体のテスト | 同じ python で `-m pytest -q -p no:cacheprovider --ignore=tests/test_header_help.py` → 4988 passed, 1 skipped（15分22秒、終了コード 0。報告のあとに終わった） |
 | 画面写真 | scratchpad\shots の header_1280x800_start / _loaded、page_1280x800_loaded、header_1920x1080_status_tip を目で見た |
 
 ## 結果
@@ -39,7 +39,6 @@ FAIL に当たる指摘は無し。
 ## 未確認事項
 
 - 390px など狭い画面（@media max-width: 600px の .status-wrap の行）の見た目は、写真が無く確かめていない（CSS は読んだ：折り返して1行を全部使い、ⓘ の右の余白を0にして画面の内側に収める作り）。
-- 全体のテスト（test_header_help.py 以外）は、このレビューの間に終わらず結果を確かめていない。test_ux_polish・test_single_entry など、ヘッダーに触れる他のテストが通るかは、developer か QA の結果で確かめること。
 - tools/e2e_browser.py の check_header_help は流していない（別の担当が流す）。
 - キーボードだけ・読み上げソフトでの実際の操作は確かめていない。
 - このレビューは画面の表示の確認で、実機のリスクアセスメントや唐川さんの安全確認の代わりにならない。実機投入の可否は判定しない。
