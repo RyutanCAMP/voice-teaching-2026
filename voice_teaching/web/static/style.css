@@ -1324,7 +1324,6 @@ body:has(#export-result[data-ok="true"]:not([hidden])) #export-note { display: n
 /* ポップアップの中の X・Y・Z の表は小さく（変わる値の1行を主役にする。表は確認表示にも全部出る） */
 .cand-pop .xyz table { font-size: 12px; }
 .cand-pop .xyz th, .cand-pop .xyz td { padding: 3px 8px; }
-.cand-pop .cand-card .friendly, .cand-pop .cand-card ul { font-size: 12.5px; }
 /* 3D は寄せない（11/5 F7：候補の前後で 3D の点が動かない）。ポップアップを狭くして右下に置く */
 .cand-pop { width: min(380px, 36%); }
 /* 1920×1080（撮影の主な大きさ）：会話の欄は細く、3D は前（434165d）より小さくしない（11/5 F6） */
@@ -1361,4 +1360,32 @@ body:has(#export-result[data-ok="true"]:not([hidden])) #export-note { display: n
   .stage { padding-top: 6px; padding-bottom: 6px; }
   .sel-line { margin-top: 2px; min-height: 26px; }
   .play-row { margin-top: 2px; }
+}
+
+/* 文字の大きさ（11/5 F6）：1280〜1440 は前のまま、1920×1080 は決めた大きさ以上（PR #4 の一律 17px・12px を合わせ直す） */
+@media (max-width: 1699px), (max-height: 949px) {
+  .bubble .said { font-size: 14px; }
+  .bubble.claude .said { font-size: 15px; }
+  .bubble.app.notice .said { font-size: 13px; }
+  .bubble .who { font-size: 11px; }
+  #reply-message, #reply-message .range-lines { font-size: 14px; }
+}
+@media (min-width: 1700px) and (min-height: 950px) {
+  .bubble .said { font-size: 17px; }
+  .bubble .who { font-size: 13px; }
+  .status-line, .status-line .st-chip { font-size: 14px; }
+  .legend, .legend.kinds, .figure-notes, .range-button-note { font-size: 13px; }
+  .cand-heard, .cand-warn { font-size: 14px; }
+  #reply-message { font-size: 16px; }
+  #reply-message .range-lines { font-size: 15px; }
+}
+/* 1100〜1499px：3D が狭いので、ポップアップは会話の欄の上に重ねる（3D の点を隠さない。前の版で候補のカードがあった場所） */
+@media (min-width: 1100px) and (max-width: 1499px) {
+  .cand-pop { position: fixed; left: 20px; top: 76px; bottom: 50px; right: auto; width: clamp(380px, 30vw, 460px); max-height: none; z-index: 6; }
+}
+@media (min-width: 1100px) and (max-width: 1499px) and (max-height: 800px) {
+  .cand-pop { left: 12px; top: 66px; bottom: 42px; }
+}
+@media (min-width: 1100px) and (max-width: 1499px) {
+  .stage { backdrop-filter: none; }  /* 位置の基準を画面にする（backdrop-filter があると fixed の基準が 3D の欄になる） */
 }
