@@ -554,7 +554,8 @@ def test_e2_5_meaning_does_not_change_hear_results(tmp_path, steps):
             for item in (r.get("state") or {}).get("log", []):
                 item.pop("at", None)
             outs.append(r)
-        return dump(outs)
+        import re
+        return re.sub(r"#[0-9a-f]{16}", "#番号", dump(outs))  # d（11/5）：向きの確かめのボタンの番号は毎回違う（比べるときは除く）
     assert run(True) == run(False)
 
 

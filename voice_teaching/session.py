@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import re
+import secrets
 from dataclasses import dataclass, replace
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
@@ -107,6 +108,11 @@ class Session:
         # 回数の変更の範囲の確認（ボタンを待っている間だけ。dict）。新しい指示・選び直し・元に戻すで捨てる
         self.repeat_range: dict | None = None
         self._range_turn = 0
+        # d：ロボットを正面から見た向き（唐川さんの決定 11/5）。この画面だけ。保存しない。"confirmed"／"rejected"／None
+        self.facing: str | None = None
+        self._facing_pending: dict | None = None  # 確かめのボタンを待っている間だけ（番号と、確かめた発話）
+        self._facing_used = False                 # 今の発話を、確かめた向きで読んだか
+        self.candidate_facing = False             # 今の候補を、確かめた向きで読んだ発話から作ったか（表示だけに使う）
 
     @classmethod
     def from_file(cls, path: str | Path, **kw) -> "Session":
@@ -147,7 +153,11 @@ class Session:
             return self.explain_only(text, source)
         if rc.is_repeat_request(text):
             return self._hear_repeat(text, source)  # 回数の変更：プログラムだけで読む（docs/REPEAT_COUNT_DESIGN.md）
-        facts = ut.read_utterance(text)
+        self._facing_pending = None  # 新しい発話：前の向きの確かめのボタンは使えない
+        st0 = self.updown_status()
+        read_text = self._facing_text(text, st0)
+        self._facing_used = read_text != text
+        facts = ut.read_utterance(read_text)
         prev = self._awaiting_answer
         followup, self._updown_followup = self._updown_followup, None
         if prev is not None and (not facts.kinds or ut.is_explicit_direction_answer(prev, facts)
@@ -162,10 +172,14 @@ class Session:
         self._log("発話", f"{'音声' if source == 'voice' else '文字'}：{text}")
         st = self.updown_status()
         v = ut.pre_check(facts, self.selected, st)
+        if v.confirm_position is not None and v.confirm_position not in self._job.positions:
+            # 4桁以下の位置番号の確かめ：ジョブに無い番号なら、ボタンを出さずに止める（唐川さんの決定 11/5）
+            v = ut.Verdict("stop", f"{v.confirm_position} はこのジョブにありません")
         if v.status == "ask" and facts.question and v.choices and facts.op in ("move", "speed"):
             v = self._check_question(facts, v)  # 疑問の形の確かめ（2026-11-03 夜）
         if ut.is_shimasu_confirmation(v):
             v = self.check_shimasu(facts, v)  # 「〜します」：外した文が検査・上限まで通るときだけ2択（QA P1-1）
+        v = self._facing_check(text, facts, v, st)  # d：向きの言葉の確かめ（前・後ろはいつも聞き返す）
         if followup is not None and v.status == "ask" and not facts.kinds and not facts.unknown_words:
             # 上下の案内のすぐあとの「3ミリ」：前の発話とはつながない。次にどう言えばよいかを案内する（CHECKER_028 D）
             v = ut.Verdict("ask", ut.updown_followup_message(*followup))
@@ -188,9 +202,55 @@ class Session:
         if self.selected is None:
             return tuple(choices)
         return tuple((label, text if (ut.normalize_position(text[:6]) or ut.is_explain_choice(text)
-                                      or ut.read_utterance(text).place_ref)
+                                      or ut.read_facing_choice(text) or ut.read_utterance(text).place_ref)
                       else f"{self.selected}{'の' if _OF_HEAD.match(text) else 'を'}{text}")
                      for label, text in choices)
+
+    # ---- d：ロボットを正面から見た向き ----
+    def _facing_applies(self, st: ud.UpdownStatus) -> bool:
+        """専門家の登録が不一致・変更済みなら、今の決まりどおり止める（d の既定で上書きしない）。"""
+        return st.status not in (ud.MISMATCH, ud.CHANGED)
+
+    def _facing_text(self, text: str, st: ud.UpdownStatus) -> str:
+        """確かめたあとだけ、6つの向きの言葉を表の軸と向きで読む文にする。上下は、専門家の登録が無いときだけ。"""
+        if self.facing != "confirmed" or not self._facing_applies(st):
+            return text
+        return ut.facing_rewrite(text, include_updown=st.status == ud.UNCONFIRMED)
+
+    def _facing_check(self, text: str, facts: ut.UtteranceFacts, v: ut.Verdict, st: ud.UpdownStatus) -> ut.Verdict:
+        """pre_check が向きの言葉で断った・聞き返したときだけ、向きを確かめる（打ち消しなど先に止まるものは先に止まる）。"""
+        if v.status == "stop" and v.message == ut.FRONT_BACK_MESSAGE:
+            fb = ut.front_back_ask(facts)
+            if fb is not None:
+                return fb
+        if self.facing is not None or not self._facing_applies(st) or facts.place_ref:
+            return v  # 場所の言葉（「置く位置を右に」）は、場所の聞き返しを先にする
+        side = v.message in (ut.SIDE_MESSAGE, ut.SIDE_MESSAGE_UPDOWN) or (v.status == "stop" and v.message == ut.FRONT_BACK_MESSAGE)
+        updown = st.status == ud.UNCONFIRMED and ut.is_updown_unset_ask(v.message)
+        if not (side or updown):
+            return v
+        found = ut.facing_word(facts)
+        if found is None or (found[1] == "Z" and st.status != ud.UNCONFIRMED):
+            return v
+        token = secrets.token_hex(8)
+        self._facing_pending = {"token": token, "text": text}
+        return ut.Verdict("ask", ut.facing_ask_message(facts, found, updown_unset=found[1] == "Z"),
+                          ((ut.FACING_YES_LABEL, ut.facing_choice_text(ut.FACING_YES_LABEL, token)),
+                           (ut.FACING_NO_LABEL, ut.facing_choice_text(ut.FACING_NO_LABEL, token))))
+
+    def facing_choose(self, text: str, source: str = "text") -> tuple[str, "Reply | str"]:
+        """確かめのボタン（画面の選択肢）。("yes", 確かめた発話) か ("no"／"stale", 返事)。ボタンだけで確かめる。"""
+        got = ut.read_facing_choice(text)
+        pending, self._facing_pending = self._facing_pending, None
+        self._log("操作", f"向きの確かめ：{got[0] if got else '?'}")
+        if got is None or pending is None or got[1] != pending["token"]:
+            return "stale", self._reply("stop", ut.FACING_STALE)
+        if got[0] == ut.FACING_YES_LABEL:
+            self.facing = "confirmed"
+            return "yes", pending["text"]
+        self.facing = "rejected"
+        self.forget_question()
+        return "no", self._reply("ask", ut.FACING_NO_REPLY)
 
     def check_shimasu(self, facts: ut.UtteranceFacts, v: ut.Verdict) -> ut.Verdict:
         """「〜します」の2択（v）を出す前に、外した文がふつうの指示としてどうなるかを、候補を作らずに確かめる（QA P1-1）。
@@ -257,11 +317,18 @@ class Session:
             return self._reply("ask", rc.unknown_message(rc.leftovers(body)), facts=facts)
         if self.candidate is not None:
             return stop(self.pending_message)
+        confirm_block = False
         if req.start is not None:
             try:
                 block = self._job.find_repeat(req.start, req.end)
             except jbi.JbiError as e:
-                return stop_job(str(e))
+                # 「C0001とC0002の動きを3回繰り返して」：言った位置がくり返しの区間とぴったり合わない。両方を含む区間が
+                # 1つだけなら、その区間を示して確かめる（候補にも範囲の確認にもしない。唐川さんの指示 11/5 c）
+                # 「…の動きを」と言ったときだけ（範囲・位置そのものを言ったときは、今どおり言った範囲で止める。P1-c）
+                blocks = [b for b in self._job.find_repeat_blocks() if req.start in b.positions and req.end in b.positions]
+                if not req.motion or len(blocks) != 1:
+                    return stop_job(str(e))
+                block, confirm_block = blocks[0], True
         else:
             # 範囲を言わない：ジョブに数えられる区間が1つだけなら、その区間を示して確かめる（QA P1-1）
             if req.position is not None and req.position not in self._job.positions:
@@ -305,6 +372,10 @@ class Session:
             self._job.plan_repeat(start, end, total)  # 試すだけ（候補はボタンのあと）
         except jbi.JbiError as e:
             return stop_job(str(e))
+        if confirm_block:
+            # 選択肢は決まった文（今の回数を入れる）を送り、同じ検査を通ってから［この範囲を繰り返す］のボタンで確かめる
+            return self._reply("ask", rc.block_confirm_message(start, end, total), facts=facts,
+                               choices=((f"この区間を{total}回にする", rc.canonical(start, end, n, total)),))
         self._range_turn += 1
         texts = tuple(_strip_ending(x) for x in block.cycle_lines)
         first, last = block.first_line + 1, block.first_line + block.cycle_len
@@ -360,6 +431,7 @@ class Session:
         self.candidate = change
         self.candidate_utterance = self.facts.raw if self.facts is not None else None
         self.candidate_blocked_reason = None
+        self.candidate_facing = False
         self.candidate_updown = self.updown_status()
         self._candidate_value_change = False
         self._candidate_position = None  # 位置ごとの候補ではない（位置を選び直すと捨てる）
@@ -513,6 +585,7 @@ class Session:
         self.candidate_utterance = self.facts.raw if self.facts is not None else None
         self.candidate_blocked_reason = blocked
         self.candidate_updown = self.updown  # この候補を作ったときの上下の向きの照合（propose で読み直したもの）
+        self.candidate_facing = self._facing_used  # d：確かめた向きで読んだ発話からか（表示だけ。承認の条件には使わない）
         f = self.facts
         self._candidate_value_change = bool(p.kind == "shift" and f is not None and p.axis in f.value_axes
                                             and not f.vertical)

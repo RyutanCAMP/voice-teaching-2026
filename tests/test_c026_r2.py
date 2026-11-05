@@ -46,6 +46,14 @@ TAIL = "それとも操作の説明でしょうか？"
 UPDOWN_MSGS = (updown.MSG_UNCONFIRMED, updown.MSG_MISMATCH, updown.MSG_CHANGED)
 
 
+def updown_said(expected: str, message: str, exact: bool = False) -> bool:
+    """会話の聞き返しが、状態ごとの案内になっているか。未確認のときは、会話の文（ut.updown_ask_message）の形。
+    11/5 唐川さんの決定：未確認の会話の聞き返しだけを、意図を受け止める文にした。状態の表示の文は MSG_UNCONFIRMED のまま。"""
+    if expected == updown.MSG_UNCONFIRMED:
+        return ut.is_updown_unset_ask(message)
+    return message == expected if exact else expected in message
+
+
 def _rewrite(path, fn):
     obj = json.loads(Path(path).read_text(encoding="utf-8"))
     fn(obj)
@@ -117,7 +125,7 @@ def test_p0_two_step_up_down_never_becomes_z(kind, first, second, source, make_u
     w, sid, msg = start(kind, make_updown, tmp_path)
     r = w.hear(sid, first, source=source)
     assert r["status"] == "ask" and cand(r) is None, (first, r["message"])
-    assert msg in r["message"]
+    assert updown_said(msg, r["message"]), r["message"]
     r = w.hear(sid, second, source=source)
     assert r["status"] != "ok" and cand(r) is None and not r["candidate_made"], (first, second, r["message"])
     assert r["state"]["can_approve"] is False
@@ -181,7 +189,7 @@ def test_p0_config_removed_between_the_two_steps(make_updown, tmp_path):
     assert w.hear(sid, "下げて")["message"] == "何mm動かしますか？"
     Path(w.updown_config).unlink()
     r = w.hear(sid, "3ミリ")
-    assert r["status"] == "ask" and r["message"] == updown.MSG_UNCONFIRMED and cand(r) is None
+    assert r["status"] == "ask" and ut.is_updown_unset_ask(r["message"]) and cand(r) is None
 
 
 # ---- Session だけ（設定なし） ----
@@ -201,7 +209,7 @@ def test_p0_merge_answer_keeps_vertical():
     assert prev.vertical and prev.explicit_axes == ()
     m = ut.merge_answer(prev, ut.read_utterance("3ミリ"))
     assert m.vertical is True and m.axes == ("Z",) and m.explicit_axes == ()
-    assert ut.pre_check(m).status == "ask" and ut.pre_check(m).message == updown.MSG_UNCONFIRMED
+    assert ut.pre_check(m).status == "ask" and ut.is_updown_unset_ask(ut.pre_check(m).message)
 
 
 def _non_default(f: dataclasses.Field):
@@ -228,13 +236,15 @@ def test_p0_merge_answer_drops_no_field():
                                                    if f.name not in ("raw", "text")})
     answer = ut.UtteranceFacts(raw="答え", text="答え")
     m = ut.merge_answer(prev, answer)
-    # 答えと合わせたときに、わざと空にする項目（確かめの選択肢の文は作り直さない）
-    cleared = {"question_text", "shimasu_text"}
+    # 答えと合わせたときに、わざと空にする項目（確かめの選択肢の文は作り直さない）。
+    # said_signs は「その発話の向きの言葉」なので答えのものにし、前の発話の言葉は earlier_signs に移して残す（QA 002 N1）
+    cleared = {"question_text", "shimasu_text", "said_signs"}
     for n in names:
         if n in ("raw", "text") or n in cleared:
             continue
         assert getattr(m, n) == getattr(prev, n), n
     assert m.question_text is None and m.shimasu_text is None
+    assert m.said_signs == answer.said_signs and set(prev.said_signs) <= set(m.earlier_signs)
 
 
 def test_p0_combine_axes_keeps_explicit_axes_and_vertical():
@@ -290,7 +300,7 @@ def test_p0_check_proposal_rejects_axis_not_in_utterance(updown_ok):
 def test_p0_shimasu_path_never_becomes_z(kind, source, make_updown, tmp_path):
     w, sid, msg = start(kind, make_updown, tmp_path)
     r = w.hear(sid, "下げて動かします", source=source)
-    assert r["status"] == "ask" and msg in r["message"] and labels(r) != LABELS and cand(r) is None
+    assert r["status"] == "ask" and updown_said(msg, r["message"]) and labels(r) != LABELS and cand(r) is None
     r = w.hear(sid, "3ミリ", source=source)
     assert r["status"] != "ok" and cand(r) is None
     # 前の版の［変更したい］が送っていた文（「C00005を下げて」）のあとでも同じ
@@ -298,7 +308,7 @@ def test_p0_shimasu_path_never_becomes_z(kind, source, make_updown, tmp_path):
     r = w.hear(sid, "3ミリ", source=source)
     assert r["status"] != "ok" and cand(r) is None
     r = w.hear(sid, "3mm下げて動かします", source=source)
-    assert r["status"] == "ask" and msg in r["message"] and labels(r) != LABELS and cand(r) is None
+    assert r["status"] == "ask" and updown_said(msg, r["message"]) and labels(r) != LABELS and cand(r) is None
 
 
 @pytest.mark.parametrize("kind", NOT_CONFIRMED)
@@ -312,7 +322,7 @@ def test_p0_dialog_answer_two_step(kind, make_updown, tmp_path):
         r = w.select(sid, "C00005")
     assert r["state"]["dialog"]["step"] == "ask_move"
     r = w.hear(sid, "下げて")
-    assert r["status"] == "ask" and msg in r["message"]
+    assert r["status"] == "ask" and updown_said(msg, r["message"])
     r = w.hear(sid, "3ミリ")
     assert cand(r) is None and r["state"]["dialog"]["direction"] is None
 
@@ -326,7 +336,7 @@ def test_p0_dialog_direction_from_up_down_rechecked_at_the_end(make_updown, tmp_
     Path(w.updown_config).unlink()
     r = w.hear(sid, "3ミリ")
     assert cand(r) is None and r["status"] != "ok"
-    assert updown.MSG_UNCONFIRMED in r["message"]
+    assert ut.is_updown_unset_ask(r["message"])
 
 
 def test_p0_dialog_confirmed_up_still_works(make_updown, tmp_path):
@@ -396,7 +406,8 @@ def test_p1_messages_confirmed_keep_up_down_examples(make_updown, tmp_path):
     r = w.hear(sid, "バイオ3ミリ動かして")
     assert "下に3ミリ" in r["message"]
     r = w.hear(sid, "右に3mm")
-    assert "下げて" in r["message"]
+    # d（11/5）：右・左は、上下の登録が確認済みでも、画面で初めてなら向きの確かめ（ロボットを正面から見た向き）
+    assert "右は Yプラス で合っていますか？" in r["message"] and all(ut.read_facing_choice(c["text"]) for c in r["choices"])
 
 
 def test_p1_fixed_messages_have_no_up_down_example():
@@ -442,7 +453,7 @@ def test_p1_index_html_examples_switch_by_updown():
 # ======================================================================
 SPECIFIC = [
     ("下に3mmを2回移動します", "2回の移動ですか、2往復ですか？"),
-    ("右に3mm動かします", "「右」「左」は"),
+    ("右に3mm動かします", "右は Yプラス で合っていますか？"),  # d（11/5）：向きの確かめ
     ("Yを3mm下げて動かします", "2つの読み方"),
     ("少し下げて動かします", "量がはっきりしません"),  # 差分の再レビュー QA P2-3：具体的な理由をそのまま返す（戻した）
     ("置くところまで3mm動かします", "へ動かす指示は扱いません"),
@@ -468,7 +479,7 @@ def test_qa_p1_shimasu_does_not_hide_specific_answers(text, part, source, make_u
 def test_qa_p1_unconfirmed_shimasu_gives_updown_message(make_updown, tmp_path):
     w, sid, msg = start("missing", make_updown, tmp_path)
     r = w.hear(sid, "3mm下げて動かします")
-    assert r["status"] == "ask" and r["message"] == msg and labels(r) != LABELS and cand(r) is None
+    assert r["status"] == "ask" and updown_said(msg, r["message"], exact=True) and labels(r) != LABELS and cand(r) is None
 
 
 def test_qa_p1_no_position_shimasu(make_updown, tmp_path):

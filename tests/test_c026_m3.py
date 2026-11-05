@@ -105,7 +105,7 @@ def test_shimasu_facts_and_pre_check(text, plain, head, updown_ok):
     v = ut.pre_check(f, None, updown_ok)  # 上・下を Z として読むのは確認済みのときだけ（fix/c026-r2）
     assert v.status == "ask" and [c[0] for c in v.choices] == LABELS
     assert v.choices[0][1] == CHOICE_TEXT[text]
-    assert ut.pre_check(f).message == ut.UPDOWN_UNSET_MESSAGE or not f.vertical  # 未確認なら2択にしない
+    assert ut.is_updown_unset_ask(ut.pre_check(f).message) or not f.vertical  # 未確認なら2択にしない
 
 
 def test_shimasu_without_a_clear_phrase_asks_amount():
@@ -438,7 +438,7 @@ def test_unconfirmed_shimasu_never_becomes_candidate(unconfirmed, text, plain, s
     assert r["status"] == "ask" and cand(r) is None
     r2 = w.hear(sid, plain, source=source)  # ［変更したい］を押したのと同じ文
     assert r2["status"] == "ask" and cand(r2) is None
-    assert "上下の向きがまだ確認されていません" in r2["message"]
+    assert ut.is_updown_unset_ask(r2["message"])  # 11/5 唐川さんの決定：未確認の会話の聞き返しは ut.updown_ask_message（状態の文は MSG_UNCONFIRMED のまま）
     assert all("（上）" not in c["label"] and "（下）" not in c["label"] for c in r2.get("choices") or [])
 
 
@@ -448,7 +448,7 @@ def test_unconfirmed_question_shimasu_asks_without_candidate(unconfirmed, text, 
     w, sid = new()
     r = w.hear(sid, text, source=source)
     assert r["status"] == "ask" and cand(r) is None
-    assert "上下の向きがまだ確認されていません" in r["message"]
+    assert ut.is_updown_unset_ask(r["message"])  # 11/5 唐川さんの決定：未確認の会話の聞き返しは ut.updown_ask_message（状態の文は MSG_UNCONFIRMED のまま）
 
 
 @pytest.mark.parametrize("source", SOURCES)

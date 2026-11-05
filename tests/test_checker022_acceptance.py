@@ -170,7 +170,7 @@ def test_undecided_a_switch_removes_updown(monkeypatch):
     assert r["status"] == "ask" and [c["label"] for c in r["choices"]] == ["Y座標を −3mm"]
     assert ud.MSG_UNCONFIRMED in r["message"]
     r = hear("下に3mm")
-    assert r["status"] == "ask" and cand(r) is None and r["message"] == ud.MSG_UNCONFIRMED
+    assert r["status"] == "ask" and cand(r) is None and ut.is_updown_unset_ask(r["message"])
     assert cand(hear("Y座標を3mm下げて")) == ("Y", "-3.000")  # 座標の値の増減は上下の設定に関係しない
 
 

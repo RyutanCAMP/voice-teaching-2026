@@ -20,6 +20,8 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--run', required=True, help='New result name; never overwrite an existing run')
     ap.add_argument('--commit', default='HEAD')
+    ap.add_argument('--no-updates', action='store_true',
+                    help='Compare with the reviewed ce7c981 baseline only (ignore reports/20261106_nl_demo/baseline_updates.json)')
     a = ap.parse_args()
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', a.run): ap.exit(2, 'Invalid run name\n')
     out = BASE / a.run
@@ -59,6 +61,10 @@ if __name__ == '__main__':
     semantics = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(semantics)
     baseline = read(HERE / 'reports/20261105/case_verdicts.json')
+    # Intended changes only (Karakawa 2026-11-05, conditional on QA content review). The reviewed baseline and
+    # the original recordings are never rewritten; an update applies only when the projection matches exactly.
+    upath = HERE / 'reports/20261106_nl_demo/baseline_updates.json'
+    updates = {} if a.no_updates or not upath.exists() else {u['id']: u for u in read(upath)['updates']}
     rows = []
     for expected in baseline['cases']:
         id = expected['id']; r = records.get(id)
@@ -66,16 +72,22 @@ if __name__ == '__main__':
         if not r: status, reason = 'NOT_RUN', 'No complete case result'
         elif r.get('status') == 'ERROR' or 'response' not in r:
             status, reason = 'EXECUTION_ERROR', 'Replay/precondition failed; not a semantic pass'
+        elif id in updates and semantics.projection(r) == updates[id]['layers']:
+            u = updates[id]
+            status = u['combined_after'] if u['qa_confirmed'] and u.get('combined_after') else 'UPDATED_PENDING_QA'
+            reason = 'Matches the intended change recorded in baseline_updates.json: ' + u['reason']
         elif semantics.projection(r) != reference:
             status, reason = 'REVIEW_REQUIRED', 'Changed response/state requires case-specific review'
         else:
             status, reason = expected['combined_after'], 'Exact reviewed semantic projection matches ce7c981'
         rows.append(dict(id=id, status=status, reviewed_baseline=expected['combined_after'],
-                         reason=reason, contract=expected['contract']))
+                         reason=reason, contract=expected['contract'], baseline_update=id in updates))
     counts = dict(Counter(r['status'] for r in rows))
     summary = dict(commit=read(BASE / variant / 'manifest.json')['commit'], mode='saved_real_response_replay',
         api_calls=0, credential_read=False, real_microphone='NOT_RUN', cases=rows, summary=counts,
         original_recording_attempts=attempts,
+        baseline_updates=None if a.no_updates or not upath.exists() else dict(path=str(upath.relative_to(ROOT)), sha256=sha(upath),
+                                                                              ids=sorted(updates)),
         reference='168 original saved responses + 1 separately recaptured context response; not new live trials',
         asset_manifest_sha256=sha(HERE / 'portable/manifest.json'),
         jobs={p.name:sha(p) for p in (ROOT / 'samples/dummy').glob('DEMO*JBI')})
@@ -84,4 +96,4 @@ if __name__ == '__main__':
         '\n\nAPI calls: 0. Microphone: NOT_RUN. H02/H16 remain filming blockers.\n'
         'The original context recording cannot run the new path; its error and separate recapture are retained.\n', encoding='utf-8')
     print(json.dumps(dict(commit=summary['commit'], summary=counts, api_calls=0, output=str(out)), ensure_ascii=False))
-    raise SystemExit(2 if counts.get('EXECUTION_ERROR') or counts.get('NOT_RUN') else 1 if counts.get('FAIL') else 2 if counts.get('REVIEW_REQUIRED') else 0)
+    raise SystemExit(2 if counts.get('EXECUTION_ERROR') or counts.get('NOT_RUN') else 1 if counts.get('FAIL') else 2 if counts.get('REVIEW_REQUIRED') or counts.get('UPDATED_PENDING_QA') else 0)

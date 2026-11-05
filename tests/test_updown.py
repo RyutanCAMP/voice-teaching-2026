@@ -131,8 +131,8 @@ def test_1_no_config_asks_for_updown_and_accepts_explicit_axis(config, tmp_path)
     w, sid = start(cfg)
     for text in ("3ミリ下げて", "3mm下げて", "下に3ミリ", "上に3mm", "3ミリ上げて", "C00005を下に3mm"):
         r = w.hear(sid, text)
-        assert r["status"] == "ask" and r["message"] == UNCONF, text
-        assert cand(r) is None and r["choices"] == [] and r["tool_calls"] == []
+        assert r["status"] == "ask" and ut.is_updown_unset_ask(r["message"]), text
+        assert cand(r) is None and all(ut.read_facing_choice(c["text"]) for c in r["choices"]) and r["tool_calls"] == []  # d（11/5 唐川さんの決定）：未確認の向きの言葉は、向きの確かめのボタン（番号つきの文）だけ。Z を決める選択肢は出さない
     st = r["state"]
     assert st["updown"]["status"] == "unconfirmed" and st["updown"]["message"] == UNCONF
     assert st["updown"]["confirmed_by"] is None and st["updown"]["fingerprint"] is None
@@ -150,7 +150,7 @@ def test_1_default_webflow_has_no_config():
     sid = w.load(DEMO_C)["session_id"]
     w.select(sid, "C00005")
     r = w.hear(sid, "3ミリ下げて")
-    assert r["status"] == "ask" and r["message"] == UNCONF and cand(r) is None
+    assert r["status"] == "ask" and ut.is_updown_unset_ask(r["message"]) and cand(r) is None
 
 
 @pytest.mark.parametrize("text,target,delta", [
@@ -170,7 +170,8 @@ def test_1_up_down_words_with_axis_letters_are_still_asked(text, tmp_path):
     w, sid = start(tmp_path / "none.json")
     r = w.hear(sid, text)
     assert r["status"] == "ask" and cand(r) is None
-    assert UNCONF in r["message"]
+    # 「Yを3mm下げて」は「Y の値を変えるなら…」に状態の文を足した文、「3mm下げて？」などは会話の聞き返しの文（11/5）
+    assert ut.is_updown_unset_ask(r["message"]) or UNCONF in r["message"]
     assert not any("上方向" in c["label"] or "下方向" in c["label"] for c in r["choices"])
 
 
@@ -184,7 +185,7 @@ def test_1_d1_choice_keeps_only_the_value_reading(tmp_path):
 def test_1_pre_check_without_updown_is_unconfirmed(updown_ok):
     f = ut.read_utterance("C00005を3ミリ下げて")
     v = ut.pre_check(f)
-    assert v.status == "ask" and v.message == UNCONF and v.choices == ()
+    assert v.status == "ask" and ut.is_updown_unset_ask(v.message) and v.choices == ()
     assert ut.pre_check(f, None, updown_ok).status == "ok"
     p = ut.ProposedChange(kind="shift", position="C00005", axis="Z", delta_mm=-3.0)
     assert ut.check_proposal(f, p).status == "ask"  # Claude が Z−3 を出しても、未確認なら通さない
@@ -196,7 +197,7 @@ def test_1_session_without_checker_is_unconfirmed():
     s = Session(jbi.parse_bytes(DEMO_C))
     s.select("C00005")
     r = s.hear("3ミリ下げて")
-    assert r.status == "ask" and r.message == UNCONF
+    assert r.status == "ask" and ut.is_updown_unset_ask(r.message)
     assert s.propose({"kind": "shift", "position": "C00005", "axis": "Z", "delta_mm": -3.0}).status == "stop"
 
 
@@ -219,7 +220,7 @@ def test_1_claude_is_not_called_for_up_down_when_unconfirmed(tmp_path):
     w, sid = start(tmp_path / "none.json", interp=ci.ClaudeInterpreter("sk-ant-TEST-0123456789",
                                                                        client=NS(messages=FakeMessages())))
     r = w.hear(sid, "3ミリ下げて")
-    assert r["status"] == "ask" and r["message"] == UNCONF and calls == [] and cand(r) is None
+    assert r["status"] == "ask" and ut.is_updown_unset_ask(r["message"]) and calls == [] and cand(r) is None
     # 軸と符号を明示した指示は Claude に送り、Claude の「下」も照らし合わせ（Z−3）を通る
     r = w.hear(sid, "Zマイナス3ミリ")
     assert len(calls) == 1 and cand(r) == ("C00005 Z", "-3.000")
@@ -413,7 +414,7 @@ def test_6_broken_config_is_not_read(name, make_updown):
         updown.parse_config(path.read_bytes())
     w, sid = start(path)
     r = w.hear(sid, "3ミリ下げて")
-    assert r["status"] == "ask" and r["message"] == UNCONF and cand(r) is None
+    assert r["status"] == "ask" and ut.is_updown_unset_ask(r["message"]) and cand(r) is None
     assert r["state"]["updown"]["status"] == "unconfirmed"
     assert cand(w.hear(sid, "Zマイナス3ミリ")) == ("C00005 Z", "-3.000")
 
@@ -547,7 +548,7 @@ def test_8_dialog_follows_the_same_updown_rule(kind, answer, make_updown, tmp_pa
     assert r["state"]["dialog"]["step"] == "ask_move"
     assert not any("（上）" in x or "（下）" in x for x in labels(r))
     r = w.hear(sid, answer)
-    assert r["status"] == "ask" and r["message"] == msg and cand(r) is None, r["message"]
+    assert r["status"] == "ask" and (ut.is_updown_unset_ask(r["message"]) if msg == UNCONF else r["message"] == msg) and cand(r) is None, r["message"]
     assert not any("（上）" in x or "（下）" in x for x in labels(r))
     # 同じ会話の続きで、軸と符号を明示すれば候補（方向のボタンでも同じ）
     r = w.hear(sid, "Zのマイナス3ミリ")
@@ -560,7 +561,7 @@ def test_8_dialog_opening_with_up_down_is_asked(kind, opening, make_updown, tmp_
     path, data, msg = _state_config(kind, make_updown, tmp_path)
     w, sid = start(path, data=data, select="C00001")
     r = w.hear(sid, opening)
-    assert r["status"] == "ask" and r["message"] == msg and cand(r) is None
+    assert r["status"] == "ask" and (ut.is_updown_unset_ask(r["message"]) if msg == UNCONF else r["message"] == msg) and cand(r) is None
     assert r["state"]["dialog"]["step"] is None
     assert r["state"]["dialog"]["direction"] is None
 
@@ -602,13 +603,13 @@ def test_8_read_slots_does_not_turn_up_down_into_z_without_confirmation(updown_o
 def test_config_is_reread_on_every_instruction(make_updown, tmp_path):
     path = tmp_path / "updown" / "live.json"
     w, sid = start(path)
-    assert w.hear(sid, "3ミリ下げて")["message"] == UNCONF
+    assert ut.is_updown_unset_ask(w.hear(sid, "3ミリ下げて")["message"])
     make_updown(name="live.json")
     r = w.hear(sid, "3ミリ下げて")
     assert cand(r) == ("C00005 Z", "-3.000")
     w.undo(sid)
     path.unlink()
-    assert w.hear(sid, "3ミリ下げて")["message"] == UNCONF
+    assert ut.is_updown_unset_ask(w.hear(sid, "3ミリ下げて")["message"])
 
 
 def test_messages_have_no_forbidden_words():

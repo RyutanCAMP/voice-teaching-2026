@@ -253,6 +253,14 @@ function renderAll() {
 // 実機の JOB の承認のあとの案内（CHECKER_030 S30-3。唐川さんの決定 2026-11-03 17:14）
 const UNDO_HINT = "もう一度直すときは［元に戻す］を押してください";
 
+// d：ロボットを正面から見た向き（サーバーの state.facing。この画面で確かめたときだけ。文はサーバーが作る）
+function renderFacing(f) {
+  if (!f || !f.confirmed || !f.message) return;
+  const detail = $("updown-detail");
+  detail.textContent = detail.textContent ? `${detail.textContent}／${f.message}` : f.message;
+  detail.hidden = false;
+}
+
 // 上下の向きの状態（サーバーの state.updown）。無いときは何も出さない。文は highlight.js の updownStatus が作る
 function renderUpdown(u) {
   const box = $("updown-status");
@@ -311,6 +319,7 @@ function renderState() {
   $("voice-position").replaceChildren(el("strong", {}, st.selected || "位置は未選択"), el("span", {}, st.selected ? "変える" : "選ぶ"));
   renderSelLine(st.selected);
   renderUpdown(st.updown);
+  renderFacing(st.facing);
   $("out-dir").textContent = shortDir(st.out_dir);
   $("out-dir").title = st.out_dir;
   renderChips();
