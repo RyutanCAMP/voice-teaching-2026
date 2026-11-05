@@ -169,7 +169,8 @@ class UtteranceFacts:
 _POS_RE = re.compile(r"(?<![A-Z0-9])C\s?([0-9]+)(?![0-9.])")
 _NUM_RE = re.compile(r"([0-9]+(?:\.[0-9]+)?)")
 _SIGN_BEFORE = re.compile(r"(マイナス|プラス|[+\-])\s?$")
-_UNIT_AFTER = re.compile(r"^\s?(MM|ミリ|%)")
+# 「3ミリメートル」は「3ミリ」と同じ量（クローク 11/5 夜。実マイクの言い方）。「メートル」「センチメートル」は今どおり聞き返す
+_UNIT_AFTER = re.compile(r"^\s?(MM|ミリメートル|ミリ|%)")
 _OTHER_UNIT_AFTER = re.compile(r"^\s?(センチ|CM|M(?![A-Z])|メートル|パーセント|割|度|倍)")
 _KANJI_AMOUNT = re.compile(r"[〇零一二三四五六七八九十百千万]+\s?(ミリ|MM|センチ|CM|%|パーセント|割)")
 _VAGUE = re.compile(r"そこそこ|半分|少し|すこし|ちょっと|ちょい|わずか|僅か|倍|もう少し|適当")
@@ -317,7 +318,7 @@ _COORD_VALUE_WORD = re.compile(r"(?<![A-Z])[XYZ]\s?(?:の\s?)?(?:座標値|座�
 _CONNECTOR = re.compile(r"そして|それから")  # 2つの変更の区切り（_SPLIT_MOVES）
 _VERB_TAIL = re.compile(f"(?<=上げ|下げ|増や|減ら|動か|ずら|寄せ|移動)(?:{_alt(VERB_ENDINGS)})")
 _QUESTION_VERB_TAIL = re.compile(f"(?<=戻|消|較|択)(?:{_alt(QUESTION_ONLY_ENDINGS)})")
-_AMOUNT_PREFIX = re.compile(f"(?:{_alt(AMOUNT_PREFIXES)})" + r"(?=\s?[0-9]+(?:\.[0-9]+)?\s?(?:MM|ミリ|%))")
+_AMOUNT_PREFIX = re.compile(f"(?:{_alt(AMOUNT_PREFIXES)})" + r"(?=\s?[0-9]+(?:\.[0-9]+)?\s?(?:MM|ミリメートル|ミリ|%))")
 # 位置番号のすぐ後の「位置」（「C00005の位置を下に3mm」）。「この位置」「その位置」は _THIS で読む
 _POSITION_WORD = re.compile(r"^\s?(?:の\s?)?位置")
 # 「ここここ」「そこそこ」：同じ指す言葉の繰り返しは、指す言葉として読まない（そこそこ は、あいまいな量として読む）
@@ -532,7 +533,22 @@ _MASU_END = re.compile(rf"(?<={'|'.join(MASU_AFTER)})(?:ておき)?ます[ねよ
 # 「下げてくれる」「下げてもらえる」（唐川さんの実マイク 11/3）：お願いとも、できるかの質問とも読める。
 # 「〜ます」と同じく外して2択で確かめる（候補にしない。安全の決まりは緩めない）。「くれない」「もらえない」は外さない
 _KURERU_END = re.compile(r"(?<=て)(?:くれる|くれます|もらえる|もらえます)[ねよ]?[\s　。．.!！]*$")
-_NI_SHIMASU_END = re.compile(r"([0-9０-９]+(?:[.．][0-9０-９]+)?\s*(?:mm|ＭＭ|MM|ｍｍ|ミリ))\s*に(?:しておき|し)ます[ねよ]?[\s　。．.!！]*$", re.I)
+_NI_SHIMASU_END = re.compile(r"([0-9０-９]+(?:[.．][0-9０-９]+)?\s*(?:mm|ＭＭ|MM|ｍｍ|ミリメートル|ミリ))\s*に(?:しておき|し)ます[ねよ]?[\s　。．.!！]*$", re.I)
+# 文の終わりの希望の言い方（クローク 11/5 夜。唐川さんの実マイク「この位置を上に3mm上げたい」→「「たい」が分かりませんでした」）。
+# 動きの言葉のすぐ後の、文の終わりの「〜たい」「〜たいです」「〜たいんだけど」「〜てほしい」「〜てもらいたい」「〜ていただきたい」は、
+# 同じ文の「〜て」（お願い）と同じに読む（「上げたい」→「上げて」。言葉は足さない）。読んだあとの検査は「〜て」と全く同じ。
+# 「〜ます」「〜てくれる」と違い2択にしないのは、変更の希望であることがはっきりしているため（回数の「3回にしたい」と同じ扱い）。
+# 外さないもの：「たくない」（打ち消し）・「たかった」・「たいかな」「たいと思う」「たいな」「たいけど」（ためらい・言いさし）・疑問の形
+WISH_AFTER = ("動かさせ", "移動させ", "動かし", "ずらし", "移動し", "上げ", "下げ", "あげ", "さげ", "寄せ")
+_WISH_END = re.compile(f"(?:{_alt(WISH_AFTER)})"
+                       r"(?P<wish>たい(?:です|んです(?:けど|が)|んだけど|のですが)?|て(?:ほしい|もらいたい|いただきたい)(?:です)?)"
+                       r"[\s　。．.!！]*$")
+
+
+def _strip_wish(text: str) -> str | None:
+    """「この位置を上に3mm上げたい」→「この位置を上に3mm上げて」。文の終わりが希望の言い方でなければ None。"""
+    m = _WISH_END.search(text)
+    return None if m is None else text[: m.start("wish")] + "て"
 
 
 def _strip_shimasu(text: str) -> str | None:
@@ -578,6 +594,10 @@ def read_utterance(raw: str) -> UtteranceFacts:
         plain = _strip_shimasu(plain) or plain
         f = _read(plain, question=True)
         return replace(f, raw=raw, question=True, question_text=plain or None)
+    wish = _strip_wish(raw)
+    if wish is not None:
+        # 希望の言い方：「〜て」の文として読む（聞こえた文 raw は変えずに残す）
+        return replace(read_utterance(wish), raw=raw)
     request = _strip_shimasu(raw)
     if request is not None:
         # 言い終わりの「〜します」（CHECKER_026 M3）：外した文を読み、候補にせず確かめる印を付ける（pre_check が確かめる）
@@ -1178,12 +1198,20 @@ def facing_rewrite(text: str, include_updown: bool) -> str:
     """
     t = _spoken(normalize(text))
     t = _HIRA_VERB.sub(lambda m: {"さげ": "下げ", "あげ": "上げ"}[m.group(1)], t)
+    # 書き換えた軸の言葉の前には空白を入れる（クローク 11/5 夜）。「3mm上げて」→「3MMZプラス方向に…」のように英字が続くと、
+    # 軸の文字（前が英字でないときだけ読む）が読めず「「Z」「方向」が分かりませんでした」で止まっていた
     if include_updown and not _COORD_VALUE.search(t):
-        t = _UPDOWN_VERB.sub(lambda m: f"{_sign_word('Z', 1 if m.group(1) == '上げ' else -1)}方向に動か"
-                             f"{_FACING_VERB_END[m.group(2)]}", t)
-        t = _UPDOWN_TO.sub(lambda m: f"{_sign_word('Z', 1 if (m.group(1) or m.group(4)) == '上' else -1)}方向"
+        # 「上に3mm上げて」（唐川さんの実マイク）：向きの言葉と動きの言葉が同じ向きを言っているときは、動きの言葉を
+        # 向きの無い「動かして」にする（向きを2つ数えて「向きの指定が2つあります」にしない）。向きが違う「上に3mm下げて」は今どおり2つ
+        to = {(m.group(1) or m.group(4)) for m in _UPDOWN_TO.finditer(t)}
+        verb = {m.group(1)[0] for m in _UPDOWN_VERB.finditer(t)}
+        same = len(to) == 1 and to == verb
+        t = _UPDOWN_VERB.sub(lambda m: (f"動か{_FACING_VERB_END[m.group(2)]}" if same else
+                                        f" {_sign_word('Z', 1 if m.group(1) == '上げ' else -1)}方向に動か"
+                                        f"{_FACING_VERB_END[m.group(2)]}"), t)
+        t = _UPDOWN_TO.sub(lambda m: f" {_sign_word('Z', 1 if (m.group(1) or m.group(4)) == '上' else -1)}方向"
                            f"{m.group(3) or ''}", t)
-    return _SIDE_WORD.sub(lambda m: f"{_sign_word(*FACING_SIDES[m.group(1)])}方向{m.group(3) or ''}", t)
+    return _SIDE_WORD.sub(lambda m: f" {_sign_word(*FACING_SIDES[m.group(1)])}方向{m.group(3) or ''}", t)
 
 
 def front_back_ask(facts: UtteranceFacts) -> Verdict | None:
