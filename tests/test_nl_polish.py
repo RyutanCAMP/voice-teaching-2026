@@ -210,7 +210,9 @@ def test_place_ref_with_unknown_word_still_asks_unknown():
 # ---- 7. 向きの言葉 ----
 @pytest.mark.parametrize("source", SOURCES)
 @pytest.mark.parametrize("text,word,status", [
-    ("手前に3mm", "手前", "stop"), ("奥に3mm", "奥", "stop"), ("前に3mm", "前", "stop"), ("後ろに3mm", "後ろ", "stop"),
+    # d（11/5 唐川さんの決定）：手前・奥・右・左は、向きの確かめのボタンで聞き返す。前・後ろは「手前（X＋）ですか、奥（X−）ですか？」。
+    # どれもボタンを押すまで軸には当てない（候補なし）
+    ("手前に3mm", "手前", "ask"), ("奥に3mm", "奥", "ask"), ("前に3mm", "前", "ask"), ("後ろに3mm", "後ろ", "ask"),
     ("右に3mm", "右", "ask"), ("左に3mm", "左", "ask"),
 ])
 def test_relative_direction_is_exposed_but_never_mapped(text, word, status, source):

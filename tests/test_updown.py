@@ -132,7 +132,7 @@ def test_1_no_config_asks_for_updown_and_accepts_explicit_axis(config, tmp_path)
     for text in ("3ミリ下げて", "3mm下げて", "下に3ミリ", "上に3mm", "3ミリ上げて", "C00005を下に3mm"):
         r = w.hear(sid, text)
         assert r["status"] == "ask" and ut.is_updown_unset_ask(r["message"]), text
-        assert cand(r) is None and r["choices"] == [] and r["tool_calls"] == []
+        assert cand(r) is None and all(ut.read_facing_choice(c["text"]) for c in r["choices"]) and r["tool_calls"] == []  # d（11/5 唐川さんの決定）：未確認の向きの言葉は、向きの確かめのボタン（番号つきの文）だけ。Z を決める選択肢は出さない
     st = r["state"]
     assert st["updown"]["status"] == "unconfirmed" and st["updown"]["message"] == UNCONF
     assert st["updown"]["confirmed_by"] is None and st["updown"]["fingerprint"] is None

@@ -207,6 +207,13 @@ def test_stray_sign_question_is_kept_when_the_sign_is_really_loose(tmp_path):
     assert not r["state"]["candidate"] and "どこに付くか" in hear_msg(r)
 
 
+def _reject_facing(w, sid):
+    """d の向きの確かめで［違う］を押す（そのあとは、確かめの前の決まりの文で聞き返す）。"""
+    q = w.talk(sid, "右に1mm")
+    no = next(c["text"] for c in q["hear"]["choices"] if c["label"] == "違う")
+    w.hear(sid, no, "text")
+
+
 # ---- 5. 上下の向きが未確認の「上に3mm」：意図を受け止めてから、分からないことだけを聞く（唐川さんの決定 11/5） ----
 # 数と上下の言葉はプログラムが人の文から読んで入れる。Zプラス・Zマイナスは決めない。候補は作らない。
 # 状態の表示（state.updown.message・候補の表示）は今の文（updown.MSG_UNCONFIRMED）のまま。変えるのは会話の聞き返しだけ。
@@ -222,6 +229,7 @@ def test_stray_sign_question_is_kept_when_the_sign_is_really_loose(tmp_path):
 ])
 def test_unconfirmed_updown_question_takes_the_intent_first(tmp_path, text, head, word):
     w, _, sid = A.place_flow(tmp_path)
+    _reject_facing(w, sid)  # d（11/5）：画面で初めての向きの言葉は、先に向きの確かめ。［違う］のあとが、この文
     r = w.talk(sid, text)
     msg = hear_msg(r)
     assert not r["state"]["candidate"] and not r["state"]["approval"]
@@ -236,6 +244,7 @@ def test_unconfirmed_updown_question_takes_the_intent_first(tmp_path, text, head
 @pytest.mark.parametrize("text,word", [("上に動かして", "上"), ("下げて", "下")])
 def test_unconfirmed_updown_without_amount_asks_direction_and_amount(tmp_path, text, word):
     w, _, sid = A.place_flow(tmp_path)
+    _reject_facing(w, sid)  # d（11/5）：画面で初めての向きの言葉は、先に向きの確かめ。［違う］のあとが、この文
     r = w.talk(sid, text)
     msg = hear_msg(r)
     assert not r["state"]["candidate"]

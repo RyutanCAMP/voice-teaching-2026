@@ -212,6 +212,18 @@ class WebFlow:
                 r = e.session.hear(text, source)
                 return {"ok": True, "heard": text, "source": source, "facts": None, "tool_calls": [],
                         "dialog": False, **self._reply(e, r)}
+            if ut.read_facing_choice(text) is not None:
+                # d：向きの確かめのボタン（唐川さんの決定 11/5）。番号が今の確かめと合うときだけ。［合っている］なら、
+                # 確かめた発話をふつうの指示として続けて読む（今までの検査を全部通す）。声・文字では確かめにならない
+                kind, x = e.session.facing_choose(text, source)
+                label = f"［{ut.read_facing_choice(text)[0]}］"
+                if kind != "yes":
+                    return {"ok": True, "heard": label, "source": source, "facts": None, "tool_calls": [],
+                            "dialog": False, "no_change": True, **self._reply(e, x)}
+                cancelled = self._begin_instruction(e)
+                out = self._hear_body(e, x, source)
+                out["heard"] = label
+                return self._say_cancelled(e, out) if cancelled else out
             if ut.is_explain_choice(text):
                 # ［説明です］（「〜します」の2択。CHECKER_026 M3）：何もしない。承認・候補・会話の状態も変えない
                 r = e.session.explain_only(text, source)
@@ -1139,6 +1151,8 @@ class WebFlow:
             # 今の照合の結果と違えば（設定が変わった）名前は付けない（承認もできない）
             cu = s.candidate_updown
             cand["direction_names"] = cu.direction_names if (cu is not None and same_updown) else {}
+            if s.candidate_facing:  # d：確かめた向きで読んだ発話から作った候補（候補の表示と確認表示の注意に出す。表示だけ）
+                cand["warnings"] = list(cand["warnings"]) + [ut.FACING_CANDIDATE_NOTE]
             cand["updown"] = cu.as_state() if (cu is not None and same_updown) else None
         return {
             "session_id": sid,
@@ -1151,6 +1165,9 @@ class WebFlow:
             # 上下の向きの照合の結果（CHECKER_026 M2）。画面の表示は別の担当
             # app_robot：アプリの --robot の値（どの状態でも。画面にロボット名を常に出すため。CHECKER_030 S30-1）
             "updown": {**st.as_state(), "app_robot": self.robot},
+            # d：ロボットを正面から見た向き（この画面だけ。保存しない）
+            "facing": {"confirmed": s.facing == "confirmed",
+                       "message": ut.FACING_STATE_MESSAGE if s.facing == "confirmed" else None},
             "candidate": cand,
             "confirmation_text": s.confirmation_text(),
             "blocked_reason": s.candidate_blocked_reason if ch is not None else None,

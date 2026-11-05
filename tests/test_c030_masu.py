@@ -10,6 +10,7 @@
 """
 from pathlib import Path
 
+import re
 import pytest
 
 from voice_teaching import claude_interpreter as ci
@@ -32,7 +33,9 @@ def flow(mode, make_updown, tmp_path):
 
 
 def summary(r):
-    return (r["status"], r["message"], [(c["label"], c["text"]) for c in r["choices"]], r["state"]["candidate"])
+    # d（11/5）：向きの確かめのボタンの文には、その時だけの番号が入る（比べるときは番号を除く）
+    return (r["status"], r["message"], [(c["label"], re.sub(r"#[0-9a-f]{16}$", "#番号", c["text"])) for c in r["choices"]],
+            r["state"]["candidate"])
 
 
 # 「〜ます」と、同じ意味の「〜して動かします」（M3 の2択）
@@ -75,7 +78,7 @@ def test_masu_is_two_choices_when_the_plain_instruction_passes(text, mode, sourc
     assert r["status"] == "ask" and r["state"]["candidate"] is None
     if mode == "none" and ut.read_utterance(text).vertical:
         # 上下の向きが未確認：上げ・下げの「〜ます」は、「〜して動かします」と同じく上下の案内（2択も候補も出さない）
-        assert r["choices"] == [] and (ut.is_updown_unset_ask(r["message"])
+        assert all(ut.read_facing_choice(c["text"]) for c in r["choices"]) and (ut.is_updown_unset_ask(r["message"])
                                         if w._entries[sid].session.updown.status == "unconfirmed"
                                         else r["message"] == w._entries[sid].session.updown.message), r["message"]  # 11/5 唐川さんの決定：未確認の会話の聞き返しは ut.updown_ask_message（状態の文は MSG_UNCONFIRMED のまま）
         return

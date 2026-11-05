@@ -1093,6 +1093,102 @@ def is_updown_unset_ask(text: object) -> bool:
             and "ZプラスとZマイナスのどちら" in text and "「Zプラス" in text and "「Zマイナス" in text)
 
 
+# ---- d：ロボットを正面から見た向き（唐川さんの決定 11/5）----
+# 既定の対応：上＝Z＋・下＝Z−・右＝Y＋・左＝Y−・手前＝X＋・奥＝X−（ロボットを正面から見た向き。安川のロボット座標の X＋前・Z＋上・右手系と合う）。
+# その画面（セッション）で、ボタン（Session の確かめ）で確かめたあとだけ使う。確かめは保存しない。判定（updown.py）は変えない
+FACING_SIDES = {"手前": ("X", 1), "奥": ("X", -1), "右": ("Y", 1), "左": ("Y", -1)}
+FACING_STATE_MESSAGE = "向き：正面から見た向き（この画面で確かめ済み）"
+FACING_CANDIDATE_NOTE = "この画面で確かめた向きです"
+FACING_NO_REPLY = "分かりました。Zプラス・Yマイナスのように、軸と向きで言ってください"
+FACING_STALE = "この向きの確かめは、もう使えません（新しい指示がありました）。もう一度指示してください"
+FACING_YES_LABEL, FACING_NO_LABEL = "合っている", "違う"
+FRONT_BACK_ASK = "「{w}」は、ロボットを正面から見て手前（X＋）ですか、奥（X−）ですか？"
+_FACING_CHOICE = re.compile(r"［向きの確かめ：(合っている|違う)］#([0-9a-f]{16})")
+_SIDE_WORD = re.compile(r"(手前|奥|右|左)(方向|側)?(に|へ)?")
+_FB_WORD = re.compile(r"(?<!手)(?<!以)(?<!名)(?<!変更)(前|後ろ)(?=に|へ|方向)")
+_UPDOWN_VERB = re.compile(r"(?<!以)(上げ|下げ)(て|る|ます|たい)?")
+_UPDOWN_TO = re.compile(r"(?<!以)(上|下)(方向)?(に|へ)|(?<!以)(上|下)方向")
+_FACING_VERB_END = {"て": "して", "る": "す", "ます": "します", "たい": "したい", None: "し"}
+
+
+def facing_choice_text(answer: str, token: str) -> str:
+    """確かめのボタンが送る文（決まった形と、その時だけの番号）。声・文字・Claude の答えでは出てこない。"""
+    return f"［向きの確かめ：{answer}］#{token}"
+
+
+def read_facing_choice(text: object) -> tuple[str, str] | None:
+    """確かめのボタンの文なら (合っている／違う, 番号)。"""
+    m = _FACING_CHOICE.fullmatch(text.strip()) if isinstance(text, str) else None
+    return (m.group(1), m.group(2)) if m else None
+
+
+def _sign_word(axis: str, sign: int) -> str:
+    return f"{axis}{'プラス' if sign > 0 else 'マイナス'}"
+
+
+def facing_word(facts: UtteranceFacts) -> tuple[str, str, int, str] | None:
+    """発話の中の向きの言葉が1つの向きだけなら (言葉, 軸, 符号, 言った形)。0個・2つの向き・座標の値の話なら None。"""
+    t = facts.text
+    found: list[tuple[str, str, int, str]] = []
+    if not _COORD_VALUE.search(t):
+        found += [("上", "Z", 1, m.group(0)) for m in _UP.finditer(t)]
+        found += [("下", "Z", -1, m.group(0)) for m in _DOWN.finditer(t)]
+    found += [(m.group(1), *FACING_SIDES[m.group(1)], m.group(0)) for m in _SIDE_WORD.finditer(t)]
+    if not found or len({(a, s) for _, a, s, _ in found}) != 1:
+        return None
+    return found[0]
+
+
+def facing_ask_message(facts: UtteranceFacts, found: tuple[str, str, int, str], updown_unset: bool) -> str:
+    """確かめの文。数・言葉・軸はプログラムが入れる。3D・矢印には触れない（サーバーから 3D の表示を確かめられない）。"""
+    word, axis, sign, said = found
+    a = facts.amount
+    v = _num(a.value) if (a is not None and a.unit == "mm" and a.sign is None and not facts.unclear_amounts) else None
+    if said in ("上げ", "下げ"):
+        head = f"{v}mm{said}たい" if v else f"{said}たい"
+    elif word in ("上", "下"):
+        tail = "" if said.endswith(("に", "へ")) else "に"
+        head = f"{v}mm{said}{tail}動かしたい" if v else f"{said}{tail}動かしたい"
+    else:
+        part = said if said.endswith(("に", "へ")) else f"{said}に"
+        head = f"{part}{v}mm動かしたい" if v else f"{part}動かしたい"
+    msg = f"{head}んですね。"
+    if updown_unset:
+        n = v or "3"
+        return (msg + f"この設備では、まだ「{word}」の方向が決まっていません。ロボットを正面から見て、{word}は "
+                f"{_sign_word(axis, sign)} で合っていますか？ 違うときは、ZプラスとZマイナスのどちらかを、"
+                f"「Zプラス{n}ミリ」か「Zマイナス{n}ミリ」のように言ってください")
+    return msg + f"ロボットを正面から見て、{word}は {_sign_word(axis, sign)} で合っていますか？"
+
+
+def facing_rewrite(text: str, include_updown: bool) -> str:
+    """確かめたあとの発話：6つの向きの言葉を、表の軸と向きの言葉に書き換えた文（ふつうの指示と同じ検査を全部通す）。
+
+    上下は、専門家の登録が無いとき（include_updown）だけ。座標の値の話（「Y座標を3mm下げて」）の上げ下げは書き換えない。
+    """
+    t = _spoken(normalize(text))
+    t = _HIRA_VERB.sub(lambda m: {"さげ": "下げ", "あげ": "上げ"}[m.group(1)], t)
+    if include_updown and not _COORD_VALUE.search(t):
+        t = _UPDOWN_VERB.sub(lambda m: f"{_sign_word('Z', 1 if m.group(1) == '上げ' else -1)}方向に動か"
+                             f"{_FACING_VERB_END[m.group(2)]}", t)
+        t = _UPDOWN_TO.sub(lambda m: f"{_sign_word('Z', 1 if (m.group(1) or m.group(4)) == '上' else -1)}方向"
+                           f"{m.group(3) or ''}", t)
+    return _SIDE_WORD.sub(lambda m: f"{_sign_word(*FACING_SIDES[m.group(1)])}方向{m.group(3) or ''}", t)
+
+
+def front_back_ask(facts: UtteranceFacts) -> Verdict | None:
+    """「前」「後ろ」：手前・奥と取り違えやすいので、いつも聞き返す（確かめ済みでも）。選択肢は言い換えた文（同じ検査を通る）。"""
+    m = _FB_WORD.search(facts.text)
+    if m is None:
+        return None
+    w = m.group(1)
+    base = facts.question_text or facts.shimasu_text or facts.raw
+    t = _spoken(normalize(base))
+    if w not in t:
+        return _ask(FRONT_BACK_ASK.format(w=w))
+    return _ask(FRONT_BACK_ASK.format(w=w), (("手前（X＋）", t.replace(w, "手前", 1)), ("奥（X−）", t.replace(w, "奥", 1))))
+
+
 def updown_word(facts: UtteranceFacts) -> str:
     """発話の中の上下の言葉（「下げて」「上に」）。示すためだけ。見つからなければ「上」「下」。"""
     m = _UPDOWN_WORD.search(facts.text)

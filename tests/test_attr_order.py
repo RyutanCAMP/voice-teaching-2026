@@ -115,7 +115,7 @@ def test_masu_is_two_choices_like_shimasu(text, kind, want, mode, source, make_u
     assert r["state"]["candidate"] is None, (text, mode, r["message"])  # 「〜ます」からは候補を作らない
     assert r["state"]["approval"] is None
     if kind == "updown" and mode == "none":
-        assert r["choices"] == [] and (ut.is_updown_unset_ask(r["message"])
+        assert all(ut.read_facing_choice(c["text"]) for c in r["choices"]) and (ut.is_updown_unset_ask(r["message"])
                                         if w._entries[sid].session.updown.status == "unconfirmed"
                                         else r["message"] == w._entries[sid].session.updown.message), r["message"]  # 11/5 唐川さんの決定：未確認の会話の聞き返しは ut.updown_ask_message（状態の文は MSG_UNCONFIRMED のまま）
         return

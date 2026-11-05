@@ -406,7 +406,8 @@ def test_p1_messages_confirmed_keep_up_down_examples(make_updown, tmp_path):
     r = w.hear(sid, "バイオ3ミリ動かして")
     assert "下に3ミリ" in r["message"]
     r = w.hear(sid, "右に3mm")
-    assert "下げて" in r["message"]
+    # d（11/5）：右・左は、上下の登録が確認済みでも、画面で初めてなら向きの確かめ（ロボットを正面から見た向き）
+    assert "右は Yプラス で合っていますか？" in r["message"] and all(ut.read_facing_choice(c["text"]) for c in r["choices"])
 
 
 def test_p1_fixed_messages_have_no_up_down_example():
@@ -452,7 +453,7 @@ def test_p1_index_html_examples_switch_by_updown():
 # ======================================================================
 SPECIFIC = [
     ("下に3mmを2回移動します", "2回の移動ですか、2往復ですか？"),
-    ("右に3mm動かします", "「右」「左」は"),
+    ("右に3mm動かします", "右は Yプラス で合っていますか？"),  # d（11/5）：向きの確かめ
     ("Yを3mm下げて動かします", "2つの読み方"),
     ("少し下げて動かします", "量がはっきりしません"),  # 差分の再レビュー QA P2-3：具体的な理由をそのまま返す（戻した）
     ("置くところまで3mm動かします", "へ動かす指示は扱いません"),
