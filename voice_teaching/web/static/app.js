@@ -470,6 +470,10 @@ function renderSteps() {
     text = "承認しました（変更案の確認のみ。実機用JOBは出力できません）";
     primary = null;  // 出力も、捨てる操作も勧めない（内部 QA N-1）
     hint = UNDO_HINT;  // 次の操作の案内を1行（CHECKER_030 S30-3）。「元に戻す」は目立たせない（primary にしない）
+  } else if (!st.exported && exportFailed()) {
+    // 出力に失敗した：［出力］は押せるまま、目立たせない（11/5 確定版 1・K2。次にすることは結果の欄）
+    text = "出力できませんでした";
+    primary = null;
   } else if (!st.exported) {
     text = "承認しました。出力してください";
     primary = "export-button";
@@ -1243,9 +1247,16 @@ function renderApproval() {
   // 「出力しました」と食い違うため（11/5 夜 H1）。上書きしない決まりはサーバーのまま。1回目の失敗のあとは押せる
   $("export-button").disabled = !st.can_export || !!st.exported || state.exporting || recording();
   $("approve-button").disabled = !st.can_approve || state.approving || recording();  // 承認を送っている間は押せない（11/5 夜 N2）
-  if (!a && !$("export-result").hidden && $("export-result").dataset.ok === "true") {
+  // 結果の欄（成功・失敗とも）は、出力したときの候補と承認のものだけ。元に戻した・新しい候補・別のジョブで消す（11/5 確定版 1）
+  if (!$("export-result").hidden && $("export-result").dataset.owner !== exportOwner()) {
     $("export-result").hidden = true;
   }
+}
+// 出力の結果が、どの画面・候補・承認のものか（vt:state の key と同じ考え）
+function exportOwner() {
+  const st = state.st || {}, c = st.candidate;
+  return JSON.stringify([state.sessionId, c ? c.kind : null, c ? c.target : null, c ? c.after_value : null,
+    st.approval ? st.approval.approved_at : null]);
 }
 
 // ---- シミュレーション用の出力 ----
@@ -1273,6 +1284,7 @@ $("export-button").addEventListener("click", async () => {
   }
   if (res.state) state.st = res.state;
   const box = $("export-result");
+  box.dataset.owner = exportOwner();  // 出力したあとの状態（承認が消えた失敗なら、承認なし）
   if (res.ok === true) {
     box.className = "result done";
     box.dataset.ok = "true";
@@ -1282,11 +1294,25 @@ $("export-button").addEventListener("click", async () => {
   } else {
     box.className = "result";
     box.dataset.ok = "false";
-    box.replaceChildren(friendly("export", res.error || "理由が分かりません"));
+    const reason = res.error || "理由が分かりません";
+    box.replaceChildren(friendly("export", reason), el("p", { class: "next-step" }, exportNextStep(reason)));
   }
   box.hidden = false;
   renderState();
 });
+
+// 出力に失敗したときの「次にすること」（11/5 確定版 1・K2）。理由はサーバーの文のまま出し、ここでは次の操作だけを足す。
+// 同じ名前のファイルは上書きしない（サーバーの決まり）ので、消してから押し直してもらう。承認が消えたら承認し直してもらう
+function exportNextStep(reason) {
+  if (!(state.st && state.st.approval)) return "次にすること：もう一度承認してください";
+  if (/が既にあるため、上書きしません/.test(reason)) {
+    return "次にすること：同じ名前のファイルが output\\sim\\ にあります。消してから、もう一度［出力］";
+  }
+  return "次にすること：理由を確かめてから、もう一度［出力］";
+}
+function exportFailed() {
+  return !$("export-result").hidden && $("export-result").dataset.ok === "false";
+}
 
 // ---- 作業ログ（詳細表示） ----
 function renderLog() {

@@ -153,10 +153,22 @@ function speaker(model) {
   return /^claude-mock/.test(model || "") ? "モック（台本の答え・本物の Claude ではありません）" : "Claude（" + model + "）";
 }
 
+// 質問の上限（11/5 確定版 4・U-02）：［会話をやり直す］は「詳しく」の中（会話の欄のいちばん上）にあり、会話が長いと
+// スクロールしないと押せない。上限の文の吹き出しの下へ同じボタンを動かす（id は1つのまま。押したときの動き・押せない決まりは同じ）。
+// 会話を消す前に「詳しく」の中へ戻す（吹き出しと一緒に消さない）
+const resetHome = $("ask-reset").parentNode, resetNext = $("ask-reset").nextSibling;
+function resetToHome() {
+  if ($("ask-reset").parentNode !== resetHome) resetHome.insertBefore($("ask-reset"), resetNext);
+}
+
 function showReply(r) {
   if (r.conversation_notice) addTurn("アプリ", r.conversation_notice, "app notice");
   if (!r.ok) {
-    addTurn("アプリ", r.error || "理由が分かりません", "app");
+    const li = addTurn("アプリ", r.error || "理由が分かりません", "app");
+    if (r.status === "too_many_turns") {
+      li.append($("ask-reset"));
+      scrollDown();
+    }
     if (r.talk) renderTalk(r.talk);
     return;
   }
@@ -211,6 +223,7 @@ function showReply(r) {
 
 window.addEventListener("vt:session", (ev) => {
   ask.sessionId = (ev.detail && ev.detail.sessionId) || null;
+  resetToHome();
   $("ask-turns").replaceChildren();
   $("ask-usage").textContent = "";
   $("ask-memory").replaceChildren();
@@ -274,6 +287,7 @@ window.vtTalk = talkSend;
 $("ask-reset").addEventListener("click", async () => {
   if (!ask.sessionId || ask.busy) return;
   const r = await post({ session_id: ask.sessionId, reset: true });
+  resetToHome();
   $("ask-turns").replaceChildren();
   highlight({ positions: [], lines: [] });
   if (!r.ok) addTurn("アプリ", r.error || "理由が分かりません", "app");

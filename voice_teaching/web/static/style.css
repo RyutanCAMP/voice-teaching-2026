@@ -437,6 +437,7 @@ details summary { cursor: pointer; }
 .confirm-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; position: sticky; bottom: -32px; z-index: 2;
   background: #0d1628; margin: 20px -32px -32px; padding: 14px 32px 20px; box-shadow: 0 -10px 18px rgba(0, 0, 0, 0.35);
   border-top: 1px solid var(--line); border-radius: 0 0 20px 20px; }
+.confirm-actions #confirm-error { flex: 1 0 100%; margin: 0; }  /* 帯の中の1行目（名前の欄の上） */
 #approver-name { flex: 1; min-width: 200px; font: inherit; font-size: 17px; min-height: 48px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px;
   background: #091224; color: var(--text); }
 #approver-name::placeholder { color: #7f8ca4; }
@@ -689,6 +690,9 @@ svg .dest-mark { pointer-events: none; }
   margin-top: 2px; padding: 2px 0; scrollbar-width: thin; }
 .bubble.claude { max-width: calc(100% - 44px); }
 .bubble .evidence button.link { font-size: 14px; text-align: left; padding: 4px 8px; min-height: 44px; }
+/* 質問の上限の吹き出しの下に出す［会話をやり直す］（11/5 確定版 4・U-02。ふだんは「詳しく」の中） */
+.bubble #ask-reset { display: block; margin-top: 8px; font-size: 14px; min-height: 44px; padding: 6px 12px;
+  border-color: var(--blue-text); }
 .talk-choices { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .talk-choices .choice { flex: 1 1 100%; min-width: 0; font-size: 14px; padding: 9px 10px; overflow-wrap: anywhere; text-align: left; white-space: normal; }
 .memory { margin-top: 10px; padding: 8px 12px; border: 1.5px solid #2f6b4a; background: var(--green-bg); border-radius: 12px; }
