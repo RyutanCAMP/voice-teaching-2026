@@ -175,7 +175,6 @@ def test_words_never_approve(tmp_path, text):
 
 
 # ---- 5. 聞き返しのやさしさ ----
-@pytest.mark.xfail(strict=True, reason=P0 + " 「終わり」で正しい説明まで隠す（A08・A13・A14・A38・A48 ほか）")
 @pytest.mark.parametrize("reply", ["まず最初の位置へ動き、次にボタンを押す動作を同じ形でくり返します。そのあと最後の位置へ移って終わります。",
                                    "ボタンを押す動作をくり返したあと、最後に別の位置へ関節の動きで移って終わります。"])
 def test_plain_motion_explanation_is_shown(reply):
