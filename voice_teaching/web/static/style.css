@@ -1417,3 +1417,13 @@ body.hero #kbd-button { min-width: 0; width: 44px; padding-inline: 0; }
 @media (max-width: 1699px), (max-height: 949px) {
   .bubble .said { line-height: 1.6; }
 }
+@media (min-width: 1700px) and (min-height: 950px) {
+  /* 会話の欄は前の版と同じ 500px（範囲の確かめの文が欄に収まる）。外の余白とすき間を詰めて、3D は前より小さくしない */
+  .work { grid-template-columns: clamp(400px, 26vw, 500px) minmax(0, 1fr); gap: 12px; padding: 8px 8px; }
+}
+/* 会話のあとのマイク：大きく押しやすいまま、縦の場所を詰める（範囲の確かめの文と、いちばん新しい吹き出しを欄に収める） */
+@media (min-width: 1100px) {
+  body:not(.hero) .mic-big { width: 68px; height: 68px; }
+  body:not(.hero) .mic-stage { padding-block: 0; }
+  body:not(.hero) .mic-cta-row { display: none; }
+}
