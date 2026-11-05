@@ -260,11 +260,17 @@ class Session:
             return self._reply("ask", rc.unknown_message(rc.leftovers(body)), facts=facts)
         if self.candidate is not None:
             return stop(self.pending_message)
+        confirm_block = False
         if req.start is not None:
             try:
                 block = self._job.find_repeat(req.start, req.end)
             except jbi.JbiError as e:
-                return stop_job(str(e))
+                # 「C0001とC0002の動きを3回繰り返して」：言った位置がくり返しの区間とぴったり合わない。両方を含む区間が
+                # 1つだけなら、その区間を示して確かめる（候補にも範囲の確認にもしない。唐川さんの指示 11/5 c）
+                blocks = [b for b in self._job.find_repeat_blocks() if req.start in b.positions and req.end in b.positions]
+                if len(blocks) != 1:
+                    return stop_job(str(e))
+                block, confirm_block = blocks[0], True
         else:
             # 範囲を言わない：ジョブに数えられる区間が1つだけなら、その区間を示して確かめる（QA P1-1）
             if req.position is not None and req.position not in self._job.positions:
@@ -308,6 +314,10 @@ class Session:
             self._job.plan_repeat(start, end, total)  # 試すだけ（候補はボタンのあと）
         except jbi.JbiError as e:
             return stop_job(str(e))
+        if confirm_block:
+            # 選択肢は決まった文（今の回数を入れる）を送り、同じ検査を通ってから［この範囲を繰り返す］のボタンで確かめる
+            return self._reply("ask", rc.block_confirm_message(start, end, total), facts=facts,
+                               choices=((f"この区間を{total}回にする", rc.canonical(start, end, n, total)),))
         self._range_turn += 1
         texts = tuple(_strip_ending(x) for x in block.cycle_lines)
         first, last = block.first_line + 1, block.first_line + block.cycle_len
