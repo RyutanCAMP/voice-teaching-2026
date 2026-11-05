@@ -55,8 +55,10 @@ def test_figure_notes_are_one_paragraph_with_same_ids_and_text():
     for i in ["play-note", "view3d-note", "figure-note"]:
         assert re.search(rf'<span id="{i}">', inner), i
     assert "点を命令の順に直線で結んだ目安です。ロボット本体の動きではありません。" in inner
-    assert ("3D はジョブの X・Y・Z をそのまま点で描いたもので、ロボット本体・関節は描いていません。"
+    assert ("3D はジョブの X・Y・Z をそのまま点で描いたものです。ロボットの形は、HC20 を模した目安の静止モデルです"
+            "（メーカーの形状データではありません）。実機の姿勢・寸法・可動範囲・干渉を再現したものではありません。"
             "動作や干渉を保証するシミュレーターではありません。") in inner
+    assert "ロボット本体・関節は描いていません" not in inner
     assert ("この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。"
             "参考表示であり、実際のロボットの動きではありません。") in inner
 
