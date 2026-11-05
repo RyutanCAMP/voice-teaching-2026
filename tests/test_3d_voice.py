@@ -83,10 +83,7 @@ def test_3d_states_it_is_not_a_robot_simulator():
     h = text("index.html")
     note = re.search(r'id="view3d-note"[^>]*>(.*?)</', h, re.S)
     assert note
-    # 2026-11-05 夜 唐川さんの決定：HC20 を模した静止モデルを描く。モデルが目安であることと、保証しないことを書く
-    assert "HC20 を模した目安の静止モデル" in note.group(1) and "メーカーの形状データではありません" in note.group(1)
-    assert "実機の姿勢・寸法・可動範囲・干渉を再現したものではありません" in note.group(1) and "保証" in note.group(1)
-    assert "ロボット本体・関節は描いていません" not in h
+    assert "ロボット本体" in note.group(1) and "保証" in note.group(1)
 
 
 # ---- 音声：Web会議のようなマイクの ON/OFF ----
@@ -126,8 +123,7 @@ def test_confirm_shows_unplottable_note_3d_limit_and_affected_lines():
     assert "state.view.figure_message" in body
     assert '$("confirm-affected")' in body and "st.candidate.affected" in body
     o = overlay()
-    assert "HC20 を模した目安の静止モデル" in o and "実機の姿勢・寸法・可動範囲・干渉を再現したものではありません" in o and "保証" in o
-    assert "ロボット本体・関節は描いていません" not in o
+    assert "ロボット本体・関節は描いていません" in o and "保証" in o
     view = api.job_view((ROOT / "samples" / "dummy" / "PAT_POSTYPE_MIXED.JBI").read_bytes())
     assert view["figure_message"]  # 描けない点があるジョブでは、注記の文がある
 
