@@ -47,8 +47,9 @@ def test_header_has_no_question_mark_buttons():
 def test_help_button_is_text_link_like_engineer_toggle():
     bs = {attr(t, "id"): (t, i) for t, i in buttons(header())}
     tag, inner = bs["help-button"]
-    assert inner == "使い方"
-    assert attr(tag, "class") == "link" == attr(bs["engineer-toggle"][0], "class")
+    # 本番UI（ミニマル確定案 11/5 夜）：使い方・詳細表示は同じ見た目のアイコンのボタン（名前は aria-label と title）
+    assert attr(tag, "aria-label") == "使い方" and attr(bs["engineer-toggle"][0], "aria-label") == "詳細表示"
+    assert attr(tag, "class") == "icon-btn" == attr(bs["engineer-toggle"][0], "class")
     assert attr(tag, "type") == "button"
     assert attr(tag, "aria-controls") == "help-pop"
     assert attr(tag, "aria-expanded") == "false"
