@@ -71,8 +71,9 @@ def test_notes_keep_the_no_guarantee_sentences_and_add_base_note():
             "動作や干渉を保証するシミュレーターではありません。") in m
     assert ("この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。"
             "参考表示であり、実際のロボットの動きではありません。") in m
-    base = re.search(r'<span id="base-note">(.*?)</span>', h, re.S).group(1)
-    assert base == "台座の印は、ロボット座標の原点（0,0,0）の位置です。ロボットの大きさ・形ではありません。"
+    # 台座の印の説明：図の下の注意書きには足さない（1440×900 で 3D が縮むため）。3D の印の title と確認表示の注意書きに置く
+    assert 'id="base-note"' not in h
+    assert 'const BASE_NOTE = "台座の印は、ロボット座標の原点（0,0,0）の位置です。ロボットの大きさ・形ではありません。";' in text("view3d.js")
     ov = h[h.index('id="confirm-overlay"'):]
     assert "ロボット本体・関節は描いていません" in ov and "動作や干渉を保証するシミュレーターではありません" in ov
     assert "台座の印は、ロボット座標の原点（0,0,0）の位置です。ロボットの大きさ・形ではありません。" in ov

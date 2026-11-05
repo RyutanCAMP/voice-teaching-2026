@@ -58,6 +58,8 @@ function niceStep(span) {
 const C_ROBOT = "#f2c94c";  // 台座の目印・正面の矢印と札（軸の X・Y・Z の色、変更後のオレンジと見分ける。形と札でも見分ける）
 const BASE_LABEL = "ロボット（台座の中心）";
 const FRONT_LABEL = "ロボットの正面（X＋）";
+// 台座の印の説明（印にマウスを重ねたときの文。確認表示の注意書きにも同じ文がある）。図の下の注意書きには足さない（1440×900 で 3D が縮むため）
+const BASE_NOTE = "台座の印は、ロボット座標の原点（0,0,0）の位置です。ロボットの大きさ・形ではありません。";
 
 const ptsAttr = (ps) => ps.map((q) => `${q[0].toFixed(1)},${q[1].toFixed(1)}`).join(" ");
 
@@ -482,6 +484,8 @@ export class View3D {
     g.append(svgEl("path", { d: `M ${t[0] + ux * 12} ${t[1] + uy * 12} L ${t[0] - ux * 4 - uy * 8} ${t[1] - uy * 4 + ux * 8} `
       + `L ${t[0] - ux * 4 + uy * 8} ${t[1] - uy * 4 - ux * 8} Z`, fill: C_ROBOT, class: "robot-front-head" }));
     g.append(svgEl("circle", { cx: o[0], cy: o[1], r: 5, fill: C_ROBOT, stroke: "#08101f", "stroke-width": 1.5, class: "robot-origin" }));
+    const tt = svgEl("title", {}); tt.textContent = BASE_NOTE;
+    g.append(tt);
     svg.append(g);
     this.baseAt = { o, t };
   }

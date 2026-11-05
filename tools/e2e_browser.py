@@ -3141,10 +3141,12 @@ def check_3d_robot_base(browser, check, shots: Path | None, out: Path) -> None:
                 body = pg.inner_text("body")
                 check("ロボット本体・関節は描いていません" in notes and "動作や干渉を保証するシミュレーターではありません" in notes
                       and "当たらないとは限りません" in notes and "腕やツールの根元は描いていません" in notes and "参考表示であり" in notes
-                      and "台座の印は、ロボット座標の原点（0,0,0）の位置です。ロボットの大きさ・形ではありません。" in notes
                       and not any(x in body for x in MODEL_WORDS)
                       and not pg.evaluate("(ws) => [...document.querySelectorAll('[title],[aria-label]')].some((e) => ws.some((w) => (e.title + (e.getAttribute('aria-label') || '')).includes(w)))", list(MODEL_WORDS)),
-                      f"台座（{tag}）：干渉を保証しない注意書きと台座の印の文が出て、モデル用の文はどこにも無い")
+                      f"台座（{tag}）：干渉を保証しない注意書きが出て、モデル用の文はどこにも無い")
+                tip = pg.evaluate("() => { const t = document.querySelector('#fig-3d g.robot-base > title'); return t ? t.textContent : null; }")
+                check(tip == "台座の印は、ロボット座標の原点（0,0,0）の位置です。ロボットの大きさ・形ではありません。",
+                      f"台座（{tag}）：台座の印にマウスを重ねると、原点の位置でありロボットの大きさ・形ではないと出る：{tip}")
                 if r0 is None:
                     pg.close()
                     continue
