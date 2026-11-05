@@ -233,7 +233,7 @@ class Session:
         if found is None or (found[1] == "Z" and st.status != ud.UNCONFIRMED):
             return v
         token = secrets.token_hex(8)
-        self._facing_pending = {"token": token, "text": text}
+        self._facing_pending = {"token": token, "text": text, "selected": self.selected}
         return ut.Verdict("ask", ut.facing_ask_message(facts, found, updown_unset=found[1] == "Z"),
                           ((ut.FACING_YES_LABEL, ut.facing_choice_text(ut.FACING_YES_LABEL, token)),
                            (ut.FACING_NO_LABEL, ut.facing_choice_text(ut.FACING_NO_LABEL, token))))
@@ -243,7 +243,8 @@ class Session:
         got = ut.read_facing_choice(text)
         pending, self._facing_pending = self._facing_pending, None
         self._log("操作", f"向きの確かめ：{got[0] if got else '?'}")
-        if got is None or pending is None or got[1] != pending["token"]:
+        if (got is None or pending is None or got[1] != pending["token"]
+                or pending.get("selected") != self.selected):  # 聞いたときと違う位置では使わない（Safety 003 High-1）
             return "stale", self._reply("stop", ut.FACING_STALE)
         if got[0] == ut.FACING_YES_LABEL:
             self.facing = "confirmed"
@@ -457,6 +458,7 @@ class Session:
         次の発話を前の発話に足さない）。未確定の状態（答えを待つ発話・上下の案内の印）を全部捨てる。"""
         self._awaiting_answer = None
         self._updown_followup = None
+        self._facing_pending = None  # 向きの確かめのボタンも使えなくする（選び直し・元に戻す。Safety 003 High-1）
 
     def pending_reply(self, facts: ut.UtteranceFacts | None) -> Reply:
         """承認待ちの候補があるのに来た移動・速度の指示を、解釈の係を呼ばずに断る。"""

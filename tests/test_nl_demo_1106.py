@@ -962,3 +962,24 @@ def test_facing_negation_stops_before_asking(tmp_path):
     w, _, sid = A.place_flow(tmp_path)
     r = w.talk(sid, "右に10mm動かさないで")
     assert not r["state"]["candidate"] and not _facing_buttons(r) and "打ち消し" in hear_msg(r)
+
+
+# ---- Safety 003 High-1：向きの確かめのボタンは、位置の選び直し・［元に戻す］のあとは使えない ----
+def test_facing_button_is_refused_after_selecting_another_position(tmp_path):
+    w, _, sid = A.place_flow(tmp_path)
+    q = w.talk(sid, "右に10mm")
+    yes = _facing_buttons(q)["合っている"]
+    w.select(sid, "C00004")
+    r = w.hear(sid, yes, "text")
+    assert not r["state"]["candidate"] and not r["state"]["facing"]["confirmed"]
+    assert "もう使えません" in r["message"], r["message"]
+
+
+def test_facing_button_is_refused_after_undo(tmp_path):
+    w, _, sid = A.place_flow(tmp_path)
+    q = w.talk(sid, "右に10mm")
+    yes = _facing_buttons(q)["合っている"]
+    w.undo(sid)
+    r = w.hear(sid, yes, "text")
+    assert not r["state"]["candidate"] and not r["state"]["facing"]["confirmed"]
+    assert "もう使えません" in r["message"], r["message"]
