@@ -313,3 +313,14 @@ python -m voice_teaching.claude_explain --job samples/dummy/DEMO_BUTTON_REPEAT.J
   データが変わったら**会話を区切る**（新しい会話にして「データが変わったので、ここからは新しい内容で答えます」）。
   `change_record` に、あとで変更エンジンへつなぐための事実（読んだ回数・区間・根拠の行が区間に収まるか）を出す（このブランチでは記録だけ）。
 - `/api/ask` の追加：`source`（voice・text。同じ検査）、`sync: true`（確かめ直しと知らせだけ）、`choose`・`token`（区間のボタン）。
+
+### 8-10. Claude の言い添え（2026-11-05 夜。`voice_teaching/claude_lead.py`）
+指示の道（確かめの質問・変更の案・止めた理由）の答えの前に、本物の Claude が前後の会話を踏まえた一言を言う。
+- 一言は決まった相づち（`PHRASES`・9文）から Claude が選ぶ（2つまで）。一覧に無い文は出さない。画面に出すのは一覧の文そのもの
+- 一言で、位置・軸・符号・量・回数は決まらない。Session・候補・承認・選択・会話の状態には使わない（表示と作業ログだけ）
+- 送るもの：人の発話・前に選んだ相づち・答えの種類（ask・ok・stop）・相づちの一覧。**送らないもの**：アプリの答えの文
+  （座標の値・位置番号・命令が入る）・ジョブの中身・キー。**合成ジョブのときだけ**呼ぶ（8-3 と同じ）
+- 料金の上限と使用量の記録は 8-6 と同じ（同じ records/api_usage.jsonl。kind は "explain" のまま：一言と説明は区別しない）
+- 待つのは10秒まで・やり直さない。呼べない・時間切れ・一覧に無い文は、一言を出さないだけ（プログラムの答えはそのまま）
+- 使うのは本物の Claude とキーがあるときの起動（`python -m voice_teaching.web`・`tools/debug_review_only.py`）だけ。
+  `VOICE_TEACHING_CLAUDE_LEAD=0` で止める。モックの起動（tools/demo_mock.py）とテストの既定では使わない

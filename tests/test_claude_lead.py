@@ -119,12 +119,48 @@ def test_history_is_sent_in_order(tmp_path):
     f.talk(sid, "マイナス")
     p = c.payload()
     assert p["said"] == "マイナス"
-    assert [h["who"] for h in p["history"]] == ["人", "Claude", "アプリ"]
-    assert p["history"][0]["text"] == "Yに10mm"
-    assert p["history"][2]["text"] == first["hear"]["message"]
-    assert p["app_reply"]["status"] == "ok"
+    # 送るのは人の発話と前に選んだ相づちだけ。アプリの文（座標の値・位置番号）は送らない（独立チェック 2回目 High-A）
+    assert p["history"] == [{"who": "人", "text": "Yに10mm"}, {"who": "Claude", "text": OK_LEAD}]
+    assert p["app_reply_kind"] == "ok" and "app_reply" not in p
     sent = json.dumps(c.sent, ensure_ascii=False, default=str)
     assert KEY not in sent
+    assert first["hear"]["message"] not in sent
+
+
+def test_no_coordinates_or_app_text_are_sent(tmp_path):
+    c = LeadClient(OK_LEAD)
+    f = make_flow(tmp_path, c)
+    sid = start(f)
+    outs = [f.talk(sid, t) for t in ("Yに10mm", "マイナス")]
+    sent = json.dumps([kw["messages"] for kw in c.sent], ensure_ascii=False)
+    for v in ("150.000", "140.000", "400.000", "200.000", "-10.000", "C00005", "MOVL", "//POS"):
+        assert v not in sent, v
+    for o in outs:
+        assert o["hear"]["message"] not in sent
+
+
+def test_non_synthetic_job_does_not_call(tmp_path):
+    c = LeadClient(OK_LEAD)
+    f = make_flow(tmp_path, c)
+    data = (ROOT / "samples" / "dummy" / "DEMO_C_PLACE.JBI").read_bytes().replace(
+        b"C00005=400.000,150.000,200.000", b"C00005=412.345,151.234,203.456")
+    sid = f.load(data)["session_id"]
+    f.select(sid, "C00005")
+    out = f.talk(sid, "Yマイナスの方向に10mm")
+    assert c.sent == []
+    assert "claude_lead" not in out["hear"] and out["hear"]["message"]
+    assert "合成でないジョブのため呼びません" in json.dumps(f.state(sid), ensure_ascii=False)
+
+
+@pytest.mark.parametrize("raw, shown", [
+    ("㊀緒に確かめさせてください", "一緒に確かめさせてください"),
+    ("ここは確かめさせてください｡", "ここは確かめさせてください"),
+    ("さっきの続きですね。ここは確かめさせてください。", "さっきの続きですね。ここは確かめさせてください"),
+])
+def test_shown_text_is_the_listed_phrase(tmp_path, raw, shown):
+    f = make_flow(tmp_path, LeadClient(raw))
+    out = f.talk(start(f), "Yに10mm")
+    assert out["hear"]["claude_lead"]["text"] == shown
 
 
 def test_history_is_capped(tmp_path):
