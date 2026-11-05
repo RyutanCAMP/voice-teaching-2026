@@ -196,7 +196,6 @@ def test_clarification_does_not_quote_a_broken_fragment(tmp_path):
     assert "「っぱり" not in shown
 
 
-@pytest.mark.xfail(strict=True, reason=P0 + " 単位が無いのに「符号の付く所」を聞き返す")
 def test_missing_unit_is_what_the_question_is_about(tmp_path):
     w, _, sid = place_flow(tmp_path)
     r = w.talk(sid, "Z+3")

@@ -471,6 +471,7 @@ def _repeat(text: str) -> tuple[tuple[int | None, str] | None, list[tuple[int, i
 # CHECKER_032 P1-1（唐川さん 11/3 夜）：言い終わりの「ね」「よ」（「下げますね」）・「〜ておきます」・「量＋にします」も、
 # 既定の確認ルール（11/3 17:14）どおり2択で確かめる（候補にしない）。「ません」「ました」「ましょう」は外さない（今まで通り）
 MAX_AMOUNT_DECIMALS = 6
+NO_UNIT_NOTE = "（単位がありません）"  # 単位の無い数（「Z+3」の 3）。_amount_check が単位を聞き返す
 _SHIMASU_END = re.compile(rf"(?<={'|'.join(SHIMASU_AFTER)})(?:しておき|し)ます[ねよ]?[\s　。．.!！]*$")
 _SHIMASU_VERB = re.compile(f"(?:{'|'.join(SHIMASU_AFTER)})$")
 _MASU_END = re.compile(rf"(?<={'|'.join(MASU_AFTER)})(?:ておき)?ます[ねよ]?[\s　。．.!！]*$")
@@ -552,6 +553,7 @@ def _read(raw: str, question: bool) -> UtteranceFacts:
     # 量
     amounts: list[Amount] = []
     unclear: list[str] = []
+    unclear_signs = 0  # 単位の無い・違う数のすぐ前の符号（「Z+3」の +）。はぐれた符号ではなく、量の側の符号として数える
     for m in _NUM_RE.finditer(rest):
         before = rest[: m.start()]
         after = rest[m.end():]
@@ -565,8 +567,13 @@ def _read(raw: str, question: bool) -> UtteranceFacts:
         unit = _UNIT_AFTER.match(after)
         if unit is None:
             other = _OTHER_UNIT_AFTER.match(after)
-            word = other.group(1) if other else ""
-            unclear.append(f"「{m.group(0)}{word}」（単位が mm・ミリ・% ではありません）")
+            if other:
+                unclear.append(f"「{m.group(0)}{other.group(1)}」（単位が mm・ミリ・% ではありません）")
+            else:
+                unclear.append(f"「{m.group(0)}」{NO_UNIT_NOTE}")
+            # 「Z+3」「Zのマイナス5」：符号は数に付いている（足りないのは単位）。符号の付く所ではなく、単位を聞き返す。
+            # 量は作らない（単位を補わない）ので、この符号は向きとしても使わない
+            unclear_signs += _SIGN_BEFORE.search(before) is not None
             continue
         sm = _SIGN_BEFORE.search(before)
         amounts.append(Amount(
@@ -730,7 +737,8 @@ def _read(raw: str, question: bool) -> UtteranceFacts:
         axes=tuple(axes), axis_signs=tuple(axis_signs), sides=sides,
         speed_signs=tuple(speed_signs),
         refers_to_selection=bool(_THIS.search(rest)),
-        stray_signs=len(_SIGN_TOKEN.findall(rest)) - sum(a.sign is not None for a in amounts) - placed_axis_signs,
+        stray_signs=(len(_SIGN_TOKEN.findall(rest)) - sum(a.sign is not None for a in amounts) - placed_axis_signs
+                     - unclear_signs),
         vertical=vertical,
         explicit_axes=tuple(a for a in axes if a in explicit),
         value_axes=tuple(coord),
@@ -1257,6 +1265,14 @@ def _split_moves(raw: str) -> list[tuple[str, float]] | None:
 
 
 def _amount_check(facts: UtteranceFacts, unit: str, missing_question: str) -> Verdict:
+    if facts.unclear_amounts and all(u.endswith(NO_UNIT_NOTE) for u in facts.unclear_amounts):
+        # 単位が無いだけ（「Z+3」）：足りない単位をやさしく聞く。単位を補った候補は作らない（数字はプログラムが読んだまま）
+        nums = "".join(u[: -len(NO_UNIT_NOTE)] for u in facts.unclear_amounts)
+        if unit == "mm":
+            return _ask(f"量がはっきりしません。{nums}に単位が付いていません。"
+                        "ミリ（mm）を付けて、もう一度言ってもらえますか？（例：Zマイナス3ミリ）")
+        return _ask(f"量がはっきりしません。{nums}に単位が付いていません。"
+                    "%を付けて、もう一度言ってもらえますか？（例：速度を10%下げて）")
     if facts.unclear_amounts:
         return _ask(f"量がはっきりしません（{'・'.join(facts.unclear_amounts)}）。"
                     f"算用数字と {'mm（ミリ）' if unit == 'mm' else '%'} で量を言ってください")
