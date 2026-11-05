@@ -141,6 +141,17 @@ BAD = [
     "承認しました", "案を作りますね", "元に戻しますね", "安全に動かせます", "どちらにしますか？",
     "少し動かしたいんですね", "C00005ですね", "ジョブを直します", "変更が済みました", "大丈夫です",
     "あ" * (lead.MAX_CHARS + 1), "二行に\nなります", "", "  ",
+    # 独立チェック（11/5 夜）で前の検査を通った文：ひらがな・カタカナの軸や量・ボタン操作の指示・言い切り・状態・約束
+    "ごばんめの点を、ぜっとのほうへ、ごみり、うえにですね", "ゼットをさげたいのですね", "ワイのほうへ、じゅうみりですね",
+    "にじゅっせんちですね", "エックスですね", "みぎですね", "さっきのぎゃくですね", "さっきと同じ向きですね", "にばいですね",
+    "すこーしですね", "最初の点ですね", "正の向きですね", "アップですね", "合っているを押してください",
+    "あっているを押してください", "はいを押して進めてください", "違うは押さないでください", "ボタンを押してください",
+    "その向きで合っています", "案は正しいです", "間違いありません", "候補はもうできています", "これで決まりです",
+    "すぐ動き出します", "実機でも動きます", "動かしてよいです", "範囲の外です", "キャンセルしますね", "言われたとおりにします",
+    # 一覧の文の言い換え・付け足し・3つ以上・同じ文の重ね
+    "教えてくれてありがとうございます", "教えてくれて、ありがとうございます！合っています",
+    "さっきの続きですね。ここは確かめさせてください。一緒に確かめさせてください",
+    "さっきの続きですね。さっきの続きですね",
 ]
 
 
@@ -155,10 +166,19 @@ def test_bad_lead_is_not_shown(tmp_path, bad):
     assert lead.problem(bad) is not None
 
 
-@pytest.mark.parametrize("good", [OK_LEAD, "さっきの続きですね", "動かしたいお気持ちは分かりました",
-                                  "ここは確かめさせてください"])
+@pytest.mark.parametrize("good", list(lead.PHRASES) + ["さっきの続きですね。ここは確かめさせてください",
+                                                     "教えてくれて、ありがとうございます。"])
 def test_good_leads_pass(good):
     assert lead.problem(good) is None
+
+
+def test_phrases_pass_existing_checks():
+    # 一覧の文は、数・評価・状態・大きさ・安全の言葉・上下・命令の文字列の検査（前からの検査）もそのまま通る
+    import re as _re
+    for x in lead.PHRASES:
+        assert talk.reply_mvp_problem(x) is None and cx.check_reply(x, set(), False) is None, x
+        assert not _re.search(r"[0-9０-９〇一二三四五六七八九十百A-Za-zＡ-Ｚａ-ｚ?？]", x.replace("一緒", "")), x
+        assert not _re.search(r"押|選|ボタン|承認|出力|合って|正し|動き出|実機|安全|大丈夫|上|下|右|左|前|後|戻|やめ|作", x), x
 
 
 def test_api_error_no_key_and_budget_do_not_block_answer(tmp_path):
@@ -220,8 +240,96 @@ def test_p1a_prompt_added_and_magnitude_check_not_relaxed():
     assert talk.reply_mvp_problem("ちょっと進みます") == talk.FIXED_MAGNITUDE
 
 
-def test_main_turns_lead_on_only_for_real_claude(monkeypatch):
+def test_enabled_only_for_real_claude_with_key():
+    real, mock = SimpleNamespace(kind="claude"), SimpleNamespace(kind="mock")
+    key, nokey = SimpleNamespace(has_key=True), SimpleNamespace(has_key=False)
+    assert lead.enabled(real, key, {}) is True
+    assert lead.enabled(real, key, {lead.ENV: "1"}) is True
+    assert lead.enabled(real, key, {lead.ENV: "0"}) is False
+    assert lead.enabled(real, key, {lead.ENV: " 0 "}) is False
+    assert lead.enabled(mock, key, {}) is False
+    assert lead.enabled(real, nokey, {}) is False
+
+
+def test_launcher_uses_enabled(monkeypatch):
+    # 起動（python -m voice_teaching.web）が lead.enabled の結果を使う：サーバーを作る所を差し替えて確かめる
     from voice_teaching.web import __main__ as m
-    src = Path(m.__file__).read_text(encoding="utf-8")
-    assert 'interp.kind == "claude" and explainer.has_key' in src
-    assert "claude_lead.ENV" in src
+
+    made = {}
+
+    class Srv:
+        server_address = ("127.0.0.1", 0)
+
+        def __init__(self):
+            self.flow = SimpleNamespace(claude_lead=None)
+
+        def serve_forever(self):
+            made["lead"] = self.flow.claude_lead
+            raise KeyboardInterrupt
+
+        def server_close(self):
+            pass
+
+    monkeypatch.setattr(m, "make_server", lambda **kw: Srv())
+    monkeypatch.setattr(m.claude_interpreter, "load_dotenv", lambda path: None)
+    monkeypatch.setattr(m.claude_explain.Explainer, "from_env",
+                        classmethod(lambda cls, model=None: SimpleNamespace(has_key=True, model="m")))
+    for env_value, kind, expect in (("", "claude", True), ("0", "claude", False), ("", "mock", False)):
+        monkeypatch.setenv(lead.ENV, env_value)
+        monkeypatch.setattr(m.claude_interpreter, "from_env", lambda k=kind: SimpleNamespace(kind=k, model="m"))
+        m.main(["--port", "0"])
+        assert made["lead"] is expect, (env_value, kind)
+
+
+def test_usage_is_logged(tmp_path):
+    f = make_flow(tmp_path, LeadClient(OK_LEAD))
+    f.talk(start(f), "Yに10mm")
+    lines = (tmp_path / "u.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1 and KEY not in lines[0]
+
+
+def test_count_route_does_not_call_lead(tmp_path):
+    # 回数の変更の希望（会話の道＋指示の道。via が2つ）：Claude の説明があるので、一言は足さない
+    class Dual(LeadClient):
+        """説明（cx.SYSTEM）には回数の変更の希望の答え、言い添えには相づちを返す。"""
+
+        def create(self, **kw):
+            if kw.get("system") == cx.SYSTEM:
+                self.sent.append(kw)
+                data = {"reply": "回数を変えたいのですね。", "evidence_lines": [], "intent": "change_request",
+                        "change_request": {"kind": "repeat", "from_count": 2, "to_count": 3}}
+                return SimpleNamespace(stop_reason="tool_use", usage=usage(), content=[
+                    SimpleNamespace(type="tool_use", id="toolu_c", name="answer", input=data)])
+            return super().create(**kw)
+
+    c = Dual(OK_LEAD)
+    f = make_flow(tmp_path, c)
+    sid = start(f, "DEMO_BUTTON_REPEAT.JBI", None)
+    out = f.talk(sid, "3回にして")
+    assert out["via"] == ["ask", "hear"], out["via"]
+    assert out["state"]["repeat_range"]
+    assert all(kw.get("system") != lead.SYSTEM for kw in c.sent)
+    assert "claude_lead" not in (out.get("hear") or {})
+
+
+def test_reset_clears_history(tmp_path):
+    c = LeadClient(OK_LEAD)
+    f = make_flow(tmp_path, c)
+    sid = start(f)
+    f.talk(sid, "Yに10mm")
+    f.ask(sid, reset=True)
+    f.talk(sid, "10mm動かして")
+    assert c.payload()["history"] == []
+
+
+def test_short_timeout_without_retry(tmp_path):
+    class WithOptions(LeadClient):
+        def with_options(self, **kw):
+            self.options = kw
+            return self
+
+    c = WithOptions(OK_LEAD)
+    f = make_flow(tmp_path, c)
+    f.talk(start(f), "Yに10mm")
+    assert c.options == {"timeout": lead.TIMEOUT_SECONDS, "max_retries": 0}
+    assert c.payload()["phrases"] == list(lead.PHRASES)
