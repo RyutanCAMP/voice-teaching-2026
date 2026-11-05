@@ -1,0 +1,74 @@
+{
+  "base": "63577a6ba29f8d8fd48c75a9fd2522cf795a0828",
+  "real_api_calls": 0,
+  "cases": [
+    {
+      "variant": "baseline",
+      "attempt": 1,
+      "line22_seen": true,
+      "states": [
+        {
+          "tick": 0,
+          "now": "いま：21行目 MOVL C00001 V=150.01回目",
+          "status": "命令の順を再生中 1/7"
+        },
+        {
+          "tick": 4,
+          "now": "いま：22行目 MOVL C00002 V=30.01回目",
+          "status": "命令の順を再生中 2/7"
+        }
+      ]
+    },
+    {
+      "variant": "baseline",
+      "attempt": 2,
+      "line22_seen": true,
+      "states": [
+        {
+          "tick": 0,
+          "now": "いま：21行目 MOVL C00001 V=150.01回目",
+          "status": "命令の順を再生中 1/7"
+        },
+        {
+          "tick": 4,
+          "now": "いま：22行目 MOVL C00002 V=30.01回目",
+          "status": "命令の順を再生中 2/7"
+        }
+      ]
+    },
+    {
+      "variant": "ui",
+      "attempt": 1,
+      "line22_seen": true,
+      "states": [
+        {
+          "tick": 0,
+          "now": "いま：21行目 MOVL C00001 V=150.01回目",
+          "status": "命令の順を再生中 1/7"
+        },
+        {
+          "tick": 3,
+          "now": "いま：22行目 MOVL C00002 V=30.01回目",
+          "status": "命令の順を再生中 2/7"
+        }
+      ]
+    },
+    {
+      "variant": "ui",
+      "attempt": 2,
+      "line22_seen": true,
+      "states": [
+        {
+          "tick": 0,
+          "now": "いま：21行目 MOVL C00001 V=150.01回目",
+          "status": "命令の順を再生中 1/7"
+        },
+        {
+          "tick": 3,
+          "now": "いま：22行目 MOVL C00002 V=30.01回目",
+          "status": "命令の順を再生中 2/7"
+        }
+      ]
+    }
+  ]
+}

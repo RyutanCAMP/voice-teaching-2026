@@ -1,0 +1,27 @@
+{
+  "runtime_commit": "7bc484aa2a9c95af513d4d0814719fada5543663",
+  "base_commit": "63577a6ba29f8d8fd48c75a9fd2522cf795a0828",
+  "pr3_implementation": "0625d68620043c1217c3cb48337af6eef91c436f",
+  "assets": {
+    "voice_teaching/web/static/index.html": {
+      "git_blob": "f68079bbead3411b55d053745bb86164beb7d565",
+      "sha256_lf": "0c052e0d477424ef9675473f223cb14db1c5b86cf906c3c9a98f1648ac589ad6"
+    },
+    "voice_teaching/web/static/style.css": {
+      "git_blob": "83b87c6ca4b35ba1ebf8994c751b1bbed7bf1eb4",
+      "sha256_lf": "6390afecda6f917380c932e32d1082d060603551f8089cc4b2594315ea2c37f3"
+    },
+    "voice_teaching/web/static/highlight.js": {
+      "git_blob": "7846dd244b868d1fce12a3960b059c26fe0a7d21",
+      "sha256_lf": "8757f5c02bdb95975e66a6bd63f569b3b5962850e0a24e27df0be4f0b7314afc"
+    },
+    "voice_teaching/web/static/explain.js": {
+      "git_blob": "5169b7aa1c6aee1a435c3ba2055a95f4cd44c009",
+      "sha256_lf": "57c147648f4dc3b345d87ae8d092c48117d9e8613cfcd9c3bba184cca9c9bee8"
+    }
+  },
+  "api_calls": 0,
+  "secret_files_copied": false,
+  "protected_ports_touched": false,
+  "e2e_status": "INCOMPLETE; legacy header-layout assertions not updated; raw failures retained"
+}

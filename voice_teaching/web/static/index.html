@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ボイスティーチング（シミュレーションモード）</title>
+<title>Voice Teaching — 話して、動きを確かめる</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -30,9 +30,8 @@
        4つのステップの列は画面から外した（今のステップの印だけ残す。今のステップは見出しと状態のチップで分かる） -->
   <div class="brand">
     <span class="logo-mark" aria-hidden="true"><svg viewBox="0 0 32 32" width="30" height="30"><path d="M4 16h3M9 11v10M14 6v20M19 10v12M24 13v6M28 15v2" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></span>
-    <h1 class="logo"><span class="logo-en"><span class="logo-thin">VOICE</span> TEACHING</span><span class="logo-ja">産業用ロボット 音声ティーチング</span></h1>
+    <h1 class="logo"><span class="logo-en"><span class="logo-thin">Voice</span> Teaching</span><span class="logo-ja">話して、動きを確かめる</span></h1>
     <p id="mode-banner" class="mode-banner" data-mode="simulation">シミュレーションモード</p>
-    <p id="interp-badge" class="interp-badge" hidden>解釈：—</p>
   </div>
   <ol class="steps" id="steps" aria-label="手順" aria-hidden="true">
     <li id="step-1" class="step"><span class="num">1</span><span class="label">JOBを読み込む</span></li>
@@ -42,9 +41,15 @@
   </ol>
   <!-- 状態の1行（CHECKER_033 P1-A）：サーバーの文（state.status_line）をそのまま、区切り（／）ごとの小さなチップにして出す。文は変えない（app.js） -->
   <!-- 記録の説明（案3）：チップの直後にくっついた小さな ⓘ（CSS の丸の中の「i」）。説明の中身は highlight.js の TIPS.status のまま -->
-  <div class="status-wrap">
+  <details class="app-info">
+    <summary aria-label="アプリ情報を開く">ⓘ アプリ情報</summary>
+    <div class="app-info-body">
+    <p id="interp-badge" class="interp-badge" hidden>解釈：—</p>
+    <div class="status-wrap">
     <p id="status-line" class="status-line" aria-live="polite" hidden></p><button type="button" class="tip tip-info" data-tip="status" aria-label="アプリの記録の説明">i</button>
-  </div>
+    </div>
+    </div>
+  </details>
   <div class="help-wrap">
     <!-- 使い方（案3）：丸の「？」をやめ、隣の「詳細表示」と同じ見た目の文字ボタンにする -->
     <button type="button" id="help-button" class="link" aria-expanded="false" aria-controls="help-pop">使い方</button>
@@ -68,7 +73,8 @@
 <section id="load-panel" class="load-panel">
   <!-- ⓪ 読み込みの前：左＝案内とサンプル・ファイルを選ぶ、右＝3D の場所のドロップの枠 -->
   <div class="load-left">
-    <p class="load-title">動作データを読み込んでください</p>
+    <p class="load-title">話して、<br>動きを確かめる。</p>
+    <p class="load-intro">「何してる？」と<br>話しかけてみましょう。</p>
     <p class="sample-row"><button type="button" id="sample-button" class="link sample-btn">サンプルで試す</button></p>
     <p id="load-error" class="error" hidden></p>
   </div>
@@ -93,6 +99,7 @@
        並べ方・見せ方だけを変えた。隠す・出す決まり（どのステップで、どのカードを出すか）は app.js のまま -->
   <aside class="side">
     <div class="side-head">
+      <p class="side-kicker">声で確かめる</p>
       <p id="next-action" class="next-action" aria-live="polite">JOBファイルをドロップしてください</p>
       <!-- 見出しの下の1行の案内（CHECKER_030 S30-3：実機の JOB の承認のあと）。文は app.js の決まった文だけ -->
       <p id="next-hint" class="next-hint" hidden></p>
@@ -105,11 +112,11 @@
          答えでジョブ・変更候補・承認は変わらない。文は explain.js がテキストのノードで作る -->
     <section id="ask-panel" class="card dialog talk-panel" aria-label="会話" hidden>
       <div class="dlg-head">
-        <span class="dlg-title">会話</span>
-        <span id="ask-model" class="dlg-engine"></span>
+        <span class="dlg-title">Claude と話す</span>
         <!-- トークン数・料金・会話のやり直し・役割の説明は「詳しく」の中（いつもは閉じている。会話の欄のいちばん上） -->
         <details class="more talk-more"><summary>詳しく</summary>
           <div class="talk-more-body">
+            <p id="ask-model" class="dlg-engine"></p>
             <p id="ask-usage" class="fine"></p>
             <button type="button" id="ask-reset" class="link small" disabled>会話をやり直す</button>
             <p class="fine">Claude は動作の説明と作業目的の推定だけをします。数・状態・変更の案内はアプリが出します。承認と出力はボタンだけです。</p>
@@ -129,13 +136,13 @@
     <section id="dialog-panel" class="card dialog" aria-label="Claude との会話" hidden>
       <div class="dlg-head">
         <span class="dlg-title">会話</span>
-        <span id="dialog-engine" class="dlg-engine"></span>
       </div>
       <ol id="dialog-turns" class="bubbles" aria-live="polite"></ol>
       <div id="dialog-evidence" class="evidence"></div>
       <p id="dialog-estimated" class="dlg-est" hidden></p>
       <div id="dialog-choices" class="choices dlg-choices"></div>
       <details class="more"><summary>詳しく</summary>
+        <p id="dialog-engine" class="dlg-engine"></p>
         <p id="dialog-note" class="fine">Claude は意味を読んで候補を出し、聞き返すだけです。座標の変更・検査・数字はプログラムが行い、承認は確認表示のボタンだけです。</p>
       </details>
     </section>
@@ -201,7 +208,7 @@
                 <button type="button" id="mic-button" class="mic-big" disabled aria-label="マイクをONにする" aria-pressed="false"><svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8.5" y="2.5" width="7" height="12" rx="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
                 <span class="mic-wave right" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
               </div>
-              <p class="mic-cta-row"><span id="mic-cta" class="mic-cta" aria-hidden="true">押して話す</span><button type="button" class="tip" data-tip="mic">?</button></p>
+              <p class="mic-cta-row"><span id="mic-cta" class="mic-cta" aria-hidden="true">押して話す</span><span class="mic-followup" aria-hidden="true">押して話す</span><button type="button" class="tip" data-tip="mic">?</button></p>
               <p id="mic-label" class="mic-label">マイク OFF</p>
               <p id="mic-hint" class="fine mic-hint" hidden></p>
               <div class="rec-buttons">
@@ -225,7 +232,7 @@
           <p id="voice-unsupported" class="warn" hidden>このブラウザでは音声入力を使えません。文字で入力してください</p>
         </div>
         <!-- キーボード：① 初期は押すと入力欄が出る。② 会話のあとは入力欄へ移る -->
-        <button type="button" id="kbd-button" class="kbd-btn" aria-label="文字で入力する" title="文字で入力する" aria-expanded="false" aria-controls="text-form"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M6 9.5h1M9.5 9.5h1M13 9.5h1M16.5 9.5h1M6 12.2h1M9.5 12.2h1M13 12.2h1M16.5 12.2h1M8 15h8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
+        <button type="button" id="kbd-button" class="kbd-btn" aria-label="文字で入力する" title="文字で入力する" aria-expanded="false" aria-controls="text-form"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M6 9.5h1M9.5 9.5h1M13 9.5h1M16.5 9.5h1M6 12.2h1M9.5 12.2h1M13 12.2h1M16.5 12.2h1M8 15h8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg><span>文字で入力</span></button>
         <label for="text-input" id="heard-label" class="heard-label" hidden>聞き取った文（直せます）</label>
         <form id="text-form" class="text-form">
           <label for="text-input" class="sr-only">指示の文</label>
@@ -248,7 +255,7 @@
   <!-- 右：位置の図（経路の目安。主役） -->
   <section id="figure-panel" class="stage" aria-label="位置の図">
     <div class="stage-head">
-      <span id="file-name" class="file-name"></span>
+      <div class="stage-source"><span class="stage-title">3Dで確かめる</span><span id="file-name" class="file-name"></span></div>
       <!-- 上下の向きの、ロボット名と確認した人・日時（CHECKER_030 S30-1）。マウスを重ねなくても常に見せる。文は highlight.js の updownDetail。
            3D を広く取るため、図の上の帯（ファイル名の横）に置く -->
       <p id="updown-detail" class="updown updown-detail" hidden></p>

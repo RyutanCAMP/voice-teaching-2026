@@ -318,6 +318,7 @@ export function nextStep(message) {
 // 目印：<button type="button" class="tip" data-tip="mic">?</button>。開く：マウスを合わせる・押す・Tab で合わせる。
 // 閉じる：マウスを外す（押して開いたときは、もう一度押す・×・Esc・外を押す）・Tab で外す
 export function attachTips(doc = document) {
+  attachFigureDetails(doc);
   const pop = doc.createElement("div");
   pop.id = "tip-pop";
   pop.className = "tip-pop";
@@ -404,4 +405,23 @@ export function attachTips(doc = document) {
   doc.addEventListener("scroll", () => { if (owner) place(owner); }, true);  // 欄が動いても、目印のそばに付いていく
   doc.defaultView.addEventListener("resize", () => { if (owner) place(owner); });
   return { open, close, pop };
+}
+
+// Presentation only: keep the actual limitation visible, and move just the
+// two technical explanations into a keyboard-accessible native disclosure.
+// Existing nodes/IDs/hidden flags are retained for the existing view switcher.
+export function attachFigureDetails(doc = document) {
+  const notes = doc.querySelector('.figure-notes');
+  if (!notes || doc.querySelector('.figure-help')) return;
+  const explanations = ['play-note', 'view3d-note'].map((id) => doc.getElementById(id)).filter(Boolean);
+  if (!explanations.length) return;
+  const details = doc.createElement('details');
+  details.className = 'figure-help';
+  const summary = doc.createElement('summary');
+  summary.textContent = 'ⓘ 図の見方';
+  const body = doc.createElement('div');
+  body.className = 'figure-help-body';
+  body.append(...explanations);
+  details.append(summary, body);
+  notes.before(details);
 }

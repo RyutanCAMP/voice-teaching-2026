@@ -1,0 +1,7 @@
+{
+  "scanned_files": 39,
+  "findings": [],
+  "env_file_present_in_clone": false,
+  "scope": "all changed payloads versus pinned integration base, including staged evidence",
+  "screenshots": "synthetic JOB, test UI only; no desktop capture or entered real name"
+}

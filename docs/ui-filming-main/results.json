@@ -1,0 +1,515 @@
+{
+  "base_sha": "63577a6ba29f8d8fd48c75a9fd2522cf795a0828",
+  "tested_parent_sha": "7bc484aa2a9c95af513d4d0814719fada5543663",
+  "asset_hashes": {
+    "voice_teaching/web/static/index.html": "dc46e7052bfefb4d1b1ed529d3ba22e3977c908427cac9e660a2e4166a0fe368",
+    "voice_teaching/web/static/style.css": "1fbca65e598342d6b3abc0054526e93597e9e0acdc2b0eed6927466781e309f2",
+    "voice_teaching/web/static/highlight.js": "067a97ac4cca7f074221818381259d5ee03c05950849f2de58c5efad23b1a19e",
+    "voice_teaching/web/static/explain.js": "1a3677611c5f20a16bf78b0b11de18f50e963b9b3dee0a6c2b6a813fa8096aee"
+  },
+  "job_sha256": "9fc72d40532e959909cfef80287f8b7fd95cadcbd5916c51e3cc00b6f543a512",
+  "chrome_version": "156.0.8078.80",
+  "checks": [
+    {
+      "name": "1920: no page horizontal overflow",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1920: hero mic large and reachable",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1920: text alternative has visible words",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1920: model folded initially",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1920: model and records retrievable",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1920: unconfirmed orientation visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1920: mic consent visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1920: recording controls reachable",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1920: transcript enters input without sending",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1920: Claude mock explanation visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1920: conversation mic reachable",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1920: text send reachable",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1920: direction question retained",
+      "passed": true,
+      "detail": "もう少し教えてください\n\n3mm上に動かしたいんですね。この設備では、まだ「上」の方向が決まっていません。ロボットを正面から見て、上は Zプラス で合っていますか？ 違うときは、ZプラスとZマイナスのどちらかを、「Zプラス3ミリ」か「Zマイナス3ミリ」のように言ってください\n\n合っている\n違う\n言い換えの例（押すと欄に入ります）\nZプラス3ミリ\nZマイナス3ミリ"
+    },
+    {
+      "name": "1920: no candidate while direction unknown",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1920: candidate exact XYZ",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1920: candidate warning visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1920: review button reachable",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1920: 2D tab works",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1920: 3D tab works",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1920: view reset reachable",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1920: step playback works",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1920: physical limitation always visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1920: 3D technical help opens",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1920: review warning visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1920: review exact XYZ",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1920: approver input reachable",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1920: approve control reachable",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1920: rejected position reason visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1920: blocked review reason visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1920: blocked candidate approval disabled",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: no page horizontal overflow",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: hero mic large and reachable",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: text alternative has visible words",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: model folded initially",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: model and records retrievable",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: unconfirmed orientation visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: mic consent visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: recording controls reachable",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: transcript enters input without sending",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: Claude mock explanation visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: conversation mic reachable",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: text send reachable",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: direction question retained",
+      "passed": true,
+      "detail": "もう少し教えてください\n\n3mm上に動かしたいんですね。この設備では、まだ「上」の方向が決まっていません。ロボットを正面から見て、上は Zプラス で合っていますか？ 違うときは、ZプラスとZマイナスのどちらかを、「Zプラス3ミリ」か「Zマイナス3ミリ」のように言ってください\n\n合っている\n違う\n言い換えの例（押すと欄に入ります）\nZプラス3ミリ\nZマイナス3ミリ"
+    },
+    {
+      "name": "1280: no candidate while direction unknown",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: candidate exact XYZ",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: candidate warning visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: review button reachable",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: 2D tab works",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: 3D tab works",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: view reset reachable",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: step playback works",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: physical limitation always visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: 3D technical help opens",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: review warning visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: review exact XYZ",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: approver input reachable",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: approve control reachable",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: rejected position reason visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: blocked review reason visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "1280: blocked candidate approval disabled",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: no page horizontal overflow",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: hero mic large and reachable",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: text alternative has visible words",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: model folded initially",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: model and records retrievable",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: unconfirmed orientation visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: mic consent visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: recording controls reachable",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: transcript enters input without sending",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: Claude mock explanation visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: conversation mic reachable",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: text send reachable",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: direction question retained",
+      "passed": true,
+      "detail": "もう少し教えてください\n\n3mm上に動かしたいんですね。この設備では、まだ「上」の方向が決まっていません。ロボットを正面から見て、上は Zプラス で合っていますか？ 違うときは、ZプラスとZマイナスのどちらかを、「Zプラス3ミリ」か「Zマイナス3ミリ」のように言ってください\n\n合っている\n違う\n言い換えの例（押すと欄に入ります）\nZプラス3ミリ\nZマイナス3ミリ"
+    },
+    {
+      "name": "390: no candidate while direction unknown",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: candidate exact XYZ",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: candidate warning visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: review button reachable",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: 2D tab works",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: 3D tab works",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: view reset reachable",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: step playback works",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: physical limitation always visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: 3D technical help opens",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: review warning visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: review exact XYZ",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: approver input reachable",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: approve control reachable",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: rejected position reason visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: blocked review reason visible",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "390: blocked candidate approval disabled",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "display fixture: conversational speaker is simply Claude",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "display fixture: exact model available in details",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "no browser script errors",
+      "passed": true,
+      "detail": []
+    },
+    {
+      "name": "no external HTTP requests",
+      "passed": true,
+      "detail": []
+    },
+    {
+      "name": "no approval/export HTTP requests",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "Python and shared runtime JS unchanged",
+      "passed": true,
+      "detail": []
+    },
+    {
+      "name": "explain.js limited to one speaker display expression",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "existing HTML event target IDs retained",
+      "passed": true,
+      "detail": null
+    },
+    {
+      "name": "HTML IDs unique",
+      "passed": true,
+      "detail": null
+    }
+  ],
+  "errors": [],
+  "live_api_calls": 0,
+  "microphone": "MOCK_RECOGNITION_ONLY; REAL_MIC_NOT_RUN",
+  "approval_export_requests": 0,
+  "protected_files_count": 24,
+  "protected_ports_touched": false
+}

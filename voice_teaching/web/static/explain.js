@@ -186,7 +186,7 @@ function showReply(r) {
   const asking = r.status === "ask_which" && r.talk && r.talk.pending;
   if (r.reply && !asking) {
     const isClaude = r.reply_by === "claude";
-    const li = addTurn(isClaude ? speaker(r.model) : "アプリ", r.reply, isClaude ? "claude" : "app");
+    const li = addTurn(isClaude ? (/^claude-mock/.test(r.model || "") ? speaker(r.model) : "Claude") : "アプリ", r.reply, isClaude ? "claude" : "app");
     if ((r.guesses || []).length) {  // AI の推定（未確定）：登録はしない。表示だけ
       const g = el("div", { class: "guesses" });
       for (const s of r.guesses) g.append(el("p", { class: "guess" }, mark("ai", ask.marks.ai || "AI の推定（未確定）"), s));
