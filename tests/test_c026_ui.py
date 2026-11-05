@@ -123,9 +123,17 @@ def test_screen_uses_segment_kind_not_only_solid():
 
 
 def test_legend_names_movl_and_movj():
+    """11/6 唐川さんの指示：図の下の線の説明文はいつも出さず、MOVL・MOVJ の短いラベルと ? だけにする。
+    違いは、? に合わせた（マウス・キーボード）ときだけ小さく出す。点線が実際の通り道ではないことは ? の説明に残す"""
     h = text("index.html")
-    assert "MOVL：直線移動" in h
-    assert "MOVJ：関節移動（点線は順番だけ。実際の通り道ではありません）" in h  # QA P2：点線が引かれていることと矛盾しない言い方
+    lg = h[h.index('id="legend-kinds"'):h.index('id="legend"')]
+    assert ">MOVL<" in lg and ">MOVJ<" in lg
+    assert 'data-tip="movl"' in lg and 'data-tip="movj"' in lg and 'data-tip="other"' in lg
+    assert "直線移動" not in lg and "実際の通り道ではありません" not in lg  # 長い説明文は凡例にいつも出さない
+    hl = text("highlight.js")
+    tips = hl[hl.index("export const TIPS"):hl.index("};", hl.index("export const TIPS"))]
+    assert "直線で移動" in tips and "関節を使って移動" in tips
+    assert "実際の通り道ではありません" in tips  # QA P2：点線が引かれていることと矛盾しない言い方は ? の説明に残す
 
 
 def test_engineer_note_does_not_say_only_plain_movl_is_solid():

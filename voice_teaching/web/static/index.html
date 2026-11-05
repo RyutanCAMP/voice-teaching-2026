@@ -77,6 +77,7 @@
       <p class="help-line">一文字の『Yを…』は聞き違えやすいので、『Y座標を…』と言ってください</p>
       <p class="help-line">話した文は欄に入るだけ。『送る』で送ります</p>
       <p class="help-line">聞き取った文がちがうときは、直してから送ってください</p>
+      <p class="help-line">同じ動作を繰り返す回数を変えるときは「3回にして」（範囲はボタンで確かめます）</p>
       <p class="help-line">承認は確認表示のボタンだけです</p>
     </div><!-- /help-pop -->
   </div>
@@ -305,7 +306,7 @@
         <button type="button" id="play-step" class="small icon-play" disabled aria-label="1つ進む" title="1つ進む（今の区間を終わりまで進めて止める）">⏭</button>
         <button type="button" id="play-stop" class="small icon-play" disabled aria-label="止める" title="止める">■</button>
       </div>
-      <button type="button" class="tip" data-tip="play">?</button><button type="button" class="tip tip-word" data-tip="count">回数 ?</button><span id="play-status" class="play-status" aria-live="polite"></span>
+      <button type="button" class="tip" data-tip="play">?</button><!-- 11/6 唐川さん：「回数？」は再生の操作ではないので外した。回数の説明は上の「使い方」 --><span id="play-status" class="play-status" aria-live="polite"></span>
       <!-- 回数の変更の候補があるときだけ出す（候補が無ければ出さない） -->
       <div id="play-compare" class="play-compare" role="group" aria-label="変更前と変更後を比べる" hidden>
         <button type="button" id="play-before" class="small" aria-pressed="false">変更前を再生</button>
@@ -322,9 +323,10 @@
     <div class="play-text">
       <!-- 区間の種類（CHECKER_026 S-MOVJ）。MOVJ・目安の区間は、そのジョブにあるときだけ出す -->
       <div id="legend-kinds" class="legend kinds" hidden>
-        <span class="lg movl">MOVL：直線移動</span>
-        <span class="lg movj" id="legend-movj" hidden title="関節移動（MOVJ）：実際の通り道は直線ではありません">MOVJ：関節移動（点線は順番だけ。実際の通り道ではありません）</span>
-        <span class="lg other" id="legend-other" hidden>破線：直線とは限りません（目安）</span>
+        <!-- 11/6 唐川さん：説明文はいつも出さない。短いラベルと ? だけ。違いは ? に合わせた（マウス・キーボード）ときだけ出す（highlight.js の TIPS） -->
+        <span class="lg-item"><span class="lg movl" title="MOVL：直線で移動">MOVL</span><button type="button" class="tip" data-tip="movl">?</button></span>
+        <span class="lg-item" id="legend-movj" hidden><span class="lg movj" title="MOVJ：関節を使って移動（点線は順番だけ）">MOVJ</span><button type="button" class="tip" data-tip="movj">?</button></span>
+        <span class="lg-item" id="legend-other" hidden><span class="lg other" title="破線：直線とは限りません（目安）">目安</span><button type="button" class="tip" data-tip="other">?</button></span>
       </div>
       <div id="legend" class="legend" hidden>
         <span class="lg before">変更前</span>

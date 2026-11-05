@@ -555,8 +555,8 @@ def check_ui_1105(browser, check, shots: Path | None, out: Path) -> None:
         until(pg, lambda: pg.is_visible("[data-tip=mic]"))
         tips = pg.eval_on_selector_all("button.tip[data-tip]", "els => els.filter(e => e.getClientRects().length).map(e => e.dataset.tip)")
         # Issue #7：移動量・位置・上下の説明の行は常に出さない（その「？」も一緒に出さない）。記録の「ⓘ」は記録が上の帯に出るときだけ
-        check({"mic", "count", "play"} <= set(tips) and not ({"shift", "position", "updown", "status"} & set(tips)),
-              f"11/5 個別ヘルプ・Issue #7（{w}×{h}）：マイク・回数・再生の「？」が見える。説明の行の「？」は出さない（{tips}）")
+        check({"mic", "play"} <= set(tips) and not ({"count", "shift", "position", "updown", "status"} & set(tips)),
+              f"11/5 個別ヘルプ・Issue #7・11/6（{w}×{h}）：マイク・再生の「？」が見える。回数の「？」は 3D の下に出さない・説明の行の「？」は出さない（{tips}）")
         pg.hover("[data-tip=mic]")
         until(pg, lambda: pop_open(pg))
         t = pg.inner_text("#tip-pop")
@@ -566,14 +566,15 @@ def check_ui_1105(browser, check, shots: Path | None, out: Path) -> None:
         pg.mouse.move(5, h - 5)
         until(pg, lambda: not pop_open(pg))
         check(True, f"11/5 個別ヘルプ（{w}×{h}）：マウスを外すと消える")
-        pg.click("[data-tip=count]")
+        pg.click("[data-tip=play]")
         pg.mouse.move(5, h - 5)
         pg.wait_for_timeout(200)
-        check(pop_open(pg) and "例：「3回にして」" in pg.inner_text("#tip-pop") and pg.get_attribute("[data-tip=count]", "aria-expanded") == "true",
-              f"11/5 個別ヘルプ（{w}×{h}）：押すと開いたまま（マウスを外しても消えない）")
+        check(pop_open(pg) and "3D の再生" in pg.inner_text("#tip-pop") and pg.get_attribute("[data-tip=play]", "aria-expanded") == "true",
+              f"11/5 個別ヘルプ（{w}×{h}）：押すと開いたまま（マウスを外しても消えない）（11/6：回数の「？」を外したので再生の「？」で確かめる）")
         pg.click("#tip-pop .tip-close")
         until(pg, lambda: not pop_open(pg))
         check(True, f"11/5 個別ヘルプ（{w}×{h}）：× で閉じる")
+        pg.evaluate("document.activeElement && document.activeElement.blur()")  # × で「？」に戻ったフォーカスを外してから、もう一度合わせる
         pg.focus("[data-tip=play]")
         until(pg, lambda: pop_open(pg))
         pg.keyboard.press("Escape")
@@ -2313,8 +2314,15 @@ def check_c026(browser, url, check, shots: Path | None) -> None:
         check(MOVJ_LABEL in j["title"] and MOVJ_LABEL not in l["title"],
               f"S-MOVJ 3D：MOVJ の区間に、マウスを重ねると「{MOVJ_LABEL}」が出る（{j['title']!r}）")
     lg = pg.inner_text("#legend-kinds") if pg.is_visible("#legend-kinds") else ""
-    check("MOVL：直線移動" in lg and "MOVJ：関節移動（点線は順番だけ。実際の通り道ではありません）" in lg and pg.is_visible("#legend-movj"),
-          f"S-MOVJ：凡例に「MOVL：直線移動」「MOVJ：関節移動（点線は順番だけ。実際の通り道ではありません）」を出す（{lg!r}）")
+    check("MOVL" in lg and "MOVJ" in lg and pg.is_visible("#legend-movj") and "実際の通り道ではありません" not in lg,
+          f"S-MOVJ：凡例は短いラベル「MOVL」「MOVJ」と ? だけ（11/6：説明文はいつも出さない）（{lg!r}）")
+    pg.hover('#legend-movj button.tip')
+    pg.wait_for_timeout(200)
+    tip = pg.inner_text("#tip-pop") if pg.is_visible("#tip-pop") else ""
+    check("関節を使って移動" in tip and "実際の通り道ではありません" in tip,
+          f"S-MOVJ：MOVJ の ? に合わせると「関節を使って移動…点線は順番だけで、実際の通り道ではありません」が出る（{tip!r}）")
+    pg.mouse.move(5, 5)
+    pg.keyboard.press("Escape")
     shot(pg, "C026_1280_a_movj_3d.png")
 
     def watch_playback(host_marker, seconds=14.0):

@@ -93,7 +93,7 @@ def test_other_tips_keep_question_mark():
     tips = {attr(t, "data-tip"): i for t, i in buttons(rest) if attr(t, "data-tip")}
     for k in ["position", "approve", "updown", "mic", "shift", "play"]:
         assert tips[k] == "?", k
-    assert tips["count"] == "回数 ?"
+    assert "count" not in tips  # 11/6 唐川さん：回数は再生の操作ではないので、3D の下から外した（説明は「使い方」へ）
     assert 'el("button", { type: "button", class: "tip", "data-tip": "range" }, "?")' in text("app.js")
 
 

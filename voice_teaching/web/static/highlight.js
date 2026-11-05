@@ -287,13 +287,17 @@ export const TIPS = {
   mic: { head: "声で指示する", body: "押して1回話すと、自動で OFF になります。話した文は欄に入るので、確かめて［送る］。", ex: "Zプラス方向に10mm" },
   input: { head: "文字で指示する", body: "声と同じ欄です。位置を選んでから、軸・向き・量を書きます。", ex: "Zマイナス3ミリ" },
   shift: { head: "移動量", body: "軸（X・Y・Z）と向き（プラス・マイナス）と量（mm）を一緒に言います。上限を超える量は変更しません。", ex: "Zプラス方向に10mm" },
-  count: { head: "回数", body: "続けて2回以上書かれた動きの回数を変えます（2回→3回だけ）。範囲は画面のボタンで確かめます。", ex: "3回にして" },
+  count: { head: "回数", body: "同じ動作を繰り返す回数を指定します", ex: "3回にして", small: true },
   range: { head: "変更範囲", body: "どの位置からどの位置まで変更するか確認します。違うときは［違う］を押します。", ex: null },
   position: { head: "位置を選ぶ", body: "右の図の点か、番号を押します。薄い番号の位置は変更できません。", ex: "C00005 を押してから「Zプラス方向に10mm」" },
   updown: { head: "上下の向き", body: "「上げる・下げる」が Z のどちら向きかを、設定で確かめたかどうかです。未確認のときは Zプラス・Zマイナスで言います。", ex: "Zマイナス方向に3mm" },
   play: { head: "3D の再生", body: "▶ で命令の順に動きをたどります。候補があるときは［変更前を再生］［変更後を再生］で比べます。ドラッグで回す・ホイールで拡大。", ex: null },
   approve: { head: "承認", body: "［確認して承認へ］を押し、名前を入れて［承認する］。声では承認しません。", ex: null },
   status: { head: "アプリの記録", body: "アプリが記録している今の状態です（候補・承認・出力）。会話の答えでは変わりません。", ex: null },
+  // 図の下の線の種類（11/6：凡例は短いラベルだけ。違いはここに出す）
+  movl: { head: "MOVL", body: "直線で移動（実線）。", ex: null, small: true },
+  movj: { head: "MOVJ", body: "関節を使って移動（細い点線）。点線は順番だけで、実際の通り道ではありません。", ex: null, small: true },
+  other: { head: "目安の線", body: "破線は、直線とは限りません（目安）。", ex: null, small: true },
 };
 
 // サーバーの返事の文（決まった文）→ 次にすること。上から順に、最初に合ったものだけ。合わなければ出さない
@@ -302,7 +306,7 @@ export const NEXT_STEPS = [
   { re: /^どの方向/, say: "移動する方向を指定してください", ex: "Zプラス方向に10mm" },
   { re: /^何mm動かしますか|^量がはっきりしません/, say: "移動量を、数と mm で指定してください", ex: "Zプラス方向に10mm" },
   { re: /^位置が決まっていないため/, say: "先に、右の図の点か下の番号で位置を選んでください", ex: null },
-  { re: /^回数は整数で言ってください/, say: "回数を、整数で指定してください", ex: "3回にして" },
+  { re: /^回数は(?:1以上の)?整数で言ってください/, say: "回数を、整数で指定してください", ex: "3回にして" },
   { re: /^区間（[^）]+）の中に、区間の外の位置/, say: "指定された範囲では変更できません。対象の位置を確認してください", ex: null },
   { re: /^位置 C[0-9]{5} はこのジョブにありません/, say: "対象の位置を確認してください。位置の番号は右の図と下の番号で確かめられます", ex: null },
 ];
@@ -337,6 +341,7 @@ export function attachTips(doc = document) {
     x.type = "button"; x.className = "tip-close"; x.textContent = "×"; x.setAttribute("aria-label", "閉じる");
     x.addEventListener("click", () => close(true));
     pop.replaceChildren(x, ...parts);
+    pop.classList.toggle("tip-small", !!t.small);  // 11/6：回数・線の種類は、? の近くに小さく出す
   };
   const place = (btn) => {
     const r = btn.getBoundingClientRect(), vw = doc.documentElement.clientWidth, vh = doc.documentElement.clientHeight;

@@ -605,6 +605,9 @@ details.more .fine { margin-top: 4px; }
 .lg.movl::before { background: #c9d6ec; }
 .lg.movj::before { background: none; border-top: 2px dotted #8e8e96; height: 0; top: 8px; }
 .lg.other::before { background: none; border-top: 3px dashed #c9d6ec; height: 0; top: 8px; }
+/* 11/6：凡例のラベルと ? を1つのまとまりにする（? は押せる所 44px のまま、見た目だけ小さく寄せる） */
+.lg-item { display: inline-flex; align-items: center; gap: 0; }
+.lg-item[hidden] { display: none; }
 .lg.movj { color: var(--text); }
 .movj-legend { color: var(--sub); font-weight: 600; }
 /* ---- 上下の向きの状態（サーバーの state.updown があるときだけ。目立たせすぎない） ---- */
@@ -980,6 +983,12 @@ button.tip.tip-info::before { left: 15px; width: 22px; height: 22px; }
 .tip-pop { position: fixed; z-index: 60; width: min(300px, calc(100vw - 16px)); padding: 10px 30px 10px 12px; border-radius: 12px;
   background: #0f1c33; border: 1px solid rgba(124, 188, 255, 0.55); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55); color: var(--text); }
 .tip-pop[hidden] { display: none; }
+/* 11/6 唐川さん：本番UIの小さな吹き出し（回数・線の種類）。? の近くに、短い文だけ */
+.tip-pop.tip-small { width: auto; max-width: min(240px, calc(100vw - 16px)); padding: 6px 24px 6px 10px; border-radius: 8px; }
+.tip-pop.tip-small .tip-head { font-size: 13px; margin-bottom: 2px; }
+.tip-pop.tip-small .tip-body { font-size: 12px; line-height: 1.45; }
+.tip-pop.tip-small .tip-ex { font-size: 12px; margin-top: 2px; }
+.tip-pop.tip-small .tip-close { top: 2px; right: 2px; width: 20px; height: 20px; }
 .tip-pop p { margin: 0; }
 .tip-pop .tip-head { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
 .tip-pop .tip-body { font-size: 13px; color: var(--sub); line-height: 1.55; }

@@ -43,7 +43,7 @@ test("次にすることの文：承認・出力・安全の言葉を含めな�
 });
 
 test("個別ヘルプ：短い説明（80字以内）と、できることの具体例。安全を言い切らない・声で承認できるとは書かない", () => {
-  const keys = ["mic", "input", "shift", "count", "range", "position", "updown", "play", "approve", "status"];
+  const keys = ["mic", "input", "shift", "count", "range", "position", "updown", "play", "approve", "status", "movl", "movj", "other"];  // 11/6：図の下の線の種類（凡例の ?）を足した
   assert.deepEqual(Object.keys(TIPS).sort(), [...keys].sort());
   for (const [k, t] of Object.entries(TIPS)) {
     assert.ok(t.head && t.body, k);
