@@ -203,3 +203,44 @@ def test_missing_unit_is_what_the_question_is_about(tmp_path):
     msg = (r.get("hear") or {}).get("message", "")
     assert not r["state"]["candidate"] and ("mm" in msg or "ミリ" in msg or "単位" in msg)
     assert "どこに付くか" not in msg
+
+
+# ---- 6. 聞き返しへの答えを受け取る（会話の続き） ----
+@pytest.mark.xfail(strict=True, reason=P0 + " C1：符号だけの答えが会話の道（説明）へ回る")
+@pytest.mark.parametrize("answer", ["マイナス", "マイナスで"])
+def test_sign_only_answer_to_sign_question_is_used(tmp_path, answer):
+    w, _, sid = place_flow(tmp_path)
+    w.talk(sid, "Yに10mm")  # アプリ：Y方向のプラスですか、マイナスですか？
+    r = w.talk(sid, answer)
+    c = r["state"]["candidate"]
+    assert c and c["target"] == "C00003 Y" and not r["state"]["approval"]
+
+
+@pytest.mark.xfail(strict=True, reason=P0 + " C2：軸と符号の答えで、前に言った量を忘れる")
+@pytest.mark.parametrize("first", ["Yの方向に10mm", "10mm動かして"])
+def test_axis_sign_answer_keeps_the_amount_already_said(tmp_path, first):
+    w, _, sid = place_flow(tmp_path)
+    w.talk(sid, first)
+    r = w.talk(sid, "Yマイナス")
+    c = r["state"]["candidate"]
+    assert c and c["target"] == "C00003 Y"
+    assert "何mm" not in (r.get("hear") or {}).get("message", "")
+
+
+def test_answer_after_selecting_another_position_is_not_applied_to_it(tmp_path):
+    """回帰：聞き返したあとに別の位置を選んだら、答えをその位置に当てない（A1-74 と同じ考え方）。"""
+    w, _, sid = place_flow(tmp_path)
+    w.talk(sid, "Yに10mm")
+    w.select(sid, "C00002")
+    r = w.talk(sid, "マイナス")
+    c = r["state"]["candidate"]
+    assert not c or not c["target"].startswith("C00002")
+
+
+@pytest.mark.parametrize("answer", ["プラスかな", "たぶんマイナス", "マイナスじゃない"])
+def test_unsure_answers_do_not_fill_the_sign(tmp_path, answer):
+    """回帰：ためらい・打ち消しのある答えで符号を埋めない。"""
+    w, _, sid = place_flow(tmp_path)
+    w.talk(sid, "Yに10mm")
+    r = w.talk(sid, answer)
+    assert not r["state"]["candidate"]
