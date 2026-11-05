@@ -493,3 +493,172 @@ def test_two_numbers_are_asked_one_at_a_time_before_the_unit(tmp_path, text):
     msg = hear_msg(r)
     assert not r["state"]["candidate"]
     assert "1つずつ" in msg and "単位が付いていません" not in msg, msg
+
+
+# ---- 11. QA 002（7c6c955）の指摘 ----
+# N1：前の発話に出た符号の言葉（+ − プラス マイナス・上 下 など）は、読み取りのどの道を通っても全部残す。
+# 答えと合わせたとき、前の符号の言葉と1つでも食い違えば候補を作らない。前の文の符号の言葉が互いに食い違えば止める
+N1_FIRST = [
+    "Yプラス方向にマイナス", "Y+方向にマイナス", "Yプラス方向、マイナス", "Y+にマイナス", "Yプラスにマイナス",
+    "Y+方向に-3.0000001", "Y+方向にマイナス3,5", "Yプラス方向に-3.5.", "Y+方向にマイナス3.0000001",
+    "Yプラスの方向にマイナス三ミリ", "Yのプラス方向でマイナス", "Yマイナス方向に+3,0",
+    # 似た言い方（自分で足した）
+    "Yプラスの方向にマイナス", "Y軸プラス方向にマイナス", "Ｙ＋方向にマイナス", "Y + 方向に マイナス", "Yプラス方向にマイナス少し",
+    "Yマイナスにプラス", "Y-方向に+", "Yのマイナス方向にプラス三ミリ", "Xプラス方向にマイナス", "Zマイナス方向にプラス",
+    "C00004をYプラス方向にマイナス",
+]
+
+
+@pytest.mark.parametrize("second", ["3ミリ", "3mm", "3ミリです"])
+@pytest.mark.parametrize("first", N1_FIRST)
+def test_conflicting_sign_words_are_never_merged_into_a_candidate(tmp_path, first, second):
+    w, _, sid = A.place_flow(tmp_path)
+    r1 = w.talk(sid, first)
+    assert not r1["state"]["candidate"], hear_msg(r1)
+    r2 = w.talk(sid, second)
+    assert not r2["state"]["candidate"], (first, second, hear_msg(r2))
+    assert not r2["state"]["approval"]
+
+
+@pytest.mark.parametrize("first", ["上にマイナス", "下にプラス", "上にマイナス三ミリ"])
+def test_conflicting_updown_and_sign_words_confirmed(tmp_path, first):
+    w, _, sid = A.place_flow(tmp_path, confirmed=True)
+    w.talk(sid, first)
+    r = w.talk(sid, "3ミリ")
+    assert not r["state"]["candidate"], hear_msg(r)
+
+
+@pytest.mark.parametrize("text", ["Yプラス方向にマイナス", "Y+方向に-3.0000001", "Yプラスの方向にマイナス三ミリ", "上にマイナス"])
+def test_every_sign_word_is_kept_in_facts(text):
+    f = ut.read_utterance(text)
+    assert set(f.said_signs) == {1, -1}, f.said_signs
+
+
+def test_conflicting_earlier_signs_stop_without_merging(tmp_path):
+    w, _, sid = A.place_flow(tmp_path)
+    w.talk(sid, "Yプラス方向にマイナス")
+    r = w.talk(sid, "3ミリ")
+    assert r["hear"]["status"] == "stop" and "向き" in hear_msg(r), hear_msg(r)
+    r = w.talk(sid, "プラス")  # 止めたあとの答えは、前の発話に足さない
+    assert not r["state"]["candidate"]
+
+
+@pytest.mark.parametrize("seq", [
+    ("Zプラス", "3ミリ"),              # 軸と符号 → 量（今どおり候補）
+    ("Yに10mm", "マイナス"),           # C1
+    ("10mm動かして", "Yマイナス"),     # C2
+    ("Z+3", "3ミリ", "プラス"),        # 同じ向きの言い直し
+])
+def test_consistent_sign_words_still_make_the_candidate(tmp_path, seq):
+    """回帰：前と今の符号の言葉が同じなら、今どおり候補になる（承認はボタンだけ）。"""
+    w, _, sid = A.place_flow(tmp_path)
+    for s in seq:
+        r = w.talk(sid, s)
+    assert r["state"]["candidate"] and not r["state"]["approval"], hear_msg(r)
+
+
+def test_confirmed_down_then_amount_is_still_a_candidate(tmp_path):
+    """回帰：上下が確認済みの「下げて」→「3ミリ」は、今どおり Z−3（前の「下」と今の向きが同じ）。"""
+    w, _, sid = A.place_flow(tmp_path, confirmed=True)
+    w.talk(sid, "下げて")
+    r = w.talk(sid, "3ミリ")
+    c = r["state"]["candidate"]
+    assert c and c["target"] == "C00003 Z" and "-3.000mm" in hear_msg(r)
+
+
+# N3：速度の話（「速度」「%」がある）なら、上下のやさしい聞き返し（位置の上下として受け止める文）を使わない
+@pytest.mark.parametrize("seq", [("速度を-10", "10%下げて"), ("10%下げて",), ("10%上げて",)])
+def test_speed_talk_is_not_taken_as_position_updown(tmp_path, seq):
+    w, _, sid = A.place_flow(tmp_path)
+    for s in seq:
+        r = w.talk(sid, s)
+    msg = hear_msg(r)
+    assert not r["state"]["candidate"]
+    assert "動かしたいんですね" not in msg and "下げたいんですね" not in msg and "上げたいんですね" not in msg, msg
+
+
+# 唐川さんの判断（11/5）：「ボタンを押して終わります」は JOB の内容の説明として表示してよい。
+# 実際にボタンを押した・操作が終わった、と取れる文は出さない
+@pytest.mark.parametrize("reply", ["同じ動きをくり返し、最後にボタンを押して終わります。",
+                                   "ボタンを押す動作をくり返したあと、最後の位置へ移って終わります。"])
+def test_job_content_push_and_end_is_shown(reply):
+    assert talk.reply_mvp_problem(reply) is None
+
+
+@pytest.mark.parametrize("reply", ["ボタンを押しました。", "ボタンを押して完了しました。", "ボタンを押し終わりました。",
+                                   "操作が終わりました。", "ボタンを押して終わりました。", "ボタンを押し終わります。",
+                                   "ボタンを押したので、終わりです。", "押して操作を完了します。", "ボタンを押して終了です。"])
+def test_done_push_or_done_operation_is_hidden(reply):
+    assert talk.reply_mvp_problem(reply) is not None
+
+
+# ---- 12. Safety 002（7c6c955）の指摘 ----
+# Medium-1：聞き返しのもとの発話で符号の言葉を言っていたら、ボタンの道でも、全部言い直す道でも、食い違う向きで
+# 候補を作る前に必ず食い違いを示して確かめる。同じ向きなら今までどおり候補にする
+def _choice(r, label_part):
+    return next(c["text"] for c in (r.get("hear") or {}).get("choices", []) if label_part in c["label"])
+
+
+def test_sign_question_mentions_the_sign_said_first(tmp_path):
+    w, _, sid = A.place_flow(tmp_path)
+    w.talk(sid, "Z+3")
+    r = w.talk(sid, "3ミリ")
+    msg = hear_msg(r)
+    assert msg.startswith("Z方向のプラスですか、マイナスですか？") and "最初は「プラス」と聞こえました" in msg, msg
+
+
+def test_button_against_the_first_sign_is_confirmed_first(tmp_path):
+    w, _, sid = A.place_flow(tmp_path)
+    w.talk(sid, "Z+3")
+    q = w.talk(sid, "3ミリ")
+    r = w.talk(sid, _choice(q, "マイナス"))
+    assert not r["state"]["candidate"]
+    assert "最初はプラス、今はマイナスと聞こえました" in hear_msg(r), hear_msg(r)
+
+
+def test_button_with_the_first_sign_makes_the_candidate(tmp_path):
+    w, _, sid = A.place_flow(tmp_path)
+    w.talk(sid, "Z+3")
+    q = w.talk(sid, "3ミリ")
+    r = w.talk(sid, _choice(q, "プラス"))
+    c = r["state"]["candidate"]
+    assert c and c["target"] == "C00003 Z" and "+3.000mm" in hear_msg(r) and not r["state"]["approval"]
+
+
+@pytest.mark.parametrize("first,again,said,now", [("Z-3", "Zプラス3ミリ", "マイナス", "プラス"),
+                                                  ("Z+3", "Zマイナス3ミリ", "プラス", "マイナス"),
+                                                  ("Yプラス", "Yマイナス3ミリ", "プラス", "マイナス")])
+def test_full_restatement_against_the_first_sign_is_confirmed_first(tmp_path, first, again, said, now):
+    w, _, sid = A.place_flow(tmp_path)
+    w.talk(sid, first)
+    r = w.talk(sid, again)
+    assert not r["state"]["candidate"]
+    assert f"最初は{said}、今は{now}と聞こえました" in hear_msg(r), hear_msg(r)
+    # 食い違いを示したあと、もう一度はっきり言えば、ふつうの指示として候補になる（承認はボタンだけ）
+    r = w.talk(sid, again)
+    assert r["state"]["candidate"] and not r["state"]["approval"], hear_msg(r)
+
+
+@pytest.mark.parametrize("first,again", [("Z-3", "Zマイナス3ミリ"), ("Z+3", "Zプラス3ミリ")])
+def test_full_restatement_with_the_first_sign_makes_the_candidate(tmp_path, first, again):
+    w, _, sid = A.place_flow(tmp_path)
+    w.talk(sid, first)
+    r = w.talk(sid, again)
+    assert r["state"]["candidate"] and not r["state"]["approval"], hear_msg(r)
+
+
+# Medium-2：動く大きさ・距離を見積もる言い方も隠す（網には限りがある。残存リスクに書く）
+@pytest.mark.parametrize("word", ["ずいぶん", "一気に", "大胆に", "ぐんと", "おおきく", "ちいさく", "大移動", "最大まで",
+                                  "微妙に", "微小に", "広く", "狭い範囲で", "数センチ", "数ミリ", "十センチ", "何センチか"])
+def test_more_size_and_distance_words_are_hidden(word):
+    assert talk.reply_mvp_problem(f"はじめに{word}動いてから、同じ動きをくり返します。") is not None
+
+
+# Low-2：速度の食い違いの文は、速度の言い方にする（「軸と…」を出さない）
+def test_speed_sign_mismatch_uses_speed_words(tmp_path):
+    w, _, sid = A.place_flow(tmp_path)
+    w.talk(sid, "C00003の速度を+10")
+    r = w.talk(sid, "-10%")
+    msg = hear_msg(r)
+    assert not r["state"]["candidate"]
+    assert "聞こえました" in msg and "軸" not in msg and "速度" in msg, msg
