@@ -1,11 +1,8 @@
 // 3D の点と経路の表示（依存なし。SVG に投影して描く）。
-// - 座標はジョブの位置の値（X・Y・Z、mm）をそのまま使う。作った座標は点として描かない。
-// - HC20 を模した簡易モデル（唐川さんの決定 2026-11-05 夜。docs/DECISION_3D_HC20_MODEL_20261105.md）：
-//   台座・胴・腕・関節を円柱で組んだ、決まった1つの姿勢の静止モデル（メーカーの形状データではない。寸法は HC20_DIMS の目安）。
-//   台座の中心をロボット座標の原点 (0,0,0)、正面を X＋、上を Z＋ に置く。再生・ジョブの点に合わせて動かさない。
-//   半透明の面と細い線で、点・経路・札の下に描き、押しても選ばれない（pointer-events なし）。［モデルを隠す］で隠せる。
-//   実機の姿勢・寸法・可動範囲・干渉を再現したものではない（届く・当たるの判定には使わない）
-// - 台座の目印（原点の印と「ロボット（台座の中心）」）と、正面の矢印（X＋、「ロボットの正面（X＋）」）は、モデルを隠しても出す
+// - 座標はジョブの位置の値（X・Y・Z、mm）をそのまま使う。作った座標・ロボット本体・関節は描かない。
+// - ロボットの台座の目印（2026-11-05 夜 唐川さんの決定。docs/DECISION_3D_ROBOT_BASE_20261105.md）：ロボット座標の原点 (0,0,0)
+//   に黄色の丸と「ロボット（台座の中心）」、原点から X＋ へ「ロボットの正面（X＋）」の矢印。点・経路の下に描き、押しても何も起きない。
+//   印の大きさ・矢印の長さは見やすさの目安で、ロボットの大きさ・形ではない
 // - ドラッグで回転、ホイールで拡大・縮小、点を押して選ぶ、視点を戻す。重なって見える点は、押すと選び分けの一覧を出す。
 // - 経路は JOB の命令の順に点を直線で結んだ目安。再生は線の上を印が動くだけで、ロボットの動きではない。
 // - 区間の種類（kind）で描き分ける（highlight.js の segmentLook）。MOVJ（関節移動）は細い灰色の点線で、
@@ -55,78 +52,13 @@ function niceStep(span) {
 }
 
 
-// ---- HC20 を模した簡易モデル（静止）・台座の目印・正面の矢印 ----
-// 寸法（mm）は目安。唐川さんの確認待ち。
-// メーカーの形状データではない（CAD・画像・ロゴを使わず、円柱を組み合わせて自分で作った形）。各部の長さは、
-// 届く範囲 約 1700mm（公開の値）に全体が合うように決めた目安で、実機の各部の寸法を調べて決めたものではない
-export const HC20_DIMS = Object.freeze({
-  baseR: 170, baseH: 160,        // 台座（円柱。中心がロボット座標の原点）
-  turretR: 130, shoulderZ: 450,  // 旋回の胴（台座の上から肩の高さまで）
-  shoulderX: 80,                 // 肩の関節の、台座の中心から正面（X＋）へのずれ
-  jointR: 95, jointW: 230,       // 肩・肘の関節（Y の向きの円柱の太さと幅）
-  lowerArm: 760, lowerR: 70,     // 下の腕
-  upperArm: 740, upperR: 60,     // 上の腕
-  wrist: 140, wristR: 50,        // 手首
-  // 腕を伸ばしたときの目安：shoulderX + lowerArm + upperArm + wrist = 1720 ≈ 1700
-});
-// 決まった1つの姿勢（待機の姿勢の目安）：下の腕を少し正面へ傾けて立て、上の腕を正面へ出して少し下げ、手首は下向き。
-// ジョブの点・再生と関係ない（腕の先がジョブの点に届いて見える必要はない）。角度はラジアン
-const HC20_POSE = Object.freeze({ lowerTilt: 0.26, upperTilt: -0.17 });
-const C_ROBOT = "#f2c94c";       // 台座の目印・正面の矢印と札（軸の X・Y・Z の色、変更後のオレンジと見分ける。形と札でも見分ける）
-const C_MODEL = "#5b6f94";       // モデルの細い線（暗い地の上で 3:1 以上）
-const C_MODEL_FILL = "rgba(120, 145, 190, 0.10)";  // モデルの面（半透明。点・経路を隠さない）
-const C_MODEL_TEXT = "#a9b6cf";  // モデルの札
-const MODEL_CAPTION = ["HC20 を模した簡易モデル（メーカーの形状データではありません）",
-  "ロボットの姿勢は、実機・ジョブの動きと関係ありません（目安の静止モデル）"];
+// ---- 台座の目印・正面の矢印（2026-11-05 夜 唐川さんの決定。docs/DECISION_3D_ROBOT_BASE_20261105.md） ----
+// ジョブはロボット座標なので、原点 (0,0,0) がロボットの台座の中心。安川のロボット座標では X＋ がロボットの正面。
+// 印の大きさ・矢印の長さは見やすさのための目安で、ロボットの大きさ・形ではない。ロボット本体・腕・関節は描かない
+const C_ROBOT = "#f2c94c";  // 台座の目印・正面の矢印と札（軸の X・Y・Z の色、変更後のオレンジと見分ける。形と札でも見分ける）
 const BASE_LABEL = "ロボット（台座の中心）";
 const FRONT_LABEL = "ロボットの正面（X＋）";
 
-const sub3 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-const cross3 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-const norm3 = (a) => { const n = Math.hypot(...a) || 1; return [a[0] / n, a[1] / n, a[2] / n]; };
-
-// モデルの部品（円柱：a から b、太さ r）。決まった姿勢から一度だけ作る
-function hc20Parts() {
-  const d = HC20_DIMS, P = HC20_POSE;
-  const S = [d.shoulderX, 0, d.shoulderZ];
-  const E = [S[0] + d.lowerArm * Math.sin(P.lowerTilt), 0, S[2] + d.lowerArm * Math.cos(P.lowerTilt)];
-  const Wr = [E[0] + d.upperArm * Math.cos(P.upperTilt), 0, E[2] + d.upperArm * Math.sin(P.upperTilt)];
-  const T = [Wr[0], 0, Wr[2] - d.wrist];
-  const jw = d.jointW / 2;
-  return [
-    { name: "base", a: [0, 0, 0], b: [0, 0, d.baseH], r: d.baseR },
-    { name: "turret", a: [0, 0, d.baseH], b: [0, 0, d.shoulderZ], r: d.turretR },
-    { name: "shoulder", a: [S[0], -jw, S[2]], b: [S[0], jw, S[2]], r: d.jointR },
-    { name: "lower", a: S, b: E, r: d.lowerR },
-    { name: "elbow", a: [E[0], -jw * 0.8, E[2]], b: [E[0], jw * 0.8, E[2]], r: d.jointR * 0.85 },
-    { name: "upper", a: E, b: Wr, r: d.upperR },
-    { name: "wrist", a: Wr, b: T, r: d.wristR },
-  ].map((p) => Object.assign(p, cylRings(p.a, p.b, p.r)));
-}
-
-// 円柱の両端の輪（世界座標の点の並び）
-function cylRings(a, b, r, N = 20) {
-  const u = norm3(sub3(b, a));
-  const p1 = norm3(cross3(u, Math.abs(u[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0])), p2 = cross3(u, p1);
-  const ring = (c) => Array.from({ length: N }, (_, i) => {
-    const t = (i / N) * Math.PI * 2, cs = Math.cos(t) * r, sn = Math.sin(t) * r;
-    return [c[0] + p1[0] * cs + p2[0] * sn, c[1] + p1[1] * cs + p2[1] * sn, c[2] + p1[2] * cs + p2[2] * sn];
-  });
-  return { ringA: ring(a), ringB: ring(b) };
-}
-const HC20_PARTS = hc20Parts();
-const HC20_POINTS = HC20_PARTS.flatMap((p) => p.ringA.concat(p.ringB));
-
-// 画面の点の凸包（円柱の投影の輪郭）
-function hull(ps) {
-  const p = ps.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-  if (p.length < 3) return p;
-  const cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
-  const lo = [], up = [];
-  for (const q of p) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
-  for (const q of p.slice().reverse()) { while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], q) <= 0) up.pop(); up.push(q); }
-  return lo.slice(0, -1).concat(up.slice(0, -1));
-}
 const ptsAttr = (ps) => ps.map((q) => `${q[0].toFixed(1)},${q[1].toFixed(1)}`).join(" ");
 
 // 札の置き場所：目印（ax, ay）のまわりを近い順に探す。枠の中で、boxes に重ならない所（無ければ枠の中の所、それも無ければ null）
@@ -145,7 +77,7 @@ function findSpot(ax, ay, w, boxes, W, H, h = 16, M = 5) {
   return inside;
 }
 
-// 札（暗い地の四角の上に文字）。text-anchor は真ん中
+// 札（暗い地の四角の上に文字）。text-anchor は真ん中。押しても何も起きない（下の点を押せるように）
 function labelEl(cx, cy, text, color, cls) {
   const g = svgEl("g", { "pointer-events": "none" });
   const w = textWidth(text);
@@ -156,7 +88,7 @@ function labelEl(cx, cy, text, color, cls) {
   return g;
 }
 
-// 2D の図（app.js の drawFigure）の、原点（台座の中心）の印と X＋（正面）の向きの印。モデルの輪郭は描かない。
+// 2D の図（app.js の drawFigure）の、原点（台座の中心）の印と X＋（正面）の向きの印。
 // sx・sy：その図の座標 → 画面。placed：点の名前の札（{x, y, w}）。pts：点の画面の位置
 export function drawBase2d(svg, { axA, axB, sx, sy, W, H, big, placed = [], pts = [] }) {
   const ox = sx(0), oy = sy(0);
@@ -191,24 +123,6 @@ export function drawBase2d(svg, { axA, axB, sx, sy, W, H, big, placed = [], pts 
   }
 }
 
-// モデルの表示・非表示（［モデルを隠す］。既定は表示。このページの中だけ。保存しない）。3D の図すべてに効く
-const VIEW3DS = new Set();
-let modelShown = true;
-function syncModelToggle() {
-  const b = document.getElementById("model-toggle");
-  if (!b) return;
-  // 文字は短く「モデル」だけ（3D の上の欄を2行にしない。1280×720 で図が縮まないように）。今の状態は aria-pressed と線の見た目、説明は title
-  b.setAttribute("aria-pressed", String(modelShown));
-  b.textContent = "モデル";
-  b.title = modelShown ? "HC20 を模した簡易モデルを隠す（台座の印と正面の矢印は残ります）" : "HC20 を模した簡易モデルを出す";
-  b.setAttribute("aria-label", modelShown ? "HC20 を模した簡易モデルを隠す" : "HC20 を模した簡易モデルを出す");
-}
-document.getElementById("model-toggle")?.addEventListener("click", () => {
-  modelShown = !modelShown;
-  syncModelToggle();
-  for (const v of VIEW3DS) if (v.data) v.setData(v.data);
-});
-
 export class View3D {
   // host：描く場所（div）。opts.onPick(name)：点を選んだとき（無ければ選べない）
   constructor(host, opts = {}) {
@@ -226,18 +140,6 @@ export class View3D {
     this.chooser = null;
     host.classList.add("view3d");
     this._bind();
-    VIEW3DS.add(this);
-    // ［モデルを隠す］は、画面の 3D の図（#fig-3d）を出している間だけ出す（2D の図・読み込む前は出さない）
-    if (host.id === "fig-3d") {
-      new MutationObserver(() => this._syncButton()).observe(host, { attributes: true, attributeFilter: ["hidden"] });
-      this._syncButton();
-    }
-  }
-
-  _syncButton() {
-    const b = document.getElementById("model-toggle");
-    if (b) b.hidden = this.host.hidden || !this.data;
-    syncModelToggle();
   }
 
   // data: { points: [{name, xyz, line}], segments: [{from, to, line_no, text, kind, solid}],
@@ -248,10 +150,8 @@ export class View3D {
     const bounds = (vs) => [[0, 1, 2].map((k) => Math.min(...vs.map((v) => v[k]))), [0, 1, 2].map((k) => Math.max(...vs.map((v) => v[k])))];
     const [plo, phi] = bounds(all);
     this.spanPts = Math.max(Math.hypot(phi[0] - plo[0], phi[1] - plo[1], phi[2] - plo[2]), 1);
-    // 図に入れるもの：ジョブの点・ロボット座標の原点（台座の中心）・（出しているときは）HC20 を模したモデル。
-    // 最初の視点で、台座とモデルの全体と点の両方が入るように（点はそのぶん小さく見える。ホイールで拡大できる）
-    this.model = modelShown;
-    const [lo, hi] = bounds(all.concat([[0, 0, 0]], this.model ? HC20_POINTS : []));
+    // 図に入れるもの：ジョブの点と、ロボット座標の原点（台座の中心）。最初の視点で、台座と点の両方が入るように
+    const [lo, hi] = bounds(all.concat([[0, 0, 0]]));
     this.center = [0, 1, 2].map((k) => (lo[k] + hi[k]) / 2);
     this.lo = lo; this.hi = hi;
     this.span = Math.max(Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]), 1);
@@ -268,11 +168,9 @@ export class View3D {
       this.span = Math.max(fspan * 1.8, this.spanPts * 0.5, 1);
     }
     // 枠に収める割合とずれは、JOB の点（と focus）が変わったときだけ決め直す。選ぶ・候補・元に戻す・再生では図を動かさない
-    // モデルの表示・非表示を切り替えたときも決め直す（モデルを隠すと、点が大きく見える）
-    const fitKey = JSON.stringify([data.points.map((p) => [p.name, p.xyz]), fp.map((p) => p.name), this.model, this.W, this.H]);
+    const fitKey = JSON.stringify([data.points.map((p) => [p.name, p.xyz]), fp.map((p) => p.name)]);
     if (fitKey !== this.fitKey) { this.fitKey = fitKey; this._fit(fp.length >= 2); }
     this.render();
-    if (this.host.id === "fig-3d") this._syncButton();
   }
 
   // 最初の向き（DEFAULT_YAW・DEFAULT_PITCH・拡大なし）で、点・点の名前・床・軸と軸の文字が枠（W×H）に収まるように、
@@ -305,7 +203,6 @@ export class View3D {
     }
     marks.push([[0, 0, 0], -24, 24, -14, 30]);  // 原点の印（札は描くときにまわりの空いた所を探す）
     marks.push([this._frontTip(), -16, 16 + textWidth(FRONT_LABEL) / 2, -24, 24]);  // 正面の矢印の先と札
-    if (this.model) for (const v of HC20_POINTS) marks.push([v, 0, 0, 0, 0]);  // モデルの全体
     const base = marks.map(([v, ...pad]) => [this.project(v), pad]);
     // 縮める割合 k のときの、文字の余白を含めた広がり（文字の余白は縮まない）
     const box = (k) => {
@@ -315,17 +212,14 @@ export class View3D {
     };
     // 右上の窓（回数の窓・変更の拡大の窓）の下には、点・名前を入れない
     const inset = { x0: this.W - 156, y1: 148 };  // 回数の窓（〜y 104）と変更の拡大の窓（〜y 144）の両方
-    const cap = this.model ? this._captionBox() : null;  // 左上のモデルの札
     // 割合 k で枠に収まり、右上の窓に重ならない、真ん中に最も近いずれ（無ければ null）
     const place = (k) => {
       const b = box(k);
       const ax = [M - b[0], this.W - M - b[1]], ay = [M - b[2], this.H - M - b[3]];
       if (ax[0] > ax[1] || ay[0] > ay[1]) return null;
       const cx = this.W / 2 - (b[0] + b[1]) / 2, cy = this.H / 2 - (b[2] + b[3]) / 2;
-      const rects = base.map(([q, p]) => [this.W / 2 + (q[0] - this.W / 2) * k + p[1], this.H / 2 + (q[1] - this.H / 2) * k + p[2],
-        this.W / 2 + (q[0] - this.W / 2) * k + p[0]]);
-      const free = (ox, oy) => rects.every(([x1, y0, x0]) => (x1 + ox <= inset.x0 || y0 + oy >= inset.y1)
-        && (!cap || x0 + ox >= cap.x1 || y0 + oy >= cap.y1));
+      const rects = base.map(([q, p]) => [this.W / 2 + (q[0] - this.W / 2) * k + p[1], this.H / 2 + (q[1] - this.H / 2) * k + p[2]]);
+      const free = (ox, oy) => rects.every(([x1, y0]) => x1 + ox <= inset.x0 || y0 + oy >= inset.y1);
       let best = null, bestD = Infinity;
       const N = 24;
       for (let i = 0; i <= N; i++) for (let j = 0; j <= N; j++) {
@@ -337,7 +231,7 @@ export class View3D {
       return best;
     };
     let k = 1, off = place(1);
-    if (off) {  // 枠に余りがあれば大きくする（最大 2.5 倍。モデルと原点を入れると点が小さくなるため。2026-11-05 夜）
+    if (off) {  // 枠に余りがあれば大きくする（最大 2.5 倍。原点を入れると点が小さくなるため。2026-11-05 夜）
       let lo = 1, hi = 2.5;
       if (place(hi)) lo = hi;
       else for (let i = 0; i < 14; i++) { const mid = (lo + hi) / 2; if (place(mid)) lo = mid; else hi = mid; }
@@ -384,8 +278,7 @@ export class View3D {
     const svg = svgEl("svg", { viewBox: `0 0 ${this.W} ${this.H}`, width: this.W, height: this.H,
       role: "img", "aria-label": "3D の点と経路（ドラッグで回す・ホイールで拡大縮小）" });
     this._floor(svg);
-    if (this.model) this._robotModel(svg);  // HC20 を模した静止モデル（点・経路・札の下。押しても選ばれない）
-    this._baseMarks(svg);                   // 台座の目印・正面の矢印（モデルを隠しても出す）
+    this._baseMarks(svg);  // 台座の目印・正面の矢印（点・経路の下）
     const c = d.after;
     const stopped = !!(c && d.stopped);
     const cAfter = stopped ? C_STOPPED : C_AFTER, cAfterText = stopped ? C_STOPPED : C_AFTER_TEXT;
@@ -462,7 +355,6 @@ export class View3D {
     }
     const moved = c ? c.moved : null;
     const labelBoxes = [];  // 置いた名前の四角（変更後の名前を重ならない所に置くため）
-    if (this.model) labelBoxes.push(this._captionBox());  // 左上のモデルの札（変更の札・回数の札・人が教えた札を重ねない）
     for (const g of groups) {
       const [x, y] = g.s;
       const sel = g.names.includes(d.selected);
@@ -472,7 +364,7 @@ export class View3D {
       const floor = this.project([g.p.xyz[0], g.p.xyz[1], this.z0]);
       svg.insertBefore(svgEl("line", { x1: x, y1: y, x2: floor[0], y2: floor[1], stroke: "#3a4d72",
         "stroke-width": 1, "stroke-dasharray": "2 3" }), svg.firstChild.nextSibling);
-      // 押しやすい大きさ。近くにほかの点があるときは、その点の真ん中を覆わない大きさ（モデルを出すと点が近く見えるため）
+      // 押しやすい大きさ。近くにほかの点があるときは、その点の真ん中を覆わない大きさ（原点も図に入れると点が近く見えるため）
       const near = Math.min(Infinity, ...groups.filter((q) => q !== g).map((q) => Math.hypot(q.s[0] - x, q.s[1] - y)));
       el.append(svgEl("circle", { cx: x, cy: y, r: Math.max(7, Math.min(16, near / 2 - 0.5)), fill: "transparent" }));
       if (sel) el.append(svgEl("circle", { cx: x, cy: y, r: 12, fill: "rgba(77,163,255,0.18)", stroke: "#4da3ff", "stroke-width": 2 }));
@@ -489,8 +381,8 @@ export class View3D {
         const label = svgEl("text", { x: x + 12, y: y - 8, fill: sel && !isMoved ? "#7cbcff" : "#b3c0d8",
           "font-weight": sel && !isMoved ? "600" : "400" });
         label.textContent = shownNames.join(" / ");
-        // 名前の置き場所：右上（今まで）。先に置いた名前・ほかの点・モデルの札に重なるときは、右下・左上・左下・もう少し上・下の順に
-        // 空いている所（枠の中）。モデルを出すと点が近く見えるため（2026-11-05 夜）
+        // 名前の置き場所：右上（今まで）。先に置いた名前・ほかの点に重なるときは、右下・左上・左下・もう少し上・下の順に
+        // 空いている所（枠の中）。原点も図に入れると点が近く見えるため（2026-11-05 夜）
         const tw = textWidth(label.textContent);
         const others = groups.filter((q) => q !== g).map((q) => ({ x0: q.s[0] - 9, x1: q.s[0] + 9, y0: q.s[1] - 9, y1: q.s[1] + 9 }));
         const cands = [[x + 12, y - 8, "start"], [x + 12, y + 16, "start"], [x - 12, y - 8, "end"], [x - 12, y + 16, "end"],
@@ -554,46 +446,20 @@ export class View3D {
       svg.append(svgEl("circle", { cx: m[0], cy: m[1], r: 9, fill: this.marker.color, stroke: "#fff", "stroke-width": 3, class: "marker" }));
       // 何回目かは図の上の帯（いま：…）と動きの並びに出す（印の横には出さない。重複を減らす）
     }
-    this._robotLabels(svg, labelBoxes);  // 台座と正面の札・モデルの札（ほかの札の置き場所が決まってから、空いた所に）
+    this._robotLabels(svg, labelBoxes);  // 台座と正面の札（ほかの札の置き場所が決まってから、空いた所に）
     this.host.querySelector("svg")?.remove();
     this.host.prepend(svg);
     this.svg = svg;
   }
 
-  // 正面の矢印の先（世界座標。X＋ の向き。長さは表示の目安）
+  // 正面の矢印の先（世界座標。X＋ の向き。長さは表示の目安で、ロボットの大きさではない）
   _frontTip() {
-    return [Math.max(HC20_DIMS.baseR * 2.6, this.span * 0.2), 0, 0];
+    return [this.span * 0.22, 0, 0];
   }
 
-  // 左上のモデルの札の四角
-  _captionBox() {
-    return { x0: 0, x1: 16 + Math.max(...MODEL_CAPTION.map(textWidth)), y0: 0, y1: 46 };
-  }
-
-  // 見る位置より手前に出る所（投影が崩れる所）か。区間を大きく見せる図（focus）で、遠くの部品を描かないため
+  // 見る位置より手前に出る所（投影が崩れる所）か。区間を大きく見せる図（focus）で、遠くの原点の印を描かないため
   _behind(q) {
     return q[2] <= -0.8 * this.span * 2.6;
-  }
-
-  // HC20 を模した簡易モデル（静止）：円柱の輪郭（両端の輪の凸包）を半透明の面と細い線で。奥の部品から描く
-  _robotModel(svg) {
-    const g = svgEl("g", { class: "robot-model", "pointer-events": "none" });
-    const parts = [];
-    for (const p of HC20_PARTS) {
-      const A = p.ringA.map((v) => this.project(v)), B = p.ringB.map((v) => this.project(v));
-      if (A.concat(B).some((q) => this._behind(q))) continue;
-      parts.push({ p, A, B, depth: A.concat(B).reduce((s, q) => s + q[2], 0) / (A.length + B.length) });
-    }
-    parts.sort((a, b) => b.depth - a.depth);
-    for (const { p, A, B } of parts) {
-      const e = svgEl("g", { class: "robot-part", "data-part": p.name, "pointer-events": "none" });
-      e.append(svgEl("polygon", { points: ptsAttr(hull(A.concat(B))), fill: C_MODEL_FILL, stroke: C_MODEL, "stroke-width": 1,
-        "stroke-linejoin": "round" }));
-      e.append(svgEl("polygon", { points: ptsAttr(A), fill: "none", stroke: C_MODEL, "stroke-width": 0.8, class: "ring-bottom" }));
-      e.append(svgEl("polygon", { points: ptsAttr(B), fill: "none", stroke: C_MODEL, "stroke-width": 0.8, class: "ring-top" }));
-      g.append(e);
-    }
-    svg.append(g);
   }
 
   // 台座の目印（原点の印と、床の面 Z=0 の点線の輪）と、正面の矢印（原点から X＋ へ。太い線と矢じり）
@@ -602,7 +468,7 @@ export class View3D {
     const o = this.project([0, 0, 0]), t = this.project(this._frontTip());
     if (this._behind(o) || this._behind(t)) return;
     const g = svgEl("g", { class: "robot-base", "pointer-events": "none" });
-    const R = HC20_DIMS.baseR * 1.35;
+    const R = this.span * 0.07;  // 輪の大きさは目安（ロボットの大きさではない）
     const ring = Array.from({ length: 36 }, (_, i) => { const a = (i / 36) * Math.PI * 2; return this.project([R * Math.cos(a), R * Math.sin(a), 0]); });
     if (!ring.some((q) => this._behind(q))) {
       g.append(svgEl("polygon", { points: ptsAttr(ring), fill: "none", stroke: C_ROBOT, "stroke-width": 1.5, "stroke-dasharray": "6 4" }));
@@ -620,19 +486,10 @@ export class View3D {
     this.baseAt = { o, t };
   }
 
-  // 札：モデルの札（左上に2行）・「ロボット（台座の中心）」・「ロボットの正面（X＋）」。
+  // 札：「ロボット（台座の中心）」・「ロボットの正面（X＋）」。
   // 点・点の名前・変更の札・回数の札・人が教えた札（boxes）・右上の窓・軸の文字に重ならず、枠の中に収まる所に置く
   _robotLabels(svg, boxes) {
     const d = this.data;
-    if (this.model) {
-      const g = svgEl("g", { class: "robot-caption-g", "pointer-events": "none" });
-      MODEL_CAPTION.forEach((text, i) => {
-        const t = svgEl("text", { x: 12, y: 20 + i * 17, fill: C_MODEL_TEXT, class: "robot-caption" });
-        t.textContent = text;
-        g.append(t);
-      });
-      svg.append(g);
-    }
     if (!this.baseAt) return;
     const taken = boxes.concat(this._axisBoxes || [],
       d.points.map((p) => this.project(p.xyz)).map(([x, y]) => ({ x0: x - 12, x1: x + 12, y0: y - 12, y1: y + 12 })));

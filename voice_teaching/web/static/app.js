@@ -1395,7 +1395,7 @@ function setView(name) {
 for (const b of document.querySelectorAll(".view-tab")) b.addEventListener("click", () => setView(b.dataset.view));
 for (const f of document.querySelectorAll(".figs-small figure")) f.addEventListener("click", () => setView(f.dataset.view));
 
-// ---- 3D（ジョブの X・Y・Z をそのまま点で描く。HC20 を模した静止モデルは view3d.js） ----
+// ---- 3D（ジョブの X・Y・Z をそのまま点で描く。ロボット本体は描かない） ----
 const view3d = new View3D($("fig-3d"), { onPick: (name) => {
   if (state.st && state.st.candidate) {
     $("play-status").textContent = "変更を確かめている間は、位置を選び直せません（「元に戻す」で選び直せます）";

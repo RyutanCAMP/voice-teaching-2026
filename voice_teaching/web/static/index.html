@@ -255,8 +255,6 @@
       <!-- 再生中の「いま：24行目 MOVL C00001 V=150.0（2回目）」。サーバーの区間の線の文字だけ。図の点に重ねない（図の上の帯に出す） -->
       <div id="play-now" class="play-now" aria-live="polite" hidden></div>
       <button type="button" id="view-reset" class="link small" hidden>視点を戻す</button>
-      <!-- HC20 を模した静止モデルの表示・非表示（view3d.js が動かす。既定は表示。3D の図を出している間だけ出す） -->
-      <button type="button" id="model-toggle" class="link small" aria-pressed="true" hidden title="HC20 を模した簡易モデルを隠す（台座の印と正面の矢印は残ります）" aria-label="HC20 を模した簡易モデルを隠す">モデル</button>
       <div class="view-tabs" role="tablist" aria-label="図の向き">
         <button type="button" class="view-tab" data-view="3d" role="tab" title="ドラッグで回す・ホイールで拡大縮小">3D</button>
         <button type="button" class="view-tab" data-view="yz" role="tab" title="X方向から見る">Y・Z</button>
@@ -309,7 +307,7 @@
         <span class="lg stopped" id="legend-stopped" hidden>灰色の点線と ✕＝変更できない案（参考・承認できません）</span>
       </div>
     </div>
-    <p class="fine figure-notes"><span id="play-note">点を命令の順に直線で結んだ目安です。ロボット本体の動きではありません。</span> <span id="view3d-note">3D はジョブの X・Y・Z をそのまま点で描いたものです。ロボットの形は、HC20 を模した目安の静止モデルです（メーカーの形状データではありません）。実機の姿勢・寸法・可動範囲・干渉を再現したものではありません。動作や干渉を保証するシミュレーターではありません。</span> <span id="base-note">台座の印は、ロボット座標の原点（0,0,0）の位置です。ロボットの姿勢は、実機・ジョブの動きと関係ありません（目安の静止モデル）。</span> <span id="figure-note">この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。参考表示であり、実際のロボットの動きではありません。</span></p>
+    <p class="fine figure-notes"><span id="play-note">点を命令の順に直線で結んだ目安です。ロボット本体の動きではありません。</span> <span id="view3d-note">3D はジョブの X・Y・Z をそのまま点で描いたもので、ロボット本体・関節は描いていません。動作や干渉を保証するシミュレーターではありません。</span> <span id="base-note">台座の印は、ロボット座標の原点（0,0,0）の位置です。ロボットの大きさ・形ではありません。</span> <span id="figure-note">この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。参考表示であり、実際のロボットの動きではありません。</span></p>
   </section>
 
   <!-- 詳細表示（同じ画面の中の切り替え。最初は閉じている） -->
@@ -403,7 +401,7 @@
         <div id="confirm-xyz" class="confirm-xyz"></div>
         <div id="confirm-diff" class="diff"></div>
         <details class="fine"><summary>変わる命令の行</summary><ul id="confirm-affected" class="confirm-affected"></ul></details>
-        <p class="fine">灰色＝変更前、オレンジ＝変更後。点を命令の順に直線で結んだ目安で、ロボット本体の動きではありません。ロボットの形は、HC20 を模した目安の静止モデルです（メーカーの形状データではありません）。実機の姿勢・寸法・可動範囲・干渉を再現したものではありません。動作や干渉を保証するシミュレーターではありません。経路は人が確かめてください。</p>
+        <p class="fine">灰色＝変更前、オレンジ＝変更後。点を命令の順に直線で結んだ目安で、ロボット本体の動きではありません。ロボット本体・関節は描いていません。台座の印は、ロボット座標の原点（0,0,0）の位置です。ロボットの大きさ・形ではありません。動作や干渉を保証するシミュレーターではありません。経路は人が確かめてください。</p>
         <p id="confirm-movj-legend" class="fine movj-legend" hidden>細い灰色の点線＝関節移動（MOVJ）。点線は命令の順番だけで、実際の通り道ではありません</p>
         <p id="confirm-stopped-legend" class="fine stopped-legend" hidden>灰色の点線と ✕＝変更できない案（参考・承認できません）</p>
         <p class="fine confirm-figure-note">この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。参考表示であり、実際のロボットの動きではありません。</p>
