@@ -662,3 +662,132 @@ def test_speed_sign_mismatch_uses_speed_words(tmp_path):
     msg = hear_msg(r)
     assert not r["state"]["candidate"]
     assert "聞こえました" in msg and "軸" not in msg and "速度" in msg, msg
+
+
+# ==== 唐川さんの「今までのを一気に直して」（11/5）a〜d ====
+# ---- a：ひらがな・カタカナの軸名と符号を、X・Y・Z・プラス・マイナスと同じに読む（書き方を揃えるだけ。補わない） ----
+@pytest.mark.parametrize("text,target,delta", [
+    ("yぷらす1mm", "C00003 Y", "+1.000"),
+    ("Yぷらす1mm", "C00003 Y", "+1.000"),
+    ("ぜっとまいなす3mm", "C00003 Z", "-3.000"),
+    ("ぜっとぷらす3ミリ", "C00003 Z", "+3.000"),
+    ("わいまいなす10mm", "C00003 Y", "-10.000"),
+    ("えっくすぷらす5ミリ", "C00003 X", "+5.000"),
+    ("ゼットまいなす3mm", "C00003 Z", "-3.000"),
+    ("x+2mm", "C00003 X", "+2.000"),
+    ("zのまいなす2mm", "C00003 Z", "-2.000"),
+    ("わいまいなすの方向に10mm", "C00003 Y", "-10.000"),
+])
+def test_hiragana_axis_and_sign_words(tmp_path, text, target, delta):
+    w, _, sid = A.place_flow(tmp_path)
+    r = w.talk(sid, text)
+    c = r["state"]["candidate"]
+    assert c and c["target"] == target and f"{delta}mm" in hear_msg(r), (text, hear_msg(r))
+    assert not r["state"]["approval"]
+
+
+def test_hiragana_without_unit_asks_the_unit_without_claude(tmp_path):
+    """「ぜっとぷらす3」：単位を聞き返す（会話の道・Claude に回さない。偽の Claude は答えを持たないので、呼べば落ちる）。"""
+    w, fake, sid = A.place_flow(tmp_path)
+    r = w.talk(sid, "ぜっとぷらす3")
+    assert not r["state"]["candidate"] and r.get("hear") and "単位" in hear_msg(r), r
+    assert r.get("ask") is None
+
+
+@pytest.mark.parametrize("text", ["かわいい", "わいわい", "まいなすいおん"])
+def test_hiragana_words_that_are_not_axis_or_sign(text):
+    f = ut.read_utterance(text + "3mm下げて")
+    assert "X" not in f.axes and "Y" not in f.axes and not f.axis_signs[1:], f
+
+
+# ---- b：4桁以下の位置番号は、ボタンで確かめる（勝手に5桁にしない） ----
+def _labels(r):
+    return [c["label"] for c in (r.get("hear") or {}).get("choices", [])]
+
+
+@pytest.mark.parametrize("text,canon", [("c0004をYマイナスに3ミリ", "C00004"), ("C4をYマイナスに3ミリ", "C00004"),
+                                        ("c004をYマイナスに3ミリ", "C00004")])
+def test_short_position_number_is_confirmed_with_buttons(tmp_path, text, canon):
+    w, _, sid = A.place_flow(tmp_path)
+    r = w.talk(sid, text)
+    assert not r["state"]["candidate"]
+    assert f"{canon} のことですか？" in hear_msg(r), hear_msg(r)
+    assert _labels(r) == [f"はい、{canon}", "違う"]
+    yes = next(c["text"] for c in r["hear"]["choices"] if c["label"].startswith("はい"))
+    r2 = w.talk(sid, yes)  # ［はい］：その位置で、同じ発話の続きを今までどおり読む
+    c = r2["state"]["candidate"]
+    assert c and c["target"] == f"{canon} Y" and "-3.000mm" in hear_msg(r2) and not r2["state"]["approval"]
+
+
+def test_short_position_no_button_does_nothing(tmp_path):
+    w, _, sid = A.place_flow(tmp_path)
+    r = w.talk(sid, "c0004をYマイナスに3ミリ")
+    no = next(c["text"] for c in r["hear"]["choices"] if c["label"] == "違う")
+    r2 = w.hear(sid, no, "text")  # 画面の選択肢のボタンは /api/hear に送る（app.js の answerChoice）
+    assert not r2["state"]["candidate"] and not r2["state"]["approval"]
+    assert "変更はしません" in r2["message"], r2["message"]
+
+
+def test_short_position_not_in_the_job_has_no_buttons(tmp_path):
+    w, _, sid = A.place_flow(tmp_path)
+    r = w.talk(sid, "c0099をYマイナスに3ミリ")
+    assert not r["state"]["candidate"] and _labels(r) == []
+    assert "C00099 はこのジョブにありません" in hear_msg(r), hear_msg(r)
+
+
+def test_long_position_number_keeps_the_form_message(tmp_path):
+    """回帰：6桁以上は今どおり形が分からないと聞く（5桁に直さない）。"""
+    w, _, sid = A.place_flow(tmp_path)
+    r = w.talk(sid, "C000004をYマイナスに3ミリ")
+    assert not r["state"]["candidate"] and "形が分かりません" in hear_msg(r)
+
+
+def test_short_position_confirm_text_is_not_an_approval(tmp_path):
+    """［はい］の文は位置を言い直すだけ（承認ではない）。承認待ちの候補があるときは、今どおり断る。"""
+    w, _, sid = A.place_flow(tmp_path)
+    first = w.talk(sid, "Y-方向に10mm")["state"]["candidate"]
+    r = w.talk(sid, "c0004をYマイナスに3ミリ")
+    yes = next((c["text"] for c in (r.get("hear") or {}).get("choices", []) if c["label"].startswith("はい")), None)
+    if yes is not None:
+        r = w.talk(sid, yes)
+    assert r["state"]["candidate"] == first and r["state"]["approval"] is None
+
+
+# ---- c：回数の変更の自然な言い方 ----
+def test_two_positions_and_ugoki_is_read_as_a_repeat_request(tmp_path):
+    w, _ = T.flow(tmp_path)
+    sid = w.load(T.demo_bytes())["session_id"]
+    r = w.talk(sid, "c0001とC0002の動きを3回繰り返して")
+    msg = (r.get("hear") or {}).get("message", "")
+    assert "分からなかった言葉" not in msg, msg
+    assert "くり返している区間は C00001〜C00003 です。この区間を3回にしますか？" in msg, msg
+    assert not r["state"]["candidate"] and not r["state"]["repeat_range"]
+    go = r["hear"]["choices"][0]["text"]
+    r2 = w.talk(sid, go)  # 選択肢は決まった文を送る（同じ検査）。確定は今までどおり［この範囲を繰り返す］のボタンだけ
+    assert r2["state"]["repeat_range"] and not r2["state"]["candidate"]
+
+
+@pytest.mark.parametrize("text", ["C00001からC00003を3回繰り返して", "c0001の動きを3回にして", "C1からC3の動きを3回にして"])
+def test_natural_repeat_forms_show_the_range_button(tmp_path, text):
+    w, _ = T.flow(tmp_path)
+    sid = w.load(T.demo_bytes())["session_id"]
+    r = w.talk(sid, text)
+    assert r["state"]["repeat_range"] and not r["state"]["candidate"], (r.get("hear") or {}).get("message")
+
+
+@pytest.mark.parametrize("text", ["c0001とC0002の動きを3回くらい繰り返して", "c0001とC0002の動きを2.5回繰り返して",
+                                  "c0001とC0002の動きを3回繰り返さないで", "たぶんc0001とC0002の動きを3回繰り返して"])
+def test_natural_repeat_forms_keep_the_count_safety_lines(tmp_path, text):
+    w, _ = T.flow(tmp_path)
+    sid = w.load(T.demo_bytes())["session_id"]
+    r = w.talk(sid, text)
+    assert not r["state"]["candidate"] and not r["state"]["repeat_range"]
+    # 回数の変更に進む選択肢（決まった文「…の作業を…回から…回にして」）を出さない。「3回の移動／3往復」の2択（どちらも止める）は今どおり
+    assert not any("作業を" in c["text"] for c in (r.get("hear") or {}).get("choices", [])), r.get("hear")
+
+
+@pytest.mark.parametrize("reply", ["同じ順番の動きを何度も通る流れです。作業の名前が分かると、説明が短くなります。",
+                                   "同じ動きをくり返すので、サイクルの時間が長くなります。"])
+def test_length_words_not_about_movement_are_shown(reply):
+    """長く・短く は、動く・移る・距離の話のときだけ隠す（e2e の長い答え「説明が短くなります」を隠していた。QA 002 N5）。"""
+    assert talk.reply_mvp_problem(reply) is None
