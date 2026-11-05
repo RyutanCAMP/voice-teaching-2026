@@ -37,7 +37,7 @@
 ## 5. 独立チェック（内部。同じ Claude のサブエージェント）
 | 対象 | 判定 |
 |---|---|
-| P0（Safety & Spec） | 1〜4回目 FAIL → 直し → **5回目 CONDITIONAL PASS（High 0件）**。条件の Medium も直した。詳しくは `handoff/HANDOFF_20261105_P0_H02_H16.md` 5・6章 |
+| P0（Safety & Spec） | 1〜4回目 FAIL → 直し → 5回目 CONDITIONAL PASS → **最終（61ef19a）PASS（High・Medium 0件。400件の文・保留のボタン・クロークさんの読み取りの変更も見た）**。詳しくは `handoff/HANDOFF_20261105_P0_H02_H16.md` 5・6章 |
 | P0（QA） | CONDITIONAL PASS → 指摘（質問の保留・かな書き・競合のテスト・保留のボタン）を直した |
 | 本番UI（QA：安全の表示の見直し） | **CONDITIONAL PASS**。安全の表示を隠した所・e2e の安全の確かめを弱めた所は無し。保留の返事のボタンを足した |
 | クロークさんの自然な話し言葉（b5ac053） | 統合した。テストの期待を1つ P0 に合わせた |
@@ -59,21 +59,21 @@ $env:PYTHONUTF8="1"; $env:PYTHONIOENCODING="utf-8"
 ```
 - Chrome・表示倍率 100%・1920×1080。起動直後にオープニング（約3秒・押すと飛ばす）
 
-## 7. 最終の状態（11/6 2時台）
+## 7. 最終の状態（11/6 2時台。最後の確かめは 61ef19a）
 
 ### SHA
 | ブランチ | SHA |
 |---|---|
-| `ui/filming-final-1106`（撮影用・テストした版のコード） | **c354c48**（そのあとはスクリーンショットと、この引き継ぎだけ） |
+| `ui/filming-final-1106`（撮影用・テストした版のコード） | **61ef19a**（そのあとは、この引き継ぎだけ） |
 | `integrate/home-nl-1105` | **048cec2**（コードは b57685a） |
-| 8825・8835 で動いている版 | c354c48（作業フォルダ `vt-serve` に固定） |
+| 8825・8835 で動いている版 | 61ef19a（作業フォルダ `vt-serve` に固定） |
 
-### テスト（c354c48 で実測）
+### テスト（pytest・Node・169件は c354c48、e2e は 61ef19a で実測。間の差は画面の見出しの1か所と e2e の確かめの追加だけ）
 | テスト | 結果 |
 |---|---|
 | pytest（`--ignore=tests/test_e2e_browser.py`） | **6182 passed**, 1 skipped, 1 xfailed（xfail は Q-3 待ちの「4回にして」） |
 | Node | **127 / 127** |
-| e2e（`tools/e2e_browser.py`） | **OK 1511・NG 0・「すべて通りました」** |
+| e2e（`tools/e2e_browser.py`） | **OK 1514・NG 0・「すべて通りました」**（保留のボタンの確かめを足した） |
 | 169件の再生（API 0回） | PASS 123・FAIL 36・REVIEW 5・UPDATED_PENDING_QA 2・EXECUTION_ERROR 3 |
 | 本物の Claude（8835 の画面・撮影の流れ） | 30mm 止める → 5mm 候補 → 確認表示 → 承認 → 出力、通った（約 $0.02/回） |
 | 実マイク | **未実施** |
