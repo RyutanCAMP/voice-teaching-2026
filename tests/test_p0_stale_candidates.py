@@ -408,3 +408,62 @@ def test_approved_move_restated_via_ask_is_voided(tmp_path, out_dir):
     w.ask(sid, "やっぱり5ミリ")
     voided(w, sid, gen)
     assert files(out_dir) == []
+
+
+# ---- 11. 独立チェック（11/5 夜 Safety FAIL・QA CONDITIONAL PASS）の再現の文 ----
+SAFETY_LEAKS = ["やっぱりやめた", "やっぱりいいや", "やっぱいいや", "10じゃなくて5", "やっぱり五ミリ", "じゃなくて五ミリ",
+                "とりけして", "トリケシテ", "取りけして", "もどして", "元にもどして", "戻す", "今のナシ", "ナシで", "やっぱなし", "なしなし",
+                "撤回して", "なかったことにして", "消して", "候補を消して", "破棄して", "リセットして", "さっきの間違ってた",
+                "ストップ", "待って", "やっぱ5ミリ", "ヤッパリ5ミリ", "チガウ、5ミリ", "いや5ミリ", "いやいや5ミリ", "いえ、5ミリ",
+                "ごめん5ミリ", "や っぱり5ミリ", "取り下げて", "さっきのはやめて", "今のはやめて", "それはやめて",
+                "今の変更は無しで", "今の変更いらない", "ヤメて", "リセット"]
+
+
+@pytest.mark.parametrize("text", SAFETY_LEAKS)
+def test_after_approval_no_leak_can_export(tmp_path, out_dir, text):
+    """承認済みの古い候補が、どの言い方のあとも出力できない（無効か保留）。"""
+    w, fake, sid = approved_move(tmp_path)
+    gen = w.candidate_gen_of(sid)
+    w.talk(sid, text)
+    st = w.state(sid)["state"]
+    assert not st["can_export"] and not st["can_approve"], (text, st["status_line"])
+    for g in (gen, st["candidate_gen"]):
+        assert not w.export(sid, candidate_gen=g)["ok"], text
+        assert not w.approve(sid, "QA", candidate_gen=g)["ok"], text
+    assert files(out_dir) == []
+
+
+@pytest.mark.parametrize("text", ["3じゃなくて4", "とりけして", "やっぱりやめた"])
+def test_after_approval_count_no_leak(tmp_path, out_dir, text):
+    w, _, sid = pending_three(tmp_path)
+    approve(w, sid)
+    gen = w.candidate_gen_of(sid)
+    w.talk(sid, text)
+    assert not w.export(sid, candidate_gen=gen)["ok"] and not w.state(sid)["state"]["can_export"]
+    assert files(out_dir) == []
+
+
+@pytest.mark.parametrize("text", ["3回と4回ではどう違う？", "何が違う？", "C00003とC00004は何が違うの？", "これは溶接じゃないの？",
+                                  "間違いないですか？", "やっぱりこれで合ってる？", "元に戻すボタンはどこ？"])
+@pytest.mark.parametrize("approved", [False, True])
+def test_questions_with_marker_words_do_not_hold(tmp_path, text, approved):
+    """QA M-1：言い直しの印の言葉が入った、ふつうの質問は保留にしない（候補・世代を変えない）。"""
+    w, fake, sid = pending_three(tmp_path)
+    if approved:
+        approve(w, sid)
+    gen = w.candidate_gen_of(sid)
+    fake.add(T.answer("C00001〜C00003 の動きをくり返しています。", [21]))
+    w.talk(sid, text, source="voice")
+    st = w.state(sid)["state"]
+    assert st["hold"] is False and st["candidate"] is not None and st["candidate_gen"] == gen and st["voided"] is None, text
+
+
+def test_hold_undo_button_voids_after_hold(tmp_path):
+    """QA L-1：保留になったことを確かめてから［元に戻す］。"""
+    w, _, sid = pending_three(tmp_path)
+    w.talk(sid, "違う")
+    assert w.state(sid)["state"]["hold"] is True
+    gen = w.candidate_gen_of(sid)
+    w.undo(sid)
+    st = w.state(sid)["state"]
+    assert st["candidate"] is None and st["hold"] is False and st["candidate_gen"] > gen

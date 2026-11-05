@@ -28,18 +28,22 @@ INVALIDATING = (CANCEL, CANCEL_EXPLAIN, CORRECTION)
 _BUTTON = re.compile(r"承認|出力|書き出|転送|送信|保存|起動|実行|スタート|エクスポート|ダウンロード|登録|上書き|確定")
 # 取消の明示の節（節の全体が一致）。今の utterance.is_explicit_cancellation に、前置き（「変更は」「今の候補を」など）を足した形
 _X = re.compile(
-    r"(?:(?:やっぱり|やはり|じゃあ|では|もう)[\s]*)?"
+    r"(?:(?:やっぱり|やっぱ|やはり|じゃあ|では|もう)[\s]*)?"
     r"(?:(?:(?:今の|この|さっきの|前の)?(?:提案|変更候補|変更|候補)(?:は|を)?)|さっきのは|さっきのを|今のは|今の|さっきの)?"
-    r"(?:取り消(?:して|します|し)|取消(?:して|し)?|キャンセル(?:して|します)?|元に戻(?:して|します)|もとに戻(?:して|します)"
-    r"|戻して|やめて|やめます|やめる|やめよう|なしにして|なしで|なし)"
+    r"(?:取り消(?:して|します|し|す)|取消(?:して|し)?|キャンセル(?:して|します)?|元に戻(?:して|します|す)|もとに戻(?:して|します|す)"
+    r"|戻して|戻す|やめて|やめます|やめる|やめた|やめよう|なしにして|なしで|なし(?:なし)?|無しにして|無しで|無し|いらない|要らない|撤回(?:して|します)?"
+    r"|なかったことに(?:して)?|消して|破棄(?:して)?|取り下げ(?:て|ます)?|リセット(?:して)?)"
     r"(?:ください|下さい|ほしい|欲しい)?(?:よ|ね)?[\s。.!！]*")
 # 取消の動詞（節のどこかにある）
-_CANCEL_VERB = re.compile(r"取り消|取消|キャンセル|元に戻|もとに戻|戻して|やめ")
+_CANCEL_VERB = re.compile(r"取り消|取消|キャンセル|元に戻|もとに戻|戻して|戻す|やめ|撤回|なかったことに|消して|消す|破棄|取り下げ|リセット")
+# 取消・止めたいのかもしれない言葉（はっきりしない）：候補があれば保留にする（今の道の文のまま。承認・出力はできない）
+_HOLD_WORDS = re.compile(r"ストップ|すとっぷ|待って|まって|いいや|もういい|やっぱいい")
 # 取消の打ち消し・候補を残す言葉
 _N = re.compile(r"取り消さな|取り消さず|取消さな|キャンセルしな|キャンセルせず|戻さな|戻さず|やめないで|やめずに"
                 r"|(?:キャンセル|取り消し|取消|取り消すの|取消すの|元に戻すの|戻すの)(?:は|を)やめ")
 # ほかの操作の打ち消し（「C00004を選ぶのはやめて」「比較はやめて」「それはやめて」）：候補の取消ではない。今の道（止める）
 _OTHER_STOP = re.compile(r"^(?!.*(?:提案|変更|候補))(?:.+?)(?:の)?(?:は|を)やめ(?:て|ます)(?:ください)?[\s。.!！]*$")
+_POINTER = re.compile(r"^(?:それ|これ|その|この|今の|さっきの|さっき|前の|あれ)")
 # 取消の明示の文を、疑問の形にしただけ（「元に戻しますか」「取り消して？」）：今の道が［「元に戻します」でよいですか？］の
 # ボタンで確かめる（押すと取消）。確かめるまでは保留にする
 _QUESTION_TAIL = re.compile(r"(?:か|[?？])[\s。.!！?？]*$")
@@ -47,8 +51,10 @@ _KEEP_WORDS = re.compile(r"^(?:今の|この|その)?(?:候補|提案|変更)?(?
                          r"(?:このまま|そのまま)(?:で)?(?:いい|よい|良い|大丈夫|お願いします|お願い)?(?:です)?[\s。.!！]*$"
                          r"|この候補を残(?:す|して)(?:ください)?[\s。.!！]*$")
 # 言い直しの印。後ろに新しい内容が来る形（「3回じゃなくて4回」）
-_M_BEFORE = re.compile(r"じゃなくて|じゃなく|ではなくて|ではなく|でなくて|でなく|じゃない|違います|違う|ちがう|いや(?=[\s、,]|$)"
-                       r"|やっぱり|やはり|間違い|間違え|まちがい|訂正|言い直し")
+_M_BEFORE = re.compile(r"じゃなくて|じゃなく|ではなくて|ではなく|でなくて|でなく|じゃない|違います|違う|ちがう"
+                       r"|いや(?=[\s、,0-9]|いや|$)|いえ(?=[\s、,0-9]|$)|ごめん"
+                       r"|やっぱり|やっぱ|やはり|間違い|間違え|間違って|まちがい|訂正|言い直し")
+_BARE_NUMBER = re.compile(r"[0-9]+(?:\.[0-9]+)?")
 # 言い直しの印。前に新しい内容が来る形（「4回に変えて」）
 _M_AFTER = re.compile(r"に変えて|に変更して|に直して|へ変えて|へ変更して")
 # 新しい値（回数・量・軸と符号・位置番号）。「もう一回」「もう一度」は値にしない（副詞）
@@ -60,7 +66,10 @@ _H = re.compile(r"かも|かな|迷|たぶん|多分|おそらく|と思う|気�
                 r"|かどうか|[?？]|(?:ですか|ますか|か|の)[\s。.!！]*$")
 _H_HESITATE = re.compile(r"かも|かな|迷|たぶん|多分|おそらく|と思う|気がする|ほうがいい|方がいい|べき")
 # 取消のしかた・結果を聞く問い
-_HQ = re.compile(r"どうやって|どうやる|どうなる|どうすれば|方法|やり方|とは|って何|ってなに|し方|方を")
+_HQ = re.compile(r"どうやって|どうやる|どうなる|どうすれば|方法|やり方|とは|って何|ってなに|し方|方を|どこ|ボタン")
+# ふつうの質問（QA M-1）：言い直しの印（「違う」「じゃない」「間違い」）があっても、取消の言葉・新しい値が無く、印のほかに
+# 中身がある疑問の文（「何が違う？」「3回と4回ではどう違う？」「これは溶接じゃないの？」「間違いないですか？」）は質問。何も変えない
+_ASKING = re.compile(r"[?？][\s。.!！?？]*$|(?:ですか|ますか|の|か)[\s。.!！]*$|何|なに|どう|どこ|なぜ|どれ|どっち|どちら|合って")
 # 説明の頼みの節（白い一覧。節の全体が一致）。回数・量・軸・位置番号・承認の言葉が入る節は説明にしない
 _E = re.compile(
     r"(?:(?:今の|この|元の|読み込んだ)?(?:ジョブ|動作データ|ロボット|動き|作業)?(?:は|が|で)?)?"
@@ -89,15 +98,34 @@ class Verdict:
 
 # 取消・言い直しの言葉のカタカナ書き（声の認識・打ち間違いで出る）。言葉ごとにひらがなに寄せる
 # （「キャンセル」などのカタカナの言葉は崩さない）
-_KATA = {"ヤッパリ": "やっぱり", "ヤハリ": "やはり", "イヤ": "いや", "チガウ": "ちがう", "チガイマス": "違います",
+_KATA = {"トリケシテ": "取り消して", "モドシテ": "戻して", "ヤメテ": "やめて", "ヤメ": "やめ", "ヤッパ": "やっぱ", "ヤッパリ": "やっぱり", "ヤハリ": "やはり", "イヤ": "いや", "チガウ": "ちがう", "チガイマス": "違います",
          "ヤメテ": "やめて", "ヤメル": "やめる", "トリケシ": "取り消し", "モドシテ": "戻して", "マチガイ": "まちがい",
          "ジャナクテ": "じゃなくて", "ジャナク": "じゃなく", "デハナク": "ではなく", "ナシ": "なし"}
 _KATA_RE = re.compile("|".join(sorted(_KATA, key=len, reverse=True)))
 
 
+# かな書きの取消の言葉を、漢字の書き方にそろえる（声の認識はかなで返すことがある）
+_KANA_WORDS = (("とりけ", "取り消"), ("取りけ", "取り消"), ("とり消", "取り消"), ("元にもど", "元に戻"), ("もとにもど", "元に戻"),
+               ("もどして", "戻して"), ("もどす", "戻す"), ("てっかい", "撤回"), ("けして", "消して"), ("はき", "破棄"),
+               ("とりさげ", "取り下げ"), ("取りさげ", "取り下げ"), ("まちが", "間違"))
+_KANJI_DIGIT = {"〇": 0, "零": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+_KANJI_AMOUNT = re.compile(r"([〇零一二三四五六七八九十]+)(?=(?:ミリ|みり|mm|MM|ミリメートル|回|かい|%|パーセント))")
+
+
+def _kanji_number(k: str) -> str:
+    """「五」「十五」「二十」を数字にする（量・回数の前だけ。99 まで）。"""
+    if "十" in k:
+        a, _, b = k.partition("十")
+        return str((_KANJI_DIGIT.get(a, 1) if a else 1) * 10 + (_KANJI_DIGIT.get(b, 0) if b else 0))
+    return "".join(str(_KANJI_DIGIT[c]) for c in k)
+
+
 def _norm(text: str) -> str:
-    t = unicodedata.normalize("NFKC", text).strip()
-    return _KATA_RE.sub(lambda m: _KATA[m.group(0)], t)
+    t = re.sub(r"\s+", "", unicodedata.normalize("NFKC", text))  # 「や っぱり」など、声の認識の空白は見分けに使わない
+    t = _KATA_RE.sub(lambda m: _KATA[m.group(0)], t)
+    for a, b in _KANA_WORDS:
+        t = t.replace(a, b)
+    return _KANJI_AMOUNT.sub(lambda m: _kanji_number(m.group(1)), t)
 
 
 def _clauses(t: str) -> list[str]:
@@ -151,7 +179,14 @@ def classify(text: object) -> Verdict:
     if _N.search(t) or _KEEP_WORDS.search(t):
         return Verdict(KEEP, rule="3 keep")
     if _OTHER_STOP.match(t) and not [v for v in _values(t) if not v.startswith("C")]:  # 「3回はやめて」は値の打ち消し：下の規則で確かめる
+        if _POINTER.match(t):
+            return Verdict(UNSURE, asked_form=True, rule="3b pointer stop")  # 「それはやめて」：候補のことかもしれない。保留（今の文のまま）
         return Verdict(OTHER, rule="3b other stop")
+    # 3c：ふつうの質問（取消の言葉が無い・印のあとに新しい値が無い・印のほかに中身がある疑問の文）
+    if (has_m and not cancel_verb and not x_clauses and _ASKING.search(t)
+            and not (m_before and (_values(t[m_before.end():]) or _BARE_NUMBER.search(rc.to_digits(t[m_before.end():]))))
+            and not _empty_rest(_QUESTION_TAIL.sub("", t)) and not _H_HESITATE.search(t)):
+        return Verdict(OTHER, rule="3c question")
     # 4：取消・言い直しの節に、ためらい・推量・条件・疑問（取消のしかたを聞く問いは何も変えない）
     for c in clauses:
         if _CANCEL_VERB.search(c) and _HQ.search(c):
@@ -164,6 +199,9 @@ def classify(text: object) -> Verdict:
             asked = len(clauses) == 1 and bool(_X.fullmatch(plain) or _X.fullmatch(plain + "て")
                                                or _X.fullmatch(re.sub(r"ます$", "して", plain)))
             return Verdict(UNSURE, asked_form=asked, rule="4 hesitate")
+    # 4a：止めたいのかもしれない言葉（「ストップ」「待って」「やっぱりいいや」）：保留（今の道の文のまま）
+    if _HOLD_WORDS.search(t) and not x_clauses:
+        return Verdict(UNSURE, asked_form=True, rule="4a hold word")
     # 4b：新しい値に、ためらいの言葉（「4回のほうがいいかな」）
     if _values(t) and _H_HESITATE.search(t):
         return Verdict(UNSURE, rule="4b value+hesitate")
@@ -182,7 +220,7 @@ def classify(text: object) -> Verdict:
         # 6：印より後ろ（「に変えて」の形は前）に新しい値
         if m_before:
             after = t[m_before.end():]
-            vals = _values(after)
+            vals = _values(after) or _BARE_NUMBER.findall(rc.to_digits(after))  # 「10じゃなくて5」：単位が無くても言い直し
         else:
             vals = []
         if not vals and m_after:
@@ -192,7 +230,10 @@ def classify(text: object) -> Verdict:
         # 7：印のほかに中身が無い（「違う」「やっぱり」「今の提案は違う」）
         if _empty_rest(t):
             return Verdict(UNSURE, rule="7 bare marker")
-        return Verdict(OTHER, rule="8 marker+other")  # 「ボタンじゃなくてスイッチを押している」：今の道
+        # 「やっぱりやめた」「さっきの間違ってた」など：取消の言葉があれば取消、無ければ保留（今の道の文のまま）
+        if cancel_verb:
+            return Verdict(UNSURE, rule="8 marker+cancel verb")
+        return Verdict(UNSURE, asked_form=True, rule="8 marker+other")
     if cancel_verb and not _E.fullmatch(t):
         # 取消の動詞があるが、明示の形ではない（「3回はやめて」「やめとこうかな」など）：消さずに確かめる
         return Verdict(UNSURE, rule="cancel verb not explicit")
