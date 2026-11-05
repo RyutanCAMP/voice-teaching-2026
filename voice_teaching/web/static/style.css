@@ -1435,3 +1435,12 @@ body.hero #kbd-button { min-width: 0; width: 44px; padding-inline: 0; }
 @media (min-width: 1100px) and (max-width: 1499px) {
   .cand-pop { left: 10px; width: clamp(400px, 34vw, 500px); top: 128px; }
 }
+/* 1100px 以上で高さが 949px 以下（1440×900 など）：縦の余白を詰めて、回数の候補（動きの並びが出る）でも 3D を前より小さくしない */
+@media (min-width: 1100px) and (max-height: 949px) {
+  .top { min-height: 52px; padding-top: 4px; padding-bottom: 4px; }
+  .work { padding-top: 6px; padding-bottom: 6px; }
+  .stage { padding-top: 4px; padding-bottom: 4px; }
+  .stage-head { margin-bottom: 2px; }
+  .sel-line { margin-top: 0; min-height: 24px; }
+  .play-row { margin-top: 0; }
+}
