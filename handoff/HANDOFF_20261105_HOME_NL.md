@@ -53,9 +53,9 @@
 
 ## 5. 自宅PCでの起動（デバッグ専用・本物の Claude）
 ```
-cd C:\Users\User\vt-homenl
+cd <このブランチの作業フォルダ>
 $env:PYTHONUTF8="1"; $env:PYTHONIOENCODING="utf-8"
-C:\Users\User\voice-teaching\.venv\Scripts\python.exe tools\debug_review_only.py --port 8825 --env-file C:/Users/User/voice-teaching/.env
+<仮想環境の python.exe> tools\debug_review_only.py --port 8825 --env-file <キーを置いた .env のパス（リポジトリの外）>
 ```
 - 起動の表示：「デバッグ専用：承認と出力はサーバーで断ります」「解釈：本物の Claude（claude-sonnet-5-5）」「Claude の言い添え：使う」
 - URL：http://127.0.0.1:8825/（Chrome・表示倍率 100%）。止めるときは Ctrl+C
@@ -67,4 +67,4 @@ C:\Users\User\voice-teaching\.venv\Scripts\python.exe tools\debug_review_only.py
 - d6f6a7c の線（「2回動かして」は二択にせず言い方を示して止める）でよいか：唐川さんの確認待ち
 - P0（H02・H16）：未着手（`fix/p0-stale-candidates` は設計だけ）
 - コックさんの UI：4章の直しのあと、e2e を全部通してから
-- GitHub への push：自宅PCの権限の確認で止まった。唐川さんの確認のあとに push する
+- GitHub への push：唐川さんの承認（11/5 夜）のあと、新しいブランチとして push（main・`integrate/filming-1106`・PR #4 の `ui/cock-filming-main` は変えていない）
