@@ -1029,6 +1029,55 @@ def check_mic_after_undo(browser, check, shots: Path | None, out: Path) -> None:
         srv.server_close()
 
 
+def check_hold_after_approval(browser, check, shots: Path | None, out: Path) -> None:
+    """P0（11/6）：承認のあとに、相づち・否定の無い質問ではない文（「違くない？」）を言うと保留。画面は
+    ［取り消す］［このまま残す］のボタンを出し、出力は押せず、見出しは保留の文。［このまま残す］で承認は消え、もう一度承認ボタンから。"""
+    sys.path.insert(0, str(REPO / "tools"))
+    import demo_mock as dm
+    from voice_teaching import claude_explain as cx
+    from voice_teaching import sim
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import server
+    cx.PRICES[dm.MOCK_MODEL] = cx.Price(input=0.0, output=0.0, cache_write_5m=0.0, cache_write_1h=0.0, cache_read=0.0)
+    ex = cx.Explainer("mock-no-network", dm.MOCK_MODEL, client=dm.ScriptClient(), usage_log=cx.UsageLog(out / "hold_usage.jsonl"))
+    old_out = sim.DEFAULT_OUT_DIR
+    sim.DEFAULT_OUT_DIR = out / "hold_sim"
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None, explainer=ex)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    try:
+        pg = browser.new_page(viewport={"width": 1920, "height": 1080})
+        pg.add_init_script(FAKE_RECOGNITION)
+        pg.goto(url + "?opening=0")
+        pg.set_input_files("#file-input", str(REPO / "samples/dummy" / "DEMO_C_PLACE.JBI"))
+        pg.wait_for_selector("#job-area:not([hidden])")
+        pg.locator("#position-chips button", has_text="C00005").first.click()
+        fill_text(pg, "Zプラス方向に5ミリ")
+        pg.click("#text-send")
+        until(pg, lambda: pg.is_enabled("#open-confirm"), 10000)
+        pg.click("#open-confirm")
+        pg.fill("#approver-name", "e2e確認")
+        pg.click("#approve-button")
+        until(pg, lambda: pg.is_visible("#approval-status"), 10000)
+        check(pg.is_enabled("#export-button"), "P0 保留：前提：承認のあとは出力ボタンを押せる")
+        fill_text(pg, "違くない？")
+        pg.click("#text-send")
+        until(pg, lambda: pg.locator("#reply-message button").count() >= 2, 10000)
+        btns = [b.inner_text() for b in pg.locator("#reply-message button").all()]
+        check(btns[:2] == ["取り消す", "このまま残す（もう一度承認）"] and pg.is_disabled("#export-button")
+              and "保留" in pg.inner_text("#status-line") and pg.inner_text("#next-action").startswith("取り消すか確かめています"),
+              f"P0 保留：承認のあとの「違くない？」で保留。ボタン {btns}・出力は押せない・見出しは保留の文")
+        pg.locator("#reply-message button", has_text="このまま残す").first.click()
+        until(pg, lambda: "保留" not in pg.inner_text("#status-line"), 10000)
+        check(pg.is_hidden("#approval-status") and pg.is_disabled("#export-button") and pg.is_enabled("#open-confirm"),
+              "P0 保留：［このまま残す］で保留を解くと、承認は消え、もう一度［確認して承認へ］から（出力は押せない）")
+        pg.close()
+    finally:
+        sim.DEFAULT_OUT_DIR = old_out
+        srv.shutdown()
+        srv.server_close()
+
+
 def check_export_twice(browser, check, shots: Path | None, out: Path) -> None:
     """11/5 夜 H1：出力に成功したあと［シミュレーション用に出力］をもう一度押す（2回押す・ダブルクリック）と、
     2回目が「既にあるため、上書きしません」の赤い失敗になり、「出力しました」の見出し・「出力 済み」と食い違っていた。
@@ -3535,6 +3584,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check_reload_same_file(b, check, shots, out)
             check_voice_error_typing(b, check, shots, out)
             check_mic_after_undo(b, check, shots, out)
+            check_hold_after_approval(b, check, shots, out)
             check_export_twice(b, check, shots, out)
             check_opening_click_through(b, check, shots, out)
             check_export_path_short(b, check, shots, out)

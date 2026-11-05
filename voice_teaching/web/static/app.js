@@ -500,6 +500,10 @@ function renderSteps() {
   } else if (st.blocked_reason) {
     text = "この変更はできません";
     primary = "undo-button";
+  } else if (st.hold) {
+    // 保留（P0）：取り消すか確かめている間は、承認・出力を促さない（サーバーも断る）。答えは返事の欄のボタンで
+    text = "取り消すか確かめています（承認・出力はできません）";
+    primary = null;
   } else if (!st.approval) {
     text = "動きを確かめてください";
     primary = "open-confirm";
