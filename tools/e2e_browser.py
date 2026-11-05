@@ -3895,7 +3895,8 @@ def check_dialog(browser, check, shots: Path | None, errors: list, updown_config
         shot(pg, "d14_390.png")
         pg.close()
 
-        # ---- 3. くり返しの2択（「2回」）→ どちらでも、動きは足せないと伝える。候補なし・解釈の係も呼ばない ----
+        # ---- 3. くり返しの「2回」（d6f6a7c・11/5 唐川さん：行き止まりの二択はやめ、1回目で言い方を示して止める）----
+        #      候補なし・選択肢なし・解釈の係も呼ばない
         pg = browser.new_page(viewport={"width": 1280, "height": 720})
         watch(pg)
         pg.add_init_script(FAKE_RECOGNITION)
@@ -3906,14 +3907,13 @@ def check_dialog(browser, check, shots: Path | None, errors: list, updown_config
         until(pg, lambda: pg.inner_text("#voice-position strong") == "C00001")
         before = (interp.decides, interp.locates)
         send(pg, "C00001からC00002を2回移動させて")
-        until(pg, lambda: pg.is_visible("#reply-message button.choice"))
-        rc = [t.strip() for t in pg.locator("#reply-message button.choice").all_inner_texts()]
-        check(rc == ["2回の移動", "2往復"], f"くり返し：「2回」は［2回の移動］［2往復］で聞く：{rc}")
-        shot(pg, "d8_repeat.png")
-        pg.locator("#reply-message button.choice", has_text="2往復").click()
         until(pg, lambda: "範囲の決まらない繰り返しは、このアプリでは扱いません" in pg.inner_text("#reply-message"))
-        check(pg.get_attribute("#step-3", "aria-current") == "step" and (interp.decides, interp.locates) == before,
-              "くり返し：どちらを選んでも、動きは足せないと伝える（候補なし・解釈の係を呼ばない）")
+        check("回数を変えるときは" in pg.inner_text("#reply-message"),
+              "くり返し：「2回」は、二択にせず、回数を変える言い方を示して止める")
+        shot(pg, "d8_repeat.png")
+        check(pg.locator("#reply-message button.choice").count() == 0 and not pg.is_visible("#range-yes")
+              and pg.get_attribute("#step-3", "aria-current") == "step" and (interp.decides, interp.locates) == before,
+              "くり返し：選択肢・範囲の確認を出さない（候補なし・解釈の係を呼ばない）")
         pg.close()
 
         # ---- 3b. 言い終わりの「〜します」（CHECKER_026 M3）→［変更したい］［説明です］の2択。候補にしない ----
