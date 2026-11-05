@@ -791,3 +791,165 @@ def test_natural_repeat_forms_keep_the_count_safety_lines(tmp_path, text):
 def test_length_words_not_about_movement_are_shown(reply):
     """長く・短く は、動く・移る・距離の話のときだけ隠す（e2e の長い答え「説明が短くなります」を隠していた。QA 002 N5）。"""
     assert talk.reply_mvp_problem(reply) is None
+
+
+# ---- d：ロボットを正面から見た向きを既定にして、画面ごとにボタンで確かめる（唐川さんの決定 11/5） ----
+# 上＝Z＋・下＝Z−・右＝Y＋・左＝Y−・手前＝X＋・奥＝X−。その画面で初めて方向の言葉が出たら、候補を作る前に必ず確かめる。
+# 確かめはボタンだけ（声・文字・Claude の答えでは確かめにならない）。保存しない（画面を閉じる・読み直すと消える）
+import test_c026_r2 as R2  # noqa: E402
+from voice_teaching import jbi  # noqa: E402
+
+FACING_STATE = "向き：正面から見た向き（この画面で確かめ済み）"
+
+
+def _facing_buttons(r):
+    return {c["label"]: c["text"] for c in (r.get("hear") or {}).get("choices", [])}
+
+
+def _confirm_facing(w, sid, text="右に1mm"):
+    q = w.talk(sid, text)
+    b = _facing_buttons(q)
+    assert set(b) == {"合っている", "違う"}, hear_msg(q)
+    return q, w.hear(sid, b["合っている"], "text")  # 画面の選択肢のボタンは /api/hear に送る
+
+
+@pytest.mark.parametrize("text,head", [
+    ("右に10mm", "右に10mm動かしたいんですね。ロボットを正面から見て、右は Yプラス で合っていますか？"),
+    ("左に5mm", "左に5mm動かしたいんですね。ロボットを正面から見て、左は Yマイナス で合っていますか？"),
+    ("手前に3mm", "手前に3mm動かしたいんですね。ロボットを正面から見て、手前は Xプラス で合っていますか？"),
+    ("奥に3mm", "奥に3mm動かしたいんですね。ロボットを正面から見て、奥は Xマイナス で合っていますか？"),
+    ("上に3mm", "3mm上に動かしたいんですね。"),
+    ("3mm下げて", "3mm下げたいんですね。"),
+])
+def test_facing_is_asked_with_buttons_before_any_candidate(tmp_path, text, head):
+    w, _, sid = A.place_flow(tmp_path)
+    r = w.talk(sid, text)
+    msg = hear_msg(r)
+    assert not r["state"]["candidate"] and not r["state"]["approval"]
+    assert msg.startswith(head), msg
+    assert set(_facing_buttons(r)) == {"合っている", "違う"}
+    assert not r["state"]["facing"]["confirmed"]
+    assert "3D" not in msg and "矢印" not in msg and not ut.contains_forbidden(msg)
+
+
+def test_updown_facing_question_keeps_the_unconfirmed_shape(tmp_path):
+    """上・下は、専門家の登録が無いことも言う（「この設備では、まだ「上」の方向が決まっていません」）。"""
+    w, _, sid = A.place_flow(tmp_path)
+    msg = hear_msg(w.talk(sid, "上に3mm"))
+    assert ut.is_updown_unset_ask(msg) and "ロボットを正面から見て、上は Zプラス で合っていますか？" in msg, msg
+
+
+def test_facing_yes_continues_the_same_utterance(tmp_path):
+    w, _, sid = A.place_flow(tmp_path)
+    _, r = _confirm_facing(w, sid, "右に10mm")
+    c = r["state"]["candidate"]
+    assert c and c["target"] == "C00003 Y" and "+10.000mm" in r["message"] and not r["state"]["approval"]
+    assert r["state"]["facing"] == {"confirmed": True, "message": FACING_STATE}
+    assert "この画面で確かめた向きです" in c["warnings"]
+    assert not w.export(sid)["ok"]  # 承認はボタンだけ
+
+
+@pytest.mark.parametrize("text,target,delta", [
+    ("上に3mm", "C00003 Z", "+3.000"), ("下に3mm", "C00003 Z", "-3.000"), ("右に3mm", "C00003 Y", "+3.000"),
+    ("左に3mm", "C00003 Y", "-3.000"), ("手前に3mm", "C00003 X", "+3.000"), ("奥に3mm", "C00003 X", "-3.000"),
+    ("3ミリ上げて", "C00003 Z", "+3.000"), ("3ミリ下げて", "C00003 Z", "-3.000"), ("右方向に2mm", "C00003 Y", "+2.000"),
+])
+def test_after_facing_yes_all_six_words_follow_the_table(tmp_path, text, target, delta):
+    w, _, sid = A.place_flow(tmp_path)
+    _confirm_facing(w, sid, "右に1mm")
+    w.undo(sid)
+    r = w.talk(sid, text)
+    c = r["state"]["candidate"]
+    assert c and c["target"] == target and f"{delta}mm" in hear_msg(r), (text, hear_msg(r))
+    assert not set(_facing_buttons(r)) & {"合っている"}  # 2回目からは聞かない
+    assert "この画面で確かめた向きです" in c["warnings"] and not r["state"]["approval"]
+
+
+def test_facing_no_keeps_the_axis_words(tmp_path):
+    w, _, sid = A.place_flow(tmp_path)
+    q = w.talk(sid, "右に10mm")
+    r = w.hear(sid, _facing_buttons(q)["違う"], "text")
+    assert not r["state"]["candidate"] and "Zプラス・Yマイナスのように、軸と向きで言ってください" in r["message"], r["message"]
+    r = w.talk(sid, "右に10mm")
+    assert not r["state"]["candidate"] and "合っている" not in _facing_buttons(r) and not r["state"]["facing"]["confirmed"]
+
+
+@pytest.mark.parametrize("confirmed_first", [False, True])
+@pytest.mark.parametrize("text", ["前に10mm", "後ろに10mm", "前へ3mm"])
+def test_front_back_always_asks_temae_or_oku(tmp_path, text, confirmed_first):
+    w, _, sid = A.place_flow(tmp_path)
+    if confirmed_first:
+        _confirm_facing(w, sid)
+        w.undo(sid)
+    r = w.talk(sid, text)
+    assert not r["state"]["candidate"]
+    assert "手前（X＋）ですか、奥（X−）ですか？" in hear_msg(r), hear_msg(r)
+
+
+def test_facing_is_not_kept_in_another_screen(tmp_path):
+    w, _, sid = A.place_flow(tmp_path)
+    _confirm_facing(w, sid)
+    sid2 = w.load(A.DEMO_C)["session_id"]
+    w.select(sid2, "C00003")
+    r = w.talk(sid2, "右に10mm")
+    assert not r["state"]["candidate"] and set(_facing_buttons(r)) == {"合っている", "違う"}
+    assert not r["state"]["facing"]["confirmed"]
+
+
+def test_registered_updown_has_priority(tmp_path):
+    """専門家の登録が照合に通っていれば、上下はそちら（確かめを聞かない）。右・左は d の確かめ。"""
+    w, _, sid = A.place_flow(tmp_path, confirmed=True)
+    r = w.talk(sid, "上に3mm")
+    assert r["state"]["candidate"]["target"] == "C00003 Z" and not _facing_buttons(r)
+    w.undo(sid)
+    r = w.talk(sid, "右に10mm")
+    assert set(_facing_buttons(r)) == {"合っている", "違う"}
+
+
+def test_mismatched_registration_still_stops(tmp_path):
+    """登録が不一致なら、今の決まりどおり止める（d の既定で上書きしない。確かめのボタンも出さない）。"""
+    obj = updown.build_config(jbi.parse_bytes(A.DEMO_C), updown.DEFAULT_ROBOT, "QA", "test evidence",
+                              confirmed_at="2026-11-05T00:00:00+09:00")
+    cfg = updown.write_config(obj, tmp_path / "updown.json", overwrite=True)
+    w, _ = T.flow(tmp_path, updown_config=cfg)
+    sid = w.load(R2.TOOL_1)["session_id"]
+    w.select(sid, "C00003")
+    for text in ("上に3mm", "右に10mm"):
+        r = w.talk(sid, text)
+        assert not r["state"]["candidate"] and not _facing_buttons(r), (text, hear_msg(r))
+    assert w.state(sid)["state"]["updown"]["status"] == "mismatch"
+
+
+@pytest.mark.parametrize("said", ["合っている", "合っています", "はい", "違う"])
+def test_voice_or_text_is_not_a_facing_confirmation(tmp_path, said):
+    w, fake, sid = A.place_flow(tmp_path)
+    fake.add(T.answer("合っていると思います。", ()))  # Claude（偽）が答えても、確かめにはしない
+    w.talk(sid, "右に10mm")
+    w.talk(sid, said)
+    w.hear(sid, said, "voice")
+    r = w.talk(sid, "右に10mm")
+    assert not r["state"]["candidate"] and not r["state"]["facing"]["confirmed"]
+
+
+def test_old_facing_button_is_refused(tmp_path):
+    w, _, sid = A.place_flow(tmp_path)
+    q = w.talk(sid, "右に10mm")
+    old = _facing_buttons(q)["合っている"]
+    w.talk(sid, "Zプラス3ミリ")  # 新しい指示：前の確かめは使えない
+    r = w.hear(sid, old, "text")
+    assert "もう使えません" in r["message"] and not r["state"]["facing"]["confirmed"], r["message"]
+
+
+def test_used_facing_button_is_refused_the_second_time(tmp_path):
+    w, _, sid = A.place_flow(tmp_path)
+    q, r1 = _confirm_facing(w, sid, "右に10mm")
+    first = r1["state"]["candidate"]
+    r2 = w.hear(sid, _facing_buttons(q)["合っている"], "text")
+    assert "もう使えません" in r2["message"] and r2["state"]["candidate"] == first
+
+
+def test_facing_negation_stops_before_asking(tmp_path):
+    """打ち消しは、向きを確かめる前に止める（今の順番どおり）。"""
+    w, _, sid = A.place_flow(tmp_path)
+    r = w.talk(sid, "右に10mm動かさないで")
+    assert not r["state"]["candidate"] and not _facing_buttons(r) and "打ち消し" in hear_msg(r)
