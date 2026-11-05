@@ -437,7 +437,9 @@ function renderSteps() {
   $("dock-actions").hidden = $("candidate-panel").hidden;
   // ステップ4では、マイク（録音）を出さない・押せない（録音と承認・出力が重ならない。今までの決まり）。承認のあとは文字の欄だけ
   $("voice-input-slot").hidden = step === 4;
-  if (step === 4) $("mic-button").disabled = true;
+  // マイクの押せる・押せないは、ステップを描くたびに updateLocks と同じ条件で決め直す（11/5 夜 実マイク：
+  // ステップ4で押せなくしたあと、［元に戻す］でステップ3に戻っても灰色のまま押せなかった）
+  $("mic-button").disabled = micLocked(step);
   renderDialog();
   // 次に押すものを1つだけ目立たせる
   for (const id of ["drop-zone", "mic-button", "voice-stop", "consent-yes", "text-send", "open-confirm", "undo-button", "export-button", "copy-url"]) {
@@ -653,10 +655,12 @@ $("engineer-toggle").addEventListener("click", () => {
 // ---- 2. 位置の選択 ----
 async function select(name) {
   if (!state.sessionId || recording()) return;
+  const had = state.st && state.st.candidate ? state.st.candidate.target : null;
   const res = await postJson("/api/select", { session_id: state.sessionId, position: name });
   state.pickAgain = false;
   $("reply-message").hidden = true;
   applyResult(res, false);
+  noteDropped(had, res);
 }
 
 function renderChips() {
@@ -1146,11 +1150,20 @@ $("compare-button").addEventListener("click", async () => {
 });
 
 $("undo-button").addEventListener("click", async () => {
+  const had = state.st && state.st.candidate ? state.st.candidate.target : null;
   const res = await postJson("/api/undo", { session_id: state.sessionId });
   closeConfirm();
   stopPlayback();
   applyResult(res);
+  noteDropped(had, res);
 });
+
+// 会話の欄には前の候補の文が残るので、ボタン（元に戻す・位置の選び直し）で候補が無くなったことを、アプリの文として足す
+// （11/5 夜 実マイク：C00003 を選んでいるのに、会話の欄には C00005 の候補の文だけが残っていた）。文はサーバーの返事のまま
+function noteDropped(had, res) {
+  if (!had || !res || res.ok === false || !res.state || res.state.candidate) return;
+  window.dispatchEvent(new CustomEvent("vt:app-note", { detail: { text: res.message || "変更候補を捨てました" } }));
+}
 
 // ---- 大きな確認表示（文はサーバーのプログラムが作ったもの） ----
 function openConfirm() {
@@ -2067,6 +2080,11 @@ function startListening() {
   voice.start(mode);
 }
 
+// マイクを押せない条件（1か所で決める）：録音中・JOB が無い・認識が使えない・ステップ4（候補・承認の間は録音しない。今までの決まり）
+function micLocked(step) {
+  return recording() || !state.sessionId || !Recognition || step === 4;
+}
+
 function updateLocks() {
   const rec = recording();
   const loaded = !!state.sessionId;
@@ -2078,7 +2096,7 @@ function updateLocks() {
   $("voice-mode-local").disabled = rec;
   $("voice-mode-reset").disabled = rec;
   $("voice-position").disabled = rec;
-  $("mic-button").disabled = rec || !loaded || !Recognition || currentStep() === 4;  // ステップ4では録音しない
+  $("mic-button").disabled = micLocked(currentStep());  // ステップ4では録音しない
   $("voice-stop").disabled = !rec;
   $("voice-cancel").disabled = !rec;
   document.body.classList.toggle("recording", rec);

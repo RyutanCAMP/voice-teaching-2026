@@ -227,6 +227,12 @@ function showReply(r) {
   if (r.highlight) highlight(r.highlight);  // 返事のたびに自動で光らせる（無ければ消す）
 }
 
+// アプリの決まった文を会話の欄に足す（app.js から。元に戻す・選び直しで候補が無くなったとき）
+window.addEventListener("vt:app-note", (ev) => {
+  const text = ev.detail && ev.detail.text;
+  if (ask.sessionId && typeof text === "string" && text) addTurn("アプリ", text, "app notice");
+});
+
 window.addEventListener("vt:session", (ev) => {
   ask.sessionId = (ev.detail && ev.detail.sessionId) || null;
   resetToHome();

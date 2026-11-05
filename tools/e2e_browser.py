@@ -972,6 +972,62 @@ def check_voice_error_typing(browser, check, shots: Path | None, out: Path) -> N
         srv.server_close()
 
 
+def check_mic_after_undo(browser, check, shots: Path | None, out: Path) -> None:
+    """11/5 夜 実マイク（8825）：声で C00005 の候補を作る → ［元に戻す］→ 位置を選び直す と、マイクのボタンが灰色のまま押せなかった
+    （ステップ4で押せなくしたまま、ステップ3に戻っても戻さなかった）。候補が無くなったら、マイクがまた押せて、続けて声で話せること。
+    ステップ4（候補を確かめている間）は今までどおり押せない。会話の欄に、候補を捨てたアプリの文が出ること。承認・出力は押さない。"""
+    sys.path.insert(0, str(REPO / "tools"))
+    import demo_mock as dm
+    from voice_teaching import claude_explain as cx
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import server
+    cx.PRICES[dm.MOCK_MODEL] = cx.Price(input=0.0, output=0.0, cache_write_5m=0.0, cache_write_1h=0.0, cache_read=0.0)
+    ex = cx.Explainer("mock-no-network", dm.MOCK_MODEL, client=dm.ScriptClient(), usage_log=cx.UsageLog(out / "mic_usage.jsonl"))
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None, explainer=ex)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+
+    def speak(pg, text):
+        pg.evaluate("t => { window.__fakeText = t; }", text)
+        pg.click("#mic-button")
+        if pg.is_visible("#consent-yes"):
+            pg.click("#consent-yes")
+        until(pg, lambda: pg.is_enabled("#voice-stop"))
+        pg.click("#voice-stop")
+        until(pg, lambda: pg.input_value("#text-input") == text)
+        pg.click("#text-send")
+        until(pg, lambda: pg.is_enabled("#text-send"), 15000)
+        pg.wait_for_timeout(300)
+    try:
+        for (w, h) in [(1920, 1080), (1366, 768)]:
+            pg = browser.new_page(viewport={"width": w, "height": h})
+            pg.add_init_script(FAKE_RECOGNITION)
+            pg.goto(url + "?opening=0")
+            pg.set_input_files("#file-input", str(REPO / "samples/dummy" / "DEMO_C_PLACE.JBI"))
+            pg.wait_for_selector("#job-area:not([hidden])")
+            pg.locator("#position-chips button", has_text="C00005").first.click()
+            until(pg, lambda: pg.inner_text("#voice-position strong") == "C00005")
+            speak(pg, "Yマイナス方向に10mm")
+            until(pg, lambda: pg.get_attribute("#step-4", "aria-current") == "step")
+            check(pg.is_disabled("#mic-button"), f"11/5 夜 マイク（{w}×{h}）：候補を確かめている間（ステップ4）はマイクを押せない（今までの決まり）")
+            pg.click("#undo-button")
+            until(pg, lambda: "候補 なし" in pg.inner_text("#status-line"))
+            pg.wait_for_timeout(300)
+            check(pg.is_visible("#mic-button") and pg.is_enabled("#mic-button"),
+                  f"11/5 夜 マイク（{w}×{h}）：［元に戻す］で候補が無くなったら、マイクがまた押せる（灰色のままにしない）")
+            notes = [" ".join(x.split()) for x in pg.locator("#ask-turns li.app").all_inner_texts()]
+            check(any("変更候補を捨てました" in x for x in notes),
+                  f"11/5 夜 マイク（{w}×{h}）：会話の欄に、候補を捨てたアプリの文が出る（前の候補の文だけを残さない）")
+            speak(pg, "このロボット、何をしているの？")
+            check(pg.is_enabled("#mic-button"), f"11/5 夜 マイク（{w}×{h}）：続けて声で話したあとも、マイクを押せる")
+            speak(pg, "上に3mm")
+            check(pg.is_enabled("#mic-button"), f"11/5 夜 マイク（{w}×{h}）：3回続けて声で話せる")
+            pg.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 def check_export_twice(browser, check, shots: Path | None, out: Path) -> None:
     """11/5 夜 H1：出力に成功したあと［シミュレーション用に出力］をもう一度押す（2回押す・ダブルクリック）と、
     2回目が「既にあるため、上書きしません」の赤い失敗になり、「出力しました」の見出し・「出力 済み」と食い違っていた。
@@ -3476,6 +3532,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check_load_while_waiting(b, check, shots, out)
             check_reload_same_file(b, check, shots, out)
             check_voice_error_typing(b, check, shots, out)
+            check_mic_after_undo(b, check, shots, out)
             check_export_twice(b, check, shots, out)
             check_opening_click_through(b, check, shots, out)
             check_export_path_short(b, check, shots, out)
