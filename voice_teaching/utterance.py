@@ -1111,6 +1111,16 @@ _UPDOWN_TO = re.compile(r"(?<!以)(上|下)(方向)?(に|へ)|(?<!以)(上|下)�
 _FACING_VERB_END = {"て": "して", "る": "す", "ます": "します", "たい": "したい", None: "し"}
 
 
+def is_speed_updown_answer(text: str) -> bool:
+    """「上げて」「下げて」だけの答え（速度の問いへの答えになりうる）。量・軸・位置・打ち消し・ためらいがあれば答えにしない。"""
+    f = read_utterance(text)
+    return bool(f.vertical and f.op == "move" and f.axes == ("Z",) and not f.explicit_axes and not f.positions
+                and not f.amounts and not f.unclear_amounts and not f.negations and not f.undo_negations
+                and not f.unknown_words and not f.question and f.shimasu_text is None and not f.sides
+                and len(f.axis_signs) == 1 and re.fullmatch(r"(?:上げ|下げ|あげ|さげ)(?:て|る)?(?:ください)?[。.!！]*",
+                                                             normalize(text).strip()))
+
+
 def facing_choice_text(answer: str, token: str) -> str:
     """確かめのボタンが送る文（決まった形と、その時だけの番号）。声・文字・Claude の答えでは出てこない。"""
     return f"［向きの確かめ：{answer}］#{token}"
@@ -1408,12 +1418,9 @@ def _pre_check_core(facts: UtteranceFacts, selected: str | None = None,
     if facts.repeat is not None:
         # 繰り返し・往復：候補にしない。「2回」「行き来」はどちらの意味かを、プログラムが作る2つの選択肢で聞く。
         # どちらを選んでも、最後は止める（動きの追加・繰り返しはしない）
-        n, kind = facts.repeat
-        if kind != "ambiguous":
-            return _stop(REPEAT_STOP_MESSAGE)
-        if n is None:
-            return _ask("繰り返しの移動ですか、往復ですか？", (("繰り返しの移動", "繰り返しの移動"), ("往復", "往復")))
-        return _ask(f"{n}回の移動ですか、{n}往復ですか？", ((f"{n}回の移動", f"{n}回の移動"), (f"{n}往復", f"{n}往復")))
+        # 「2回」「繰り返し」：回数の変更の形（repeat_count）でなければ、どちらの意味でも止める。前は「2回の移動ですか、2往復ですか？」と
+        # 聞いていたが、どちらを押しても止まる行き止まりの問いだった（唐川さんが 8815 で見つけた）。言い方を示して止める
+        return _stop(REPEAT_STOP_MESSAGE)
     if facts.stop_reasons:
         return _stop("。".join(facts.stop_reasons))
     if not facts.kinds:

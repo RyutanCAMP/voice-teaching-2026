@@ -50,8 +50,10 @@ def test_said_range_is_refused_with_the_said_range(tmp_path, text):
 @pytest.mark.parametrize("text", ["C00002からC00003を3回くり返して", "C00002とC00003を3回くり返して"])
 def test_the_two_choices_do_not_widen_the_range(tmp_path, text):
     w, f, sid = start(tmp_path)
-    ch = w.talk(sid, text)["hear"].get("choices") or []
-    assert ch  # 「3回の移動ですか、3往復ですか？」
+    r = w.talk(sid, text)
+    ch = r["hear"].get("choices") or []
+    # 11/5 唐川さん：行き止まりの二択はやめた。選択肢があっても、どれも言った範囲を区間に広げない
+    assert "C00001〜C00003" not in (r["hear"].get("message") or "") and r["state"]["repeat_range"] is None
     for c in ch:
         w2, f2, sid2 = start(tmp_path)
         w2.talk(sid2, text)

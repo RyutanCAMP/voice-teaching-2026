@@ -160,7 +160,11 @@ class Session:
         facts = ut.read_utterance(read_text)
         prev = self._awaiting_answer
         followup, self._updown_followup = self._updown_followup, None
-        if prev is not None and (not facts.kinds or ut.is_explicit_direction_answer(prev, facts)
+        if prev is not None and prev.op == "speed" and prev.speed_signs == () and ut.is_speed_updown_answer(text):
+            # 「速度を上げますか、下げますか？」への「下げて」（QA 003 M1）：位置の上下（Z）・向きの確かめにせず、速度の答えとして読む
+            facts = ut.merge_answer(prev, ut.read_utterance("速度を" + text))
+            self._facing_used = False
+        elif prev is not None and (not facts.kinds or ut.is_explicit_direction_answer(prev, facts)
                                  or ut.is_direction_answer(prev, facts, self.selected)):
             facts = ut.merge_answer(prev, facts)
         elif (prev is not None and prev.op == "move" and prev.amount is None and not prev.unclear_amounts
@@ -233,17 +237,22 @@ class Session:
         if found is None or (found[1] == "Z" and st.status != ud.UNCONFIRMED):
             return v
         token = secrets.token_hex(8)
-        self._facing_pending = {"token": token, "text": text}
+        self._facing_pending = {"token": token, "text": text, "selected": self.selected}
         return ut.Verdict("ask", ut.facing_ask_message(facts, found, updown_unset=found[1] == "Z"),
                           ((ut.FACING_YES_LABEL, ut.facing_choice_text(ut.FACING_YES_LABEL, token)),
                            (ut.FACING_NO_LABEL, ut.facing_choice_text(ut.FACING_NO_LABEL, token))))
+
+    def forget_facing(self) -> None:
+        """前の向きの確かめのボタンを使えなくする（新しい発話。どの道でも）。"""
+        self._facing_pending = None
 
     def facing_choose(self, text: str, source: str = "text") -> tuple[str, "Reply | str"]:
         """確かめのボタン（画面の選択肢）。("yes", 確かめた発話) か ("no"／"stale", 返事)。ボタンだけで確かめる。"""
         got = ut.read_facing_choice(text)
         pending, self._facing_pending = self._facing_pending, None
         self._log("操作", f"向きの確かめ：{got[0] if got else '?'}")
-        if got is None or pending is None or got[1] != pending["token"]:
+        if (got is None or pending is None or got[1] != pending["token"]
+                or pending.get("selected") != self.selected):  # 聞いたときと違う位置では使わない（Safety 003 High-1）
             return "stale", self._reply("stop", ut.FACING_STALE)
         if got[0] == ut.FACING_YES_LABEL:
             self.facing = "confirmed"
@@ -372,7 +381,7 @@ class Session:
             self._job.plan_repeat(start, end, total)  # 試すだけ（候補はボタンのあと）
         except jbi.JbiError as e:
             return stop_job(str(e))
-        if confirm_block:
+        if confirm_block or req.described:
             # 選択肢は決まった文（今の回数を入れる）を送り、同じ検査を通ってから［この範囲を繰り返す］のボタンで確かめる
             return self._reply("ask", rc.block_confirm_message(start, end, total), facts=facts,
                                choices=((f"この区間を{total}回にする", rc.canonical(start, end, n, total)),))
@@ -457,6 +466,7 @@ class Session:
         次の発話を前の発話に足さない）。未確定の状態（答えを待つ発話・上下の案内の印）を全部捨てる。"""
         self._awaiting_answer = None
         self._updown_followup = None
+        self._facing_pending = None  # 向きの確かめのボタンも使えなくする（選び直し・元に戻す。Safety 003 High-1）
 
     def pending_reply(self, facts: ut.UtteranceFacts | None) -> Reply:
         """承認待ちの候補があるのに来た移動・速度の指示を、解釈の係を呼ばずに断る。"""

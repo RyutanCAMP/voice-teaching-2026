@@ -837,6 +837,8 @@ class WebFlow:
         with e.lock:
             if e.closed:  # 錠を待つ間に読み直しで閉じられた（ここから先も、錠を取るたびに確かめる）
                 return self._closed_reply(sid, e)
+            # 新しい発話（どの道でも。会話の道・回数の変更の希望も）：前の向きの確かめのボタンは使えない（QA 003 M2）
+            e.session.forget_facing()
             route = self._talk_route(e, text)
             if route != "hear":
                 # 指示の道以外（会話・ボタンの案内・変更が2つ・回数）へ回した発話のあとに、前の聞き返しへの答えを当てない
