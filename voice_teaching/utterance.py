@@ -222,7 +222,16 @@ _SPOKEN_AXIS = re.compile(r"(?<![ァ-ヺー])(エックス|ワイ|ゼット|ズ�
 _SPOKEN_SIGN = re.compile(r"(?<![A-Z])(PLUS|MINUS)(?![A-Z])")
 
 
+# ひらがなの符号と軸名（唐川さんの実機の試し 11/5：「yぷらす1mm」が「「ぷらす」が分かりませんでした」になった）。
+# 書き方を揃えるだけで、符号や軸を補わない。軸名は、すぐ前がひらがなでなく、すぐ後に符号・方向・軸があるときだけ
+# （「かわいい」「わいわい」を Y にしない）
+_HIRA_SIGN = re.compile(r"ぷらす|まいなす")
+_HIRA_AXIS = re.compile(r"(?<![ぁ-ゖ])(えっくす|わい|ぜっと)(?=\s?(?:プラス|マイナス|[+\-]|の\s?(?:プラス|マイナス|[+\-])|方向|軸))")
+
+
 def _spoken(text: str) -> str:
+    text = _HIRA_SIGN.sub(lambda m: {"ぷらす": "プラス", "まいなす": "マイナス"}[m.group(0)], text)
+    text = _HIRA_AXIS.sub(lambda m: {"えっくす": "X", "わい": "Y", "ぜっと": "Z"}[m.group(1)], text)
     text = _SPOKEN_AXIS.sub(lambda m: {"エックス": "X", "ワイ": "Y", "ゼット": "Z", "ズィー": "Z"}[m.group(1) or m.group(2)], text)
     return _SPOKEN_SIGN.sub(lambda m: {"PLUS": "プラス", "MINUS": "マイナス"}[m.group(1)], text)
 
