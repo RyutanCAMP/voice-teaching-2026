@@ -118,7 +118,7 @@ HEADER_JS = """() => {
   }
   return { header: box('header'), sw: top.scrollWidth, cw: top.clientWidth, texts: qs,
     doc: [document.documentElement.scrollWidth, innerWidth],
-    items: Object.fromEntries(['.logo-mark', '.logo', '#mode-banner', '#interp-badge', '#status-line', '[data-tip=status]',
+    items: Object.fromEntries(['.logo-mark', '.logo', '#mode-banner', '#interp-badge', '#status-line', '[data-tip=status]', '#approval-icon',
       '#help-button', '#engineer-toggle'].map((s) => [s, box(s)])),
     chips, chip: chips.length ? chips[chips.length - 1] : null, circleX,
     help: cs('#help-button'), eng: cs('#engineer-toggle'),
@@ -219,6 +219,8 @@ def check_header_help(browser, url, check, shots: Path | None) -> None:
               f"{tag}：「使い方」と「詳細表示」は同じ高さで横に並ぶ（{hb} / {eb}）")
         check(bool(eb and eb["r"] >= w - 40), f"{tag}：読み込む前も「使い方」「詳細表示」は右の端（詳細表示の右 {eb and round(eb['r'])}px）")
         check(r["items"]["[data-tip=status]"] is None, f"{tag}：読み込む前（記録が出ていない）は ⓘ を出さない")
+        check(pg.get_attribute("#approval-icon", "data-appr") == "none" and "読み込んでいません" in (pg.get_attribute("#approval-icon", "aria-label") or ""),
+              f"{tag}：読み込む前の承認のアイコンは、承認と見間違えない形（点線の丸）・名前「JOB を読み込んでいません」")
         # 使い方の小窓：押して開く → Esc で閉じて「使い方」にフォーカスが戻る → もう一度押して開く・押して閉じる → 外を押して閉じる
         check(pg.is_hidden("#help-pop") and pg.get_attribute("#help-button", "aria-expanded") == "false", f"{tag}：使い方の小窓は最初は閉じている")
         pg.click("#help-button")
@@ -238,30 +240,32 @@ def check_header_help(browser, url, check, shots: Path | None) -> None:
         if shots is not None:
             shots.mkdir(parents=True, exist_ok=True)
             pg.screenshot(path=str(shots / f"H3_{w}x{h}_before.png"), clip=clip)
-        # サンプルを読み込んだあと（Issue #7）：ふだんのアプリの記録は上の帯に出さない。全文はアプリ情報（ⓘ）の中。
-        # 保留・取り消した・範囲の確認などのときだけ上の帯に出る（その並びは下で、出たときの形にして確かめる）
+        # サンプルを読み込んだあと（Issue #7・11/6）：アプリの記録は上の帯に出さない（全文はアプリ情報）。上の帯には承認の状態のアイコンだけ
         pg.click("#sample-button")
         pg.wait_for_selector("#job-area:not([hidden])")
         until(pg, lambda: "アプリの記録：" in (pg.text_content("#app-info-status") or ""))
         pg.wait_for_timeout(300)
-        r = layout(pg, tag, "読み込み後")
-        check(r["items"]["#status-line"] is None and r["items"]["[data-tip=status]"] is None
-              and pg.text_content("#app-info-status") == pg.text_content("#status-line"),
-              f"{tag}・読み込み後（Issue #7）：ふだんの記録は上の帯に出さず、アプリ情報にサーバーの文のまま出す（{pg.text_content('#app-info-status')}）")
-        pg.evaluate("document.body.classList.add('st-alert')")  # 上の帯に出たとき（保留など）の並びだけを確かめる
-        until(pg, lambda: pg.is_visible("#status-line") and pg.is_visible("[data-tip=status]"))
-        r = tip_checks(pg, tag, w, "読み込み後")
-        if one_line:
-            it, st = r["items"]["[data-tip=status]"], r["items"]["#status-line"]
-            check(bool(it and r["items"]["#help-button"] and it["r"] <= r["items"]["#help-button"]["x"]), f"{tag}：ⓘ は「使い方」より左")
-            vis = {k: v for k, v in r["items"].items() if v and k != ".logo"}
-            cys = [v["cy"] for v in vis.values()]
-            check(bool(r["sw"] <= r["cw"] and st and st["h"] <= 40 and max(cys) - min(cys) <= 8 and r["header"]["h"] <= 72),
-                  f"{tag}：ヘッダーは1行で折り返さない（高さ {round(r['header']['h'])}px・記録の高さ {st and round(st['h'])}px・"
-                  f"中心のずれ {round(max(cys) - min(cys), 1)}px・横 {r['sw']}/{r['cw']}）")
+
+        def appr_checks(r, phase, want):
+            ai, hb, eb = r["items"]["#approval-icon"], r["items"]["#help-button"], r["items"]["#engineer-toggle"]
+            label = pg.get_attribute("#approval-icon", "aria-label") or ""
+            check(r["items"]["#status-line"] is None and r["items"]["[data-tip=status]"] is None
+                  and pg.text_content("#app-info-status") == pg.text_content("#status-line"),
+                  f"{tag}・{phase}：記録の帯は上の帯に出さず、アプリ情報にサーバーの文のまま出す（{pg.text_content('#app-info-status')}）")
+            check(bool(ai) and pg.get_attribute("#approval-icon", "data-appr") == want and label.startswith("承認の状態：")
+                  and label == (pg.get_attribute("#approval-icon", "title") or "") and pg.get_attribute("#approval-icon", "role") == "img"
+                  and _overlap(ai, hb) == 0 and _overlap(ai, eb) == 0 and ai["x"] >= 0 and ai["r"] <= w,
+                  f"{tag}・{phase}：上の帯に承認の状態のアイコン（{want}・名前「{label}」）。ほかのボタンと重ならない")
+            if one_line:
+                vis = {k: v for k, v in r["items"].items() if v and k != ".logo"}
+                cys = [v["cy"] for v in vis.values()]
+                check(bool(r["sw"] <= r["cw"] and max(cys) - min(cys) <= 8 and r["header"]["h"] <= 72),
+                      f"{tag}・{phase}：ヘッダーは1行で折り返さない（高さ {round(r['header']['h'])}px・中心のずれ {round(max(cys) - min(cys), 1)}px）")
+
+        appr_checks(layout(pg, tag, "読み込み後"), "読み込み後", "pending")
         if shots is not None:
             pg.screenshot(path=str(shots / f"H3_{w}x{h}_loaded.png"), clip=clip)
-        # 変更候補あり：C00005（PL=0 の MOVL。止まらない位置）を選んで文字を送る
+        # 変更候補あり：C00005（PL=0 の MOVL。止まらない位置）を選んで文字を送る。承認の前なので未承認のまま
         pg.locator("#position-chips button", has_text="C00005").first.click()
         until(pg, lambda: pg.inner_text("#voice-position strong") == "C00005")
         fill_text(pg, "Zプラス方向に10mm")
@@ -269,13 +273,7 @@ def check_header_help(browser, url, check, shots: Path | None) -> None:
         until(pg, lambda: pg.get_attribute("#step-4", "aria-current") == "step")
         until(pg, lambda: "候補 あり" in pg.text_content("#status-line"))
         pg.wait_for_timeout(300)
-        pg.evaluate("document.body.classList.add('st-alert')")  # 同上（ふだんの候補は候補のポップアップに出る）
-        until(pg, lambda: pg.is_visible("#status-line"))
-        r = tip_checks(pg, tag, w, "変更候補あり")
-        if one_line:
-            st = r["items"]["#status-line"]
-            check(bool(r["header"]["h"] <= 72 and st and st["h"] <= 40),
-                  f"{tag}・変更候補あり：ヘッダーは1行で折り返さない（高さ {round(r['header']['h'])}px・記録の高さ {st and round(st['h'])}px）")
+        appr_checks(layout(pg, tag, "変更候補あり"), "変更候補あり", "pending")
         if shots is not None:
             pg.evaluate("window.scrollTo(0, 0)")
             pg.screenshot(path=str(shots / f"H3_{w}x{h}_candidate.png"), clip=clip)
@@ -1093,16 +1091,21 @@ def check_hold_after_approval(browser, check, shots: Path | None, out: Path) -> 
         pg.click("#approve-button")
         until(pg, lambda: pg.is_visible("#approval-status"), 10000)
         check(pg.is_enabled("#export-button"), "P0 保留：前提：承認のあとは出力ボタンを押せる")
+        check(pg.get_attribute("#approval-icon", "data-appr") == "ok" and "承認済み" in (pg.get_attribute("#approval-icon", "aria-label") or ""),
+              f"承認のアイコン：承認のあとは緑のチェック・名前に「承認済み」（{pg.get_attribute('#approval-icon', 'aria-label')}）")
         fill_text(pg, "違くない？")
         pg.click("#text-send")
         until(pg, lambda: pg.locator("#reply-message button").count() >= 2, 10000)
         btns = [b.inner_text() for b in pg.locator("#reply-message button").all()]
         check(btns[:2] == ["取り消す", "このまま残す（もう一度承認）"] and pg.is_disabled("#export-button")
-              and "保留" in pg.text_content("#status-line") and pg.is_visible("#status-line") and pg.inner_text("#next-action").startswith("取り消すか確かめています"),
-              f"P0 保留：承認のあとの「違くない？」で保留。ボタン {btns}・出力は押せない・見出しは保留の文・上の帯に保留の記録が出る（Issue #7）")
+              and "保留" in pg.text_content("#status-line") and pg.inner_text("#next-action").startswith("取り消すか確かめています")
+              and pg.get_attribute("#approval-icon", "data-appr") == "warn" and "保留" in (pg.get_attribute("#approval-icon", "aria-label") or "")
+              and "保留" in (pg.get_attribute("#approval-icon", "title") or ""),
+              f"P0 保留：承認のあとの「違くない？」で保留。ボタン {btns}・出力は押せない・見出しは保留の文・承認のアイコンは緑のチェックではなく警告（名前・小さな説明に「保留」）")
         pg.locator("#reply-message button", has_text="このまま残す").first.click()
         until(pg, lambda: "保留" not in pg.text_content("#status-line"), 10000)
-        check(pg.is_hidden("#approval-status") and pg.is_disabled("#export-button") and pg.is_enabled("#open-confirm"),
+        check(pg.is_hidden("#approval-status") and pg.is_disabled("#export-button") and pg.is_enabled("#open-confirm")
+              and pg.get_attribute("#approval-icon", "data-appr") == "pending",
               "P0 保留：［このまま残す］で保留を解くと、承認は消え、もう一度［確認して承認へ］から（出力は押せない）")
         pg.close()
     finally:
@@ -1206,13 +1209,13 @@ TEXT_SIZE_JS = """(sels) => { const r = {}; for (const s of sels) {
   if (v.length) r[s] = [Math.min(...v), Math.max(...v)]; } return r; }"""
 # 直す前（9671245）に同じ手順で測った値。1280×720・1366×768・1440×900 はこのまま（小さな画面の文字は変えない）
 _TS_SIDE = {".bubble.human .said": [14, 14], ".bubble.claude .said": [15, 15], ".bubble .who": [11, 11]}
-# Issue #7：ふだんの記録（.status-line）は上の帯に出さない（範囲の確認中だけ出る）。図の注意は短い1行（.figure-short・全文は ⓘ）
+# Issue #7・11/6：記録（.status-line）は上の帯に出さない（承認の状態はアイコンだけ）。図の注意は短い1行（.figure-short・全文は ⓘ）
 _TS_STATUS = {".status-line": [12, 12], ".status-line .st-chip": [12, 12]}
 _TS_ALL = {".legend.kinds": [12, 12], ".figure-notes": [12, 12], ".figure-short": [12, 12]}
 TEXT_SIZE_BEFORE = {
     "load": {**_TS_ALL, ".legend": [12, 12]},
     "conversation": {**_TS_SIDE, **_TS_ALL, ".legend": [12, 12]},
-    "range": {**_TS_SIDE, **_TS_ALL, **_TS_STATUS, ".bubble.app .said": [14, 14], "#reply-message": [14, 14], "#reply-message .range-lines": [14, 14],
+    "range": {**_TS_SIDE, **_TS_ALL, ".bubble.app .said": [14, 14], "#reply-message": [14, 14], "#reply-message .range-lines": [14, 14],
               ".legend": [12, 12], ".range-button-note": [12, 12]},
     "candidate": {**_TS_SIDE, **_TS_ALL, ".bubble.app .said": [13, 14], ".legend": [12, 13], ".cand-heard": [13, 13], ".cand-warn": [13, 13]},
     "approved": {**_TS_SIDE, **_TS_ALL, ".bubble.app .said": [13, 14], "#reply-message": [14, 14], ".legend": [12, 13], ".cand-warn": [12, 12]},

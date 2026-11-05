@@ -48,6 +48,9 @@
   <div class="status-wrap">
   <p id="status-line" class="status-line" aria-live="polite" hidden></p><button type="button" class="tip tip-info" data-tip="status" aria-label="アプリの記録の説明">i</button>
   </div>
+  <!-- 承認の状態の小さなアイコン（11/6 唐川さんの決定）。サーバーの状態（approval・hold・voided）と、閉じた画面から app.js が決める。
+       色だけでなく形・小さな説明・読み上げの名前で区別する。承認するボタンではない（承認は確認表示のボタンだけ） -->
+  <span id="approval-icon" class="appr-icon" data-appr="none" role="img" aria-label="承認の状態：JOB を読み込んでいません" title="承認の状態：JOB を読み込んでいません"></span>
   <details class="app-info">
     <summary class="icon-btn" aria-label="アプリ情報を開く" title="アプリ情報"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 10.5v6M12 7.4v.2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></summary>
     <div class="app-info-body">

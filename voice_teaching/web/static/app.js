@@ -115,8 +115,52 @@ function markClosed(message) {
   box.replaceChildren(el("p", { class: "session-closed" }, text));
   box.hidden = false;
   updateLocks();
+  renderApprovalIcon();
 }
 window.addEventListener("vt:session-closed", (ev) => markClosed(ev.detail && ev.detail.error));
+
+// 上の帯の承認の状態のアイコン（11/6 唐川さんの決定）。サーバーの状態（state.st の approval・hold・voided）と閉じた画面だけから決める。
+// 保留・取り消し・閉じた画面では、承認の記録があっても緑のチェックにしない。読み込む前は承認と見間違えない形（点線の丸）。
+// 形（点線の丸・時計・チェック・三角）・小さな説明・読み上げの名前でも区別する（色だけに頼らない）。表示だけ
+const APPR_SHAPES = {  // 決まった図形だけ（文字・サーバーの文は入れない）。[要素, 属性]
+  none: [["circle", { cx: 12, cy: 12, r: 8.5, fill: "none", stroke: "currentColor", "stroke-width": 1.6, "stroke-dasharray": "2.6 2.6" }],
+    ["path", { d: "M8.5 12h7", stroke: "currentColor", "stroke-width": 1.8, "stroke-linecap": "round" }]],
+  pending: [["circle", { cx: 12, cy: 12, r: 8.5, fill: "none", stroke: "currentColor", "stroke-width": 1.7 }],
+    ["path", { d: "M12 7.5V12l3 2", fill: "none", stroke: "currentColor", "stroke-width": 1.8, "stroke-linecap": "round", "stroke-linejoin": "round" }]],
+  ok: [["circle", { cx: 12, cy: 12, r: 9.5, fill: "currentColor" }],
+    ["path", { d: "M7.6 12.3l3 3 5.8-6.2", fill: "none", stroke: "#06130b", "stroke-width": 2.2, "stroke-linecap": "round", "stroke-linejoin": "round" }]],
+  warn: [["path", { d: "M12 3.2 21.3 19.6H2.7z", fill: "currentColor", stroke: "currentColor", "stroke-width": 1.2, "stroke-linejoin": "round" }],
+    ["path", { d: "M12 9.3v4.9M12 16.6v.2", stroke: "#1b1200", "stroke-width": 2.1, "stroke-linecap": "round" }]],
+};
+function apprSvg(kind) {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  for (const [tag, attrs] of APPR_SHAPES[kind]) {
+    const n = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
+    svg.append(n);
+  }
+  return svg;
+}function approvalIconState() {
+  const st = state.st;
+  if (!state.sessionId || !st) return ["none", "承認の状態：JOB を読み込んでいません（承認はありません）"];
+  if (state.closed) return ["warn", "承認の状態：この画面は終わりました（承認・出力は使えません）"];
+  if (st.hold) return ["warn", "承認の状態：保留中（取り消すか確かめています。承認・出力はできません）"];
+  if (st.voided) return ["warn", `承認の状態：前の候補は${st.voided.why}のため取り消しました（承認はありません）`];
+  if (st.approval) return ["ok", `承認の状態：承認済み（${st.approval.approved_by} さんが画面のボタンで承認）`];
+  return ["pending", "承認の状態：未承認（承認は確認表示のボタンだけ）"];
+}
+function renderApprovalIcon() {
+  const box = $("approval-icon");
+  const [kind, label] = approvalIconState();
+  if (box.dataset.appr !== kind || !box.firstChild) box.replaceChildren(apprSvg(kind));
+  box.dataset.appr = kind;
+  box.setAttribute("aria-label", label);
+  box.title = label;
+}
+renderApprovalIcon();
 
 function recording() {
   return state.voiceState !== "idle";
@@ -168,6 +212,7 @@ async function loadFile(f) {
 function applyLoad(res, fileName) {
   state.sessionId = null; state.view = null; state.st = null;
   state.closed = false;
+  renderApprovalIcon();  // 読み込み直し：前の画面の承認の印を残さない
   announceSession();
   closeConfirm();
   stopPlayback();
@@ -346,8 +391,8 @@ function renderState() {
   // Issue #7：上の帯から外したもの（モデル名・アプリの記録の全文）をアプリ情報に出す。文はサーバーの文のまま
   $("app-info-interp").textContent = $("interp-badge").textContent;
   $("app-info-status").textContent = st.status_line || "";
-  // 上の帯のアプリの記録は、止める・取り消した・保留・範囲の確認のときだけ出す（ふだんの候補・承認・出力は候補のポップアップに出る）
-  document.body.classList.toggle("st-alert", /保留|取り消しました|参考の表示だけ|範囲の確認中|承認できません/.test(st.status_line || ""));
+  // 上の帯には、承認の状態のアイコンだけを出す（11/6 唐川さんの決定。アプリの記録の帯は出さない）
+  renderApprovalIcon();
   $("voice-position").replaceChildren(el("strong", {}, st.selected || "位置は未選択"), el("span", {}, st.selected ? "変える" : "選ぶ"));
   renderSelLine(st.selected);
   renderUpdown(st.updown);

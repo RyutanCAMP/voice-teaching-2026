@@ -1450,8 +1450,8 @@ body.hero #kbd-button { min-width: 0; width: 44px; padding-inline: 0; }
 .mode-banner .mb-long { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .top .mode-banner { font-size: 11px; letter-spacing: 0.14em; padding: 2px 9px; cursor: help; }
 .top .interp-badge.claude { display: none; }
-/* アプリの記録：止める・取り消した・保留・範囲の確認のときだけ上の帯に出す（ふだんは候補のポップアップと確認表示に出る。全文はアプリ情報） */
-body:not(.st-alert) .top .status-wrap { display: none; }
+/* アプリの記録：上の帯には出さない（全文はアプリ情報）。候補・承認・出力は候補のポップアップと確認表示に出る */
+.top .status-wrap { display: none; }  /* 11/6 唐川さんの決定：上の帯は承認の状態のアイコンだけ（保留・取り消しは左の見出し・返事のカード・警告のアイコン） */
 .app-info-line { margin: 8px 0 0; overflow-wrap: anywhere; color: var(--sub); }
 .app-info-line:empty { display: none; }
 .app-info-body .op-replay { margin-left: 10px; }
@@ -1482,3 +1482,16 @@ body:not(.st-alert) .top .status-wrap { display: none; }
   font-size: 13px; line-height: 1.6; color: var(--text); }
 
 @media (min-width: 1700px) { .figure-short { font-size: 13px; } }
+
+/* 承認の状態のアイコン（11/6 唐川さんの決定）：上の帯の右、アプリ情報の左。形・色・小さな説明・読み上げの名前で区別する */
+.appr-icon { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex: none; margin-left: auto; cursor: help; border-radius: 50%; }
+.appr-icon svg { width: 24px; height: 24px; }
+.appr-icon[data-appr="none"] { color: #5d6b84; }
+.appr-icon[data-appr="pending"] { color: #9aa8bf; }
+.appr-icon[data-appr="ok"] { color: #34d17a; filter: drop-shadow(0 0 6px rgba(52, 209, 122, 0.45)); }
+.appr-icon[data-appr="warn"] { color: #ffb020; filter: drop-shadow(0 0 6px rgba(255, 176, 32, 0.45)); }
+.appr-icon + .app-info { margin-left: 4px; }
+@media (max-width: 1099.98px) {
+  .appr-icon { margin-left: 0; }
+  .app-info-body { position: fixed; left: 8px; right: 8px; top: 64px; width: auto; min-width: 0; max-height: calc(100vh - 80px); overflow-y: auto; }  /* 狭い画面：アプリ情報の小窓は画面の中に収める */
+}
