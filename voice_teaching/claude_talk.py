@@ -105,6 +105,7 @@ _KANJI = "〇一二三四五六七八九十"
 _COUNT = re.compile(r"([0-9]+|[〇一二三四五六七八九十]+)\s?回(?!目)")
 _COUNT_FROM = re.compile(r"([0-9]+|[〇一二三四五六七八九十]+)\s?回\s?(?:から|を)\s?([0-9]+|[〇一二三四五六七八九十]+)\s?回")
 _COUNT_ADD = re.compile(r"(?:もう)?\s?([0-9]+|[〇一二三四五六七八九十]+)\s?回\s?(?:増や|ふやし|ふやす|追加|足し|たし|多く)")
+_COUNT_MORE = re.compile(r"あと\s?([0-9]+|[〇一二三四五六七八九十]+)\s?回")  # 「あと1回」（足す言葉が無い）：確かめる
 _COUNT_KEEP = re.compile(r"([0-9]+|[〇一二三四五六七八九十]+)\s?回\s?(?:の)?\s?まま")
 _CHANGE_WORDS = re.compile(r"回数|にして|に変更|に変え|へ変更|増や|減ら|追加|足して|変更して|変えて")
 _ALL_WORDS = ("全部", "ぜんぶ", "両方", "りょうほう", "すべて", "全て", "どっちも", "どちらも", "みんな", "全体")
@@ -408,6 +409,17 @@ def read_count(text: str, blocks: list[Block], last_evidence=()) -> CountReading
         if target is None or add is None:
             return CountReading(reason=COUNT_ADD_NO_TARGET, target=None, target_note=note)
         return CountReading(total=target.count + add, target=target, target_note=note)
+    m = _COUNT_MORE.search(t)
+    if m:
+        # 「あと1回押して」：合計1回として扱わない（11/5 唐川さんの指示⑥）。今の回数をプログラムが数え、合計を確かめる。
+        # 候補・範囲は作らない（人が「3回にして」と言い直す）
+        more = _kanji_int(m.group(1))
+        if target is None or more is None or more <= 0:
+            msg = "どのくり返しを、合計何回にしたいかを教えてください。まだ変更候補は作りません"
+        else:
+            msg = (f"動作データでは今{target.count}回です。あと{more}回なら合計{target.count + more}回です。"
+                   f"よければ「{target.count + more}回にして」と言ってください。まだ変更候補は作りません")
+        return CountReading(reason=msg, stop=msg, target=target, target_note=note)
     nums = {_kanji_int(x) for x in _COUNT.findall(t)}
     nums.discard(None)
     if len(nums) >= 2:

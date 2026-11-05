@@ -869,6 +869,8 @@ class WebFlow:
             return "approved"  # 承認のあとの相づち（「はい」「OK」）：承認を取り消さず、次にすることを伝えるだけ
         if e.dialog.step is not None or s.repeat_range is not None:
             return "hear"  # 承認・起動などは今の決まった文で止める／会話・範囲の確認の続きは今の道で
+        if s.candidate is None and s.awaiting_answer and ut.is_sign_only_answer(f):
+            return "hear"  # 「プラスですか、マイナスですか？」への「マイナス」：指示の道で前の発話に足す（C1。11/5）
         if e.talk.pending is not None:
             return "ask"  # 「どの動きのことですか？」の途中（ボタンで確かめる）
         if count is not None and _said_range(text):

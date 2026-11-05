@@ -122,7 +122,6 @@ def test_stale_export_cannot_take_the_new_sessions_file_name(tmp_path, monkeypat
 
 
 # ---- 3. 回数の読み違い ----
-@pytest.mark.xfail(strict=True, reason=P0 + " 「あと1回」を合計1回と読む（2回→1回の向き）")
 def test_ato_ikkai_is_not_read_as_total_one():
     blocks = talk.repeat_blocks(jbi.parse_bytes(T.demo_bytes()))
     r = talk.read_count("あと1回押して", blocks)
@@ -206,7 +205,6 @@ def test_missing_unit_is_what_the_question_is_about(tmp_path):
 
 
 # ---- 6. 聞き返しへの答えを受け取る（会話の続き） ----
-@pytest.mark.xfail(strict=True, reason=P0 + " C1：符号だけの答えが会話の道（説明）へ回る")
 @pytest.mark.parametrize("answer", ["マイナス", "マイナスで"])
 def test_sign_only_answer_to_sign_question_is_used(tmp_path, answer):
     w, _, sid = place_flow(tmp_path)
@@ -216,7 +214,6 @@ def test_sign_only_answer_to_sign_question_is_used(tmp_path, answer):
     assert c and c["target"] == "C00003 Y" and not r["state"]["approval"]
 
 
-@pytest.mark.xfail(strict=True, reason=P0 + " C2：軸と符号の答えで、前に言った量を忘れる")
 @pytest.mark.parametrize("first", ["Yの方向に10mm", "10mm動かして"])
 def test_axis_sign_answer_keeps_the_amount_already_said(tmp_path, first):
     w, _, sid = place_flow(tmp_path)

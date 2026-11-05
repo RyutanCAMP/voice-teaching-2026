@@ -786,6 +786,43 @@ def is_explicit_direction_answer(previous: UtteranceFacts, answer: UtteranceFact
                 and re.fullmatch(r"[XYZ](?:の)?(?:プラス|マイナス|[+\-])(?:方向)?[。.!！]*", answer.text.strip()))
 
 
+def is_sign_only_answer(answer: UtteranceFacts) -> bool:
+    """聞き返し「プラスですか、マイナスですか？」への答えになりうる、符号の言葉1つだけの発話（「マイナス」「マイナスで」）。
+
+    疑問・ためらい・打ち消し・知らない言葉・量・軸・位置・上下・右左が1つでもあれば答えにしない（C1。11/5）。
+    答えとして足したあとも pre_check からの検査をすべて通る。
+    """
+    return bool(not answer.kinds and not answer.axes and not answer.positions and not answer.bad_positions
+                and not answer.amounts and not answer.unclear_amounts and answer.stray_signs == 1
+                and not answer.unknown_words and not answer.negations and not answer.undo_negations
+                and not answer.question and not answer.stop_reasons and answer.shimasu_text is None
+                and not answer.vertical and not answer.sides and not answer.speed_signs and not answer.place_ref)
+
+
+def is_direction_answer(previous: UtteranceFacts, answer: UtteranceFacts, selected: str | None) -> bool:
+    """方向を聞き返したあとの「Yマイナス」（軸と符号だけ）を、前に言った量に足してよいか（C2。11/5）。
+
+    足すのは次のどちらかだけ：
+    - 前の発話に軸が無く、位置が決まっている（口で言った位置、または画面で選んでいる位置。選び直すと聞き返しは捨てる）
+    - 前の発話の軸が1つで、答えの軸と同じ（「Yの方向に10mm」→「Yマイナス」）。違う軸なら足さない
+    前の量に符号があるとき・あいまいな量・上下・右左があるときは足さない。答えに量・位置・ためらい・疑問があれば足さない。
+    """
+    if not (previous.op == "move" and previous.amount is not None and previous.amount.sign is None
+            and not previous.unclear_amounts and not previous.axis_signs and not previous.sides
+            and not previous.vertical and not previous.speed_signs):
+        return False
+    if not (answer.kinds == ("move",) and len(answer.explicit_axes) == 1 and len(answer.axis_signs) == 1
+            and not answer.amounts and not answer.unclear_amounts and not answer.positions and not answer.bad_positions
+            and not answer.vertical and not answer.sides and not answer.question and answer.shimasu_text is None
+            and not answer.unknown_words and not answer.negations and not answer.undo_negations
+            and not answer.stop_reasons and answer.stray_signs == 0
+            and re.fullmatch(r"[XYZ](?:の)?(?:プラス|マイナス|[+\-])(?:方向)?[。.!！]*", answer.text.strip())):
+        return False
+    if not previous.axes:
+        return previous.position is not None or selected is not None
+    return len(previous.axes) == 1 and previous.axes == answer.axes
+
+
 def merge_answer(previous: UtteranceFacts, answer: UtteranceFacts) -> UtteranceFacts:
     """聞き返しへの答え（操作の言葉が無い1文）を、前の発話で分かっていたことに足す。
 

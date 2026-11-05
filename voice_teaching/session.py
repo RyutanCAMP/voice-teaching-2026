@@ -150,7 +150,8 @@ class Session:
         facts = ut.read_utterance(text)
         prev = self._awaiting_answer
         followup, self._updown_followup = self._updown_followup, None
-        if prev is not None and (not facts.kinds or ut.is_explicit_direction_answer(prev, facts)):
+        if prev is not None and (not facts.kinds or ut.is_explicit_direction_answer(prev, facts)
+                                 or ut.is_direction_answer(prev, facts, self.selected)):
             facts = ut.merge_answer(prev, facts)
         elif (prev is not None and prev.op == "move" and prev.amount is None and not prev.unclear_amounts
               and prev.axes and facts.op == "move" and facts.vertical and facts.axes == ("Z",) and not facts.positions):
@@ -373,6 +374,11 @@ class Session:
         self.forget_question()
         self._log("発話", f"{'音声' if source == 'voice' else '文字'}：{text}")
         return self._reply("ok", ut.EXPLAIN_REPLY)
+
+    @property
+    def awaiting_answer(self) -> bool:
+        """聞き返しへの答えを待っているか（振り分けが、短い答えを指示の道へ送るかを決めるのに使う。C1）。"""
+        return self._awaiting_answer is not None
 
     def forget_question(self) -> None:
         """聞き返しへの答えを待つのをやめる（会話の機能が自分で聞き返したとき・選び直し・元に戻す・承認の取り消し。
