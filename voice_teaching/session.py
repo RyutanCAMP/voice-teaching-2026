@@ -373,7 +373,7 @@ class Session:
             self._job.plan_repeat(start, end, total)  # 試すだけ（候補はボタンのあと）
         except jbi.JbiError as e:
             return stop_job(str(e))
-        if confirm_block:
+        if confirm_block or req.described:
             # 選択肢は決まった文（今の回数を入れる）を送り、同じ検査を通ってから［この範囲を繰り返す］のボタンで確かめる
             return self._reply("ask", rc.block_confirm_message(start, end, total), facts=facts,
                                choices=((f"この区間を{total}回にする", rc.canonical(start, end, n, total)),))

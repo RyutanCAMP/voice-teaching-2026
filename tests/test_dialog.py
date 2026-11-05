@@ -479,10 +479,8 @@ def test_verify_drops_bad_and_keeps_good_sorted_by_rank():
 def test_repeat_count_asks_then_explains(counting):
     w, sid = start(counting, select="C00001")
     r = w.hear(sid, "C00001からC00002を2回移動させて")
-    assert r["status"] == "ask" and [c["label"] for c in r["choices"]] == ["2回の移動", "2往復"]
+    assert r["status"] == "stop" and r["message"] == u.REPEAT_STOP_MESSAGE and r["choices"] == []  # 11/5 唐川さん：行き止まりの二択はやめ、1回目で言い方を示して止める
     assert counting.decides == 0 and counting.locates == 0 and dlg(r)["step"] is None
-    r = w.hear(sid, r["choices"][1]["text"])
-    assert r["status"] == "stop" and r["message"] == u.REPEAT_STOP_MESSAGE
     assert r["state"]["candidate"] is None and counting.decides == 0
 
 
@@ -495,7 +493,8 @@ def test_repeat_roundtrip_explains_directly(counting):
 def test_repeat_with_place_word_is_not_a_dialogue(counting):
     w, sid = start(counting)
     r = w.hear(sid, "置くところを2回動かして")
-    assert r["status"] == "ask" and dlg(r)["step"] is None and counting.locates == 0
+    # 11/5 唐川さん：行き止まりの二択はやめ、1回目で言い方を示して止める（会話にしない・場所を探さないは今どおり）
+    assert r["status"] == "stop" and dlg(r)["step"] is None and counting.locates == 0
 
 
 def test_repeat_negated_is_stopped_b6(counting):

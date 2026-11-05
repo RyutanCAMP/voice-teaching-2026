@@ -1408,12 +1408,9 @@ def _pre_check_core(facts: UtteranceFacts, selected: str | None = None,
     if facts.repeat is not None:
         # 繰り返し・往復：候補にしない。「2回」「行き来」はどちらの意味かを、プログラムが作る2つの選択肢で聞く。
         # どちらを選んでも、最後は止める（動きの追加・繰り返しはしない）
-        n, kind = facts.repeat
-        if kind != "ambiguous":
-            return _stop(REPEAT_STOP_MESSAGE)
-        if n is None:
-            return _ask("繰り返しの移動ですか、往復ですか？", (("繰り返しの移動", "繰り返しの移動"), ("往復", "往復")))
-        return _ask(f"{n}回の移動ですか、{n}往復ですか？", ((f"{n}回の移動", f"{n}回の移動"), (f"{n}往復", f"{n}往復")))
+        # 「2回」「繰り返し」：回数の変更の形（repeat_count）でなければ、どちらの意味でも止める。前は「2回の移動ですか、2往復ですか？」と
+        # 聞いていたが、どちらを押しても止まる行き止まりの問いだった（唐川さんが 8815 で見つけた）。言い方を示して止める
+        return _stop(REPEAT_STOP_MESSAGE)
     if facts.stop_reasons:
         return _stop("。".join(facts.stop_reasons))
     if not facts.kinds:

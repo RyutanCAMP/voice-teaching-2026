@@ -147,15 +147,8 @@ def test_complex_negation_still_stops(text):
 def test_ambiguous_repeat_asks_with_two_program_choices_then_stops(text, count, source):
     w, sid = new()
     r = w.hear(sid, text, source=source)
-    assert r["status"] == "ask" and cand(r) is None, (text, r.get("message"))
-    assert len(r["choices"]) == 2
-    n = f"{count}" if count else ""
-    assert [c["label"] for c in r["choices"]] == ([f"{n}回の移動", f"{n}往復"] if count else ["繰り返しの移動", "往復"])
-    for c in r["choices"]:
-        w2, sid2 = new()
-        w2.hear(sid2, text, source=source)
-        r2 = w2.hear(sid2, c["text"], source="text")
-        assert r2["status"] == "stop" and cand(r2) is None and r2["message"] == REPEAT_STOP, (c, r2.get("message"))
+    assert r["status"] == "stop" and cand(r) is None and r["message"] == REPEAT_STOP, (text, r.get("message"))  # 11/5 唐川さん：行き止まりの二択はやめ、1回目で言い方を示して止める
+    assert r["choices"] == []
 
 
 @pytest.mark.parametrize("source", SOURCES)
@@ -283,7 +276,7 @@ def test_qa_p2_1_mid_desu_and_te_hiragana_verbs_ask(text, source):
 def test_qa_p2_1_answer_keeps_question_and_repeat(first, source):
     w, sid = new()
     r1 = w.hear(sid, first, source=source)
-    assert r1["status"] == "ask"
+    assert r1["status"] in ("ask", "stop") and cand(r1) is None  # 11/5 唐川さん：行き止まりの二択はやめ、1回目で言い方を示して止める
     r2 = w.hear(sid, "3ミリ", source=source)
     assert r2["status"] in ("ask", "stop") and cand(r2) is None, r2.get("message")
 
@@ -390,7 +383,7 @@ def test_s_p3_4_place_as_destination_asks_without_choice(text, source):
 @pytest.mark.parametrize("text", ["2回下げて", "２回下げて", "3回下に3mm"])
 def test_repeat_counts_two_or_more(text):
     r = hear(text)
-    assert r["status"] == "ask" and len(r["choices"]) == 2
+    assert r["status"] == "stop" and r["message"] == REPEAT_STOP and r["choices"] == []  # 11/5 唐川さん：行き止まりの二択はやめ、1回目で言い方を示して止める
 
 
 @pytest.mark.parametrize("source", SOURCES)

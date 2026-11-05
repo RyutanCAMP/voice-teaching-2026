@@ -1008,7 +1008,7 @@ def test_repeat_with_dousa_and_tsuzukete_shows_the_range_button(tmp_path, text):
     w, sid = _repeat_flow(tmp_path)
     r = w.talk(sid, text)
     assert r["state"]["repeat_range"] and not r["state"]["candidate"], hear_msg(r)
-    assert r["state"]["repeat_range"]["start"] == "C00001" and r["state"]["repeat_range"]["end"] == "C00003"
+    assert r["state"]["repeat_range"]["positions"] == ["C00001", "C00002", "C00003"]
     r2 = w.talk(sid, "はい")  # 声の「はい」では確定しない（ボタンだけ）。汎用のエラーの文にしない
     assert r2["state"]["repeat_range"] and not r2["state"]["candidate"]
     assert "ボタン" in hear_msg(r2) and "承認とシミュレーション用の書き出しは" not in hear_msg(r2), hear_msg(r2)
@@ -1021,26 +1021,26 @@ def test_repeat_with_the_same_count_says_so(tmp_path):
 
 
 def test_repeat_described_by_its_action_shows_the_block_to_confirm(tmp_path):
-    """「ボタンを押す動作を3回続けて」：位置を言っていない。くり返しの区間がジョブに1つだけなら、その区間を示して確かめる
-    （言葉を捨てて確定しない。確定は［この範囲を繰り返す］のボタンだけ）。"""
-    w, sid = _repeat_flow(tmp_path)
+    """「ボタンを押す動作を3回続けて」：位置を言っていない。回数の変更の希望の道（Claude は意図を読むだけ）で、区間は
+    プログラムがジョブのくり返しから決め、［この範囲を繰り返す］のボタンで確かめる（確定はボタンだけ）。"""
+    w, _ = T.flow(tmp_path, T.answer("回数を変えたいのですね。", (21, 22, 23, 24, 25, 26), "change_request",
+                                     {"kind": "repeat", "from_count": 2, "to_count": 3}))
+    sid = w.load(T.demo_bytes())["session_id"]
     r = w.talk(sid, "ボタンを押す動作を3回続けて")
-    msg = hear_msg(r)
-    assert "くり返している区間は C00001〜C00003 です。この区間を3回にしますか？" in msg, (r.get("via"), msg)
-    assert not r["state"]["candidate"] and not r["state"]["repeat_range"]
-    r2 = w.talk(sid, r["hear"]["choices"][0]["text"])
-    assert r2["state"]["repeat_range"] and not r2["state"]["candidate"]
+    assert r["state"]["repeat_range"] and r["state"]["repeat_range"]["positions"] == ["C00001", "C00002", "C00003"]
+    assert "合計3回にします" in hear_msg(r) and not r["state"]["candidate"], hear_msg(r)
 
 
 def test_repeat_described_without_a_block_says_so(tmp_path):
-    w, sid = _repeat_flow(tmp_path, A.DEMO_C)
+    w, _ = T.flow(tmp_path, T.answer("回数を変えたいのですね。", (), "change_request", {"kind": "repeat", "from_count": 2, "to_count": 3}))
+    sid = w.load(A.DEMO_C)["session_id"]
     r = w.talk(sid, "ボタンを押す動作を3回続けて")
     msg = hear_msg(r)
     assert not r["state"]["candidate"] and not r["state"]["repeat_range"]
-    assert "見つかりません" in msg and "往復" not in msg, msg
+    assert "見つかりません" in msg and "往復ですか" not in msg, msg
 
 
-@pytest.mark.parametrize("text", ["Zプラス3mmを2回", "2回動かして"])
+@pytest.mark.parametrize("text", ["C00003を2回移動させて", "2回動かして"])
 def test_ambiguous_two_times_is_not_a_dead_end_question(tmp_path, text):
     """「2回」が回数の変更の形でないとき：どちらを押しても止まる二択は出さず、言い方を示して止める。"""
     w, _, sid = A.place_flow(tmp_path)
