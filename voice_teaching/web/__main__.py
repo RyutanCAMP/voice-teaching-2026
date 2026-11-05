@@ -35,8 +35,7 @@ def main(argv: list[str] | None = None) -> int:
     srv = make_server(port=args.port, interpreter=interp, updown_config=args.updown_config, robot=args.robot,
                       explainer=explainer)
     # Claude の言い添え（指示の道の答えの前の一言）：本物の Claude で、キーがあるときだけ。VOICE_TEACHING_CLAUDE_LEAD=0 で使わない
-    srv.flow.claude_lead = (interp.kind == "claude" and explainer.has_key
-                            and os.environ.get(claude_lead.ENV, "").strip() != "0")
+    srv.flow.claude_lead = claude_lead.enabled(interp, explainer, os.environ)
     print(f"解釈：{'本物の Claude（' + interp.model + '）' if interp.kind == 'claude' else '偽のClaude（モック）'}", flush=True)
     print(f"Claude の言い添え：{'使う' if srv.flow.claude_lead else '使わない'}", flush=True)
     print(f"Claude に聞く（読み取りだけ）：{'キーあり・' + explainer.model if explainer.has_key else 'APIキーが設定されていません'}",

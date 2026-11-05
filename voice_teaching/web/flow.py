@@ -996,6 +996,7 @@ class WebFlow:
                 e.talk.last_evidence = ()
             if reset is True:
                 e.talk.clear()  # 会話をやり直す：人が教えた意味も、この会話の中だけなので消す
+                e.lead_history.clear()  # Claude の言い添えに送る前の会話も消す
                 return {"ok": True, "status": "reset", **self.explainer.info(),
                         "talk": self._talk_state(e, notices)}
             conv = e.explain
