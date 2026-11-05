@@ -233,3 +233,69 @@ def test_facing_rewrite_keeps_axis_words_readable():
     for said, include in (("3mm上げて", True), ("この位置を上に3mm上げて", True), ("3mm右に動かして", False)):
         f = ut.read_utterance(ut.facing_rewrite(said, include))
         assert not f.unknown_words and not f.stop_reasons and len(f.axes) == 1, (said, f)
+
+
+# ---- 8. 2回目（実 Claude のケース集 197件で見つかった言い方。唐川さん「AI が人の話し方に合わせる」） ----
+PAIRS2 = [
+    # 博多弁・北九州・話し言葉の頼み方（＝〜しておいて・〜してしまって）は「〜て」と同じ
+    ("Zプラス3ミリ動かしとって", "Zプラス3ミリ動かして"),
+    ("3ミリ上げとって", "3ミリ上げて"),
+    ("Yマイナス10ミリずらしといて", "Yマイナス10ミリずらして"),
+    ("Zプラスに3ミリ動かしちゃって", "Zプラスに3ミリ動かして"),
+    ("Zプラス3ミリ動かしてやって", "Zプラス3ミリ動かして"),
+    ("Zプラスに3ミリ動かしてみて", "Zプラスに3ミリ動かして"),
+    ("Zプラス3ミリ動かしときー", "Zプラス3ミリ動かして"),
+    ("Zプラス3ミリ動かしてほしいっちゃけど", "Zプラス3ミリ動かして"),
+    ("Zプラス3ミリ動かしたいっちゃん", "Zプラス3ミリ動かして"),
+    ("3ミリ下げてほしいんです", "3ミリ下げて"),
+    ("この位置ば上に3ミリ上げたいっちゃけど", "この位置ば上に3ミリ上げて"),  # 「ば」は今どおり分からない言葉
+    # 「〜てくれん」（＝〜してくれない？）は「〜てくれる」と同じ2択
+    ("Zプラスに3ミリ動かしてくれんね", "Zプラスに3ミリ動かしてくれる"),
+    ("この位置、上に3ミリ上げてくれん？", "この位置、上に3ミリ上げてくれる？"),
+    ("Yマイナスに10ミリずらしてくれんやろか", "Yマイナスに10ミリずらしてくれる？"),  # 文の終わりの「か」で疑問の形
+    ("Zプラス3ミリ動かしてくれんかいな", "Zプラス3ミリ動かしてくれる"),
+    ("Yマイナスに10ミリ動かしてもらえん？", "Yマイナスに10ミリ動かしてもらえる？"),
+    # 言いよどみ
+    ("えーっと、Zプラス3ミリ", "えーと、Zプラス3ミリ"),
+    ("あのう、Yマイナス10ミリ", "あの、Yマイナス10ミリ"),
+    ("えー、Zプラス3ミリ", "えーと、Zプラス3ミリ"),
+    ("えっとー、Xプラス2ミリ", "えっと、Xプラス2ミリ"),
+    ("えー、この位置を、Zプラスに、3ミリ", "えーと、この位置を、Zプラスに、3ミリ"),
+    # ひらがなの「みり」（数のすぐ後）
+    ("Zプラス3みり", "Zプラス3ミリ"),
+    ("Yマイナス10 みり", "Yマイナス10 ミリ"),
+    ("Zプラス3みりメートル", "Zプラス3ミリ"),
+    ("えーっと、えーっと、Zプラス3ミリ", "えーと、えーと、Zプラス3ミリ"),  # 読点で区切った言いよどみの繰り返しは今も通る
+    # 選んでいる位置を指す言葉
+    ("今の位置をZプラス3ミリ", "この位置をZプラス3ミリ"),
+    ("選んでいる位置をZプラス3ミリ", "この位置をZプラス3ミリ"),
+    ("この場所を上に3ミリ上げたい", "この位置を上に3ミリ上げて"),
+]
+
+
+@pytest.mark.parametrize("new,old", PAIRS2)
+def test_round2_new_wording_is_read_like_the_known_wording(tmp_path, new, old):
+    assert outcome(tmp_path / "a", new) == outcome(tmp_path / "b", old), (new, old)
+
+
+@pytest.mark.parametrize("new,old", [("今の位置をZプラス3ミリ", "この位置をZプラス3ミリ"),
+                                     ("Zプラス3ミリ動かしとって", "Zプラス3ミリ動かして")])
+def test_round2_without_selected_position(tmp_path, new, old):
+    a, b = outcome(tmp_path / "a", new, select=None), outcome(tmp_path / "b", old, select=None)
+    assert a == b and a["candidate"] is None
+
+
+@pytest.mark.parametrize("text", [
+    "Zプラス3ミリ動かしよって", "Zプラス3ミリ動かしとらん", "Zプラス3ミリ動かさんといて", "Zプラス3ミリ動かさんで",
+    "Zプラスに3ミリ動かしてくれんね", "この位置、上に3ミリ上げてくれん？", "Zプラスみり", "みり3",
+    "えーっと、たぶんZプラス3ミリ", "あのう、Zプラス3ミリくらい", "Zプラス30ミリ動かしとって", "Zプラス3動かしとって",
+    "今の位置をZプラス30ミリ",
+])
+def test_round2_still_no_candidate(tmp_path, text):
+    w, _, sid = A.place_flow(tmp_path)
+    r = w.talk(sid, text, "voice")
+    assert not cand(r), (text, hear(r).get("message"))
+
+
+def test_filler_words_stay_within_the_cap():
+    assert len(ut.FILLER_WORDS) <= 30  # tests/test_unknown_words.py の上限（変えない）
