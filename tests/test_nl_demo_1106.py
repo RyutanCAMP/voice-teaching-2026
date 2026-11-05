@@ -420,3 +420,75 @@ def test_c2_amount_then_axis_and_sign(tmp_path):
     r = w.talk(sid, "Yマイナス")
     c = r["state"]["candidate"]
     assert c and c["target"] == "C00003 Y" and "-10.000mm" in hear_msg(r) and not r["state"]["approval"]
+
+
+# ---- 10. QA 001（92ee57d）の指摘 ----
+# M1：Claude には座標値を送っていないので、移動の大きさ（大きく・少し など）はデータから言えない。その言葉の入った説明は隠す。
+# 「ゆっくり」「速く」は、ジョブの速度があるので隠さない
+MAGNITUDE_REPLIES = [
+    "はじめに大きく動いたあと、同じ動きをくり返し、最後に別の場所へ動いて終わります。",
+    "はじめに大きく動いてから、同じ動きをくり返し、最後に別の場所へ移ります。",
+    "Z方向に少し動いて戻る動きをくり返します。",
+    "わずかに動いたあと、最初の位置へ戻ります。",
+    "小さく動く動作を同じ形でくり返します。",
+    "遠くの位置へ移ってから、同じ動きをくり返します。",
+    "長く動いたあと、最初の位置へ戻ります。",
+    "ちょっと動いてから、同じ動きをくり返します。",
+]
+
+
+@pytest.mark.parametrize("reply", MAGNITUDE_REPLIES)
+def test_movement_size_words_are_hidden(reply):
+    assert talk.reply_mvp_problem(reply) is not None
+
+
+@pytest.mark.parametrize("reply", ["同じ動きをゆっくりくり返したあと、最後の位置へ移って終わります。",
+                                   "速く動いたあと、同じ動きをくり返します。",
+                                   "ボタンを押す動作をくり返したあと、最後に別の位置へ関節の動きで移って終わります。"])
+def test_speed_words_are_not_size_words(reply):
+    assert talk.reply_mvp_problem(reply) is None
+
+
+def test_movement_size_word_hidden_in_the_explanation_path(tmp_path):
+    w, fake = T.flow(tmp_path)
+    sid = w.load(T.demo_bytes())["session_id"]
+    reply = "はじめに大きく動いたあと、同じ動きをくり返し、最後に別の場所へ動いて終わります。"
+    fake.add(T.answer(reply, (21, 22, 23, 24, 25, 26)))
+    r = w.ask(sid, "この動きについて確かに言えることだけ教えて")
+    assert r["reply_by"] == "app" and reply not in r["reply"]
+
+
+def test_push_and_end_is_shown_as_a_job_motion(tmp_path):
+    """L2：「ボタンを押して終わります」は、ジョブの動作の説明として出す（今の動きを決めておく。唐川さんに確認する）。
+    「承認ボタン」「出力ボタン」は「承認」「出力」で今どおり隠す。"""
+    assert talk.reply_mvp_problem("同じ動きをくり返し、最後にボタンを押して終わります。") is None
+    assert talk.reply_mvp_problem("最後に承認ボタンを押して終わります。") is not None
+    assert talk.reply_mvp_problem("最後に出力ボタンを押して終わります。") is not None
+
+
+# M2：打ち消しの引用は、言葉のまとまりの初めから（切れ端にしない）
+@pytest.mark.parametrize("text,whole", [
+    ("じゃあもういいや", "もういいや"), ("ああもういいや", "もういいや"), ("えっともういいや", "もういいや"),
+    ("やっぱりもういいや", "もういいや"), ("今日はもういいや", "もういいや"), ("それならもういいや", "もういいや"),
+    ("うーんやっぱりいいや", "やっぱりいいや"), ("これもう動かさないで", "もう動かさないで"),
+])
+def test_negation_quote_starts_at_the_phrase(text, whole):
+    f = ut.read_utterance(text)
+    assert f.negations == (whole,), f.negations
+
+
+@pytest.mark.parametrize("text", ["じゃあもういいや", "うーんやっぱりいいや", "これもう動かさないで"])
+def test_negation_quote_in_the_reply_is_whole(tmp_path, text):
+    w, _, sid = A.pending_three(tmp_path)
+    s = shown(w.talk(sid, text))
+    assert "「ういいや」" not in s and "「んやっぱり" not in s and "「う動かさないで」" not in s, s
+
+
+# L1：2つの数・2つの変更は、単位より先に「1回に1つ」で聞く
+@pytest.mark.parametrize("text", ["Z+3、Y+4", "Y-の方向に10と20", "Z+3と5mm"])
+def test_two_numbers_are_asked_one_at_a_time_before_the_unit(tmp_path, text):
+    w, _, sid = A.place_flow(tmp_path)
+    r = w.talk(sid, text)
+    msg = hear_msg(r)
+    assert not r["state"]["candidate"]
+    assert "1つずつ" in msg and "単位が付いていません" not in msg, msg
