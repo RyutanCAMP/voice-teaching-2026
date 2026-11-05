@@ -1783,7 +1783,11 @@ function renderPlayButtons() {
   const live = !!p && (p.state === "playing" || p.state === "paused");
   $("play-button").disabled = none;
   $("play-pause").disabled = none || !live;
-  $("play-pause").textContent = p && p.state === "paused" ? "続ける" : "一時停止";
+  // 本番UI：アイコン（❚❚＝一時停止・▶＝続ける）。名前は読み上げと小さな説明に
+  const paused = !!(p && p.state === "paused");
+  $("play-pause").textContent = paused ? "▶" : "❚❚";
+  $("play-pause").setAttribute("aria-label", paused ? "続ける" : "一時停止");
+  $("play-pause").title = paused ? "続ける" : "一時停止";
   $("play-step").disabled = none;  // 終わったあとは、はじめから1区間ずつ
   $("play-stop").disabled = none || !live;
   const rep = repeatCompare();

@@ -1323,3 +1323,7 @@ body:has(#export-result[data-ok="true"]:not([hidden])) #export-note { display: n
 /* 下の帯：必要な注意だけ（実機に出力・転送・起動しない） */
 .foot p { font-size: 12px; }
 .ver { opacity: 0.55; }
+/* 候補のポップアップが出ている間は、3D を少し小さくして左へ寄せる（動かす点・変更の拡大の図を、ポップアップの下に隠さない）。見せ方だけ */
+#fig-3d svg { transition: transform 0.35s ease; transform-origin: 35% 50%; }
+body:has(#candidate-panel:not([hidden])) #fig-3d svg { transform: translateX(-11%) scale(0.86); }
+@media (prefers-reduced-motion: reduce) { #fig-3d svg { transition: none; } }

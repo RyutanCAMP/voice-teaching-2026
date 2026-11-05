@@ -2710,11 +2710,11 @@ def check_demo3d(browser, url, check, shots: Path | None, errors: list) -> None:
     pg.click("#play-pause")
     a = now(pg)
     pg.wait_for_timeout(900)
-    check(pg.inner_text("#play-pause") == "続ける" and now(pg) == a and a != "",
+    check(pg.get_attribute("#play-pause", "aria-label") == "続ける" and now(pg) == a and a != "",
           f"再生の表示：一時停止すると、その場で止まる（{a.splitlines()[0] if a else ''}）")
     pg.click("#play-pause")
     until(pg, lambda: now(pg) != a, timeout_ms=10000)
-    check(pg.inner_text("#play-pause") == "一時停止", "再生の表示：「続ける」で続きから動く")
+    check(pg.get_attribute("#play-pause", "aria-label") == "一時停止", "再生の表示：「続ける」で続きから動く")
     pg.click("#play-stop")
     check(pg.is_hidden("#play-now") and pg.locator("#fig-3d circle.marker").count() == 0
           and pg.inner_text("#play-status") == "再生を止めました", "再生の表示：「止める」で印と「いま」を消す")
