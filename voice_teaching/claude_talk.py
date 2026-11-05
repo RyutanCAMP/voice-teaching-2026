@@ -107,7 +107,10 @@ _KANJI = "〇一二三四五六七八九十"
 _COUNT = re.compile(r"([0-9]+|[〇一二三四五六七八九十]+)\s?回(?!目)")
 _COUNT_FROM = re.compile(r"([0-9]+|[〇一二三四五六七八九十]+)\s?回\s?(?:から|を)\s?([0-9]+|[〇一二三四五六七八九十]+)\s?回")
 _COUNT_ADD = re.compile(r"(?:もう)?\s?([0-9]+|[〇一二三四五六七八九十]+)\s?回\s?(?:増や|ふやし|ふやす|追加|足し|たし|多く)")
-_COUNT_MORE = re.compile(r"(?:あと|もう)\s?([0-9]+|[〇一二三四五六七八九十]+)\s?回")  # 「あと1回」「もう1回」（足す言葉が無い）：確かめる
+# 「あと1回」「もう1回」（足す言葉が無い）：確かめる。「もう3回にして」（もう＝いいから）は合計の言い方なので除く（QA L-b）
+_COUNT_MORE = re.compile(r"あと\s?([0-9]+|[〇一二三四五六七八九十]+)\s?回|もう\s?([0-9]+|[〇一二三四五六七八九十]+)\s?回(?!\s?(?:に|へ))")
+# 「もう一回説明して」「あと1回教えて」：回数の変更ではなく、説明の頼み（Safety L1）
+_EXPLAIN_AGAIN = re.compile(r"(?:あと|もう)\s?(?:[0-9]+|[〇一二三四五六七八九十]+)\s?回\s?(?:だけ\s?)?(?:説明|言って|いって|教え|おしえ|見せ|みせ|聞かせ|話し|読ん)")
 _REDUCE_WORDS = re.compile(r"減ら|へら|少なく|すくなく|引い|削")
 _COUNT_KEEP = re.compile(r"([0-9]+|[〇一二三四五六七八九十]+)\s?回\s?(?:の)?\s?まま")
 _CHANGE_WORDS = re.compile(r"回数|にして|に変更|に変え|へ変更|増や|減ら|追加|足して|変更して|変えて")
@@ -371,6 +374,8 @@ def read_count(text: str, blocks: list[Block], last_evidence=()) -> CountReading
     if not has_count_words(text):
         return None
     t = _nfkc(text)
+    if _EXPLAIN_AGAIN.search(t):
+        return None  # 説明をもう一度：回数の言葉として読まない（会話の道で説明する。候補・範囲は作らない）
     target, _ = discussed_block(blocks, last_evidence)
     if len(blocks) >= 2 and any(w in t for w in _ALL_WORDS):
         target = None  # 「全部」「両方」：区間が2つ以上なら、直前に話した区間に決めない
@@ -417,7 +422,7 @@ def read_count(text: str, blocks: list[Block], last_evidence=()) -> CountReading
     if m:
         # 「あと1回押して」「もう1回押して」：合計1回として扱わない（11/5 唐川さんの指示⑥）。今の回数をプログラムが数え、
         # 合計を確かめる。候補・範囲は作らない（人が「3回にして」と言い直す）。減らす言葉があれば足し算を勧めない（Safety F3）
-        more = _kanji_int(m.group(1))
+        more = _kanji_int(m.group(1) or m.group(2))
         if target is None or more is None or more <= 0:
             msg = "どのくり返しを、合計何回にしたいかを教えてください。まだ変更候補は作りません"
         elif _REDUCE_WORDS.search(t):

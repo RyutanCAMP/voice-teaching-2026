@@ -297,3 +297,19 @@ def test_f3_ato_with_reduce_words_does_not_suggest_more(text, now):
 def test_m3_mou_ikkai_is_not_total_one(text):
     r = talk.read_count(text, blocks())
     assert r is not None and r.total is None and r.stop and "合計3回" in r.stop
+
+
+# ---- 再レビューの残り（QA L-b・Safety L1） ----
+@pytest.mark.parametrize("text", ["もう3回にして", "もう3回に変えて"])
+def test_mou_n_kai_ni_shite_is_a_total(text):
+    """「もう（いいから）3回にして」は合計3回。「もう」を「あと」と同じに足し算しない。"""
+    assert talk.read_count(text, blocks()).total == 3
+
+
+@pytest.mark.parametrize("text", ["もう一回説明して", "もう1回言って", "あと1回教えて", "もう1回見せて"])
+def test_explanation_requests_are_not_count_changes(tmp_path, text):
+    assert talk.read_count(text, blocks()) is None
+    w, fake = T.flow(tmp_path, T.answer("同じ動きをくり返しています。"))
+    sid = w.load(T.demo_bytes())["session_id"]
+    r = w.talk(sid, text)
+    assert "回にして" not in msg(r) and not r["state"]["repeat_range"] and not r["state"]["candidate"]
