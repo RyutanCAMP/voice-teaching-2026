@@ -15,7 +15,6 @@ import pytest
 
 import test_acceptance_nl_safety_1105 as A
 from voice_teaching import claude_talk as talk
-from voice_teaching import updown
 from voice_teaching import utterance as ut
 
 
@@ -205,15 +204,17 @@ def test_stray_sign_question_is_kept_when_the_sign_is_really_loose(tmp_path):
     assert not r["state"]["candidate"] and "どこに付くか" in hear_msg(r)
 
 
-# ---- 5. 上下の向きが未確認の「上に3mm」：候補にせず、やさしく確かめる ----
-@pytest.mark.parametrize("text", ["上に3mm", "3mm下げて"])
-def test_unconfirmed_updown_question_is_gentle(tmp_path, text):
+# ---- 5. 上下の向きが未確認の「上に3mm」：候補にせず、確かめる（回帰。文は今のまま） ----
+# 文を「…言ってもらえますか？」の聞き返しにする案は、状態の表示（候補の表示にも出る）と同じ文で、169件の再生の
+# 25件ほどの見え方が変わるため、今回は入れていない（唐川さんに確認する）
+@pytest.mark.parametrize("text", ["上に3mm", "3mm下げて", "上に三ミリ"])
+def test_unconfirmed_updown_never_makes_a_candidate(tmp_path, text):
     w, _, sid = A.place_flow(tmp_path)
     r = w.talk(sid, text)
     msg = hear_msg(r)
-    assert not r["state"]["candidate"]
-    assert msg == updown.MSG_UNCONFIRMED
-    assert "？" in msg and "Zプラス" in msg and "Zマイナス" in msg  # 片方だけを例にしない（上＝Z＋と決めつけない）
+    assert not r["state"]["candidate"] and not r["state"]["approval"]
+    assert "上下の向きがまだ確認されていません" in msg
+    assert "Zプラス" in msg and "Zマイナス" in msg  # 片方だけを例にしない（上＝Z＋と決めつけない）
     assert not ut.contains_forbidden(msg)
 
 
