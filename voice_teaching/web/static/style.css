@@ -1327,3 +1327,18 @@ body:has(#export-result[data-ok="true"]:not([hidden])) #export-note { display: n
 .cand-pop .cand-card .friendly, .cand-pop .cand-card ul { font-size: 12.5px; }
 /* 3D は寄せない（11/5 F7：候補の前後で 3D の点が動かない）。ポップアップを狭くして右下に置く */
 .cand-pop { width: min(380px, 36%); }
+/* 1920×1080（撮影の主な大きさ）：会話の欄は細く、3D は前（434165d）より小さくしない（11/5 F6） */
+@media (min-width: 1700px) and (min-height: 950px) {
+  .work { grid-template-columns: clamp(400px, 24vw, 470px) minmax(0, 1fr); gap: 16px; padding: 10px 16px; }
+  .side { padding: 16px 16px 12px; }
+  .stage-head { margin-bottom: 4px; }
+}
+/* ポップアップ：ボタンの欄（確認して承認へ・出力・元に戻す・出力の結果）はいつも見える。長いときは候補のカードの中だけをスクロール */
+.cand-pop { overflow: hidden; }
+.cand-pop .cand-card { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.cand-pop .dock-actions { flex: none; }
+.chips-more { font-size: 14px; }
+@media (max-width: 1499px) {
+  .cand-pop { width: min(400px, 48%); }
+  .status-line .st-head { display: none; }  /* 「アプリの記録：」の見出しの文字だけ省く（チップの中身は全部出す） */
+}

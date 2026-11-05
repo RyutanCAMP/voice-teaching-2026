@@ -115,10 +115,11 @@
     <section id="ask-panel" class="card dialog talk-panel" aria-label="会話" hidden>
       <div class="dlg-head">
         <span class="dlg-title">Claude と話す</span>
+        <!-- 話している相手（本物の Claude のモデル名か、モック）は、いつも見える（正直な表示。［詳しく］に畳まない） -->
+        <span id="ask-model" class="dlg-engine"></span>
         <!-- トークン数・料金・会話のやり直し・役割の説明は「詳しく」の中（いつもは閉じている。会話の欄のいちばん上） -->
         <details class="more talk-more"><summary>詳しく</summary>
           <div class="talk-more-body">
-            <p id="ask-model" class="dlg-engine"></p>
             <p id="ask-usage" class="fine"></p>
             <button type="button" id="ask-reset" class="link small" disabled>会話をやり直す</button>
             <p class="fine">Claude は動作の説明と作業目的の推定だけをします。数・状態・変更の案内はアプリが出します。承認と出力はボタンだけです。</p>
@@ -138,13 +139,13 @@
     <section id="dialog-panel" class="card dialog" aria-label="Claude との会話" hidden>
       <div class="dlg-head">
         <span class="dlg-title">会話</span>
+        <span id="dialog-engine" class="dlg-engine"></span>
       </div>
       <ol id="dialog-turns" class="bubbles" aria-live="polite"></ol>
       <div id="dialog-evidence" class="evidence"></div>
       <p id="dialog-estimated" class="dlg-est" hidden></p>
       <div id="dialog-choices" class="choices dlg-choices"></div>
       <details class="more"><summary>詳しく</summary>
-        <p id="dialog-engine" class="dlg-engine"></p>
         <p id="dialog-note" class="fine">Claude は意味を読んで候補を出し、聞き返すだけです。座標の変更・検査・数字はプログラムが行い、承認は確認表示のボタンだけです。</p>
       </details>
     </section>
