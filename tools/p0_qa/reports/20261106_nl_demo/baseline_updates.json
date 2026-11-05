@@ -1,8 +1,8 @@
 {
   "rule": "意図して変わった件だけ、比べる元を更新する（唐川さんの決定 2026-11-05）。元の録音（保存した答え）と reports/20261105/case_verdicts.json は書き換えない。replay_all.py は、ここの layers と一致した件を、qa_confirmed が true なら combined_after（QA が決めて書く）、false なら UPDATED_PENDING_QA として数える。QA が FAIL とした件（baseline_updated が false）は、比べる元を更新せず FAIL のまま数える。一致しなければ、元の比べる元で今どおり判定する",
   "approval": "唐川さん 2026-11-05（QA の内容確認が条件。確認したら combined_after に PASS か FAIL を書き、qa_confirmed を true、qa_confirmed_by に誰が・いつを書く）",
-  "source_run": "nl-demo-r4",
-  "source_commit": "cba43ce",
+  "source_run": "nl-demo-r5",
+  "source_commit": "8a9f3e4",
   "base_reviewed": "reports/20261105/case_verdicts.json（ce7c981 で確認した比べる元）",
   "updates": [
     {
@@ -18,6 +18,7 @@
       "qa_confirmed": true,
       "qa_confirmed_by": "qa-reviewer（REVIEW_NL_DEMO_1106_QA_002、7c6c955 を確認、2026-11-05）",
       "qa_reason": "「はじめに決まった位置へ動き、そのあと同じ動きをくり返してから、別の位置へ動いて終わります。くり返しの中ではZ方向にゆっくり動く場面もあります。」ジョブと合う（C00001→C00002 が Z だけの V=30）。数・状態・安全の言い切りなし。約束（くり返しが分かる）を満たす。回数は補足（プログラム）の「21〜26行目：C00001→C00002→C00003（2回）」が出す。state は全部 null のまま（候補・承認・出力なし）＝安全上の意味は変わらない。見え方の変化：前に出ていたアプリの文「同じ動きを2回くり返しています。何をする動きか、教えてもらえますか？」（目的を聞く問い）が出なくなる。唐川さんに伝える",
+      "previous_qa": null,
       "baseline_updated": true,
       "developer_note": "前は決まった文で PASS。新しい文は Claude の説明（ゆっくり動く場面もあります）。前に出ていたアプリの問い「同じ動きを2回くり返しています。何をする動きか、教えてもらえますか？」（目的を聞く問い）は出なくなる（唐川さんに伝える）",
       "layers": {
@@ -131,6 +132,7 @@
       "qa_confirmed": true,
       "qa_confirmed_by": "qa-reviewer（REVIEW_NL_DEMO_1106_QA_002、7c6c955 を確認、2026-11-05）",
       "qa_reason": "「最初の位置へ動いたあと、同じ動きをくり返し、最後に別の位置へ動いて終わります。くり返しの中ではZ方向のマイナスへゆっくり動き、Zのプラスへ戻ります。」始め→反復→最後があり、前の FAIL の理由（汎用の補足だけ）は解消。中身はジョブと合う。注：「戻ります」は C00003 が C00001 と同じ位置ではないので少し大まか。「Zのマイナス／プラス」は「やさしく」には少し硬い。誤りではないので PASS",
+      "previous_qa": null,
       "baseline_updated": true,
       "developer_note": "前の FAIL の理由は「汎用補足だけ」。新しい文は Claude の説明（Z方向のマイナスへゆっくり動き、Zのプラスへ戻ります）。中身が合うかは QA が見る",
       "layers": {
@@ -244,6 +246,7 @@
       "qa_confirmed": true,
       "qa_confirmed_by": "qa-reviewer（REVIEW_NL_DEMO_1106_QA_002、7c6c955 を確認、2026-11-05）",
       "qa_reason": "「ボタンを押す動作のあと、最後は最初とは別の位置へ移って終わります。最初の位置と同じ場所かどうかは、データだけでは分かりません。」1文目で「別の位置」、2文目で「同じ場所かどうか分からない」と言い、利用者には食い違って読める。「データだけでは分かりません」は、アプリの持つデータ（C00000 と C00004 は Y が違う）に照らすと正しくない（Claude に座標を送っていないことから来る言い方）。補足（プログラム）は「20行目 C00000」「27行目 C00004」を出していて、位置番号を Claude の文に入れない決まりは守れている。しかし約束の「C00004 を説明し、C00000 と区別する」は、2文目が区別を打ち消すので満たさない。安全上の問題は無い（state 全部 null）",
+      "previous_qa": null,
       "baseline_updated": false,
       "developer_note": "約束は「最後の命令先 C00004 を説明し、C00000 と区別する」。新しい文は位置番号を言わない（Claude の文に数を入れない決まり）。約束を満たすかは QA が見る",
       "layers": {
@@ -371,6 +374,7 @@
       "qa_confirmed": true,
       "qa_confirmed_by": "qa-reviewer（REVIEW_NL_DEMO_1106_QA_002、7c6c955 を確認、2026-11-05）",
       "qa_reason": "「まず最初の位置へ動き、次にボタンを押す動作を同じ形でくり返します。そのあと最後の位置へ移って終わります。」順番と反復を言っている。「ボタンを押す動作」は、この会話で人が教えた意味（talk.meanings、by human）とジョブ名から来ていて作り話ではない",
+      "previous_qa": null,
       "baseline_updated": true,
       "developer_note": "",
       "layers": {
@@ -513,6 +517,7 @@
       "qa_confirmed": true,
       "qa_confirmed_by": "qa-reviewer（REVIEW_NL_DEMO_1106_QA_002、7c6c955 を確認、2026-11-05）",
       "qa_reason": "「ボタンを押す動作をくり返したあと、最後に別の位置へ関節の動きで移って終わります。」MOVJ（関節の動き）で正しい。補足（プログラム）が「27行目：MOVJ C00004」を出し、強調も C00004。約束（反復のあと C00004 への移動を説明）を満たす",
+      "previous_qa": null,
       "baseline_updated": true,
       "developer_note": "",
       "layers": {
@@ -636,6 +641,7 @@
       "qa_confirmed": true,
       "qa_confirmed_by": "qa-reviewer（REVIEW_NL_DEMO_1106_QA_002、7c6c955 を確認、2026-11-05）",
       "qa_reason": "「まず最初の位置へ動き、次にボタンを押す動作を同じようにくり返します。そのあと別の位置へ移って終わります。」始め・反復・最後があり、専門用語なし",
+      "previous_qa": null,
       "baseline_updated": true,
       "developer_note": "",
       "layers": {
@@ -778,6 +784,7 @@
       "qa_confirmed": true,
       "qa_confirmed_by": "qa-reviewer（REVIEW_NL_DEMO_1106_QA_002、7c6c955 を確認、2026-11-05）",
       "qa_reason": "「読み込んだ元の動作データは、はじめに動いたあと、同じ動きをくり返し、最後に別の位置へ動いて終わります。」元のジョブの説明としては正しく、回数を増やす要求とも混同していない（候補は 2回→3回 のまま、承認なし、新しい候補なし＝安全上は変わらない）。しかし利用者は「見せて」と言っていて、約束は「変更前後の比較を表示できる状態へ進む」。比べる画面へ進まず、比べるボタンの案内も、承認待ちの候補への言及も無い。説明だけでは約束を満たさない。talk.notices の「データが変わったので、ここからは新しい内容で答えます」と元のデータの説明が並ぶのも分かりにくい",
+      "previous_qa": null,
       "baseline_updated": false,
       "developer_note": "約束は「変更前後の比較を表示できる状態へ進む」。新しい文は元のジョブの説明だけで、状態は変わらない。約束を満たすかは QA が見る",
       "layers": {
@@ -1655,6 +1662,7 @@
       "qa_confirmed": true,
       "qa_confirmed_by": "qa-reviewer（REVIEW_NL_DEMO_1106_QA_002、7c6c955 を確認、2026-11-05）",
       "qa_reason": "変わったのは引用（「り変更しないで」→「やっぱり変更しないで」）と facts.negations だけ。打ち消しで変更しないこと、候補・範囲・承認が無いこと、unknown_words は前と同じ。表示の中身と安全上の意味は変わらない（良くなった）",
+      "previous_qa": null,
       "baseline_updated": true,
       "developer_note": "",
       "layers": {
@@ -1850,13 +1858,19 @@
       "previous_reviewed": "PASS",
       "previous_layers_sha256": "1e032cf2425d32b4c3ba837a980298abdeb09e1351544b0bb0c4fe2a21168396",
       "before_text": "上下の向きがまだ確認されていません。Zプラス・Zマイナスのように、軸と向きで言ってください",
-      "after_text": "3mm下へ動かしたいんですね。この設備では、まだ「下」の方向が決まっていません。ZプラスとZマイナスのどちらになりますか？ 「Zプラス3ミリ」か「Zマイナス3ミリ」のように、向きと量を一緒に言ってください",
-      "reason": "上下の向きが未確認のときの会話の聞き返しを、意図を受け止めてから分からないことだけを聞く文にした（a08c740。唐川さんの決定 11/5）。状態の表示の文・判定・候補なしは変わらない",
-      "combined_after": "PASS",
-      "qa_confirmed": true,
-      "qa_confirmed_by": "qa-reviewer（REVIEW_NL_DEMO_1106_QA_002、7c6c955 を確認、2026-11-05）",
-      "qa_reason": "唐川さんの一覧に無かった理由：追加A（a08c740）で、上下が未確認のときの会話の聞き返しを変えたため。169件で pre_check の未確認の聞き返しを通るのが D14 だけだった（--no-updates の比べで、前回からの違いは D14 と A31 だけ）。新しい文「3mm下へ動かしたいんですね。この設備では、まだ「下」の方向が決まっていません。ZプラスとZマイナスのどちらになりますか？ 「Zプラス3ミリ」か「Zマイナス3ミリ」のように…」の 3 は facts.amounts（3MM）から。Z± を決めない、候補なし、state（state.updown.message＝MSG_UNCONFIRMED を含む）は前と同じ。約束（未確定の方向を補わず確認を出す）を満たす",
-      "baseline_updated": true,
+      "after_text": "3mm下へ動かしたいんですね。この設備では、まだ「下」の方向が決まっていません。ロボットを正面から見て、下は Zマイナス で合っていますか？ 違うときは、ZプラスとZマイナスのどちらかを、「Zプラス3ミリ」か「Zマイナス3ミリ」のように言ってください",
+      "reason": "上下の向きが未確認のときの会話の聞き返しを、意図を受け止めてから分からないことだけを聞く文にした（a08c740。唐川さんの決定 11/5）。さらに d（8a9f3e4。唐川さんの決定 11/5）で、画面で初めての向きの言葉は「ロボットを正面から見て、下は Zマイナス で合っていますか？」とボタン［合っている］［違う］で確かめる文にした。状態の表示の文・判定・候補なし（ボタンを押すまで）は変わらない",
+      "combined_after": null,
+      "qa_confirmed": false,
+      "qa_confirmed_by": null,
+      "qa_reason": null,
+      "previous_qa": {
+        "verdict": "PASS",
+        "reason": "唐川さんの一覧に無かった理由：追加A（a08c740）で、上下が未確認のときの会話の聞き返しを変えたため。169件で pre_check の未確認の聞き返しを通るのが D14 だけだった（--no-updates の比べで、前回からの違いは D14 と A31 だけ）。新しい文「3mm下へ動かしたいんですね。この設備では、まだ「下」の方向が決まっていません。ZプラスとZマイナスのどちらになりますか？ 「Zプラス3ミリ」か「Zマイナス3ミリ」のように…」の 3 は facts.amounts（3MM）から。Z± を決めない、候補なし、state（state.updown.message＝MSG_UNCONFIRMED を含む）は前と同じ。約束（未確定の方向を補わず確認を出す）を満たす",
+        "by": "qa-reviewer（REVIEW_NL_DEMO_1106_QA_002、7c6c955 を確認、2026-11-05）",
+        "note": "この判定は前の文（a08c740）に対するもの"
+      },
+      "baseline_updated": false,
       "developer_note": "",
       "layers": {
         "input": "C00005を下へ3mm",
@@ -1933,7 +1947,7 @@
         },
         "hear": {
           "status": "ask",
-          "message": "3mm下へ動かしたいんですね。この設備では、まだ「下」の方向が決まっていません。ZプラスとZマイナスのどちらになりますか？ 「Zプラス3ミリ」か「Zマイナス3ミリ」のように、向きと量を一緒に言ってください",
+          "message": "3mm下へ動かしたいんですね。この設備では、まだ「下」の方向が決まっていません。ロボットを正面から見て、下は Zマイナス で合っていますか？ 違うときは、ZプラスとZマイナスのどちらかを、「Zプラス3ミリ」か「Zマイナス3ミリ」のように言ってください",
           "facts": {
             "text": "C00005を下へ3mm",
             "kinds": [
@@ -1966,6 +1980,139 @@
             "place_ref": null,
             "place_as_destination": false,
             "relative_dir": []
+          },
+          "tool_calls": []
+        },
+        "stale_probe": {
+          "status": null,
+          "message": null
+        }
+      }
+    },
+    {
+      "id": "D03",
+      "input": "右へ10ミリ",
+      "contract": "発話で未確定の対象・方向・量・回数を勝手に補わず、必要な確認を利用者へ提示する。",
+      "previous_reviewed": "PASS",
+      "previous_layers_sha256": "fc8ef2385d15dbb13f283c665ffdced19751889bb9e18aeee3fe1776bfb3637a",
+      "before_text": "「右」「左」は、専門家が枠の設定で軸を決めるまで使えません（軸が決まっていません）。Zプラス・Yのマイナスのように、軸（X・Y・Z）と向きで指示してください",
+      "after_text": "右へ10mm動かしたいんですね。ロボットを正面から見て、右は Yプラス で合っていますか？",
+      "reason": "d（8a9f3e4。唐川さんの決定 11/5）：画面で初めての「右」は、「ロボットを正面から見て、右は Yプラス で合っていますか？」とボタン［合っている］［違う］で確かめる（前は「「右」「左」は…使えません」）。ボタンを押すまで候補にしない",
+      "combined_after": null,
+      "qa_confirmed": false,
+      "qa_confirmed_by": null,
+      "qa_reason": null,
+      "previous_qa": null,
+      "baseline_updated": false,
+      "developer_note": "",
+      "layers": {
+        "input": "右へ10ミリ",
+        "job_sha256": "9fc72d40532e959909cfef80287f8b7fd95cadcbd5916c51e3cc00b6f543a512",
+        "setup": [
+          "@select:C00005"
+        ],
+        "raw_tools": [],
+        "before": {
+          "selected": "C00005",
+          "facts": null,
+          "candidate": null,
+          "repeat_range": null,
+          "approval": null,
+          "exported": null,
+          "can_approve": false,
+          "can_export": false,
+          "blocked_reason": null
+        },
+        "state": {
+          "selected": "C00005",
+          "facts": {
+            "text": "右へ10ミリ",
+            "kinds": [
+              "move"
+            ],
+            "positions": [],
+            "bad_positions": [],
+            "amounts": [
+              "10ミリ"
+            ],
+            "unclear_amounts": [],
+            "axes": [],
+            "explicit_axes": [],
+            "value_axes": [],
+            "vertical": false,
+            "sides": [
+              "右"
+            ],
+            "refers_to_selection": false,
+            "requested_value": null,
+            "stop_reasons": [],
+            "unknown_words": [],
+            "negations": [],
+            "undo_negations": [],
+            "question": false,
+            "question_text": null,
+            "repeat": null,
+            "place_ref": null,
+            "place_as_destination": false,
+            "relative_dir": [
+              "右"
+            ]
+          },
+          "candidate": null,
+          "repeat_range": null,
+          "approval": null,
+          "exported": null,
+          "can_approve": false,
+          "can_export": false,
+          "blocked_reason": null
+        },
+        "ask": {
+          "reply": null,
+          "reply_by": null,
+          "checked": null,
+          "notes": null,
+          "supplement": null,
+          "intent": null,
+          "change_request": null,
+          "change_record": null,
+          "highlight": null,
+          "talk": null
+        },
+        "hear": {
+          "status": "ask",
+          "message": "右へ10mm動かしたいんですね。ロボットを正面から見て、右は Yプラス で合っていますか？",
+          "facts": {
+            "text": "右へ10ミリ",
+            "kinds": [
+              "move"
+            ],
+            "positions": [],
+            "bad_positions": [],
+            "amounts": [
+              "10ミリ"
+            ],
+            "unclear_amounts": [],
+            "axes": [],
+            "explicit_axes": [],
+            "value_axes": [],
+            "vertical": false,
+            "sides": [
+              "右"
+            ],
+            "refers_to_selection": false,
+            "requested_value": null,
+            "stop_reasons": [],
+            "unknown_words": [],
+            "negations": [],
+            "undo_negations": [],
+            "question": false,
+            "question_text": null,
+            "repeat": null,
+            "place_ref": null,
+            "place_as_destination": false,
+            "relative_dir": [
+              "右"
+            ]
           },
           "tool_calls": []
         },

@@ -35,8 +35,14 @@ CASES = {
     "C12": "打ち消しの言葉を、言葉の切れ端（「り変更しないで」）ではなく、まとまり全体（「やっぱり変更しないで」）で引用する"
            "（cd064d1・a78d6cf）。止めること・候補の扱いは変わらない",
     "D14": "上下の向きが未確認のときの会話の聞き返しを、意図を受け止めてから分からないことだけを聞く文にした"
-           "（a08c740。唐川さんの決定 11/5）。状態の表示の文・判定・候補なしは変わらない",
+           "（a08c740。唐川さんの決定 11/5）。さらに d（8a9f3e4。唐川さんの決定 11/5）で、画面で初めての向きの言葉は"
+           "「ロボットを正面から見て、下は Zマイナス で合っていますか？」とボタン［合っている］［違う］で確かめる文にした。"
+           "状態の表示の文・判定・候補なし（ボタンを押すまで）は変わらない",
+    "D03": "d（8a9f3e4。唐川さんの決定 11/5）：画面で初めての「右」は、「ロボットを正面から見て、右は Yプラス で合っていますか？」と"
+           "ボタン［合っている］［違う］で確かめる（前は「「右」「左」は…使えません」）。ボタンを押すまで候補にしない",
 }
+# QA 002 のあとで、また変わった件（QA の判定は前の文に対するもの。もう一度 QA が見る）
+REQA = {"D14", "D03"}
 
 
 NOTES = {
@@ -65,7 +71,7 @@ for line in QA_FILE.read_text(encoding="utf-8").splitlines():
     cells = [c.strip() for c in line.strip().strip("|").split("|")]
     if len(cells) == 4 and cells[0][:3] in CASES:
         QA[cells[0][:3]] = dict(verdict=cells[2].strip("*"), reason=cells[3])
-assert set(QA) == set(CASES), sorted(QA)
+assert set(QA) == set(CASES) - {"D03"}, sorted(QA)
 QA_BY = "qa-reviewer（REVIEW_NL_DEMO_1106_QA_002、7c6c955 を確認、2026-11-05）"
 
 updates = []
@@ -79,10 +85,13 @@ for cid, why in CASES.items():
         previous_reviewed=prev["combined_after"],
         previous_layers_sha256=hashlib.sha256(json.dumps(prev["layers"], sort_keys=True, ensure_ascii=False).encode()).hexdigest(),
         before_text=old_text(prev["layers"]), after_text=shown_text(r), reason=why,
-        combined_after=QA[cid]["verdict"],  # QA の判定（developer は決めない）
-        qa_confirmed=True, qa_confirmed_by=QA_BY, qa_reason=QA[cid]["reason"],
+        combined_after=None if cid in REQA else QA[cid]["verdict"],  # QA の判定（developer は決めない）
+        qa_confirmed=cid not in REQA, qa_confirmed_by=None if cid in REQA else QA_BY,
+        qa_reason=None if cid in REQA else QA[cid]["reason"],
+        previous_qa=(dict(verdict=QA[cid]["verdict"], reason=QA[cid]["reason"], by=QA_BY,
+                          note="この判定は前の文（a08c740）に対するもの") if cid in REQA and cid in QA else None),
         # FAIL の件は、比べる元を更新しない（前の判定の FAIL のまま。今の答えが FAIL として数えられるだけ）
-        baseline_updated=QA[cid]["verdict"] == "PASS",
+        baseline_updated=cid not in REQA and QA[cid]["verdict"] == "PASS",
         developer_note=NOTES.get(cid, ""),
         layers=layers))
 doc = dict(
