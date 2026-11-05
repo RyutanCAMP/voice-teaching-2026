@@ -12,13 +12,14 @@ P0（H02・H16・ジョブの読み直しのあとに古い候補が残る）が
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
-from voice_teaching import claude_explain, claude_interpreter, sim, updown  # noqa: E402
+from voice_teaching import claude_explain, claude_interpreter, claude_lead, sim, updown  # noqa: E402
 from voice_teaching.web.flow import WebFlow  # noqa: E402
 from voice_teaching.web.server import DEFAULT_PORT, make_server  # noqa: E402
 
@@ -69,8 +70,12 @@ def main(argv: list[str] | None = None) -> int:
     srv = make_server(port=args.port, interpreter=interp, updown_config=args.updown_config, robot=args.robot,
                       explainer=explainer)
     lock_down(srv.flow)
+    # Claude の言い添え（指示の道の答えの前の一言。表示だけ）：本物の Claude とキーがあるときだけ。VOICE_TEACHING_CLAUDE_LEAD=0 で使わない
+    srv.flow.claude_lead = (interp.kind == "claude" and explainer.has_key
+                            and os.environ.get(claude_lead.ENV, "").strip() != "0")
     print("デバッグ専用：承認と出力はサーバーで断ります（候補・3D・会話は使えます）", flush=True)
     print(f"解釈：{'本物の Claude（' + interp.model + '）' if interp.kind == 'claude' else '偽のClaude（モック）'}", flush=True)
+    print(f"Claude の言い添え：{'使う' if srv.flow.claude_lead else '使わない'}", flush=True)
     print(f"Claude に聞く（読み取りだけ）：{'キーあり・' + explainer.model if explainer.has_key else 'APIキーが設定されていません'}",
           flush=True)
     print(f"Chrome で開いてください: http://127.0.0.1:{srv.server_address[1]}/  （止めるときは Ctrl+C）", flush=True)

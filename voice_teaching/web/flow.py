@@ -27,7 +27,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .. import claude_explain, claude_interpreter, jbi, mock_claude, sim
+from .. import claude_explain, claude_interpreter, claude_lead, jbi, mock_claude, sim
 from .. import claude_talk as talk
 from .. import repeat_count as rc
 from .. import dialog as dg
@@ -130,6 +130,8 @@ class _Entry:
     explain: "claude_explain.Conversation | None" = None  # Claude に聞く（読み取りだけ）の会話。メモリの中だけ
     # 人が教えた意味（この画面の会話の中だけ。ファイル・records/・作業ログに書かない。/api/hear の流れは読まない）
     talk: "talk.TalkMemory | None" = None
+    # Claude の言い添えに送る、前の会話の文（人・アプリ・Claude。この画面のメモリの中だけ。claude_lead.HISTORY 個まで）
+    lead_history: list = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
     # 閉じた印（Q-7：新しいジョブを読み込んだら、ほかの画面はすべて閉じる）。立てたら戻さない。理由は "replaced"
     closed: bool = False
@@ -168,6 +170,8 @@ class WebFlow:
         # 上下の向きの設定ファイルの場所（None なら設定なし＝未確認）と、アプリで使うロボットの名前（照合で比べるだけ）
         self.updown_config = DEFAULT_UPDOWN_CONFIG if updown_config is USE_DEFAULT else updown_config
         self.robot = robot
+        # Claude の言い添え（指示の道の答えの前の一言）。既定は使わない。起動（本物の Claude のとき）で True にする
+        self.claude_lead = False
         self._entries: OrderedDict[str, _Entry] = OrderedDict()
         self._closed: OrderedDict[str, str] = OrderedDict()  # 閉じた画面の番号 → 理由（断る文を選ぶだけ）
         self._lock = threading.Lock()
@@ -892,11 +896,48 @@ class WebFlow:
                         # 範囲の確認を始めた：「読み取りだけ」「候補は作りません」の文は、今の状態と合わないので、次にすることの文にする
                         ask_out["notes"] = [STEP_F_RANGE_NOTE]
                         ask_out["change_record"] = None
+        if (self.claude_lead and via == ["hear"] and isinstance(hear_out, dict) and hear_out.get("ok")
+                and isinstance(hear_out.get("message"), str) and hear_out["message"]):
+            self._add_lead(e, text, hear_out)
         with e.lock:
             if e.closed:
                 return self._closed_reply(sid, e)
+            self._remember_talk(e, text, ask_out, hear_out)
             state = self._state(sid, e)
         return {"ok": True, "via": via, "ask": ask_out, "hear": hear_out, "state": state, "heard": text, "source": source}
+
+    def _add_lead(self, e: _Entry, text: str, hear_out: dict) -> None:
+        """Claude の言い添え（claude_lead）：プログラムの答え（hear_out の status・message）はそのまま。前に出す一言だけを足す。
+        一言は表示と作業ログだけ。Session・候補・承認・会話の状態には使わない。"""
+        with e.lock:
+            if e.closed:  # 読み直しで閉じた画面：呼ばない
+                return
+            history = list(e.lead_history)
+        r = claude_lead.lead(self.explainer, history, text, hear_out.get("status"), hear_out["message"])
+        with e.lock:
+            if e.closed:  # Claude を待つ間に読み直しで閉じられた：書き戻さない
+                return
+            if r["text"] is not None:
+                hear_out["claude_lead"] = {"text": r["text"], "model": r["model"], "cost_usd": r["cost_usd"]}
+                e.session.log.append(("Claude の言い添え", r["text"]))
+            else:
+                e.session.log.append(("Claude の言い添え", f"出していません（{r['why']}）"))
+
+    def _remember_talk(self, e: _Entry, text: str, ask_out: dict | None, hear_out: dict | None) -> None:
+        """言い添えに送る前の会話（画面の吹き出しと同じ順）。メモリの中だけ。"""
+        h = e.lead_history
+        h.append({"who": "人", "text": text})
+        if isinstance(ask_out, dict):
+            reply = ask_out.get("reply") if ask_out.get("ok") else ask_out.get("error")
+            if isinstance(reply, str) and reply:
+                h.append({"who": "Claude" if ask_out.get("reply_by") == "claude" else "アプリ", "text": reply})
+        if isinstance(hear_out, dict):
+            lead = hear_out.get("claude_lead")
+            if lead:
+                h.append({"who": "Claude", "text": lead["text"]})
+            if isinstance(hear_out.get("message"), str) and hear_out["message"]:
+                h.append({"who": "アプリ", "text": hear_out["message"]})
+        del h[:-claude_lead.HISTORY]
 
     def _talk_route(self, e: _Entry, text: str) -> str:
         """振り分け（決定論）："hear"（指示の道）・"count"（回数の変更の希望）・"ask"（会話の道）。"""
