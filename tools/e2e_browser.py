@@ -3407,7 +3407,12 @@ def check_updown_unconfirmed(browser, check, shots: Path | None, errors: list) -
         until(pg, lambda: not pg.is_enabled("#open-confirm"))
         fill_text(pg, "3ミリ下げて")
         pg.click("#text-send")
-        until(pg, lambda: pg.is_visible("#reply-message") and updown.MSG_UNCONFIRMED in pg.inner_text("#reply-message"))
+        # 11/5 唐川さんの決定：上下が未確認のときの会話の聞き返しは、意図を受け止める文（utterance.updown_ask_message）。
+        # 状態の表示の文（updown.MSG_UNCONFIRMED）は変えていない。ここは #reply-message の会話の文を見る
+        from voice_teaching import utterance as ut
+        until(pg, lambda: pg.is_visible("#reply-message") and ut.is_updown_unset_ask(pg.inner_text("#reply-message")))
+        check("3mm下げたいんですね。" in pg.inner_text("#reply-message") and "この設備では、まだ「下」の方向が決まっていません。"
+              in pg.inner_text("#reply-message"), "上下の設定なし：「3ミリ下げて」の聞き返しは、言った量と向きを受け止める文")
         check(pg.locator("#reply-message button.choice").count() == 0 and not pg.is_enabled("#open-confirm")
               and pg.get_attribute("#step-4", "aria-current") != "step",
               "上下の設定なし：「3ミリ下げて」は候補にせず、案内で聞き返す（選択肢も出さない）")
@@ -3454,7 +3459,8 @@ def check_updown_unconfirmed(browser, check, shots: Path | None, errors: list) -
               f"上下の設定なし：会話の方向のボタンに「（上）」「（下）」を付けない：{labels(pg)}")
         fill_text(pg, "下に3ミリ")
         pg.click("#text-send")
-        until(pg, lambda: last_said(pg) == updown.MSG_UNCONFIRMED)
+        until(pg, lambda: ut.is_updown_unset_ask(last_said(pg)))  # 会話の文（状態の文 MSG_UNCONFIRMED は変えていない）
+        check("3mm下に動かしたいんですね。" in last_said(pg), f"上下の設定なし：会話の「下に3ミリ」は、言った量と向きを受け止める文：{last_said(pg)[:60]}")
         check(not pg.is_enabled("#open-confirm") and not any("（下）" in x for x in labels(pg)),
               "上下の設定なし：会話の「下に3ミリ」も同じ案内で聞き返す（候補にしない）")
         ctx.close()
