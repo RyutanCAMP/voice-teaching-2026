@@ -1387,6 +1387,10 @@ class WebFlow:
             return M_CORR_MOVE
         return M_CORR_OTHER
 
+    # 保留の返事のボタン（QA 再レビュー M-2：候補を確かめている間は入力の欄・マイクが無いことがある。ボタンで答えられるように）。
+    # 押すと決まった文を /api/hear へ送る（今の画面の選択肢と同じ道）。「このままでいい」は承認ではない（承認は消える）
+    HOLD_CHOICES = (("取り消す", "取り消して"), ("このまま残す（もう一度承認）", "このままでいい"))
+
     def _stale_out(self, e: _Entry, text: str, source: str, status: str, msg: str, kind: str) -> dict:
         s = e.session
         s.log.append(("発話", f"{'音声' if source == 'voice' else '文字'}：{text}"))
@@ -1394,7 +1398,8 @@ class WebFlow:
         s.facts = ut.read_utterance(text)  # 状態の「最後に聞いた文」の読み取りも、この発話にそろえる（表示。Session.hear と同じ）
         return {"ok": True, "status": status, "message": msg, "heard": text, "source": source,
                 "facts": _facts(s.facts),
-                "tool_calls": [], "dialog": False, "blocked_reason": None, "candidate_made": False, "choices": [],
+                "tool_calls": [], "dialog": False, "blocked_reason": None, "candidate_made": False,
+                "choices": ([{"label": a, "text": b} for a, b in self.HOLD_CHOICES] if kind == stale.UNSURE else []),
                 "no_change": kind not in stale.INVALIDATING, "stale": kind}
 
     def _closed_reply(self, sid: object, e: "_Entry | None" = None) -> dict:
