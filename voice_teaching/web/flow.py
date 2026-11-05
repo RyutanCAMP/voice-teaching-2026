@@ -870,8 +870,11 @@ class WebFlow:
         """Claude の言い添え（claude_lead）：プログラムの答え（hear_out の status・message）はそのまま。前に出す一言だけを足す。
         一言は表示と作業ログだけ。Session・候補・承認・会話の状態には使わない。"""
         with e.lock:
+            if not sim._is_synthetic(e.session.original_bytes):  # 合成でないジョブでは Claude を呼ばない（docs/CLAUDE_API.md 8-3）
+                e.session.log.append(("Claude の言い添え", "出していません（合成でないジョブのため呼びません）"))
+                return
             history = list(e.lead_history)
-        r = claude_lead.lead(self.explainer, history, text, hear_out.get("status"), hear_out["message"])
+        r = claude_lead.lead(self.explainer, history, text, hear_out.get("status"))
         with e.lock:
             if r["text"] is not None:
                 hear_out["claude_lead"] = {"text": r["text"], "model": r["model"], "cost_usd": r["cost_usd"]}
@@ -880,19 +883,13 @@ class WebFlow:
                 e.session.log.append(("Claude の言い添え", f"出していません（{r['why']}）"))
 
     def _remember_talk(self, e: _Entry, text: str, ask_out: dict | None, hear_out: dict | None) -> None:
-        """言い添えに送る前の会話（画面の吹き出しと同じ順）。メモリの中だけ。"""
+        """言い添えに送る前の会話：人の発話と、前に選んだ相づちだけ（アプリ・説明の文は座標の値などが入るので残さない）。
+        メモリの中だけ。"""
         h = e.lead_history
         h.append({"who": "人", "text": text})
-        if isinstance(ask_out, dict):
-            reply = ask_out.get("reply") if ask_out.get("ok") else ask_out.get("error")
-            if isinstance(reply, str) and reply:
-                h.append({"who": "Claude" if ask_out.get("reply_by") == "claude" else "アプリ", "text": reply})
-        if isinstance(hear_out, dict):
-            lead = hear_out.get("claude_lead")
-            if lead:
-                h.append({"who": "Claude", "text": lead["text"]})
-            if isinstance(hear_out.get("message"), str) and hear_out["message"]:
-                h.append({"who": "アプリ", "text": hear_out["message"]})
+        lead = hear_out.get("claude_lead") if isinstance(hear_out, dict) else None
+        if lead:
+            h.append({"who": "Claude", "text": lead["text"]})
         del h[:-claude_lead.HISTORY]
 
     def _talk_route(self, e: _Entry, text: str) -> str:
