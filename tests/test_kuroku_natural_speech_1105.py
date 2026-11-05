@@ -478,3 +478,25 @@ def test_self_correction_without_axis_asks_only_axis_and_direction(tmp_path, sai
     assert msg.startswith(f"言い直しのあとの量は {n}mm ですね。どの軸の、どちらの向きですか？"), msg
     assert f"Xプラス{n}ミリ" in msg and f"Zマイナス{n}ミリ" in msg
     assert len(fake.requests) == 0
+
+
+# ---- 12. 「Yのマイナスに10ミリ」（軸と符号の間の「の」）・「〜てほしいな」・「〜てもらってもいい？」 ----
+@pytest.mark.parametrize("new,old", [
+    ("Yのマイナスに10ミリ", "Yマイナスに10ミリ"),
+    ("Xのプラスに1ミリ", "Xプラスに1ミリ"),
+    ("Yのマイナスへ10ミリ", "Yマイナスへ10ミリ"),
+    ("Yのマイナスに10ミリずらしたいです", "Yマイナスに10ミリずらして"),
+    ("Zプラス3ミリ動かしてほしいな", "Zプラス3ミリ動かして"),
+    ("Zプラス3ミリ動かしてもらってもいい？", "Zプラス3ミリ動かしてくれる？"),
+    ("Zプラス3ミリ動かしてもらってもいいですか", "Zプラス3ミリ動かしてくれる？"),
+])
+def test_round3_wording_is_read_like_the_known_wording(tmp_path, new, old):
+    assert outcome(tmp_path / "a", new) == outcome(tmp_path / "b", old), (new, old)
+
+
+@pytest.mark.parametrize("text", ["Yの方向に10mm", "Yのに10ミリ", "Yのマイナスに", "Yのマイナスにプラス10ミリ", "Zプラス3ミリ動かしたいな",
+                                  "Yのマイナスに10ミリくらい", "Yのマイナスに30ミリ"])
+def test_round3_still_no_candidate(tmp_path, text):
+    w, _, sid = A.place_flow(tmp_path)
+    r = w.talk(sid, text, "voice")
+    assert not cand(r), (text, hear(r).get("message"))
