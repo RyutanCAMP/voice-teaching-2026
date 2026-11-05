@@ -1427,3 +1427,11 @@ body.hero #kbd-button { min-width: 0; width: 44px; padding-inline: 0; }
   body:not(.hero) .mic-stage { padding-block: 0; }
   body:not(.hero) .mic-cta-row { display: none; }
 }
+/* 1100〜1699px：会話の欄は前の版の幅（34vw・400〜500px）。PR #4 の 30vw だと、長い答え・範囲の文が欄に収まらない */
+@media (min-width: 1100px) and (max-width: 1699px), (min-width: 1100px) and (max-height: 949px) {
+  .work { grid-template-columns: clamp(400px, 34vw, 500px) minmax(0, 1fr); gap: 12px; padding: 8px 10px; }
+  .side { padding: 12px 12px 10px; }
+}
+@media (min-width: 1100px) and (max-width: 1499px) {
+  .cand-pop { left: 10px; width: clamp(400px, 34vw, 500px); top: 128px; }
+}
