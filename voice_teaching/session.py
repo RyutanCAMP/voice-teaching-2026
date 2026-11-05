@@ -160,7 +160,11 @@ class Session:
         facts = ut.read_utterance(read_text)
         prev = self._awaiting_answer
         followup, self._updown_followup = self._updown_followup, None
-        if prev is not None and (not facts.kinds or ut.is_explicit_direction_answer(prev, facts)
+        if prev is not None and prev.op == "speed" and prev.speed_signs == () and ut.is_speed_updown_answer(text):
+            # 「速度を上げますか、下げますか？」への「下げて」（QA 003 M1）：位置の上下（Z）・向きの確かめにせず、速度の答えとして読む
+            facts = ut.merge_answer(prev, ut.read_utterance("速度を" + text))
+            self._facing_used = False
+        elif prev is not None and (not facts.kinds or ut.is_explicit_direction_answer(prev, facts)
                                  or ut.is_direction_answer(prev, facts, self.selected)):
             facts = ut.merge_answer(prev, facts)
         elif (prev is not None and prev.op == "move" and prev.amount is None and not prev.unclear_amounts
@@ -237,6 +241,10 @@ class Session:
         return ut.Verdict("ask", ut.facing_ask_message(facts, found, updown_unset=found[1] == "Z"),
                           ((ut.FACING_YES_LABEL, ut.facing_choice_text(ut.FACING_YES_LABEL, token)),
                            (ut.FACING_NO_LABEL, ut.facing_choice_text(ut.FACING_NO_LABEL, token))))
+
+    def forget_facing(self) -> None:
+        """前の向きの確かめのボタンを使えなくする（新しい発話。どの道でも）。"""
+        self._facing_pending = None
 
     def facing_choose(self, text: str, source: str = "text") -> tuple[str, "Reply | str"]:
         """確かめのボタン（画面の選択肢）。("yes", 確かめた発話) か ("no"／"stale", 返事)。ボタンだけで確かめる。"""

@@ -1111,6 +1111,16 @@ _UPDOWN_TO = re.compile(r"(?<!以)(上|下)(方向)?(に|へ)|(?<!以)(上|下)�
 _FACING_VERB_END = {"て": "して", "る": "す", "ます": "します", "たい": "したい", None: "し"}
 
 
+def is_speed_updown_answer(text: str) -> bool:
+    """「上げて」「下げて」だけの答え（速度の問いへの答えになりうる）。量・軸・位置・打ち消し・ためらいがあれば答えにしない。"""
+    f = read_utterance(text)
+    return bool(f.vertical and f.op == "move" and f.axes == ("Z",) and not f.explicit_axes and not f.positions
+                and not f.amounts and not f.unclear_amounts and not f.negations and not f.undo_negations
+                and not f.unknown_words and not f.question and f.shimasu_text is None and not f.sides
+                and len(f.axis_signs) == 1 and re.fullmatch(r"(?:上げ|下げ|あげ|さげ)(?:て|る)?(?:ください)?[。.!！]*",
+                                                             normalize(text).strip()))
+
+
 def facing_choice_text(answer: str, token: str) -> str:
     """確かめのボタンが送る文（決まった形と、その時だけの番号）。声・文字・Claude の答えでは出てこない。"""
     return f"［向きの確かめ：{answer}］#{token}"

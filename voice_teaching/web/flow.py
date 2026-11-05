@@ -815,6 +815,8 @@ class WebFlow:
             return {"ok": False, "error": NO_SESSION}
         text = text.strip()
         with e.lock:
+            # 新しい発話（どの道でも。会話の道・回数の変更の希望も）：前の向きの確かめのボタンは使えない（QA 003 M2）
+            e.session.forget_facing()
             route = self._talk_route(e, text)
         ask_out = hear_out = None
         via: list[str] = []
