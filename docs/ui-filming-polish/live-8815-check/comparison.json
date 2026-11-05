@@ -1,0 +1,32 @@
+{
+  "filming_worktree_head_observed_before_gets": "ea9211ebaf5e4e442bb16042ec50102617460915",
+  "pr3_implementation_sha": "0625d68620043c1217c3cb48337af6eef91c436f",
+  "http_get_only": true,
+  "ports_modified": false,
+  "files": [
+    {
+      "file": "voice_teaching/web/static/style.css",
+      "http_status": 200,
+      "http_sha256": "098c68bc075f285e505018f01ab7acf47b18c1e6e6cd2e6ab241dafaca6d6ff3",
+      "matches_pr3": false,
+      "matches_ea9211e": true,
+      "matches_filming_worktree": true,
+      "pr3_sha256": "9c7b3e1afcf4b6553716109a1ef37413be78672614b6ebe5f2f16d93e0481dc0",
+      "filming_sha256": "098c68bc075f285e505018f01ab7acf47b18c1e6e6cd2e6ab241dafaca6d6ff3",
+      "has_filming_polish_block": false,
+      "has_figure_details_function": false
+    },
+    {
+      "file": "voice_teaching/web/static/highlight.js",
+      "http_status": 200,
+      "http_sha256": "0ed45634e203078bc34d452460f0c68b180ea6800ef8b1451cf940cd45966501",
+      "matches_pr3": false,
+      "matches_ea9211e": true,
+      "matches_filming_worktree": true,
+      "pr3_sha256": "8757f5c02bdb95975e66a6bd63f569b3b5962850e0a24e27df0be4f0b7314afc",
+      "filming_sha256": "0ed45634e203078bc34d452460f0c68b180ea6800ef8b1451cf940cd45966501",
+      "has_filming_polish_block": false,
+      "has_figure_details_function": false
+    }
+  ]
+}
