@@ -28,7 +28,7 @@
 | P0：JOB の読み直しで古い画面を閉じる | `fix/p0-reload-close` `42843c2` | 実装・テスト完了。**QA・Safety とも CONDITIONAL PASS（FAIL なし）** |
 | P0：H02（言い直し）・H16（取消＋説明）・世代番号・ホーム | `fix/p0-stale-candidates` `a8d2143`（設計だけ） | **未着手**。クロちゃんのレビュー待ち。撮影では台本で避ける |
 | 案1・2・4 の設計書 | `docs/direction-words-design` `59fec81` | 文書だけ |
-| コックさんの撮影向け UI | `ui/filming-polish` | **GitHub で見つからない（未確認）** |
+| コックさんの撮影向け UI | `ui/filming-polish` `51b0bac`（表示の実装は `0625d68`） | 完了（コックさんの記録：Chrome 44/44・node 124・pytest 92）。変えたのは style.css と highlight.js だけ。統合版とぶつからない（git merge-tree で確認）。**未統合**。統合は Safety High の再検証の PASS のあと（コックさんの引き継ぎ handoff/UI_FILMING_POLISH_20261105.md も同じ順番） |
 
 ## 2. 撮影用の統合（`integrate/filming-1106` `4fa07c5`）の中身
 `integrate/debug-1106`（`cf0b3fb`）に、次の3つを merge したもの：
@@ -106,8 +106,7 @@
 - 唐川さんの確認待ち：
   - 3D の原点の高さ（Z=0 が据え付け面か）、据え付けの形
   - 3D の画面に「台座の印は大きさ・形ではありません」を見える形で出すか
-- コックさんの `ui/filming-polish`：GitHub に無い。**基本の動作を確かめてから統合**（唐川さん）
-  - ファイルの分け方の案：style.css と新しい表示用のファイルはコックさん。app.js・index.html・view3d.js・explain.js はシクロ側
+- コックさんの `ui/filming-polish`（`51b0bac`）：**基本の動作と Safety High の PASS を確かめてから統合**（唐川さん）
 
 ## 4. 撮影用のアプリの起動（8815）
 ```
@@ -161,3 +160,12 @@ node --test tests\*.test.mjs                                           （127）
 3. P1-a（説明が隠れる）を直す：撮影で「何をしているの？」を使う場合
 4. 唐川さんの承認のあと、8805 を統合版に入れ替える（または撮影は 8815 のまま）
 5. コックさんの UI は、基本の動作を確かめたあと、ぶつからなければ統合する
+
+## 8. 独立テストの担当（クロちゃん）へ伝える情報（キーの中身は含めない）
+- 8815 の起動元のフォルダ：`C:\アプリt-film`（会社PC。git worktree、ブランチ `integrate/filming-1106`）
+- 8815 で動いているコード：**`4fa07c5`**（18時ごろに起動。そのあとのコミットは handoff・reviews の文書だけで、コードは変えていない）
+- 起動のコマンド：`C:\アプリoice-teaching\.venv\Scripts\python.exe -m voice_teaching.web --port 8815 --env-file C:/アプリ/voice-teaching/.env`
+- 使う .env の場所：`C:\アプリoice-teaching\.env`（本体のフォルダ。.gitignore で除外済み。worktree には .env を置いていない）。中身（キー）は共有しない
+- モデル：claude-sonnet-5-5（起動の表示で「解釈：本物の Claude（claude-sonnet-5-5）」）
+- **8815 は撮影用の確定版ではない**（会話の Safety High の再検証の前のコード）。承認・出力は有効なので、テストで出力したファイル（`C:\アプリt-film\output\sim\`）は終わったら消すこと
+- 8805（`C:\アプリt-debug`・`cf0b3fb`・承認・出力をサーバーで断るデバッグ専用）は変えない
