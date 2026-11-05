@@ -983,3 +983,68 @@ def test_facing_button_is_refused_after_undo(tmp_path):
     r = w.hear(sid, yes, "text")
     assert not r["state"]["candidate"] and not r["state"]["facing"]["confirmed"]
     assert "もう使えません" in r["message"], r["message"]
+
+
+# ---- 唐川さんが 8815（4fa07c5）で見つけた行き止まり：回数の変更の言い方（続けて・動作・まで・4桁の番号） ----
+def _repeat_flow(tmp_path, data=None):
+    w, _ = T.flow(tmp_path)
+    return w, w.load(T.demo_bytes() if data is None else data)["session_id"]
+
+
+def test_karakawa_repeat_two_steps_have_no_dead_end(tmp_path):
+    w, sid = _repeat_flow(tmp_path)
+    r = w.talk(sid, "C0001からC0003までの動作を2回続けて下さい")
+    msg = hear_msg(r)
+    assert "往復" not in msg and not (r.get("hear") or {}).get("choices"), msg  # 行き止まりの二択を出さない
+    assert "C00001〜C00003 は今 2 回で、同じ回数のため、変更しません" in msg, msg  # 今も同じ回数なら、そう言う
+    assert not r["state"]["candidate"] and not r["state"]["repeat_range"]
+    r = w.talk(sid, "はい")
+    assert not r["state"]["candidate"] and not r["state"]["approval"]
+
+
+@pytest.mark.parametrize("text", ["C00001からC00003までの動作を3回続けて", "C00001からC00003の動作を3回にして",
+                                  "C0001からC0003までの動作を3回続けて下さい"])
+def test_repeat_with_dousa_and_tsuzukete_shows_the_range_button(tmp_path, text):
+    w, sid = _repeat_flow(tmp_path)
+    r = w.talk(sid, text)
+    assert r["state"]["repeat_range"] and not r["state"]["candidate"], hear_msg(r)
+    assert r["state"]["repeat_range"]["start"] == "C00001" and r["state"]["repeat_range"]["end"] == "C00003"
+    r2 = w.talk(sid, "はい")  # 声の「はい」では確定しない（ボタンだけ）。汎用のエラーの文にしない
+    assert r2["state"]["repeat_range"] and not r2["state"]["candidate"]
+    assert "ボタン" in hear_msg(r2) and "承認とシミュレーション用の書き出しは" not in hear_msg(r2), hear_msg(r2)
+
+
+def test_repeat_with_the_same_count_says_so(tmp_path):
+    w, sid = _repeat_flow(tmp_path)
+    r = w.talk(sid, "C00001からC00003までの動作を2回続けて")
+    assert "同じ回数のため、変更しません" in hear_msg(r) and not r["state"]["repeat_range"]
+
+
+def test_repeat_described_by_its_action_shows_the_block_to_confirm(tmp_path):
+    """「ボタンを押す動作を3回続けて」：位置を言っていない。くり返しの区間がジョブに1つだけなら、その区間を示して確かめる
+    （言葉を捨てて確定しない。確定は［この範囲を繰り返す］のボタンだけ）。"""
+    w, sid = _repeat_flow(tmp_path)
+    r = w.talk(sid, "ボタンを押す動作を3回続けて")
+    msg = hear_msg(r)
+    assert "くり返している区間は C00001〜C00003 です。この区間を3回にしますか？" in msg, (r.get("via"), msg)
+    assert not r["state"]["candidate"] and not r["state"]["repeat_range"]
+    r2 = w.talk(sid, r["hear"]["choices"][0]["text"])
+    assert r2["state"]["repeat_range"] and not r2["state"]["candidate"]
+
+
+def test_repeat_described_without_a_block_says_so(tmp_path):
+    w, sid = _repeat_flow(tmp_path, A.DEMO_C)
+    r = w.talk(sid, "ボタンを押す動作を3回続けて")
+    msg = hear_msg(r)
+    assert not r["state"]["candidate"] and not r["state"]["repeat_range"]
+    assert "見つかりません" in msg and "往復" not in msg, msg
+
+
+@pytest.mark.parametrize("text", ["Zプラス3mmを2回", "2回動かして"])
+def test_ambiguous_two_times_is_not_a_dead_end_question(tmp_path, text):
+    """「2回」が回数の変更の形でないとき：どちらを押しても止まる二択は出さず、言い方を示して止める。"""
+    w, _, sid = A.place_flow(tmp_path)
+    r = w.talk(sid, text)
+    h = r.get("hear") or {}
+    assert not r["state"]["candidate"] and not h.get("choices"), h
+    assert "回数を変えるときは" in h.get("message", ""), h
