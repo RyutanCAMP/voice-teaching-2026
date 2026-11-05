@@ -1330,7 +1330,13 @@ class WebFlow:
             return self._stale_out(e, text, source, "ok", msg, stale.KEEP)
         if s.candidate is None:
             return None
-        v = stale.classify(text)
+        said = text
+        ch = s.candidate
+        if ch.kind == "shift" and ch.target.split()[0]:
+            # 画面の選択肢の文（「C00005を元に戻します」）：今の候補の位置と同じときだけ、頭の「C00005を」を外して見分ける
+            # （今の _instruction と同じ。別の位置の名前は外さない）
+            said = re.sub(rf"^{re.escape(ch.target.split()[0])}を", "", ut.normalize(text))
+        v = stale.classify(said)
         if v.kind == stale.CANCEL:
             info = self._invalidate(e, "取消")
             msg = (APPROVAL_AND_CANDIDATE_CANCELLED if info["had_approval"]
@@ -1377,8 +1383,9 @@ class WebFlow:
         s = e.session
         s.log.append(("発話", f"{'音声' if source == 'voice' else '文字'}：{text}"))
         s.log.append(("聞き返し" if status == "ask" else "結果", msg))
+        s.facts = ut.read_utterance(text)  # 状態の「最後に聞いた文」の読み取りも、この発話にそろえる（表示。Session.hear と同じ）
         return {"ok": True, "status": status, "message": msg, "heard": text, "source": source,
-                "facts": _facts(ut.read_utterance(text)),
+                "facts": _facts(s.facts),
                 "tool_calls": [], "dialog": False, "blocked_reason": None, "candidate_made": False, "choices": [],
                 "no_change": kind not in stale.INVALIDATING, "stale": kind}
 

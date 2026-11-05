@@ -141,7 +141,7 @@ def classify(text: object) -> Verdict:
     # 3：取消の打ち消し・候補を残す言葉
     if _N.search(t) or _KEEP_WORDS.search(t):
         return Verdict(KEEP, rule="3 keep")
-    if _OTHER_STOP.match(t) and not _values(t):  # 「3回はやめて」は値の打ち消し：下の規則で確かめる
+    if _OTHER_STOP.match(t) and not [v for v in _values(t) if not v.startswith("C")]:  # 「3回はやめて」は値の打ち消し：下の規則で確かめる
         return Verdict(OTHER, rule="3b other stop")
     # 4：取消・言い直しの節に、ためらい・推量・条件・疑問（取消のしかたを聞く問いは何も変えない）
     for c in clauses:
