@@ -500,3 +500,11 @@ def test_round3_still_no_candidate(tmp_path, text):
     w, _, sid = A.place_flow(tmp_path)
     r = w.talk(sid, text, "voice")
     assert not cand(r), (text, hear(r).get("message"))
+
+
+def test_self_correction_to_a_position_not_in_the_job_is_not_offered(tmp_path):
+    """ジョブに無い位置（C00099）への言い直しは、ボタンを出さずに今どおり止める。"""
+    w, _, sid = A.place_flow(tmp_path)
+    r = w.talk(sid, "C00004、いやC00099をZプラス3ミリ", "voice")
+    assert not cand(r) and not labels(r), hear(r)
+    assert "最後の言い方" not in hear(r).get("message", "")

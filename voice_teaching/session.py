@@ -179,7 +179,10 @@ class Session:
         if v.status != "ok" and self.candidate is None:
             # 1つの発話の中の言い直し（「Zプラス10ミリ、いや5ミリ」。クローク 11/6）：候補が無いときだけ、最後の言い方をボタンで確かめる。
             # 候補があるときの言い直しは P0（シクロ）の扱いなので、今までどおり打ち消しで止める
-            v = ut.self_correction(facts) or v
+            c = ut.self_correction(facts)
+            # ジョブに無い位置（「C00004、いやC00099を…」）の言い直しは、ボタンを出さずに今どおり止める
+            if c is not None and not (c.choices and set(ut.read_utterance(c.choices[0][1]).positions) - set(self._job.positions)):
+                v = c
         if v.confirm_position is not None and v.confirm_position not in self._job.positions:
             # 4桁以下の位置番号の確かめ：ジョブに無い番号なら、ボタンを出さずに止める（唐川さんの決定 11/5）
             v = ut.Verdict("stop", f"{v.confirm_position} はこのジョブにありません")
