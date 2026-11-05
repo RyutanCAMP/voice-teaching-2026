@@ -1342,3 +1342,23 @@ body:has(#export-result[data-ok="true"]:not([hidden])) #export-note { display: n
   .cand-pop { width: min(400px, 48%); }
   .status-line .st-head { display: none; }  /* 「アプリの記録：」の見出しの文字だけ省く（チップの中身は全部出す） */
 }
+.figure-notes { font-size: 12px; }
+/* 狭い画面：ポップアップは 3D に重ねず、図の下に並べる（横にはみ出さない） */
+@media (max-width: 1099px) {
+  .fig-wrap { overflow: visible; }
+  .cand-pop { position: static; width: auto; max-height: none; overflow: visible; margin: 8px 0 0; }
+  .cand-pop .cand-card { overflow: visible; }
+}
+@media (max-width: 600px) {
+  .brand .logo { flex-basis: 100%; }
+}
+@media (max-width: 600px) {
+  .top { position: static; }
+}
+@media (min-width: 1700px) and (min-height: 950px) {
+  .top { min-height: 52px; padding-top: 4px; padding-bottom: 4px; }
+  .work { padding-top: 8px; padding-bottom: 8px; }
+  .stage { padding-top: 6px; padding-bottom: 6px; }
+  .sel-line { margin-top: 2px; min-height: 26px; }
+  .play-row { margin-top: 2px; }
+}

@@ -406,22 +406,3 @@ export function attachTips(doc = document) {
   doc.defaultView.addEventListener("resize", () => { if (owner) place(owner); });
   return { open, close, pop };
 }
-
-// Presentation only: keep the actual limitation visible, and move just the
-// two technical explanations into a keyboard-accessible native disclosure.
-// Existing nodes/IDs/hidden flags are retained for the existing view switcher.
-export function attachFigureDetails(doc = document) {
-  const notes = doc.querySelector('.figure-notes');
-  if (!notes || doc.querySelector('.figure-help')) return;
-  const explanations = ['play-note', 'view3d-note'].map((id) => doc.getElementById(id)).filter(Boolean);
-  if (!explanations.length) return;
-  const details = doc.createElement('details');
-  details.className = 'figure-help';
-  const summary = doc.createElement('summary');
-  summary.textContent = 'ⓘ 図の見方';
-  const body = doc.createElement('div');
-  body.className = 'figure-help-body';
-  body.append(...explanations);
-  details.append(summary, body);
-  notes.before(details);
-}
