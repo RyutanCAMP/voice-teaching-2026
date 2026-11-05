@@ -170,7 +170,8 @@ _UNIT_AFTER = re.compile(r"^\s?(MM|ミリ|%)")
 _OTHER_UNIT_AFTER = re.compile(r"^\s?(センチ|CM|M(?![A-Z])|メートル|パーセント|割|度|倍)")
 _KANJI_AMOUNT = re.compile(r"[〇零一二三四五六七八九十百千万]+\s?(ミリ|MM|センチ|CM|%|パーセント|割)")
 _VAGUE = re.compile(r"そこそこ|半分|少し|すこし|ちょっと|ちょい|わずか|僅か|倍|もう少し|適当")
-# 軸と向き。1つ目の形（案1-a。docs/DESIGN_NATURAL_DIRECTION_20261105.md）：「軸 → 符号 → 方向」の順で、間に入ってよいのは
+# 軸と向き。1つ目の形（案1-a。設計書 docs/DESIGN_NATURAL_DIRECTION_20261105.md は、このブランチには無く、
+# ブランチ docs/direction-words-design（59fec81）にある）：「軸 → 符号 → 方向」の順で、間に入ってよいのは
 # 「軸」「の」（各1回まで）と空白だけ（「Y-の方向」「Yのマイナス方向」「Y軸マイナス方向」「Yの-の方向」）。
 # 2つ目の形（今まで）：「Y-方向」「Y軸」「Yに」「Y+へ」。1つの所は1つの形でだけ数える（同じ符号を2回数えない）。
 # 符号の言葉は + − プラス マイナス だけ（長音「ー」・正・負・側・向き・方 は読まない。聞き返す）
@@ -333,6 +334,7 @@ def _negation_words(text: str, heard: str | None = None) -> tuple[tuple[str, ...
 
 
 _NEGATION_WORD_MAX = 8  # 打ち消しの言葉を示すときに、前へさかのぼる字の数の上限
+_NEGATION_LEADS = ("やっぱり", "やはり", "もう")  # 打ち消しを示すときの、言葉のまとまりの初めになる言葉（示すためだけ）
 
 
 def _negation_start(text: str, i: int) -> int:
@@ -351,6 +353,14 @@ def _negation_start(text: str, i: int) -> int:
             return False
         return not (c in PARTICLES and k >= 2 and _script(text[k - 2]) != "other")
 
+    # 言葉のまとまりの初めになる言葉（「もう」「やっぱり」）。打ち消しの前に、ひらがな・漢字だけでつながっていれば、
+    # いちばん近いものから示す（「じゃあもういいや」→「もういいや」、「うーんやっぱりいいや」→「やっぱりいいや」、
+    # 「これもう動かさないで」→「もう動かさないで」。QA 001 M2）
+    leads = [p for p in range(max(0, i - _NEGATION_WORD_MAX), i)
+             if text.startswith(_NEGATION_LEADS, p)
+             and all("ぁ" <= c <= "ゖ" or _script(c) == "kanji" for c in text[p:i])]
+    if leads:
+        return max(leads)
     start = i
     while start > 0 and i - start < _NEGATION_WORD_MAX and joins(start):
         start -= 1
@@ -1263,6 +1273,10 @@ def _pre_check_core(facts: UtteranceFacts, selected: str | None = None,
         return _place_check(facts, selected)
     if op in ("move", "speed") and facts.stray_signs > 0:
         return _ask("プラス・マイナスがどこに付くか分かりません。「Xのマイナス5ミリ」のように、軸のすぐ後に言ってください")
+    if op in ("move", "speed") and facts.unclear_amounts and _number_count(facts) > 1:
+        # 「Z+3、Y+4」「Y-の方向に10と20」「Z+3と5mm」：単位より先に、1回に1つだけのことを聞く（QA 001 L1）。
+        # 単位だけを聞くと、付けて言い直したあとに「量が2つ」で断ることになる
+        return _ask("1回の指示で動かすのは、1つの方向に1つの量だけです。1つずつ、軸と向きと量（単位も）を言ってください")
     if op in ("move", "speed") and facts.unclear_signs and (
             facts.axis_signs or facts.speed_signs or len(facts.unclear_signs) > 1
             or any(a.sign is not None for a in facts.amounts)):
@@ -1337,6 +1351,11 @@ def _pre_check_core(facts: UtteranceFacts, selected: str | None = None,
     elif "select" in facts.kinds and not facts.positions and not facts.refers_to_selection:
         return _ask("どの位置ですか？ 位置番号（C と5桁の数字）で言ってください")
     return OK
+
+
+def _number_count(facts: UtteranceFacts) -> int:
+    """発話の中の、算用数字の量の数（単位のある量と、単位の無い・違う数）。漢数字・「少し」・区切りのある数字などは数えない。"""
+    return len(facts.amounts) + sum(1 for u in facts.unclear_amounts if re.match(r"「[0-9]", u) and u.endswith(NOT_UNIT_NOTE))
 
 
 TWO_SIGNS_STOP = ("向きの指定が2つあります（方向と、数の前のプラス・マイナス）。どちらの向きも選ばずに止めました。"
