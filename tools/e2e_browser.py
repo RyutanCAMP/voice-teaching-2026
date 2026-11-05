@@ -138,6 +138,19 @@ def _r1(v):
     return None if v is None or v is False else round(v, 1)
 
 
+def talk_first(pg) -> None:
+    """Issue #7：［位置を選ばずに話す］の文字のボタンは画面に出さない（位置を選ばずにマイクで話せる）。
+    会話の流れの確かめのために、同じ状態（ステップ3・位置は未選択）へ入る"""
+    pg.evaluate("document.querySelector('#talk-first').click()")
+
+
+def click_opening_replay(pg) -> None:
+    """Issue #7：［▶ オープニング］はアプリ情報（上の帯の ⓘ）の中。開いてから押す"""
+    if not pg.is_visible("#opening-replay"):
+        pg.click(".app-info > summary")
+    pg.click("#opening-replay")
+
+
 def check_header_help(browser, url, check, shots: Path | None) -> None:
     """ヘッダーの「?」2つの直し（案3）：使い方は「詳細表示」と同じ見た目の文字ボタン、アプリの記録の説明はチップの直後の ⓘ。
     360×800・390×844・1150×800・1280×720・1280×800・1920×1080 の、読み込み前・読み込み後・変更候補ありで確かめる：
@@ -225,11 +238,18 @@ def check_header_help(browser, url, check, shots: Path | None) -> None:
         if shots is not None:
             shots.mkdir(parents=True, exist_ok=True)
             pg.screenshot(path=str(shots / f"H3_{w}x{h}_before.png"), clip=clip)
-        # サンプルを読み込んだあと：アプリの記録のチップと、その直後の ⓘ
+        # サンプルを読み込んだあと（Issue #7）：ふだんのアプリの記録は上の帯に出さない。全文はアプリ情報（ⓘ）の中。
+        # 保留・取り消した・範囲の確認などのときだけ上の帯に出る（その並びは下で、出たときの形にして確かめる）
         pg.click("#sample-button")
         pg.wait_for_selector("#job-area:not([hidden])")
-        until(pg, lambda: pg.is_visible("#status-line") and pg.is_visible("[data-tip=status]"))
+        until(pg, lambda: "アプリの記録：" in (pg.text_content("#app-info-status") or ""))
         pg.wait_for_timeout(300)
+        r = layout(pg, tag, "読み込み後")
+        check(r["items"]["#status-line"] is None and r["items"]["[data-tip=status]"] is None
+              and pg.text_content("#app-info-status") == pg.text_content("#status-line"),
+              f"{tag}・読み込み後（Issue #7）：ふだんの記録は上の帯に出さず、アプリ情報にサーバーの文のまま出す（{pg.text_content('#app-info-status')}）")
+        pg.evaluate("document.body.classList.add('st-alert')")  # 上の帯に出たとき（保留など）の並びだけを確かめる
+        until(pg, lambda: pg.is_visible("#status-line") and pg.is_visible("[data-tip=status]"))
         r = tip_checks(pg, tag, w, "読み込み後")
         if one_line:
             it, st = r["items"]["[data-tip=status]"], r["items"]["#status-line"]
@@ -247,8 +267,10 @@ def check_header_help(browser, url, check, shots: Path | None) -> None:
         fill_text(pg, "Zプラス方向に10mm")
         pg.click("#text-send")
         until(pg, lambda: pg.get_attribute("#step-4", "aria-current") == "step")
-        until(pg, lambda: "候補 あり" in pg.inner_text("#status-line"))
+        until(pg, lambda: "候補 あり" in pg.text_content("#status-line"))
         pg.wait_for_timeout(300)
+        pg.evaluate("document.body.classList.add('st-alert')")  # 同上（ふだんの候補は候補のポップアップに出る）
+        until(pg, lambda: pg.is_visible("#status-line"))
         r = tip_checks(pg, tag, w, "変更候補あり")
         if one_line:
             st = r["items"]["#status-line"]
@@ -275,16 +297,20 @@ def check_ux_polish(browser, url, check, shots: Path | None) -> None:
         # 画面のいちばん上（scrollY=0）で、図の注意の下の端と、下の固定の帯の上の端の間（負なら隠れている）
         page.evaluate("window.scrollTo(0, 0)")
         page.wait_for_timeout(100)
+        # Issue #7：いつも見える図の注意は短い1行（#figure-short。全文は ⓘ）
         return page.evaluate("""() => document.querySelector('.foot').getBoundingClientRect().top
-                                - document.querySelector('#figure-note').getBoundingClientRect().bottom""")
+                                - document.querySelector('#figure-short').getBoundingClientRect().bottom""")
 
 
     # ---- 1280×720：版・使い方の小窓・サンプルで試す・図の注意・止まった候補の帯 ----
     pg = browser.new_page(viewport={"width": 1280, "height": 720})
     pg.add_init_script(FAKE_RECOGNITION)
     pg.goto(url)
+    # Issue #7：版は最下部の帯からアプリ情報（上の帯の ⓘ）へ移した
+    pg.click(".app-info > summary")
     check(pg.is_visible("#app-version") and pg.inner_text("#app-version") == "Ver.1.00-dev",
-          f"左下に版を出す：{pg.inner_text('#app-version')}")
+          f"アプリ情報に版を出す：{pg.inner_text('#app-version')}")
+    pg.click(".app-info > summary")
     check(pg.is_hidden("#help-pop"), "使い方の小窓は最初は閉じている")
     pg.click("#help-button")
     pop = pg.inner_text("#help-pop") if pg.is_visible("#help-pop") else ""
@@ -479,12 +505,13 @@ def check_ui_1105(browser, check, shots: Path | None, out: Path) -> None:
         until(pg, lambda: "hero" in (pg.get_attribute("body", "class") or ""))
         pg.wait_for_timeout(200)
         # 下の帯の上の端と、切り取る親（overflow が visible でないもの）の下の端の、小さい方より上にあること
-        r = pg.evaluate("""() => { const b = document.querySelector('#talk-first'); let lim = document.querySelector('.foot').getBoundingClientRect().top;
+        # Issue #7：［位置を選ばずに話す］の文字は出さない。位置を選ばなくても、マイクをそのまま押して話せる（マイクが下の帯より上に見える）
+        r = pg.evaluate("""() => { const b = document.querySelector('#mic-button'); let lim = document.querySelector('.foot').getBoundingClientRect().top;
             for (let e = b.parentElement; e; e = e.parentElement) { const o = getComputedStyle(e);
               if (o.overflowY !== 'visible' || o.overflowX !== 'visible') lim = Math.min(lim, e.getBoundingClientRect().bottom); }
             return [b.getBoundingClientRect().bottom, lim]; }""")
-        check(pg.is_visible("#talk-first") and r[0] <= r[1],
-              f"11/5 残件4（{w}×{h}）：① で［位置を選ばずに話す］が、下の帯より上に見える（下端 {r[0]:.0f}px・帯 {r[1]:.0f}px）")
+        check(pg.is_hidden("#talk-first") and pg.is_visible("#mic-button") and pg.is_enabled("#mic-button") and r[0] <= r[1],
+              f"11/5 残件4・Issue #7（{w}×{h}）：① で位置を選ばずにマイクを押せる・下の帯より上に見える（下端 {r[0]:.0f}px・帯 {r[1]:.0f}px）")
         check(pg.inner_text("#next-action") == "ロボットの動きについて話しかけてください" and "ロボットに" not in pg.inner_text("#next-action"),
               f"11/5 残件2（{w}×{h}）：① の見出しは、ロボットに直接命令するように読めない言い方")
         check(pg.is_hidden("#chips-more"), f"11/5 残件1（{w}×{h}）：① では番号を折り返すので、はみ出しの札を出さない")
@@ -529,9 +556,10 @@ def check_ui_1105(browser, check, shots: Path | None, out: Path) -> None:
         pg.wait_for_selector("#job-area:not([hidden])")
         until(pg, lambda: pg.is_visible("[data-tip=mic]"))
         tips = pg.eval_on_selector_all("button.tip[data-tip]", "els => els.filter(e => e.getClientRects().length).map(e => e.dataset.tip)")
-        check({"mic", "shift", "count", "position", "updown", "play", "status"} <= set(tips),
-              f"11/5 個別ヘルプ（{w}×{h}）：マイク・移動量・回数・位置・上下・再生・記録の「？」が見える（{tips}）")
-        pg.hover("[data-tip=shift]")
+        # Issue #7：移動量・位置・上下の説明の行は常に出さない（その「？」も一緒に出さない）。記録の「ⓘ」は記録が上の帯に出るときだけ
+        check({"mic", "count", "play"} <= set(tips) and not ({"shift", "position", "updown", "status"} & set(tips)),
+              f"11/5 個別ヘルプ・Issue #7（{w}×{h}）：マイク・回数・再生の「？」が見える。説明の行の「？」は出さない（{tips}）")
+        pg.hover("[data-tip=mic]")
         until(pg, lambda: pop_open(pg))
         t = pg.inner_text("#tip-pop")
         box = pg.locator("#tip-pop").bounding_box()
@@ -548,11 +576,11 @@ def check_ui_1105(browser, check, shots: Path | None, out: Path) -> None:
         pg.click("#tip-pop .tip-close")
         until(pg, lambda: not pop_open(pg))
         check(True, f"11/5 個別ヘルプ（{w}×{h}）：× で閉じる")
-        pg.focus("[data-tip=position]")
+        pg.focus("[data-tip=play]")
         until(pg, lambda: pop_open(pg))
         pg.keyboard.press("Escape")
         until(pg, lambda: not pop_open(pg))
-        check(pg.evaluate("document.activeElement.dataset.tip") == "position",
+        check(pg.evaluate("document.activeElement.dataset.tip") == "play",
               f"11/5 個別ヘルプ（{w}×{h}）：キーボード（フォーカスで開く・Esc で閉じて「？」に戻る）")
         fill_text(pg, "C00002からC00003を3回にして")
         pg.click("#text-send")
@@ -593,7 +621,7 @@ def check_ui_1105(browser, check, shots: Path | None, out: Path) -> None:
         check(True, f"11/5 オープニング（{w}×{h}）：Esc で飛ばせる")
         pg.set_input_files("#file-input", str(REPO / "samples/dummy" / "DEMO_BUTTON_REPEAT.JBI"))
         pg.wait_for_selector("#job-area:not([hidden])")
-        pg.click("#opening-replay")
+        click_opening_replay(pg)
         until(pg, lambda: pg.is_visible("#opening"))
         check("LOADED" in pg.inner_text("#op-job") and "DEMO_BUTTON_REPEAT.JBI" in pg.inner_text("#op-job-note"),
               f"11/5 オープニング（{w}×{h}）：［▶ オープニング］で出し直せる。JOB は読み込んだファイルの名前だけ")
@@ -666,8 +694,10 @@ def check_answer_after_approval(browser, check, shots: Path | None, out: Path) -
             check(r[0] >= r[2] - 1 and r[1] <= r[3] + 1,
                   f"11/5 F1（{w}×{h}）：承認のあとの質問の答えの吹き出しが会話の欄の中に見える"
                   f"（吹き出し {r[0]:.0f}〜{r[1]:.0f}px・欄 {r[2]:.0f}〜{r[3]:.0f}px）")
-            check(pg.is_visible("#text-send") and pg.is_visible("#status-line"),
-                  f"11/5 F1（{w}×{h}）：入力欄の［送る］と状態の1行は見えたまま")
+            # Issue #7：ふだんの記録は上の帯に出さない（承認の状態は候補のポップアップ）。全文はアプリ情報
+            check(pg.is_visible("#text-send") and pg.is_visible("#approval-states")
+                  and "承認 済み" in (pg.text_content("#app-info-status") or ""),
+                  f"11/5 F1（{w}×{h}）：入力欄の［送る］と承認の状態は見えたまま")
             if shots is not None:
                 shots.mkdir(parents=True, exist_ok=True)
                 pg.screenshot(path=str(shots / f"F1_{w}_after_approval_answer.png"))
@@ -741,7 +771,9 @@ def check_send_while_waiting(browser, check, shots: Path | None, out: Path) -> N
         until(pg, lambda: pg.evaluate(humans) == 2)
         check(len(talks) == 2 and pg.input_value("#text-input") == "",
               f"11/5 F3：答えのあとに［送る］で、残っていた文を送れる（/api/talk {len(talks)}回）")
-        check(pg.is_visible("#text-send") and pg.is_visible("#status-line"), "11/5 F3：［送る］と状態の1行は見えたまま")
+        # Issue #7：ふだんの記録（候補なし）は上の帯に出さない。全文はアプリ情報
+        check(pg.is_visible("#text-send") and pg.is_hidden("#status-line") and "アプリの記録：" in (pg.text_content("#app-info-status") or ""),
+              "11/5 F3・Issue #7：［送る］は見えたまま・ふだんの記録はアプリ情報")
         if shots is not None:
             shots.mkdir(parents=True, exist_ok=True)
             pg.screenshot(path=str(shots / "F3_send_while_waiting.png"))
@@ -943,13 +975,14 @@ def check_voice_error_typing(browser, check, shots: Path | None, out: Path) -> N
                       and pg.input_value("#text-input") == "" and not sends,
                       f"11/5 G7（{w}×{h}・{code}）：① で声の失敗のあと、文の言う「下の欄」（入力欄と［送る］）が帯より上に見える。"
                       f"何も送らない（欄 {'見える' if pg.is_visible('#text-input') else '無い'}・送信 {len(sends)}）")
-                r = pg.evaluate("""() => { const b = document.querySelector('#talk-first'); let lim = document.querySelector('.foot').getBoundingClientRect().top;
+                # Issue #7：［位置を選ばずに話す］は出さない。代わりに位置の番号のボタンが帯より上に見えること
+                r = pg.evaluate("""() => { const b = document.querySelector('#position-chips'); let lim = document.querySelector('.foot').getBoundingClientRect().top;
                     for (let e = b.parentElement; e; e = e.parentElement) { const o = getComputedStyle(e);
                       if (o.overflowY !== 'visible' || o.overflowX !== 'visible') lim = Math.min(lim, e.getBoundingClientRect().bottom); }
                     return [b.getBoundingClientRect().bottom, lim]; }""")
                 sc = pg.evaluate(PAGE_SCROLL_JS)
-                check(pg.is_visible("#talk-first") and r[0] <= r[1] and sc[0] <= sc[2] and sc[1] <= sc[3],
-                      f"11/5 G7（{w}×{h}・{code}）：入力欄を出しても［位置を選ばずに話す］は帯より上（下端 {r[0]:.0f}px・帯 {r[1]:.0f}px）、"
+                check(pg.is_hidden("#talk-first") and pg.is_visible("#position-chips") and r[0] <= r[1] and sc[0] <= sc[2] and sc[1] <= sc[3],
+                      f"11/5 G7・Issue #7（{w}×{h}・{code}）：入力欄を出しても位置の番号は帯より上（下端 {r[0]:.0f}px・帯 {r[1]:.0f}px）、"
                       f"ページのスクロールなし（{sc}）")
                 if shots is not None and code == "not-allowed":
                     shots.mkdir(parents=True, exist_ok=True)
@@ -1012,7 +1045,7 @@ def check_mic_after_undo(browser, check, shots: Path | None, out: Path) -> None:
             until(pg, lambda: pg.get_attribute("#step-4", "aria-current") == "step")
             check(pg.is_disabled("#mic-button"), f"11/5 夜 マイク（{w}×{h}）：候補を確かめている間（ステップ4）はマイクを押せない（今までの決まり）")
             pg.click("#undo-button")
-            until(pg, lambda: "候補 なし" in pg.inner_text("#status-line"))
+            until(pg, lambda: "候補 なし" in pg.text_content("#status-line"))
             pg.wait_for_timeout(300)
             check(pg.is_visible("#mic-button") and pg.is_enabled("#mic-button"),
                   f"11/5 夜 マイク（{w}×{h}）：［元に戻す］で候補が無くなったら、マイクがまた押せる（灰色のままにしない）")
@@ -1065,10 +1098,10 @@ def check_hold_after_approval(browser, check, shots: Path | None, out: Path) -> 
         until(pg, lambda: pg.locator("#reply-message button").count() >= 2, 10000)
         btns = [b.inner_text() for b in pg.locator("#reply-message button").all()]
         check(btns[:2] == ["取り消す", "このまま残す（もう一度承認）"] and pg.is_disabled("#export-button")
-              and "保留" in pg.inner_text("#status-line") and pg.inner_text("#next-action").startswith("取り消すか確かめています"),
-              f"P0 保留：承認のあとの「違くない？」で保留。ボタン {btns}・出力は押せない・見出しは保留の文")
+              and "保留" in pg.text_content("#status-line") and pg.is_visible("#status-line") and pg.inner_text("#next-action").startswith("取り消すか確かめています"),
+              f"P0 保留：承認のあとの「違くない？」で保留。ボタン {btns}・出力は押せない・見出しは保留の文・上の帯に保留の記録が出る（Issue #7）")
         pg.locator("#reply-message button", has_text="このまま残す").first.click()
-        until(pg, lambda: "保留" not in pg.inner_text("#status-line"), 10000)
+        until(pg, lambda: "保留" not in pg.text_content("#status-line"), 10000)
         check(pg.is_hidden("#approval-status") and pg.is_disabled("#export-button") and pg.is_enabled("#open-confirm"),
               "P0 保留：［このまま残す］で保留を解くと、承認は消え、もう一度［確認して承認へ］から（出力は押せない）")
         pg.close()
@@ -1167,17 +1200,19 @@ def check_export_twice(browser, check, shots: Path | None, out: Path) -> None:
 # 11/5 夜 F6：1920×1080 で撮る動画の文字。測る要素（会話の吹き出し・話し手・状態の1行・返事の札・凡例・図の注意書き）
 TEXT_SIZE_SELS = [".bubble.human .said", ".bubble.claude .said", ".bubble.app .said", ".bubble .who", ".status-line",
                   ".status-line .st-chip", "#reply-message", "#reply-message .range-lines", ".legend", ".legend.kinds",
-                  ".figure-notes", ".range-button-note", ".cand-heard", ".cand-warn"]
+                  ".figure-notes", ".figure-short", ".range-button-note", ".cand-heard", ".cand-warn"]
 TEXT_SIZE_JS = """(sels) => { const r = {}; for (const s of sels) {
   const v = [...document.querySelectorAll(s)].filter(e => e.offsetParent !== null).map(e => parseFloat(getComputedStyle(e).fontSize));
   if (v.length) r[s] = [Math.min(...v), Math.max(...v)]; } return r; }"""
 # 直す前（9671245）に同じ手順で測った値。1280×720・1366×768・1440×900 はこのまま（小さな画面の文字は変えない）
 _TS_SIDE = {".bubble.human .said": [14, 14], ".bubble.claude .said": [15, 15], ".bubble .who": [11, 11]}
-_TS_ALL = {".status-line": [12, 12], ".status-line .st-chip": [12, 12], ".legend.kinds": [12, 12], ".figure-notes": [12, 12]}
+# Issue #7：ふだんの記録（.status-line）は上の帯に出さない（範囲の確認中だけ出る）。図の注意は短い1行（.figure-short・全文は ⓘ）
+_TS_STATUS = {".status-line": [12, 12], ".status-line .st-chip": [12, 12]}
+_TS_ALL = {".legend.kinds": [12, 12], ".figure-notes": [12, 12], ".figure-short": [12, 12]}
 TEXT_SIZE_BEFORE = {
     "load": {**_TS_ALL, ".legend": [12, 12]},
     "conversation": {**_TS_SIDE, **_TS_ALL, ".legend": [12, 12]},
-    "range": {**_TS_SIDE, **_TS_ALL, ".bubble.app .said": [14, 14], "#reply-message": [14, 14], "#reply-message .range-lines": [14, 14],
+    "range": {**_TS_SIDE, **_TS_ALL, **_TS_STATUS, ".bubble.app .said": [14, 14], "#reply-message": [14, 14], "#reply-message .range-lines": [14, 14],
               ".legend": [12, 12], ".range-button-note": [12, 12]},
     "candidate": {**_TS_SIDE, **_TS_ALL, ".bubble.app .said": [13, 14], ".legend": [12, 13], ".cand-heard": [13, 13], ".cand-warn": [13, 13]},
     "approved": {**_TS_SIDE, **_TS_ALL, ".bubble.app .said": [13, 14], "#reply-message": [14, 14], ".legend": [12, 13], ".cand-warn": [12, 12]},
@@ -1185,7 +1220,7 @@ TEXT_SIZE_BEFORE = {
 # 1920×1080 で、これより小さくしない（会話の文字 16px・話し手 13px・状態の1行 14px・凡例と注意書き 13px）
 TEXT_SIZE_MIN_1080 = {".bubble.human .said": 16, ".bubble.claude .said": 16, ".bubble.app .said": 15, ".bubble .who": 13,
                       ".status-line": 14, ".status-line .st-chip": 14, "#reply-message": 16, "#reply-message .range-lines": 15,
-                      ".legend": 13, ".legend.kinds": 13, ".figure-notes": 13, ".range-button-note": 13, ".cand-heard": 14, ".cand-warn": 14}
+                      ".legend": 13, ".legend.kinds": 13, ".figure-notes": 13, ".figure-short": 13, ".range-button-note": 13, ".cand-heard": 14, ".cand-warn": 14}
 # 1920×1080 の 3D の大きさ（直す前 9671245 に同じ手順で測った値）。これより小さくしない
 FIG_BEFORE_1080 = {"load": (1342, 742), "conversation": (1342, 742), "range": (1342, 742), "candidate": (1342, 681), "approved": (1342, 681)}
 
@@ -1271,7 +1306,7 @@ def check_opening_click_through(browser, check, shots: Path | None, out: Path) -
     pg.wait_for_selector("#job-area:not([hidden])")
     pg.wait_for_timeout(300)
     for name, do in gestures():
-        run_case("出し直し", lambda: pg.click("#opening-replay"), name, do)
+        run_case("出し直し", lambda: click_opening_replay(pg), name, do)
     if shots is not None:
         pg.screenshot(path=str(shots / "H3_opening_after_skip.png"))
     pg.close()
@@ -2435,8 +2470,9 @@ def check_c026(browser, url, check, shots: Path | None) -> None:
         pg.wait_for_selector("#job-area:not([hidden])")
         pg.locator("#position-chips button", has_text="C00005").click()
         until(pg, lambda: pg.inner_text("#voice-position strong") == "C00005")
-        got = pg.inner_text("#updown-status") if pg.is_visible("#updown-status") else ""
-        check(got == want, f"上下の向き：{value['status']} は「{want}」と出す（{got!r}）")
+        # Issue #7：左の「上下の向き」の行は出さない（文は作る）。同じ状態は図の欄の上の1行（#updown-detail）にいつも見える（下の check）
+        got = pg.text_content("#updown-status") or ""
+        check(got == want and pg.is_hidden("#updown-status"), f"上下の向き：{value['status']} は「{want}」（左の行は出さない・Issue #7）（{got!r}）")
         det = pg.inner_text("#updown-detail") if pg.is_visible("#updown-detail") else ""
         # 音声のカード（.side）の外に置く：右側の 80文字の決まり（下の check_updown_unconfirmed・4ステップで数える）を変えない
         inside = pg.evaluate("() => !!document.querySelector('.side #updown-detail')")
@@ -2845,7 +2881,7 @@ def check_demo3d(browser, url, check, shots: Path | None, errors: list) -> None:
             shot(pg, "D6_1280x720_seq_after_3rd.png")
             fit = pg.evaluate("""() => { const f = document.querySelector('.foot').getBoundingClientRect().top;
               const b = (s) => document.querySelector(s).getBoundingClientRect();
-              return [f, b('#fig-3d svg').top, b('#play-seq').bottom, b('#play-compare').bottom, b('#figure-note').bottom,
+              return [f, b('#fig-3d svg').top, b('#play-seq').bottom, b('#play-compare').bottom, b('#figure-short').bottom,
                       window.scrollY]; }""")
             shot_seq.append(fit)
     shot_seq = []
@@ -3244,7 +3280,7 @@ def check_3d_robot_base(browser, check, shots: Path | None, out: Path) -> None:
                 # 本番UI：「正面に戻す」（#view-reset）は 3D の左上（図の上）。見出しの欄は図の向きのタブだけ
                 check(heads == ["3d", "yz", "xz", "xy"] and pg.locator("#model-toggle").count() == 0 and pg.is_visible("#view-reset"),
                       f"台座（{tag}）：3D の上の欄は図の向き（3D・Y・Z・X・Z・X・Y）、正面に戻すは図の上にいつも見える：{heads}")
-                notes = pg.inner_text("#figure-panel .figure-notes")
+                notes = pg.text_content("#figure-panel .figure-notes")  # 全文（Issue #7：ⓘ の中）
                 body = pg.inner_text("body")
                 check("ロボット本体・関節は描いていません" in notes and "動作や干渉を保証するシミュレーターではありません" in notes
                       and "当たらないとは限りません" in notes and "腕やツールの根元は描いていません" in notes and "参考表示であり" in notes
@@ -3690,8 +3726,9 @@ def check_talk(browser, check, shots: Path | None, errors: list, out: Path) -> N
             if shots is not None:
                 pg.screenshot(path=str(shots / "talk_1_highlight.png"))
             check(pg.locator("#ask-turns .bubble.claude").count() == 1, "会話：数を含まない Claude の文がそのまま表示される")
-            check(pg.is_visible("#status-line") and "承認 まだ" in pg.inner_text("#status-line"),
-                  f"状態の1行（プログラムの確定情報）が見える：{pg.inner_text('#status-line')}")
+            # Issue #7：ふだんの記録は上の帯に出さず、アプリ情報に出す（文はサーバーのまま）
+            check(pg.is_hidden("#status-line") and "承認 まだ" in (pg.text_content("#app-info-status") or ""),
+                  f"状態の1行（プログラムの確定情報）はアプリ情報にある：{pg.text_content('#app-info-status')}")
             check("21〜26行目：C00001→C00002→C00003（2回）" in pg.inner_text("#ask-turns .supplement"),
                   "会話：番号は補足として小さく出る")
             whos = pg.locator("#ask-turns .bubble .who").all_inner_texts()
@@ -3804,8 +3841,9 @@ def check_dialog(browser, check, shots: Path | None, errors: list, updown_config
         pg.goto(url)
         pg.click("#sample-button")
         pg.wait_for_selector("#job-area:not([hidden])")
-        check(pg.is_visible("#talk-first"), "会話：ステップ2に「位置を選ばずに話す」がある")
-        pg.click("#talk-first")
+        # Issue #7：［位置を選ばずに話す］の文字は出さない（位置を選ばずにマイクで話せる）。会話の流れを確かめるため、同じ状態に入る
+        check(pg.is_hidden("#talk-first") and pg.is_enabled("#mic-button"), "会話・Issue #7：ステップ2で、位置を選ばずにマイクを押せる（文字のボタンは出さない）")
+        talk_first(pg)
         until(pg, lambda: pg.get_attribute("#step-3", "aria-current") == "step")
         check(pg.inner_text("#voice-position strong") == "位置は未選択" and pg.is_hidden("#dialog-panel"),
               "会話：位置を選ばずにステップ3へ進める（会話の欄は、まだ出さない）")
@@ -3893,7 +3931,7 @@ def check_dialog(browser, check, shots: Path | None, errors: list, updown_config
         pg.goto(url)
         pg.click("#sample-button")
         pg.wait_for_selector("#job-area:not([hidden])")
-        pg.click("#talk-first")
+        talk_first(pg)
         send(pg, "置くところを少し手前にして")
         until(pg, lambda: labels(pg) == ["C00005 です", "ほかの位置"])
         send(pg, "そうじゃなくて")
@@ -3926,7 +3964,7 @@ def check_dialog(browser, check, shots: Path | None, errors: list, updown_config
         pg.goto(url)
         pg.click("#sample-button")
         pg.wait_for_selector("#job-area:not([hidden])")
-        pg.click("#talk-first")
+        talk_first(pg)
         send(pg, "置くところをバイオ3ミリ下げて")
         until(pg, lambda: pg.is_visible("#reply-message"))
         check("バイオ" in pg.inner_text("#reply-message") and pg.inner_text("#next-action") == "もう一度、言い直してください",
@@ -3967,7 +4005,7 @@ def check_dialog(browser, check, shots: Path | None, errors: list, updown_config
         pg.goto(url)
         pg.click("#sample-button")
         pg.wait_for_selector("#job-area:not([hidden])")
-        pg.click("#talk-first")
+        talk_first(pg)
         send(pg, "置くところをYのマイナス3mm")
         until(pg, lambda: labels(pg) == ["C00005 です", "ほかの位置"])
         pg.locator("#dialog-choices button", has_text="ほかの位置").click()
@@ -3994,7 +4032,7 @@ def check_dialog(browser, check, shots: Path | None, errors: list, updown_config
         pg.goto(url)
         pg.click("#sample-button")
         pg.wait_for_selector("#job-area:not([hidden])")
-        pg.click("#talk-first")
+        talk_first(pg)
         send(pg, "置くところを少し手前にして")
         until(pg, lambda: labels(pg) == ["C00005 です", "ほかの位置"])
         pg.wait_for_timeout(200)
@@ -4070,7 +4108,7 @@ def check_dialog(browser, check, shots: Path | None, errors: list, updown_config
         dt = pg.evaluate_handle(DROP_FILE, ["MY_JOB.JBI", base64.b64encode(data).decode("ascii")])
         pg.dispatch_event("#drop-zone", "drop", {"dataTransfer": dt})
         pg.wait_for_selector("#job-area:not([hidden])")
-        pg.click("#talk-first")
+        talk_first(pg)
         before = interp.locates
         send(pg, "置くところを少し手前にして")
         until(pg, lambda: pg.get_attribute("#step-2", "aria-current") == "step" and pg.is_visible("#dialog-panel"))
@@ -4129,8 +4167,8 @@ def check_updown_unconfirmed(browser, check, shots: Path | None, errors: list) -
         lure = ("上に", "下に", "上へ", "下へ", "上方向", "下方向")
         check(ph == "Zプラス方向に10mm" and not any(w in ph + howto + helps for w in lure),
               f"上下の設定なし：入力欄・使い方・？の例文に上下の言葉を使わない（{ph!r}）")
-        check(pg.inner_text("#updown-status") == "上下の向き：未確認（Z＋・Z−で指示）",
-              f"上下の設定なし：「上下の向き：未確認（Z＋・Z−で指示）」と出す（{pg.inner_text('#updown-status')!r}）")
+        check(pg.text_content("#updown-status") == "上下の向き：未確認（Z＋・Z−で指示）",
+              f"上下の設定なし：「上下の向き：未確認（Z＋・Z−で指示）」と出す（{pg.text_content('#updown-status')!r}）")
         det = pg.inner_text("#updown-detail") if pg.is_visible("#updown-detail") else ""
         check(det == "上下の向き：未確認（HC20DT）", f"S30-1：設定なしのサーバーでもロボット名（--robot）を出す（{det!r}）")
         side = len("".join(pg.evaluate("""() => { const tips = [...document.querySelectorAll('button.tip')]; tips.forEach((b) => { b.style.display = 'none'; });
@@ -4206,7 +4244,7 @@ def check_updown_unconfirmed(browser, check, shots: Path | None, errors: list) -
         pg.goto(url)
         pg.click("#sample-button")
         pg.wait_for_selector("#job-area:not([hidden])")
-        pg.click("#talk-first")
+        talk_first(pg)
         until(pg, lambda: pg.get_attribute("#step-3", "aria-current") == "step")
         fill_text(pg, "置くところ")
         pg.click("#text-send")
@@ -4338,7 +4376,7 @@ def check_above_fold(browser, check, shots: Path | None, errors: list, out: Path
     url = f"http://127.0.0.1:{servers[0].server_address[1]}/"
     url_long = f"http://127.0.0.1:{servers[1].server_address[1]}/"
     table: dict = {}
-    head = ["#status-line", "#next-action"]
+    head = ["#next-action"]  # Issue #7：ふだんの記録（#status-line）は上の帯に出さない
     entry = ["#text-input", "#text-send", "#mic-button"]
 
     def stage(pg, w, h, name, sels, fig_kind, extra_ok=True, extra_what="", tag=""):
@@ -4404,7 +4442,7 @@ def check_above_fold(browser, check, shots: Path | None, errors: list, out: Path
         pg.goto(url)
         pg.click("#sample-button")
         pg.wait_for_selector("#job-area:not([hidden])")
-        until(pg, lambda: pg.is_visible("#status-line"))
+        until(pg, lambda: "アプリの記録：" in (pg.text_content("#app-info-status") or ""))  # Issue #7：ふだんはアプリ情報
         if not long_path:
             hero = "hero" in (pg.get_attribute("body", "class") or "")
             stl = pg.text_content("#status-line") or ""
@@ -4688,8 +4726,12 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     check(n <= 160, f"最初の画面の文字は少ない（{n}文字。160文字まで）")
     # ボタンは「？」（使い方）・「サンプルで試す」・「詳細表示」の3つまで（以前は2つまで。？とサンプルを足した）
     check(primaries(pg) == 1 and buttons(pg) <= 3, f"最初の画面：目立つものは1つ（ボタン {buttons(pg)}個）")
-    check(pg.is_visible("#mode-banner") and pg.is_visible("#readonly-note"),
-          "最初の画面にも、シミュレーションモードと「実機用の出力・転送・ロボットの起動はしません」を出す")
+    # Issue #7：最初の画面の印は短い「SIM」。名前（読み上げ・小さな説明）に正式な名前と「実機への出力・転送・ロボットの起動はしません」
+    check(pg.is_visible("#mode-banner .mb-short") and pg.inner_text("#mode-banner .mb-short") == "SIM"
+          and "シミュレーションモード" in (pg.get_attribute("#mode-banner", "aria-label") or "")
+          and "実機への出力・転送・ロボットの起動はしません" in (pg.get_attribute("#mode-banner", "aria-label") or "")
+          and "実機への出力・転送・ロボットの起動はしません" in (pg.get_attribute("#mode-banner", "title") or ""),
+          "最初の画面にも、シミュレーションモード（SIM）と「実機への出力・転送・ロボットの起動はしません」を出す")
     shot(pg, "1_start.png")
 
     data = (REPO / "samples/dummy/DEMO_C_PLACE.JBI").read_bytes()
@@ -4702,8 +4744,14 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     check(pg.inner_text("#interp-badge") == "解釈：モック", f"解釈のしかたを上の帯で区別：{pg.inner_text('#interp-badge')}")
     # 入口は1つ（11/4 唐川さんの指示③）：ステップ2でも、指示の欄（会話の入口）を出す（「何をしている？」を位置を選ぶ前に聞ける）
     check(cards(pg) == ["select-panel", "instruction-panel"], f"右側は今のステップのカードと、入口（指示の欄）：{cards(pg)}")
+    # Issue #7：短い1行をいつも出し、全文は ⓘ で開ける
+    short = pg.inner_text("#figure-short") if pg.is_visible("#figure-short") else ""
+    check(all(x in short for x in ["目安", "ロボット本体の動きではありません", "当たらないとは限りません", "実機の動作・干渉は保証しません"]),
+          f"図の注意・再生の限界・3D の限界（目安・本体の動きではない・当たらないとは限らない・保証しない）は、短い1行でいつも見える（{short!r}）")
+    pg.click(".fig-notes-more > summary")
     check(all(pg.is_visible(s) for s in ["#figure-note", "#play-note", "#view3d-note"]),
-          "図の注意・再生の限界・3D の限界（ロボット本体なし・保証しない）は、いつも見える")
+          "図の注意の全文（ロボット本体・関節は描かない・動作や干渉を保証しない）は ⓘ で読める")
+    pg.click(".fig-notes-more > summary")
 
     # 3D の点はジョブの座標そのもの（名前・行・数がジョブと一致する。作った点は無い）
     lines = {p["name"]: p["line"] for p in api.job_view(data)["positions"] if p["xyz"]}
@@ -4897,7 +4945,8 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     check(pg.locator("#fig-3d circle.marker").count() == 1, "再生の印が 3D の中を動く")
     shot(pg, "4_playing.png")
     until(pg, lambda: "終わりました" in pg.inner_text("#play-status"), timeout_ms=60000)
-    check("ロボット本体の動きではありません" in pg.inner_text("#play-note"), "再生の限界（ロボット本体の動きではない）を出す")
+    check("ロボット本体の動きではありません" in pg.inner_text("#figure-short") and "ロボット本体の動きではありません" in pg.text_content("#play-note"),
+          "再生の限界（ロボット本体の動きではない）を出す（いつも見える短い1行・ⓘ の全文）")
     press(pg, "C00002")
     pg.wait_for_timeout(200)
     check(pg.get_attribute("#step-4", "aria-current") == "step" and "選び直せません" in pg.inner_text("#play-status"),
