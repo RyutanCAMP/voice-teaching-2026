@@ -43,7 +43,7 @@ def speak(pg, text):
     pg.click("#voice-stop")
     E.until(pg, lambda: pg.input_value("#text-input") == text)
     pg.click("#text-send")
-    E.until(pg, lambda: pg.is_enabled("#text-send") or not pg.is_visible("#text-send"), 15000)
+    E.until(pg, lambda: pg.is_enabled("#text-send") or not pg.is_visible("#text-send"), 40000)
     pg.wait_for_timeout(700)
 
 
@@ -54,11 +54,12 @@ def main() -> int:
     ap.add_argument("--height", type=int, default=1080)
     ap.add_argument("--job", default="DEMO_C_PLACE.JBI")
     ap.add_argument("--position", default="C00005")
+    ap.add_argument("--url", default=None, help="起動中のサーバー（例 http://127.0.0.1:8835/）。無ければモックのサーバーを自分で起動する")
     a = ap.parse_args()
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     tmp = Path(tempfile.mkdtemp(prefix="vt-shoot-"))
-    srv, url = serve(tmp)
+    srv, url = (None, a.url) if a.url else serve(tmp)
     from playwright.sync_api import sync_playwright
     w, h = a.width, a.height
     shot = lambda pg, name: pg.screenshot(path=str(out / f"{w}x{h}_{name}.png"))  # noqa: E731
@@ -90,7 +91,7 @@ def main() -> int:
                 pg.wait_for_timeout(700)
             shot(pg, "06_confirm")
             if pg.is_visible("#approver-name"):
-                pg.fill("#approver-name", "唐川")
+                pg.fill("#approver-name", "自動確認（シクロ）")
                 if pg.is_enabled("#approve-button"):
                     pg.click("#approve-button")
                     pg.wait_for_timeout(900)
@@ -101,8 +102,9 @@ def main() -> int:
             shot(pg, "08_exported")
             br.close()
     finally:
-        srv.shutdown()
-        srv.server_close()
+        if srv is not None:
+            srv.shutdown()
+            srv.server_close()
     print("shots:", out)
     return 0
 
