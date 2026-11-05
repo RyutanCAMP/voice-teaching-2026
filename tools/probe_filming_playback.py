@@ -15,7 +15,7 @@ from voice_teaching.claude_interpreter import MockInterpreter
 from voice_teaching.web.server import make_server
 
 
-def run(out):
+def run(out, engine="chrome"):
     out.mkdir(parents=True, exist_ok=True)
     srv = make_server(port=0, interpreter=MockInterpreter(), updown_config=None)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -23,7 +23,7 @@ def run(out):
     rows = []
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(channel="chrome", headless=True)
+            browser = p.chromium.launch(**({"channel": "chrome"} if engine == "chrome" else {}), headless=True)
             for variant in ("baseline", "ui"):
                 for attempt in range(2):
                     page = browser.new_page(viewport=dict(width=1280, height=900))
@@ -57,7 +57,7 @@ def run(out):
     finally:
         srv.shutdown()
         srv.server_close()
-    result = dict(base=BASE, real_api_calls=0, cases=rows)
+    result = dict(base=BASE, engine=engine, real_api_calls=0, cases=rows)
     (out / "results.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False))
 
@@ -65,4 +65,6 @@ def run(out):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, required=True)
-    run(parser.parse_args().out)
+    parser.add_argument("--engine", choices=("chrome", "chromium"), default="chrome")
+    args = parser.parse_args()
+    run(args.out, args.engine)
