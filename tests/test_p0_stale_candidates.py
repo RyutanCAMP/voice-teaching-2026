@@ -601,3 +601,16 @@ def test_after_approval_fifth_round(tmp_path, out_dir, text):
     fake.add(T.answer("C00005 へ直線で動きます。", [21]), T.answer("C00005 へ直線で動きます。", [21]))
     w.talk(sid, text)
     assert not w.state(sid)["state"]["can_export"] and not w.export(sid, candidate_gen=gen)["ok"], text
+
+
+# ---- 16. QA 再レビュー M-2：保留の返事は、ボタンで答えられる（［取り消す］［このまま残す］。押すと /api/hear へ決まった文） ----
+def test_hold_reply_has_buttons_that_work(tmp_path):
+    w, fake, sid = approved_move(tmp_path)
+    r = w.talk(sid, "違くない？")
+    ch = r["hear"]["choices"]
+    assert [c["text"] for c in ch] == ["取り消して", "このままでいい"] and r["state"]["hold"]
+    r2 = w.hear(sid, ch[1]["text"])  # ［このまま残す］：保留を解き、承認は消える（もう一度ボタンで承認）
+    assert r2["state"]["hold"] is False and r2["state"]["approval"] is None and r2["state"]["candidate"] is not None
+    w.talk(sid, "違くない？")
+    r3 = w.hear(sid, ch[0]["text"])  # ［取り消す］：無効
+    assert r3["state"]["candidate"] is None
