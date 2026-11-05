@@ -10,7 +10,7 @@
 // - 画面は「説明が要らない」ことを目指す：右側には今のステップのカードだけ、目立たせる操作は1つだけ。
 "use strict";
 import { SpeechInput } from "/static/speech.js";
-import { View3D } from "/static/view3d.js";
+import { View3D, drawBase2d } from "/static/view3d.js";
 import { Player } from "/static/player.js";
 import { splitUnknown, displayMinus, segmentLook, segmentTitle, confirmHeading, updownStatus, updownConfirmLine, updownDetail,
   speechExamples, repeatCountLabel, cycleStatus, nowPlaying, nowText, sequenceChips, tallyParts, rephraseExamples,
@@ -1395,7 +1395,7 @@ function setView(name) {
 for (const b of document.querySelectorAll(".view-tab")) b.addEventListener("click", () => setView(b.dataset.view));
 for (const f of document.querySelectorAll(".figs-small figure")) f.addEventListener("click", () => setView(f.dataset.view));
 
-// ---- 3D（ジョブの X・Y・Z をそのまま点で描く。ロボット本体は描かない） ----
+// ---- 3D（ジョブの X・Y・Z をそのまま点で描く。HC20 を模した静止モデルは view3d.js） ----
 const view3d = new View3D($("fig-3d"), { onPick: (name) => {
   if (state.st && state.st.candidate) {
     $("play-status").textContent = "変更を確かめている間は、位置を選び直せません（「元に戻す」で選び直せます）";
@@ -1501,7 +1501,8 @@ function drawFigure(host, axA, axB, big) {
     return null;
   }
   const all = before.concat(after);
-  const xs = all.map((p) => p.xyz[a]), ys = all.map((p) => p.xyz[b]);
+  // ロボット座標の原点（台座の中心）も図に入れる（原点と X＋ の印は view3d.js の drawBase2d）
+  const xs = all.map((p) => p.xyz[a]).concat(0), ys = all.map((p) => p.xyz[b]).concat(0);
   const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys), 1);
   const W = big ? 720 : 300, H = big ? 480 : 220, PAD = big ? 70 : 24;
   const k = Math.min((W - 2 * PAD) / span, (H - 2 * PAD) / span);
@@ -1589,6 +1590,7 @@ function drawFigure(host, axA, axB, big) {
       svg.append(label);
     }
   }
+  drawBase2d(svg, { axA, axB, sx, sy, W, H, big, placed, pts: all.map((p) => [sx(p.xyz[a]), sy(p.xyz[b])]) });
   const ax1 = svgEl("text", { x: W - 40, y: H - 12, class: "axis" }); ax1.textContent = `${axA} →`;
   const ax2 = svgEl("text", { x: 12, y: 20, class: "axis" }); ax2.textContent = `↑ ${axB}`;
   svg.append(ax1, ax2);

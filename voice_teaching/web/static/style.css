@@ -467,6 +467,12 @@ button.approve:hover:not([disabled]) { background: #ff8a45; }
 .inset .inset-amt { font-size: 13px; font-family: "SF Mono", Consolas, monospace; }
 #view-reset { margin-left: auto; margin-right: 8px; font-size: 14px; }
 #view-reset:not([hidden]) + .view-tabs { margin-left: 0; }
+/* HC20 を模したモデルの表示・非表示（視点を戻すと図の向きのボタンの間。並びは崩さない） */
+#model-toggle { margin-left: auto; margin-right: 8px; font-size: 14px; flex: none; }
+#model-toggle[aria-pressed="false"] { color: var(--sub); text-decoration: line-through; }  /* 隠している間（色だけでなく線でも） */
+#view-reset:not([hidden]) + #model-toggle { margin-left: 0; }
+#model-toggle:not([hidden]) + .view-tabs { margin-left: 0; }
+#view-reset:not([hidden]) + #model-toggle[hidden] + .view-tabs { margin-left: 0; }
 .stage-head .view-tabs { margin-left: auto; flex: none; }
 .view-tab { white-space: nowrap; }
 .view-tab[data-view="3d"] { font-weight: 700; }
