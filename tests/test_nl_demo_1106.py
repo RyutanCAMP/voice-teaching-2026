@@ -14,7 +14,9 @@ from pathlib import Path
 import pytest
 
 import test_acceptance_nl_safety_1105 as A
+import test_claude_talk as T
 from voice_teaching import claude_talk as talk
+from voice_teaching import updown
 from voice_teaching import utterance as ut
 
 
@@ -204,18 +206,201 @@ def test_stray_sign_question_is_kept_when_the_sign_is_really_loose(tmp_path):
     assert not r["state"]["candidate"] and "どこに付くか" in hear_msg(r)
 
 
-# ---- 5. 上下の向きが未確認の「上に3mm」：候補にせず、確かめる（回帰。文は今のまま） ----
-# 文を「…言ってもらえますか？」の聞き返しにする案は、状態の表示（候補の表示にも出る）と同じ文で、169件の再生の
-# 25件ほどの見え方が変わるため、今回は入れていない（唐川さんに確認する）
-@pytest.mark.parametrize("text", ["上に3mm", "3mm下げて", "上に三ミリ"])
+# ---- 5. 上下の向きが未確認の「上に3mm」：意図を受け止めてから、分からないことだけを聞く（唐川さんの決定 11/5） ----
+# 数と上下の言葉はプログラムが人の文から読んで入れる。Zプラス・Zマイナスは決めない。候補は作らない。
+# 状態の表示（state.updown.message・候補の表示）は今の文（updown.MSG_UNCONFIRMED）のまま。変えるのは会話の聞き返しだけ。
+# 「3Dの矢印を見ながら確認できます」は出さない（画面が 3D と 2D を切り替えられ、サーバーからは 3D が出ているか確かめられない）
+@pytest.mark.parametrize("text,head,word", [
+    ("上に3mm", "3mm上に動かしたいんですね。", "上"),
+    ("下に3mm", "3mm下に動かしたいんですね。", "下"),
+    ("3ミリ上げて", "3mm上げたいんですね。", "上"),
+    ("3mm下げて", "3mm下げたいんですね。", "下"),
+    ("上へ5mm", "5mm上へ動かしたいんですね。", "上"),
+    ("C00004を上に1.5mm", "1.5mm上に動かしたいんですね。", "上"),
+    ("上方向に3mm", "3mm上方向に動かしたいんですね。", "上"),
+])
+def test_unconfirmed_updown_question_takes_the_intent_first(tmp_path, text, head, word):
+    w, _, sid = A.place_flow(tmp_path)
+    r = w.talk(sid, text)
+    msg = hear_msg(r)
+    assert not r["state"]["candidate"] and not r["state"]["approval"]
+    assert msg.startswith(head), msg
+    assert f"この設備では、まだ「{word}」の方向が決まっていません。" in msg, msg
+    assert "ZプラスとZマイナスのどちらになりますか？" in msg, msg
+    assert "3D" not in msg and not ut.contains_forbidden(msg)
+    # 状態の表示は今の文のまま
+    assert r["state"]["updown"]["message"] == updown.MSG_UNCONFIRMED
+
+
+@pytest.mark.parametrize("text,word", [("上に動かして", "上"), ("下げて", "下")])
+def test_unconfirmed_updown_without_amount_asks_direction_and_amount(tmp_path, text, word):
+    w, _, sid = A.place_flow(tmp_path)
+    r = w.talk(sid, text)
+    msg = hear_msg(r)
+    assert not r["state"]["candidate"]
+    assert msg.startswith(f"{word}"), msg  # 言っていない量を入れない
+    assert f"この設備では、まだ「{word}」の方向が決まっていません。" in msg, msg
+    assert "ZプラスとZマイナスのどちらに、何mm動かしますか？" in msg, msg
+
+
+@pytest.mark.parametrize("text", ["上に3mm", "3mm下げて", "上に三ミリ", "上に3cm"])
 def test_unconfirmed_updown_never_makes_a_candidate(tmp_path, text):
     w, _, sid = A.place_flow(tmp_path)
     r = w.talk(sid, text)
     msg = hear_msg(r)
     assert not r["state"]["candidate"] and not r["state"]["approval"]
-    assert "上下の向きがまだ確認されていません" in msg
     assert "Zプラス" in msg and "Zマイナス" in msg  # 片方だけを例にしない（上＝Z＋と決めつけない）
     assert not ut.contains_forbidden(msg)
+
+
+@pytest.mark.parametrize("text", ["上に三ミリ", "上に3cm"])
+def test_unconfirmed_updown_does_not_quote_an_unclear_amount(tmp_path, text):
+    """量がはっきりしないときは、量を言い切らない（「3mm上に動かしたい」と読み替えない）。"""
+    w, _, sid = A.place_flow(tmp_path)
+    msg = hear_msg(w.talk(sid, text))
+    assert msg.startswith("上に動かしたいんですね。"), msg
+
+
+def test_unconfirmed_updown_answer_with_axis_and_amount_makes_the_candidate(tmp_path):
+    """聞き返しのあと「Zマイナス3ミリ」と言えば、ふつうの指示として候補になる（承認はボタンだけ）。"""
+    w, _, sid = A.place_flow(tmp_path)
+    w.talk(sid, "上に3mm")
+    r = w.talk(sid, "Zマイナス3ミリ")
+    c = r["state"]["candidate"]
+    assert c and c["target"] == "C00003 Z" and "-3.000mm" in hear_msg(r) and not r["state"]["approval"]
+
+
+def test_unconfirmed_updown_sign_only_answer_is_not_used(tmp_path):
+    """「プラス」だけの答えで、上＝Z＋として候補にしない。"""
+    w, _, sid = A.place_flow(tmp_path)
+    w.talk(sid, "上に3mm")
+    r = w.talk(sid, "プラス")
+    assert not r["state"]["candidate"]
+
+
+def test_unconfirmed_updown_mismatch_state_keeps_its_message(tmp_path):
+    """回帰：未確認でない状態（不一致・変更済み）の文は、今の状態ごとの文のまま（会話の文に変えるのは未確認だけ）。"""
+    st = updown.UpdownStatus(updown.MISMATCH, updown.MSG_MISMATCH)
+    v = ut.pre_check(ut.read_utterance("上に3mm"), "C00003", st)
+    assert v.status == "ask" and v.message == updown.MSG_MISMATCH
+
+
+def test_confirmed_updown_is_not_changed(tmp_path):
+    """回帰：上下の向きが確認済みなら、今どおり Z+3 の候補（聞き返さない）。"""
+    w, _, sid = A.place_flow(tmp_path, confirmed=True)
+    r = w.talk(sid, "上に3mm")
+    assert r["state"]["candidate"]["target"] == "C00003 Z"
+
+
+# ---- 7. 単位の聞き返しのあとも、言った符号を捨てない（Safety High-1・Medium-1・Medium-2） ----
+@pytest.mark.parametrize("first,second,confirmed", [
+    ("Yプラスの方向にマイナス3", "3ミリ", False),
+    ("Yプラスの方向に-3", "3ミリ", False),
+    ("C00004をYプラスの方向にマイナス3", "3ミリ", False),
+    ("Yプラスの方向にマイナス3", "3mm", False),
+    ("Y+方向に-3", "3ミリ", False),
+    ("Y-方向に-3", "3ミリ", False),
+    ("上にマイナス3", "3ミリ", True),
+])
+def test_sign_said_with_a_unitless_number_is_not_dropped(tmp_path, first, second, confirmed):
+    w, _, sid = A.place_flow(tmp_path, confirmed=confirmed)
+    r1 = w.talk(sid, first)
+    assert not r1["state"]["candidate"]
+    assert "向きの指定が2つあります" in hear_msg(r1), hear_msg(r1)  # 1回目で止める（mm まで言ったときと同じ）
+    r2 = w.talk(sid, second)
+    assert not r2["state"]["candidate"], hear_msg(r2)
+
+
+@pytest.mark.parametrize("text", ["Yプラスの方向にマイナス3", "Y+方向に-3", "Y-方向に-3", "速度を+10上げて", "Z+3"])
+def test_unitless_number_sign_is_kept_in_facts(text):
+    f = ut.read_utterance(text)
+    assert f.unclear_signs and f.stray_signs == 0
+
+
+@pytest.mark.parametrize("answer", ["マイナス3ミリ", "-3mm"])
+def test_sign_mismatch_between_question_and_answer_is_shown(tmp_path, answer):
+    """「Z+3」→「マイナス3ミリ」：食い違いを示して確かめる。どちらの候補も作らない。"""
+    w, _, sid = A.place_flow(tmp_path)
+    w.talk(sid, "Z+3")
+    r = w.talk(sid, answer)
+    msg = hear_msg(r)
+    assert not r["state"]["candidate"]
+    assert "最初はプラス、今はマイナスと聞こえました。どちらですか？" in msg, msg
+
+
+def test_sign_mismatch_after_sign_question(tmp_path):
+    w, _, sid = A.place_flow(tmp_path)
+    w.talk(sid, "Z+3")
+    w.talk(sid, "3ミリ")  # 前の + は使わず、もう一度プラスかマイナスかを聞く（今の扱い）
+    r = w.talk(sid, "マイナス")
+    assert not r["state"]["candidate"]
+    assert "最初はプラス、今はマイナスと聞こえました" in hear_msg(r)
+
+
+def test_earlier_sign_of_an_unclear_amount_is_not_dropped(tmp_path):
+    """「Yマイナス10mmくらい」→「10mm」→「プラス」：前の「マイナス」を捨てて Y+10 にしない。"""
+    w, _, sid = A.place_flow(tmp_path)
+    w.talk(sid, "Yマイナス10mmくらい")
+    w.talk(sid, "10mm")
+    r = w.talk(sid, "プラス")
+    assert not r["state"]["candidate"]
+
+
+def test_unit_answer_without_sign_still_asks_the_sign(tmp_path):
+    """「Z+3」→「3ミリ」：前の + を使わず、もう一度聞く（推測しない。今の扱いを変えない）。"""
+    w, _, sid = A.place_flow(tmp_path)
+    w.talk(sid, "Z+3")
+    r = w.talk(sid, "3ミリ")
+    assert not r["state"]["candidate"] and "プラスですか、マイナスですか" in hear_msg(r)
+
+
+@pytest.mark.parametrize("seq", [("Z+3", "+3ミリ"), ("Z+3", "3ミリ", "プラス")])
+def test_same_sign_said_again_makes_the_candidate(tmp_path, seq):
+    """同じ向きを言い直したときだけ候補になる（承認はボタンだけ）。"""
+    w, _, sid = A.place_flow(tmp_path)
+    for s in seq:
+        r = w.talk(sid, s)
+    c = r["state"]["candidate"]
+    assert c and c["target"] == "C00003 Z" and "+3.000mm" in hear_msg(r) and not r["state"]["approval"]
+
+
+@pytest.mark.parametrize("text,bad", [("Z+3", ("マイナス",)), ("Zのマイナス5", ("プラス",)),
+                                      ("速度を+10", ("下げ",)), ("速度を-10", ("上げ",))])
+def test_unit_question_example_does_not_flip_the_sign(tmp_path, text, bad):
+    w, _, sid = A.place_flow(tmp_path)
+    msg = hear_msg(w.talk(sid, text))
+    assert "単位" in msg
+    assert not any(b in msg for b in bad), msg
+
+
+# ---- 8. 案1-a の読み方で、一覧より少し広く読む形（Safety Low-1。候補になる形として決める。唐川さんに確認する） ----
+@pytest.mark.parametrize("text", ["Y-の軸方向に10mm", "Yマイナスの軸方向に10mm", "Yマイナスの方向で10mm",
+                                  "Yマイナスの方向10mm"])
+def test_wider_natural_direction_forms_make_the_candidate(tmp_path, text):
+    w, _, sid = A.place_flow(tmp_path)
+    r = w.talk(sid, text)
+    c = r["state"]["candidate"]
+    assert c and c["target"] == "C00003 Y" and "-10.000mm" in hear_msg(r) and not r["state"]["approval"]
+
+
+# ---- 9. 説明の経路の全体で、安全の言葉の付いた「終わります」は隠す（Safety Low-2） ----
+@pytest.mark.parametrize("reply", ["同じ動きをくり返したあと、安全に戻って終わります。",
+                                   "同じ動きをくり返したあと、ぶつからずに戻って終わります。"])
+def test_safety_words_with_motion_ending_stay_hidden_in_the_explanation_path(tmp_path, reply):
+    w, fake = T.flow(tmp_path)
+    sid = w.load(T.demo_bytes())["session_id"]
+    fake.add(T.answer(reply, (21, 22, 23, 24, 25, 26)))
+    r = w.ask(sid, "どんな動き？")
+    assert r["reply_by"] == "app" and reply not in r["reply"] and "戻って終わります" not in r["reply"], r["reply"]
+
+
+def test_motion_ending_is_shown_in_the_explanation_path(tmp_path):
+    w, fake = T.flow(tmp_path)
+    sid = w.load(T.demo_bytes())["session_id"]
+    reply = "同じ動きをくり返したあと、最後の位置へ移って終わります。"
+    fake.add(T.answer(reply, (21, 22, 23, 24, 25, 26)))
+    r = w.ask(sid, "どんな動き？")
+    assert r["reply_by"] == "claude" and r["reply"] == reply
 
 
 # ---- 6. 聞き返しへの答え（C1・C2）：回帰 ----
