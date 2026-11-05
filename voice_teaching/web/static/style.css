@@ -1249,3 +1249,77 @@ body.hero #kbd-button { width: auto; min-width: 174px; gap: 10px; font-size: 14p
   .bubble .said { font-size: 16px; }
   .foot .op-replay { position: static; }
 }
+
+/* ==== 本番UI：ミニマル確定案（docs/UI_FINAL_MINIMAL_CONCEPT_20261105.md・11/5 夜）====
+   通常時は最小限（アイコンと必要な数だけ）、危険時と承認時は明瞭に。安全の表示（アプリの記録・止めた理由・上下の向き・
+   1回の上限・図の注意・承認の内容）は消さない・畳まない。ここは見せ方だけ（出す隠すの決まりは app.js のまま） */
+.top { min-height: 56px; padding: 6px 20px; gap: 12px; }
+.logo-ja { display: none; }
+.logo-en { font-size: 20px; letter-spacing: 0.06em; }
+.mode-banner { font-size: 11px; padding: 2px 9px; opacity: 0.9; }
+.icon-btn { width: 40px; height: 40px; min-height: 40px; padding: 0; border-radius: 12px; display: inline-flex; align-items: center;
+  justify-content: center; gap: 6px; background: transparent; border: 1px solid transparent; color: #a9cbff; cursor: pointer;
+  box-shadow: none; flex: none; }
+.icon-btn svg { width: 22px; height: 22px; flex: none; }
+.icon-btn:hover:not([disabled]) { background: var(--card3); border-color: var(--line); transform: none; box-shadow: none; }
+.icon-btn:focus-visible { outline: 2px solid var(--glow); outline-offset: 2px; }
+details.app-info { position: relative; }
+details.app-info > summary { list-style: none; }
+details.app-info > summary::-webkit-details-marker { display: none; }
+.app-info-body { position: absolute; right: 0; top: 46px; z-index: 8; min-width: 220px; padding: 10px 12px; border-radius: 12px;
+  background: #0d1628; border: 1px solid var(--line); box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45); }
+.status-wrap { max-width: 52vw; }
+.status-line .st-chip { padding: 3px 9px; font-size: 11.5px; }
+
+/* 左：会話（細く）。見出しの文は短く */
+.next-action { font-size: 18px; }
+/* 会話の相手の丸アイコンは「VT」（アプリの決まった文も、Claude の文も。話し手の名前は小さく残す：誰の文かを正直に） */
+.bubble.ai::before, .bubble.claude::before, .bubble.app::before {
+  content: "VT"; border-radius: 50%; font-size: 11.5px; font-weight: 800; letter-spacing: 0.02em; color: #fff;
+  background: radial-gradient(circle at 35% 30%, #4b9bff, #123a7a); border: 1px solid #7cbcff; box-shadow: 0 0 12px rgba(61, 139, 255, 0.45); }
+.bubble.human::before { content: ""; background: radial-gradient(circle at 35% 30%, #3a84ff, #1748a0) ; border: 1px solid #7cbcff;
+  -webkit-mask: none; }
+.bubble.human::after { content: ""; position: absolute; right: -42px; top: 0; width: 32px; height: 32px; pointer-events: none;
+  background: center / 18px 18px no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='8.5' r='4' fill='%23eaf3ff'/%3E%3Cpath d='M4.5 20.5c.8-4 3.8-6.2 7.5-6.2s6.7 2.2 7.5 6.2' fill='%23eaf3ff'/%3E%3C/svg%3E"); }
+.bubble .who { font-size: 10.5px; }
+
+/* 右：大きな 3D。見出しの文字は控えめ（JOB の名前・ロボット名を強調しない）。上下の向きの状態は小さく残す */
+.stage-title { display: none; }
+.file-name { font-size: 11px; opacity: 0.75; }
+.view-tabs { padding: 2px; border-radius: 10px; }
+.view-tab { min-height: 32px; padding: 3px 10px; font-size: 12px; }
+.fig-main svg { max-height: none; }
+/* 正面に戻す：3D の左上にいつも出す（視点だけを戻す） */
+.reset-front { position: absolute; left: 14px; top: 14px; z-index: 3; width: auto; padding: 0 12px 0 10px; height: 38px; min-height: 38px;
+  border-radius: 999px; background: rgba(13, 22, 40, 0.82); border: 1px solid rgba(124, 188, 255, 0.45); color: #cfe3ff;
+  font-size: 13px; font-weight: 600; backdrop-filter: blur(6px); }
+.reset-front[hidden] { display: none; }
+.reset-front:hover:not([disabled]) { background: rgba(28, 44, 76, 0.95); border-color: #7cbcff; }
+/* 再生の操作はアイコン。目立ちすぎない大きさ */
+.play-row { gap: 6px; }
+button.play { width: 40px; height: 40px; }
+.play-controls button.icon-play { min-width: 40px; min-height: 36px; padding: 0 10px; font-size: 13px; letter-spacing: -0.05em; }
+.tip.tip-word { font-size: 11px; }
+/* 図の注意は消さない・畳まない。小さく1つの段にまとめて、いつも見える */
+.figure-notes { font-size: 11.5px; line-height: 1.5; color: var(--sub); margin: 4px 2px 0; }
+.figure-notes span { display: inline; }
+
+/* 候補のポップアップ：3D の右下に重ねる。背景の 3D が見える。候補があるときだけ（app.js が #candidate-panel を出したとき） */
+.cand-pop { position: absolute; right: 16px; bottom: 16px; z-index: 4; width: min(430px, 44%); max-height: calc(100% - 32px);
+  display: flex; flex-direction: column; gap: 8px; overflow: auto; pointer-events: auto; }
+.cand-pop:not(:has(#candidate-panel:not([hidden]))) { display: none; }
+.cand-pop .cand-card { padding: 14px 16px; background: rgba(9, 16, 32, 0.93); backdrop-filter: blur(10px);
+  box-shadow: 0 0 0 1px rgba(255, 122, 46, 0.25), 0 18px 40px rgba(0, 0, 0, 0.55); animation: candPop 0.28s ease-out; }
+.cand-pop .dock-actions { padding: 10px 12px; border-radius: 14px; background: rgba(9, 16, 32, 0.93); border: 1px solid var(--glass-line);
+  backdrop-filter: blur(10px); }
+@keyframes candPop { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: none; } }
+/* 候補を確かめている間は、左の位置の行・1回の上限・キーボードを出さない（今までの決まり。.side の外へ移したので body で見る） */
+body:has(#candidate-panel:not([hidden])) .pos-row,
+body:has(#candidate-panel:not([hidden])) .max-shift,
+body:has(#candidate-panel:not([hidden])) #kbd-button { display: none; }
+body:has(#approval-status:not([hidden])) .dock-actions .role-note { display: none; }
+body:has(#export-result[data-ok="true"]:not([hidden])) #export-note { display: none; }
+
+/* 下の帯：必要な注意だけ（実機に出力・転送・起動しない） */
+.foot p { font-size: 12px; }
+.ver { opacity: 0.55; }

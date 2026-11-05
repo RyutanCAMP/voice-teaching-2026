@@ -318,7 +318,7 @@ export function nextStep(message) {
 // 目印：<button type="button" class="tip" data-tip="mic">?</button>。開く：マウスを合わせる・押す・Tab で合わせる。
 // 閉じる：マウスを外す（押して開いたときは、もう一度押す・×・Esc・外を押す）・Tab で外す
 export function attachTips(doc = document) {
-  attachFigureDetails(doc);
+  // 図の注意（#play-note・#view3d-note）は畳まない（安全の表示。ミニマル確定案「目につかないヘルプ内へ移してはいけない」）
   const pop = doc.createElement("div");
   pop.id = "tip-pop";
   pop.className = "tip-pop";

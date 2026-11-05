@@ -653,7 +653,9 @@ $("engineer-toggle").addEventListener("click", () => {
   const open = $("engineer-view").hidden;
   $("engineer-view").hidden = !open;
   $("engineer-toggle").setAttribute("aria-expanded", String(open));
-  $("engineer-toggle").textContent = open ? "詳細表示を閉じる" : "詳細表示";
+  // 本番UI：ボタンはアイコン。名前（読み上げ・小さな説明）だけを変える
+  $("engineer-toggle").setAttribute("aria-label", open ? "詳細表示を閉じる" : "詳細表示");
+  $("engineer-toggle").title = open ? "詳細表示を閉じる" : "詳細表示";
   if (open) $("engineer-view").scrollIntoView({ behavior: "smooth", block: "start" });
 });
 
@@ -1454,7 +1456,7 @@ const view3d = new View3D($("fig-3d"), { onPick: (name) => {
     return;
   }
   select(name);
-}, onView: () => { $("view-reset").hidden = $("fig-3d").hidden || !view3d.changed(); } });
+}, onView: () => { $("view-reset").hidden = $("fig-3d").hidden; } });  // 正面に戻すは 3D のときいつも出す（ミニマル確定案）
 const confirm3d = new View3D($("confirm-figure"), { width: 640, height: 440, hint: false });  // 確認表示の中では選び直さない
 
 function data3d() {
@@ -1513,7 +1515,7 @@ function renderFigures() {
   const is3d = state.figView === "3d" && state.view.positions.some((p) => p.xyz);
   $("fig-3d").hidden = !is3d;
   $("fig-main").hidden = is3d;
-  $("view-reset").hidden = !is3d || !view3d.changed();  // 回した・拡大したときだけ出す
+  $("view-reset").hidden = !is3d;  // 正面に戻すは 3D のときいつも出す（ミニマル確定案。視点だけを戻す）
   // 回数の変更の比較（動きの並びのカードを出すとき）は、区間の点に寄せて大きく見せる（表示の向き・大きさだけ）
   const rc = repeatCompare();
   if (is3d) view3d.setData({ ...data3d(), focus: rc && rc.sequence ? rc.repeat.positions : null });
@@ -2221,8 +2223,10 @@ function followLatest() {
   if (candNew || replyNew) followCardAt = performance.now();
   if (candNew) {
     // 承認のあと：「〇〇さんが承認しました」と3つの状態（出力の結果は下の操作の欄）。承認の前：候補のカードを上の端から（止まった理由・変わる値）
-    if (!$("approval-status").hidden) return revealIn(sideScroll, $("approval-panel"), "top");
-    return revealIn(sideScroll, $("candidate-panel"), "top");
+    // 候補のカードは 3D の上のポップアップ（左の欄の外）。左の欄の中にあるときだけ送る
+    const target = !$("approval-status").hidden ? $("approval-panel") : $("candidate-panel");
+    if (sideScroll.contains(target)) return revealIn(sideScroll, target, "top");
+    return;
   }
   if (replyNew) return revealIn(sideScroll, $("reply-message"), "top");  // 範囲のボタンは下の操作の欄にある：カードは上の端から
   if (!talkNew) return;  // 何も新しくない（同じ中身の描き直し）：今の位置のまま
