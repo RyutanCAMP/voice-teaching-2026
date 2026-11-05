@@ -1,0 +1,11 @@
+{
+  "tested_integration_sha": "5645cebe2ab39df041cd6d6027f8b1ed2daba675",
+  "latest_checked_integration_sha": "3a60a729c432d92bc2a42427456b4cc3b4e1cc4f",
+  "ui_implementation_sha": "0625d68620043c1217c3cb48337af6eef91c436f",
+  "runtime_changes_since_test": [],
+  "overlapping_files": [],
+  "method": "Isolated git-archive snapshot + the 2 UI files; not a merge or running-server replacement",
+  "ports_8805_8813_8815_touched": false,
+  "live_claude_calls": 0,
+  "synthetic_job": "samples/dummy/DEMO_C_PLACE.JBI"
+}
