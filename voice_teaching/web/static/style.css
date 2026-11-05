@@ -1257,7 +1257,7 @@ body.hero #kbd-button { width: auto; min-width: 174px; gap: 10px; font-size: 14p
 .logo-ja { display: none; }
 .logo-en { font-size: 20px; letter-spacing: 0.06em; }
 .mode-banner { font-size: 11px; padding: 2px 9px; opacity: 0.9; }
-.icon-btn { width: 40px; height: 40px; min-height: 40px; padding: 0; border-radius: 12px; display: inline-flex; align-items: center;
+.icon-btn { width: 44px; height: 44px; min-height: 44px; padding: 0; font-size: 14px; border-radius: 12px; display: inline-flex; align-items: center;
   justify-content: center; gap: 6px; background: transparent; border: 1px solid transparent; color: #a9cbff; cursor: pointer;
   box-shadow: none; flex: none; }
 .icon-btn svg { width: 22px; height: 22px; flex: none; }
@@ -1269,7 +1269,6 @@ details.app-info > summary::-webkit-details-marker { display: none; }
 .app-info-body { position: absolute; right: 0; top: 46px; z-index: 8; min-width: 220px; padding: 10px 12px; border-radius: 12px;
   background: #0d1628; border: 1px solid var(--line); box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45); }
 .status-wrap { max-width: 52vw; }
-.status-line .st-chip { padding: 3px 9px; font-size: 11.5px; }
 
 /* 左：会話（細く）。見出しの文は短く */
 .next-action { font-size: 18px; }
@@ -1281,25 +1280,22 @@ details.app-info > summary::-webkit-details-marker { display: none; }
   -webkit-mask: none; }
 .bubble.human::after { content: ""; position: absolute; right: -42px; top: 0; width: 32px; height: 32px; pointer-events: none;
   background: center / 18px 18px no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='8.5' r='4' fill='%23eaf3ff'/%3E%3Cpath d='M4.5 20.5c.8-4 3.8-6.2 7.5-6.2s6.7 2.2 7.5 6.2' fill='%23eaf3ff'/%3E%3C/svg%3E"); }
-.bubble .who { font-size: 10.5px; }
 
 /* 右：大きな 3D。見出しの文字は控えめ（JOB の名前・ロボット名を強調しない）。上下の向きの状態は小さく残す */
 .stage-title { display: none; }
 .file-name { font-size: 11px; opacity: 0.75; }
 .view-tabs { padding: 2px; border-radius: 10px; }
-.view-tab { min-height: 32px; padding: 3px 10px; font-size: 12px; }
+.view-tab { padding: 5px 12px; }
 .fig-main svg { max-height: none; }
 /* 正面に戻す：3D の左上にいつも出す（視点だけを戻す） */
-.reset-front { position: absolute; left: 14px; top: 14px; z-index: 3; width: auto; padding: 0 12px 0 10px; height: 38px; min-height: 38px;
+.reset-front { position: absolute; left: 14px; top: 14px; z-index: 3; width: auto; padding: 0 14px 0 12px; height: 44px; min-height: 44px;
   border-radius: 999px; background: rgba(13, 22, 40, 0.82); border: 1px solid rgba(124, 188, 255, 0.45); color: #cfe3ff;
-  font-size: 13px; font-weight: 600; backdrop-filter: blur(6px); }
+  font-size: 14px; font-weight: 600; backdrop-filter: blur(6px); }
 .reset-front[hidden] { display: none; }
 .reset-front:hover:not([disabled]) { background: rgba(28, 44, 76, 0.95); border-color: #7cbcff; }
 /* 再生の操作はアイコン。目立ちすぎない大きさ */
 .play-row { gap: 6px; }
-button.play { width: 40px; height: 40px; }
-.play-controls button.icon-play { min-width: 40px; min-height: 36px; padding: 0 10px; font-size: 13px; letter-spacing: -0.05em; }
-.tip.tip-word { font-size: 11px; }
+.play-controls button.icon-play { min-width: 44px; min-height: 44px; padding: 0 12px; font-size: 14px; letter-spacing: -0.05em; }
 /* 図の注意は消さない・畳まない。小さく1つの段にまとめて、いつも見える */
 .figure-notes { font-size: 11.5px; line-height: 1.5; color: var(--sub); margin: 4px 2px 0; }
 .figure-notes span { display: inline; }
@@ -1324,11 +1320,10 @@ body:has(#export-result[data-ok="true"]:not([hidden])) #export-note { display: n
 .foot p { font-size: 12px; }
 .ver { opacity: 0.55; }
 /* 候補のポップアップが出ている間は、3D を少し小さくして左へ寄せる（動かす点・変更の拡大の図を、ポップアップの下に隠さない）。見せ方だけ */
-#fig-3d svg { transition: transform 0.35s ease; transform-origin: 35% 50%; }
-body:has(#candidate-panel:not([hidden])) #fig-3d svg { transform: translateX(-11%) scale(0.86); }
-@media (prefers-reduced-motion: reduce) { #fig-3d svg { transition: none; } }
+
 /* ポップアップの中の X・Y・Z の表は小さく（変わる値の1行を主役にする。表は確認表示にも全部出る） */
 .cand-pop .xyz table { font-size: 12px; }
 .cand-pop .xyz th, .cand-pop .xyz td { padding: 3px 8px; }
 .cand-pop .cand-card .friendly, .cand-pop .cand-card ul { font-size: 12.5px; }
-body:has(#candidate-panel:not([hidden])) #fig-3d svg { transform: translateX(-15%) scale(0.84); }
+/* 3D は寄せない（11/5 F7：候補の前後で 3D の点が動かない）。ポップアップを狭くして右下に置く */
+.cand-pop { width: min(380px, 36%); }

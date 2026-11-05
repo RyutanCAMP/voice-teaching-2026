@@ -32,6 +32,8 @@
     <span class="logo-mark" aria-hidden="true"><svg viewBox="0 0 32 32" width="30" height="30"><path d="M4 16h3M9 11v10M14 6v20M19 10v12M24 13v6M28 15v2" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></span>
     <h1 class="logo"><span class="logo-en"><span class="logo-thin">Voice</span> Teaching</span></h1>
     <p id="mode-banner" class="mode-banner" data-mode="simulation">シミュレーションモード</p>
+    <!-- 解釈のしかた（本物の Claude かモックか）は、いつも見える（正直な表示。アプリ情報に畳まない） -->
+    <p id="interp-badge" class="interp-badge" hidden>解釈：—</p>
   </div>
   <ol class="steps" id="steps" aria-label="手順" aria-hidden="true">
     <li id="step-1" class="step"><span class="num">1</span><span class="label">JOBを読み込む</span></li>
@@ -48,7 +50,7 @@
   <details class="app-info">
     <summary class="icon-btn" aria-label="アプリ情報を開く" title="アプリ情報"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 10.5v6M12 7.4v.2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></summary>
     <div class="app-info-body">
-    <p id="interp-badge" class="interp-badge" hidden>解釈：—</p>
+    <p class="fine">シミュレーション用のアプリです。実機への出力・転送・起動はしません。詳しい情報は［詳細表示］にあります。</p>
     </div>
   </details>
   <div class="help-wrap">

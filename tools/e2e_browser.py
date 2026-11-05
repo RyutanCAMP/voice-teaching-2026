@@ -197,8 +197,9 @@ def check_header_help(browser, url, check, shots: Path | None) -> None:
         r = layout(pg, tag, "読み込み前")
         check(not any(t in ("?", "？") or "?" in t or "？" in t for t in r["texts"]),
               f"{tag}：ヘッダーに「?」「？」のボタンが無い（{r['texts']}）")
-        check(pg.inner_text("#help-button").strip() == "使い方" and "link" in (pg.get_attribute("#help-button", "class") or "").split(),
-              f"{tag}：使い方のボタンは「使い方」の文字ボタン")
+        # 本番UI（ミニマル確定案 11/5 夜）：使い方・詳細表示は同じ見た目のアイコン。名前は aria-label
+        check(pg.get_attribute("#help-button", "aria-label") == "使い方" and "icon-btn" in (pg.get_attribute("#help-button", "class") or "").split(),
+              f"{tag}：使い方のボタンは「使い方」の名前のアイコン")
         check(r["help"] == r["eng"], f"{tag}：「使い方」は「詳細表示」と同じ見た目（{r['help']} / {r['eng']}）")
         hb, eb = r["items"]["#help-button"], r["items"]["#engineer-toggle"]
         check(bool(hb and eb and abs(hb["cy"] - eb["cy"]) <= 1 and abs(hb["h"] - eb["h"]) <= 1 and hb["r"] <= eb["x"]),
@@ -3191,8 +3192,9 @@ def check_3d_robot_base(browser, check, shots: Path | None, out: Path) -> None:
                 outside = pg.evaluate(TEXT3D_OUTSIDE_JS, False)
                 check(not outside, f"台座（{tag}）：3D の文字が枠の中に収まる：{outside}")
                 heads = pg.evaluate("""() => [...document.querySelectorAll('#figure-panel .stage-head button')].map((b) => b.id || b.dataset.view)""")
-                check(heads == ["view-reset", "3d", "yz", "xz", "xy"] and pg.locator("#model-toggle").count() == 0,
-                      f"台座（{tag}）：3D の上の欄は元の並び（視点を戻す・3D・Y・Z・X・Z・X・Y。モデルのボタンは無い）：{heads}")
+                # 本番UI：「正面に戻す」（#view-reset）は 3D の左上（図の上）。見出しの欄は図の向きのタブだけ
+                check(heads == ["3d", "yz", "xz", "xy"] and pg.locator("#model-toggle").count() == 0 and pg.is_visible("#view-reset"),
+                      f"台座（{tag}）：3D の上の欄は図の向き（3D・Y・Z・X・Z・X・Y）、正面に戻すは図の上にいつも見える：{heads}")
                 notes = pg.inner_text("#figure-panel .figure-notes")
                 body = pg.inner_text("body")
                 check("ロボット本体・関節は描いていません" in notes and "動作や干渉を保証するシミュレーターではありません" in notes
@@ -4664,9 +4666,10 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     check(shown == lines, f"3D の点はジョブの位置そのもの（{len(shown)}点。ジョブは {len(lines)}点）")
     shot(pg, "2_loaded.png")
 
-    # 回転・拡大縮小・視点を戻す（「視点を戻す」は回したあとだけ出す）
-    check(pg.is_hidden("#view-reset") and "ドラッグで回す" in pg.text_content("#fig-3d svg"),
-          "最初は「視点を戻す」を出さず、図の中に薄く「ドラッグで回す・ホイールで拡大」を出す")
+    # 回転・拡大縮小・正面に戻す（本番UI：「正面に戻す」は 3D のときいつも出す。ミニマル確定案）
+    check(pg.is_visible("#view-reset") and pg.get_attribute("#view-reset", "aria-label") == "正面に戻す"
+          and "ドラッグで回す" in pg.text_content("#fig-3d svg"),
+          "最初から「正面に戻す」を出し、図の中に薄く「ドラッグで回す・ホイールで拡大」を出す")
     a0 = pos_of(pg, "C00005")
     box = pg.locator("#fig-3d").bounding_box()
     cx, cy = box["x"] + box["width"] * 0.25, box["y"] + box["height"] * 0.85
@@ -4684,7 +4687,7 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     d2 = abs(p[0] - q[0]) + abs(p[1] - q[1])
     check(d2 > d1 * 1.3, f"ホイールで拡大できる（点の間 {d1}px → {d2}px）")
     pg.click("#view-reset")
-    check(pos_of(pg, "C00005") == a0 and pg.is_hidden("#view-reset"), "「視点を戻す」で最初の向き・大きさに戻る（ボタンは隠れる）")
+    check(pos_of(pg, "C00005") == a0 and pg.is_visible("#view-reset"), "「正面に戻す」で最初の向き・大きさに戻る（ボタンは出たまま）")
     check("ドラッグで回す" not in pg.text_content("#fig-3d svg"), "視点を戻しても、操作のヒントは出し直さない")
 
     # 重なって見える点（C00000 と C00007）は、押すと選び分けの一覧が出る
