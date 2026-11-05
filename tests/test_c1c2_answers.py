@@ -167,8 +167,7 @@ def test_c2_signed_amount_is_not_given_a_second_sign(tmp_path):
     w, _, sid = place(tmp_path)
     w.talk(sid, "-10mm動かして")
     r = w.talk(sid, "Yプラス")
-    c = r["state"]["candidate"]
-    assert not c or "-140.000" not in msg(r) and "-160.000" not in msg(r)
+    assert not r["state"]["candidate"]  # QA L-2：別の値の候補でも通ってしまう弱い確かめ方をやめた
 
 
 @pytest.mark.parametrize("answer", ["Yマイナスかな", "たぶんYマイナス", "Yマイナスじゃない", "Yマイナス？", "Yマイナスにします"])
@@ -224,3 +223,77 @@ def test_add_verb_still_reads_relative_total():
     """回帰：「あと1回増やして」「もう1回足して」は今までどおり合計3回（今2回＋1）。"""
     assert talk.read_count("あと1回増やして", blocks()).total == 3
     assert talk.read_count("もう1回足して", blocks()).total == 3
+
+
+# ---- 差し戻し（Safety F1・F2・F3・F4／QA M-1・M-2・M-3）の再現 ----
+def test_f1_conversation_in_between_drops_the_old_question(tmp_path):
+    """聞き返しのあと Claude と話した（会話の道）なら、古い聞き返しに「マイナス」を当てない。"""
+    w, fake, sid = place(tmp_path)
+    w.talk(sid, "Yに10mm")
+    fake.add(T.answer("位置を順にたどる動きです。"))
+    w.talk(sid, "このジョブは何をしていますか")
+    r = w.talk(sid, "マイナス")
+    assert not r["state"]["candidate"]
+
+
+@pytest.mark.parametrize("between", ["承認して", "あと1回押して", "C00003を2回にして速度を下げて"])
+def test_f1_other_routes_in_between_drop_the_old_question(tmp_path, between):
+    w, fake, sid = place(tmp_path)
+    w.talk(sid, "Yに10mm")
+    w.talk(sid, between)
+    for answer in ("マイナス", "Yマイナス"):
+        assert not w.talk(sid, answer)["state"]["candidate"]
+
+
+def test_f1_spoken_position_question_is_dropped_after_conversation(tmp_path):
+    """前からの穴：位置を口で言った指示 → 会話 →「Zプラス」も、古い量を使わない。"""
+    w, fake, sid = place(tmp_path, select=None)
+    w.talk(sid, "C00003を10mm動かして")
+    fake.add(T.answer("位置を順にたどる動きです。"))
+    w.talk(sid, "このジョブは何をしていますか")
+    assert not w.talk(sid, "Zプラス")["state"]["candidate"]
+
+
+def test_f1_direct_ask_drops_the_old_question(tmp_path):
+    """/api/ask を直接呼んだときも、古い聞き返しを捨てる。"""
+    w, fake, sid = place(tmp_path)
+    w.talk(sid, "Yに10mm")
+    fake.add(T.answer("位置を順にたどる動きです。"))
+    w.ask(sid, "このジョブは何をしていますか")
+    assert not w.hear(sid, "マイナス", "text")["state"]["candidate"]
+
+
+def test_f4_button_confirmation_in_progress_is_not_skipped(tmp_path):
+    """「どの動きのことですか？」のボタン確認の途中の「マイナス」は、指示の道へ送らない。"""
+    w, fake = T.flow(tmp_path, T.answer("同じ動きをくり返しています。" + T.ASKED, (21, 22, 23, 24, 25, 26)))
+    sid = w.load(T.demo_bytes())["session_id"]
+    w.select(sid, "C00002")
+    w.talk(sid, "Yに10mm")
+    w.talk(sid, "この繰り返しは何？")
+    w.talk(sid, "そう、ボタンを押しているんだよ")
+    r = w.talk(sid, "マイナス")
+    assert r["via"] != ["hear"] and not r["state"]["candidate"]
+
+
+def test_f2_ato_with_pending_candidate_says_a_candidate_is_waiting(tmp_path):
+    w, fake = T.flow(tmp_path)
+    sid = w.load(T.demo_bytes())["session_id"]
+    T.repeat_to_three(w, sid)
+    r = w.talk(sid, "あと1回押して")
+    assert "承認待ちの変更候補" in msg(r) and "まだ変更候補は作りません" not in msg(r)
+    assert not fake.requests
+
+
+@pytest.mark.parametrize("text, now", [("あと1回減らして", True), ("あと2回減らして", True),
+                                       ("あと1回少なくして", False)])  # 「回少なく」は前からの打ち消しの検査で先に止まる
+def test_f3_ato_with_reduce_words_does_not_suggest_more(text, now):
+    r = talk.read_count(text, blocks())
+    assert r is not None and r.total is None and r.stop
+    assert "合計3回" not in r.stop and "合計4回" not in r.stop
+    assert ("今2回" in r.stop) == now
+
+
+@pytest.mark.parametrize("text", ["もう1回押して", "もう一回やって"])
+def test_m3_mou_ikkai_is_not_total_one(text):
+    r = talk.read_count(text, blocks())
+    assert r is not None and r.total is None and r.stop and "合計3回" in r.stop

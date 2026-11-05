@@ -58,6 +58,8 @@ TOO_LONG_MEANING = "意味が長すぎるため、覚えません（{n}文字ま
 NO_OLD_MEANING = "前に教えてもらった意味に「{old}」がないため、置き換えません。何をする動きか、もう一度教えてください"
 MANY_OLD_MEANING = "「{old}」が入った意味が2つ以上あるため、どれを置き換えるか決められません。置き換えません"
 STALE_CHOICE = "この選択肢は古くなりました（会話かデータが変わりました）。もう一度教えてください"
+COUNT_MORE_PENDING = ("承認待ちの変更候補があるため、回数の変更は受け付けません。候補を確かめて承認ボタンで承認するか、"
+                      "元に戻してから、合計の回数で言ってください（まだ新しい候補は作りません）")
 PENDING_EXPLAIN_ONLY = ("承認待ちの変更候補があるため、今は説明だけ答えます。変更は、候補を確かめて承認ボタンで承認するか、"
                         "元に戻してから、指示の欄で行ってください")
 COUNT_NEGATED = ("「{word}」という打ち消しの言葉があるため、回数の希望としては読みません（記録もしません）。"
@@ -105,7 +107,8 @@ _KANJI = "〇一二三四五六七八九十"
 _COUNT = re.compile(r"([0-9]+|[〇一二三四五六七八九十]+)\s?回(?!目)")
 _COUNT_FROM = re.compile(r"([0-9]+|[〇一二三四五六七八九十]+)\s?回\s?(?:から|を)\s?([0-9]+|[〇一二三四五六七八九十]+)\s?回")
 _COUNT_ADD = re.compile(r"(?:もう)?\s?([0-9]+|[〇一二三四五六七八九十]+)\s?回\s?(?:増や|ふやし|ふやす|追加|足し|たし|多く)")
-_COUNT_MORE = re.compile(r"あと\s?([0-9]+|[〇一二三四五六七八九十]+)\s?回")  # 「あと1回」（足す言葉が無い）：確かめる
+_COUNT_MORE = re.compile(r"(?:あと|もう)\s?([0-9]+|[〇一二三四五六七八九十]+)\s?回")  # 「あと1回」「もう1回」（足す言葉が無い）：確かめる
+_REDUCE_WORDS = re.compile(r"減ら|へら|少なく|すくなく|引い|削")
 _COUNT_KEEP = re.compile(r"([0-9]+|[〇一二三四五六七八九十]+)\s?回\s?(?:の)?\s?まま")
 _CHANGE_WORDS = re.compile(r"回数|にして|に変更|に変え|へ変更|増や|減ら|追加|足して|変更して|変えて")
 _ALL_WORDS = ("全部", "ぜんぶ", "両方", "りょうほう", "すべて", "全て", "どっちも", "どちらも", "みんな", "全体")
@@ -344,6 +347,7 @@ class CountReading:
     stop: str | None = None       # 打ち消し・ためらい（Claude を呼ばずに決まった文を返す）
     target: Block | None = None
     target_note: str | None = None
+    relative: bool = False        # 「あと1回」「もう1回」（今の回数からの相対。確かめるだけ）
 
 
 def has_count_words(text: str) -> bool:
@@ -411,15 +415,18 @@ def read_count(text: str, blocks: list[Block], last_evidence=()) -> CountReading
         return CountReading(total=target.count + add, target=target, target_note=note)
     m = _COUNT_MORE.search(t)
     if m:
-        # 「あと1回押して」：合計1回として扱わない（11/5 唐川さんの指示⑥）。今の回数をプログラムが数え、合計を確かめる。
-        # 候補・範囲は作らない（人が「3回にして」と言い直す）
+        # 「あと1回押して」「もう1回押して」：合計1回として扱わない（11/5 唐川さんの指示⑥）。今の回数をプログラムが数え、
+        # 合計を確かめる。候補・範囲は作らない（人が「3回にして」と言い直す）。減らす言葉があれば足し算を勧めない（Safety F3）
         more = _kanji_int(m.group(1))
         if target is None or more is None or more <= 0:
             msg = "どのくり返しを、合計何回にしたいかを教えてください。まだ変更候補は作りません"
+        elif _REDUCE_WORDS.search(t):
+            msg = (f"動作データでは今{target.count}回です。何回にしたいかを、合計の回数で言ってください"
+                   "（例：「○回にして」）。まだ変更候補は作りません")
         else:
-            msg = (f"動作データでは今{target.count}回です。あと{more}回なら合計{target.count + more}回です。"
+            msg = (f"動作データでは今{target.count}回です。{m.group(0)}なら合計{target.count + more}回です。"
                    f"よければ「{target.count + more}回にして」と言ってください。まだ変更候補は作りません")
-        return CountReading(reason=msg, stop=msg, target=target, target_note=note)
+        return CountReading(reason=msg, stop=msg, target=target, target_note=note, relative=True)
     nums = {_kanji_int(x) for x in _COUNT.findall(t)}
     nums.discard(None)
     if len(nums) >= 2:

@@ -804,6 +804,10 @@ class WebFlow:
         text = text.strip()
         with e.lock:
             route = self._talk_route(e, text)
+            if route != "hear":
+                # 指示の道以外（会話・ボタンの案内・変更が2つ・回数）へ回した発話のあとに、前の聞き返しへの答えを当てない
+                # （Safety F1・QA M-1。11/5）。捨てるのは未確定の聞き返しだけ（候補・承認・選択は変えない）
+                e.session.forget_question()
         ask_out = hear_out = None
         via: list[str] = []
         if route in ("button", "approved", "several", "purpose_or_change"):
@@ -869,10 +873,10 @@ class WebFlow:
             return "approved"  # 承認のあとの相づち（「はい」「OK」）：承認を取り消さず、次にすることを伝えるだけ
         if e.dialog.step is not None or s.repeat_range is not None:
             return "hear"  # 承認・起動などは今の決まった文で止める／会話・範囲の確認の続きは今の道で
-        if s.candidate is None and s.awaiting_answer and ut.is_sign_only_answer(f):
-            return "hear"  # 「プラスですか、マイナスですか？」への「マイナス」：指示の道で前の発話に足す（C1。11/5）
         if e.talk.pending is not None:
             return "ask"  # 「どの動きのことですか？」の途中（ボタンで確かめる）
+        if s.candidate is None and s.awaiting_answer and ut.is_sign_only_answer(f):
+            return "hear"  # 「プラスですか、マイナスですか？」への「マイナス」：指示の道で前の発話に足す（C1。11/5）
         if count is not None and _said_range(text):
             return "hear"  # 位置・範囲を言った回数の文（P1-C）：言ったとおりの範囲を指示の道が調べる（Claude を呼ばない）
         if count is not None and not (f.repeat and f.repeat[1] == "ambiguous" and "move" in f.kinds):
@@ -951,12 +955,16 @@ class WebFlow:
             if not isinstance(text, str) or not text.strip() or len(text) > claude_explain.MAX_TEXT:
                 return {**self.explainer.ask(conv, text), "talk": self._talk_state(e, notices)}
             text = text.strip()
+            s.forget_question()  # Claude に聞いた発話のあとに、前の聞き返しへの答えを当てない（Safety F1。/api/ask を直接呼んだときも）
             pending = s.candidate is not None
             blocks = talk.repeat_blocks(s.original)
             count = talk.read_count(text, blocks, e.talk.last_evidence)
             if count is not None and count.stop:
                 # 回数の言葉に打ち消し・ためらい（「3回にしないで」「そう、じゃなくて4回」「たぶん3回」）：読まない・呼ばない
-                return self._app_reply(e, count.stop, notices, source, "count_refused", text)
+                stop = count.stop
+                if pending and count.relative:
+                    stop = talk.COUNT_MORE_PENDING  # 「あと1回」：承認待ちの候補があることを知らせる（Safety F2）
+                return self._app_reply(e, stop, notices, source, "count_refused", text)
             if pending and talk.looks_like_change(text):
                 # Existing candidate is protected; a numeric clarification above
                 # must not be replaced with instructions to approve this candidate.
