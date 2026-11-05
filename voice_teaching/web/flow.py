@@ -81,6 +81,10 @@ def _status_line(has_candidate: bool, blocked: bool, approved: bool, exported: b
 STEP_F_APPROVED_NEXT = "承認済みです。出力は画面の［シミュレーション用に出力］のボタンで行います（声や文字では出力しません）"
 SOURCES = ("voice", "text")
 NO_SESSION = "このジョブの画面の情報がありません（時間が経って捨てたか、サーバーを起動し直しました）。ジョブを読み込み直してください"
+# 読み込みで閉じた画面への要求を断る決まった文（唐川さんの決定 Q-7。11/5）。閉じた画面では状態を変えない
+SESSION_CLOSED = ("この画面の作業は終わりました（新しいジョブが読み込まれたため）。変更候補・承認は使えません。"
+                  "新しい画面で続けてください")
+_CLOSED_KEEP = 64  # 閉じた画面の番号を覚えておく数（断る文を選ぶためだけ。覚えていなくても断る）
 NOT_DECIDED = "指示から変更の内容を決められませんでした。位置番号・方向・量（mm）を、もう一度指示してください"
 APP_SPEAKER = "アプリ"  # プログラムの決まった文の話し手（Claude の文ではない）
 NOT_APPROVED = "承認されていないため、出力しません（承認は確認表示の承認ボタンで行います）"
@@ -127,6 +131,9 @@ class _Entry:
     # 人が教えた意味（この画面の会話の中だけ。ファイル・records/・作業ログに書かない。/api/hear の流れは読まない）
     talk: "talk.TalkMemory | None" = None
     lock: threading.Lock = field(default_factory=threading.Lock)
+    # 閉じた印（Q-7：新しいジョブを読み込んだら、ほかの画面はすべて閉じる）。立てたら戻さない。理由は "replaced"
+    closed: bool = False
+    closed_reason: str | None = None
 
     # Session に渡すシミュレーション（実機用の検査に断られたときだけ呼ばれる）
     def simulate(self, job: jbi.Job, p: ut.ProposedChange, reason: str) -> jbi.ChangeProposal | None:
@@ -162,35 +169,49 @@ class WebFlow:
         self.updown_config = DEFAULT_UPDOWN_CONFIG if updown_config is USE_DEFAULT else updown_config
         self.robot = robot
         self._entries: OrderedDict[str, _Entry] = OrderedDict()
+        self._closed: OrderedDict[str, str] = OrderedDict()  # 閉じた画面の番号 → 理由（断る文を選ぶだけ）
         self._lock = threading.Lock()
 
     # ---- 読込 ----
     def load(self, data: bytes, previous: object = None) -> dict:
         """読み込む。previous（前に見ていた画面の番号）があり、中身（//NAME と ///DATE を除いた指紋）が同じなら、
-        人が教えた意味を引き継ぐ（E2-1）。違えば引き継がない（E2-2）。ファイル名では決めない。"""
+        人が教えた意味を引き継ぐ（E2-1）。違えば引き継がない（E2-2）。ファイル名では決めない。
+
+        有効な画面は1つだけ（唐川さんの決定 Q-7）：previous の有無に関係なく、今あるすべての画面を最初に閉じる。
+        新しいジョブが読めなくても閉じる（Q-5）。閉じた画面への要求は、どの API でも状態を変えずに断る。"""
+        with self._lock:  # 先に self._lock で外して印を立てる。各画面の錠は、放してから取る（_run と同じ順番）
+            closing = self._close_all_locked()
+        prev = next((old for old_sid, old in closing if old_sid == previous), None) if isinstance(previous, str) else None
+        meanings = None
+        if prev is not None:
+            with prev.lock:  # 人が教えた意味は、捨てる前に写す（E2-1）
+                if prev.talk is not None:
+                    meanings = (prev.talk.content_hash, list(prev.talk.meanings))
+        for _, old in closing:
+            self._discard_closed(old)
+        closed_note = {"session_closed": True} if closing else {}
         view = api.job_view(data)
         if not view.get("ok"):
-            return {"ok": False, "error": view.get("error") or "ジョブを読めません"}
+            return {"ok": False, "error": view.get("error") or "ジョブを読めません", **closed_note}
         job = jbi.parse_bytes(data)
         if not job.name:
-            return {"ok": False, "error": "ジョブ名の行（//NAME）が読めないため、読み込みません"}
+            return {"ok": False, "error": "ジョブ名の行（//NAME）が読めないため、読み込みません", **closed_note}
         entry = _Entry(session=None, loaded_sha256=hashlib.sha256(data).hexdigest())  # type: ignore[arg-type]
         entry.session = Session(job, simulate=entry.simulate,
                                 updown_check=ud.checker(self.updown_config, self.robot))
         entry.session.log.append((self._who(), self.interpreter.notice))
         entry.talk = talk.TalkMemory(content_hash=job.normalized_hash())
-        with self._lock:
-            prev = self._entries.get(previous) if isinstance(previous, str) else None
-        if prev is not None:
-            with prev.lock:
-                if prev.talk is not None and prev.talk.content_hash == entry.talk.content_hash:
-                    entry.talk.meanings = list(prev.talk.meanings)
-                    entry.talk.recheck(job)  # 同じ中身でも、対象の区間が見つかるかを確かめ直す
+        if meanings is not None and meanings[0] == entry.talk.content_hash:
+            entry.talk.meanings = meanings[1]
+            entry.talk.recheck(job)  # 同じ中身でも、対象の区間が見つかるかを確かめ直す
         sid = secrets.token_urlsafe(16)
         with self._lock:
+            late = self._close_all_locked()  # 同じ時間にほかの読み込みが入れた画面も閉じる（有効な画面は1つだけ）
             self._entries[sid] = entry
             while len(self._entries) > self.max_sessions:
                 self._entries.popitem(last=False)
+        for _, old in late:
+            self._discard_closed(old)
         return {"ok": True, "session_id": sid, "view": view, "state": self._state(sid, entry)}
 
     def state(self, sid: object) -> dict:
@@ -809,12 +830,13 @@ class WebFlow:
             return {"ok": False, "error": f"指示の文字が長すぎます（{MAX_TEXT}文字まで）"}
         if source not in SOURCES:
             return {"ok": False, "error": "指示の種類（voice か text）が分かりません"}
-        with self._lock:
-            e = self._entries.get(sid) if isinstance(sid, str) else None
+        e = self._live(sid)
         if e is None:
-            return {"ok": False, "error": NO_SESSION}
+            return self._closed_reply(sid, e)
         text = text.strip()
         with e.lock:
+            if e.closed:  # 錠を待つ間に読み直しで閉じられた（ここから先も、錠を取るたびに確かめる）
+                return self._closed_reply(sid, e)
             route = self._talk_route(e, text)
             if route != "hear":
                 # 指示の道以外（会話・ボタンの案内・変更が2つ・回数）へ回した発話のあとに、前の聞き返しへの答えを当てない
@@ -829,18 +851,26 @@ class WebFlow:
                    else STEP_F_PURPOSE_OR_CHANGE if route == "purpose_or_change"
                    else ("。".join(f0.stop_reasons) if f0.stop_reasons else ut.APPROVE_MESSAGE))
             with e.lock:
+                if e.closed:
+                    return self._closed_reply(sid, e)
                 e.session.log.append(("発話", f"{'音声' if source == 'voice' else '文字'}：{text}"))
                 e.session.log.append(("止めた理由", msg))
             hear_out = {"ok": True, "status": "stop", "message": msg, "heard": text, "source": source}
             via.append(route if route in ("several", "purpose_or_change") else "button")
         elif route == "hear":
             hear_out = self.hear(sid, text, source)
+            if hear_out.get("session_closed"):
+                return hear_out
             via.append("hear")
         else:
             ask_out = self.ask(sid, text, source=source)
+            if ask_out.get("session_closed"):
+                return ask_out
             via.append("ask")
             if route == "count":
                 with e.lock:
+                    if e.closed:
+                        return self._closed_reply(sid, e)
                     refused = (not ask_out.get("ok")
                                or ask_out.get("status") in ("count_refused", "explain_only")
                                or ask_out.get("intent") != "change_request"
@@ -849,14 +879,20 @@ class WebFlow:
                     canon = None if (refused or e.session.candidate is not None) else self._repeat_canonical(e, text)
                 if canon is not None:
                     hear_out = self.hear(sid, canon, "text")  # プログラムが作った文（人の文は会話の道の記録にある）
+                    if hear_out.get("session_closed"):
+                        return hear_out
                     via.append("hear")
                     with e.lock:
+                        if e.closed:
+                            return self._closed_reply(sid, e)
                         started = e.session.repeat_range is not None
                     if started and isinstance(ask_out, dict):
                         # 範囲の確認を始めた：「読み取りだけ」「候補は作りません」の文は、今の状態と合わないので、次にすることの文にする
                         ask_out["notes"] = [STEP_F_RANGE_NOTE]
                         ask_out["change_record"] = None
         with e.lock:
+            if e.closed:
+                return self._closed_reply(sid, e)
             state = self._state(sid, e)
         return {"ok": True, "via": via, "ask": ask_out, "hear": hear_out, "state": state, "heard": text, "source": source}
 
@@ -930,12 +966,13 @@ class WebFlow:
         - choose・token：「どの動きのことですか？」のボタン（Claude を呼ばない。番号が今のものと合うときだけ）
         - source：voice か text（どちらも同じ検査を通る。記録して返すだけ）
         """
-        with self._lock:
-            e = self._entries.get(sid) if isinstance(sid, str) else None
+        e = self._live(sid)
         if e is None:
-            return {"ok": False, "error": NO_SESSION}
+            return self._closed_reply(sid, e)
         if info is True:
             with e.lock:
+                if e.closed:
+                    return self._closed_reply(sid, e)
                 notices = self._talk_sync(e)
                 tstate = self._talk_state(e, notices)
             return {"ok": True, "status": "info", **self.explainer.info(), "talk": tstate}
@@ -943,6 +980,8 @@ class WebFlow:
             return {"ok": False, "error": "聞く文の種類（voice か text）が分かりません"}
         notice = None
         with e.lock:  # 状態は読むだけ。Claude を呼ぶ間はこの錠を持たない（ほかの操作を止めない）
+            if e.closed:
+                return self._closed_reply(sid, e)
             s = e.session
             notices = self._talk_sync(e)
             if sync is True:
@@ -989,6 +1028,8 @@ class WebFlow:
             version = e.talk.signature
         out = self.explainer.ask(conv, text, taught=taught, allow_change=not pending, count=count)
         with e.lock:
+            if e.closed:  # Claude に聞いている間に読み直しで閉じられた：答えを書き戻さない・返さない
+                return self._closed_reply(sid, e)
             if out.get("ok") and e.explain is conv and e.talk.signature is version:
                 e.talk.last_evidence = tuple(ev["line"] for ev in out.get("evidence", []))
             hl, sup = talk.highlight_and_supplement(conv.job, out.get("evidence", []) if out.get("ok") else [])
@@ -1043,14 +1084,58 @@ class WebFlow:
         return out
 
     # ---- 内部 ----
+    def _close_all_locked(self) -> list:
+        """今あるすべての画面を _entries から外し、閉じた印を立てる（self._lock を持って呼ぶ。画面の錠は取らない）。"""
+        closing = list(self._entries.items())
+        self._entries.clear()
+        for old_sid, old in closing:
+            old.closed, old.closed_reason = True, "replaced"
+            self._closed[old_sid] = "replaced"
+            self._closed.move_to_end(old_sid)
+        while len(self._closed) > _CLOSED_KEEP:
+            self._closed.popitem(last=False)
+        return closing
+
+    @staticmethod
+    def _discard_closed(e: _Entry) -> None:
+        """閉じた画面の候補・承認・範囲の確認・会話を捨てる（その画面の錠を取って。self._lock は持たない）。"""
+        with e.lock:
+            e.session._discard()
+            e.session.forget_range()
+            e.session.forget_question()
+            e.sim_proposal = e.approval = e.approved_candidate = e.approval_updown = None
+            e.comparison = None
+            e.dialog = dg.Dialog()
+            e.explain = None
+            if e.talk is not None:
+                e.talk.clear()
+
+    def _closed_reply(self, sid: object, e: "_Entry | None" = None) -> dict:
+        """閉じた画面・見つからない画面への要求を断る（状態は変えない・返さない）。
+        画面の錠を持っているときは e を渡す（self._lock を取らない。錠の順番を _run と逆にしない）。"""
+        if e is not None and e.closed:
+            replaced = True
+        else:
+            with self._lock:
+                replaced = isinstance(sid, str) and sid in self._closed
+        return {"ok": False, "error": SESSION_CLOSED if replaced else NO_SESSION, "session_closed": True}
+
+    def _live(self, sid: object) -> "_Entry | None":
+        """今の画面（閉じた印が無いもの）。無ければ None。"""
+        with self._lock:
+            e = self._entries.get(sid) if isinstance(sid, str) else None
+            return None if e is None or e.closed else e
+
     def _run(self, sid: object, fn) -> dict:
         with self._lock:
             e = self._entries.get(sid) if isinstance(sid, str) else None
-            if e is not None:
+            if e is not None and not e.closed:
                 self._entries.move_to_end(sid)
-        if e is None:
-            return {"ok": False, "error": NO_SESSION}
+        if e is None or e.closed:
+            return self._closed_reply(sid, e)
         with e.lock:
+            if e.closed:  # 錠を待つ間に読み直しで閉じられた：何もしない
+                return self._closed_reply(sid, e)
             st = e.session.updown_status()  # 要求のたびに、上下の向きの設定を読み直す
             e.dialog.direction_names = st.direction_names
             out = fn(e)

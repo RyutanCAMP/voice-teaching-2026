@@ -661,9 +661,13 @@ def test_e5_data_change_separates_conversation(tmp_path):
     fake.add(answer("同じ動きをくり返しています。", [21]))
     w.ask(sid, "何をしている？")
     assert len(fake.requests[-1]["messages"]) == 1  # 前の会話を入れない（新しい内容で答える）
-    for op in (lambda: w.undo(sid), lambda: w.load(demo_bytes(), previous=sid)):
-        op()
+    w.undo(sid)
     assert w.ask(sid, sync=True)["talk"]["notices"] == [talk.DATA_CHANGED]
+    # 読み直し：前の画面は閉じる（唐川さんの決定 Q-7。11/5）。古い番号では会話の知らせも返さず、断る
+    sid2 = w.load(demo_bytes(), previous=sid)["session_id"]
+    r = w.ask(sid, sync=True)
+    assert r["ok"] is False and r["session_closed"] is True and "talk" not in r
+    assert w.ask(sid2, sync=True)["ok"] is True
 
 
 def test_e5_affirmative_in_ask_panel_confirms_nothing(tmp_path):

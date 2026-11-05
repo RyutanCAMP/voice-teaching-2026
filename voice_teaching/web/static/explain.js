@@ -22,12 +22,18 @@ function el(tag, attrs, ...children) {
 
 const money = (x) => (typeof x === "number" && isFinite(x) ? "$" + x.toFixed(4) : "料金不明");
 
+// サーバーがこの画面を閉じた（別の JOB が読み込まれた。Q-7）：app.js に知らせる（承認・出力を押せなくする。断るのはサーバー）
+function closedCheck(res) {
+  if (res && res.session_closed === true) window.dispatchEvent(new CustomEvent("vt:session-closed", { detail: { error: res.error } }));
+  return res;
+}
+
 // Step F：会話の欄の文は1つの入口（/api/talk）へ送る。説明・教える・回数の変更・位置の変更の振り分けはサーバーのプログラム
 async function postTalk(body) {
   try {
     const r = await fetch("/api/talk", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body) });
-    return await r.json();
+    return closedCheck(await r.json());
   } catch (_) {
     return { ok: false, error: "アプリにつながりません。アプリを起動し直して、もう一度どうぞ" };
   }
@@ -37,7 +43,7 @@ async function post(body) {
   try {
     const r = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body) });
-    return await r.json();
+    return closedCheck(await r.json());
   } catch (_) {
     return { ok: false, error: "アプリにつながりません。アプリを起動し直して、もう一度どうぞ" };
   }

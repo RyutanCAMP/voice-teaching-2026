@@ -283,10 +283,13 @@ def test_unknown_session_is_refused(wf):
 
 
 def test_old_sessions_are_dropped(tmp_path):
+    # 有効な画面は1つだけ（唐川さんの決定 Q-7。11/5）：読み込むたびに、前の画面はすべて閉じる（max_sessions に関係なく）
     w = WebFlow(max_sessions=2)
     a, b, c = load(w), load(w), load(w)
-    assert w.state(a)["ok"] is False
-    assert w.state(b)["ok"] is True and w.state(c)["ok"] is True
+    for old in (a, b):
+        r = w.state(old)
+        assert r["ok"] is False and r["session_closed"] is True and r["error"] == flow_mod.SESSION_CLOSED
+    assert w.state(c)["ok"] is True
 
 
 def test_unreadable_job_is_refused(wf):
