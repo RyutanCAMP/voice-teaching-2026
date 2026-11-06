@@ -1593,7 +1593,7 @@ TEXT_SIZE_JS = """(sels) => { const r = {}; for (const s of sels) {
 _TS_SIDE = {".bubble.human .said": [14, 14], ".bubble.claude .said": [15, 15], ".bubble .who": [11, 11]}
 # Issue #7・11/6：記録（.status-line）は上の帯に出さない（承認の状態はアイコンだけ）。図の注意の全文は ⓘ（Issue #8 round3 で常時の短い1行は無くした）
 _TS_STATUS = {".status-line": [12, 12], ".status-line .st-chip": [12, 12]}
-_TS_ALL = {".legend.kinds": [12, 12], ".figure-notes": [12, 12]}  # Issue #8 round3：常時の短い1行（.figure-short）は無くした
+_TS_ALL = {".legend.kinds": [12, 12]}  # round4：図の注意の全文（.figure-notes）は「安全についての説明」の小窓の中で、ふだんは見えない
 TEXT_SIZE_BEFORE = {
     "load": {**_TS_ALL, ".legend": [12, 12]},
     "conversation": {**_TS_SIDE, **_TS_ALL, ".legend": [12, 12]},

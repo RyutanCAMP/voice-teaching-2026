@@ -1558,3 +1558,6 @@ button.safety-btn:hover, button.safety-btn[aria-expanded="true"] { background: r
 .safety-pop .figure-notes { margin: 0; font-size: 13px; line-height: 1.6; color: var(--text); }
 /* MOCK の印（Issue #8 round4）：SIM と同じ形の小さな印。色は控えめな黄（本物の Claude ではないことが分かる） */
 .top .mode-banner.mock-banner { color: #ffd59a; border-color: #8a6a2e; background: #2b2213; }
+/* round4：確認済みの短い表示にロボット名が入る。長い名前でも枠の外へはみ出さないよう折り返す（狭い画面でも） */
+button.updown-chip { overflow-wrap: anywhere; max-width: min(360px, 100%); }
+@media (max-width: 699.98px) { .stage-head .updown-wrap { min-width: 0; flex: 1 1 auto; } button.updown-chip { max-width: 100%; } }
