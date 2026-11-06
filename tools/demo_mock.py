@@ -23,7 +23,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 from voice_teaching import claude_explain as cx  # noqa: E402
-from voice_teaching import updown  # noqa: E402
+from voice_teaching import buildinfo, updown  # noqa: E402
 from voice_teaching.claude_interpreter import MockInterpreter  # noqa: E402
 from voice_teaching.web.server import DEFAULT_PORT, make_server  # noqa: E402
 
@@ -85,12 +85,19 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
     ap.add_argument("--updown-config", default=str(updown.DEFAULT_PATH))
     ap.add_argument("--robot", default=updown.DEFAULT_ROBOT)
+    ap.add_argument("--channel", choices=buildinfo.CHANNELS, default=None,
+                    help="画面の版の区別（dev／filming／release。無ければ環境変数 VT_CHANNEL、それも無ければ dev）")
     args = ap.parse_args(argv)
     cx.PRICES[MOCK_MODEL] = cx.Price(input=0.0, output=0.0, cache_write_5m=0.0, cache_write_1h=0.0, cache_read=0.0)
     explainer = cx.Explainer("mock-no-network", MOCK_MODEL, client=ScriptClient(),
                              usage_log=cx.UsageLog(REPO / "records" / "mock_usage.jsonl"))
-    srv = make_server(port=args.port, interpreter=MockInterpreter(), updown_config=args.updown_config,
-                      robot=args.robot, explainer=explainer)
+    try:
+        srv = make_server(port=args.port, interpreter=MockInterpreter(), updown_config=args.updown_config,
+                          robot=args.robot, explainer=explainer, channel=args.channel)
+    except ValueError as e:  # チャンネルが3つ以外（環境変数 VT_CHANNEL）・タグ前の release：起動しない
+        ap.error(str(e))
+    if getattr(srv, "build", None) is not None:
+        print(f"版：{srv.build.detail}", flush=True)
     print("モックの通し：解釈の係も会話の係もモック（本物の Claude は呼びません。.env は読みません）", flush=True)
     print(f"Chrome で開いてください: http://127.0.0.1:{srv.server_address[1]}/  （止めるときは Ctrl+C）", flush=True)
     try:

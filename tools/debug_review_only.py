@@ -19,7 +19,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
-from voice_teaching import claude_explain, claude_interpreter, claude_lead, sim, updown  # noqa: E402
+from voice_teaching import buildinfo, claude_explain, claude_interpreter, claude_lead, sim, updown  # noqa: E402
 from voice_teaching.web.flow import WebFlow  # noqa: E402
 from voice_teaching.web.server import DEFAULT_PORT, make_server  # noqa: E402
 
@@ -62,13 +62,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--robot", default=updown.DEFAULT_ROBOT)
     ap.add_argument("--env-file", default=str(sim.REPO_ROOT / ".env"))
     ap.add_argument("--explain-model", default=None)
+    ap.add_argument("--channel", choices=buildinfo.CHANNELS, default=None,
+                    help="画面の版の区別（dev／filming／release。無ければ環境変数 VT_CHANNEL、それも無ければ dev）")
     args = ap.parse_args(argv)
     if claude_interpreter.load_dotenv(args.env_file) == claude_interpreter.DOTENV_UNREADABLE:
         print(claude_interpreter.DOTENV_UNREADABLE_MESSAGE, flush=True)
     interp = claude_interpreter.from_env()
     explainer = claude_explain.Explainer.from_env(model=args.explain_model)
-    srv = make_server(port=args.port, interpreter=interp, updown_config=args.updown_config, robot=args.robot,
-                      explainer=explainer)
+    try:
+        srv = make_server(port=args.port, interpreter=interp, updown_config=args.updown_config, robot=args.robot,
+                          explainer=explainer, channel=args.channel)
+    except ValueError as e:  # チャンネルが3つ以外（環境変数 VT_CHANNEL）・タグ前の release：起動しない
+        ap.error(str(e))
+    if getattr(srv, "build", None) is not None:
+        print(f"版：{srv.build.detail}", flush=True)
     lock_down(srv.flow)
     # Claude の言い添え（指示の道の答えの前の一言。表示だけ）：本物の Claude とキーがあるときだけ。VOICE_TEACHING_CLAUDE_LEAD=0 で使わない
     srv.flow.claude_lead = claude_lead.enabled(interp, explainer, os.environ)

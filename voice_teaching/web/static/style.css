@@ -1513,3 +1513,7 @@ body.hero #kbd-button { min-width: 0; width: 44px; padding-inline: 0; }
 .play-row { border-top: none; padding-top: 4px; }
 /* 3D の枠は外側のカードの線だけにする（図の面の内側の線を重ねない） */
 .fig-wrap { box-shadow: inset 0 0 40px rgba(61, 139, 255, 0.06); border-color: transparent; }
+/* 版の小さな文字（上の帯の右の端・アイコンの右）。控えめな色。押す物ではない。狭い画面（700px 未満）ではアプリ情報の中だけ */
+.app-build { flex: none; margin-left: 6px; font-family: "SF Mono", Consolas, monospace; font-size: 11px; color: var(--faint);
+  white-space: nowrap; cursor: default; user-select: text; }
+@media (max-width: 699.98px) { .app-build { display: none; } }

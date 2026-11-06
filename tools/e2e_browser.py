@@ -119,7 +119,7 @@ HEADER_JS = """() => {
   return { header: box('header'), sw: top.scrollWidth, cw: top.clientWidth, texts: qs,
     doc: [document.documentElement.scrollWidth, innerWidth],
     items: Object.fromEntries(['.logo-mark', '.logo', '#mode-banner', '#interp-badge', '#status-line', '[data-tip=status]', '#approval-icon',
-      '#help-button', '#engineer-toggle'].map((s) => [s, box(s)])),
+      '#help-button', '#engineer-toggle', '#app-build'].map((s) => [s, box(s)])),
     chips, chip: chips.length ? chips[chips.length - 1] : null, circleX,
     help: cs('#help-button'), eng: cs('#engineer-toggle'),
     tipText: tip ? tip.textContent.trim() : null, tipLabel: tip ? tip.getAttribute('aria-label') : null,
@@ -217,7 +217,10 @@ def check_header_help(browser, url, check, shots: Path | None) -> None:
         hb, eb = r["items"]["#help-button"], r["items"]["#engineer-toggle"]
         check(bool(hb and eb and abs(hb["cy"] - eb["cy"]) <= 1 and abs(hb["h"] - eb["h"]) <= 1 and hb["r"] <= eb["x"]),
               f"{tag}：「使い方」と「詳細表示」は同じ高さで横に並ぶ（{hb} / {eb}）")
-        check(bool(eb and eb["r"] >= w - 40), f"{tag}：読み込む前も「使い方」「詳細表示」は右の端（詳細表示の右 {eb and round(eb['r'])}px）")
+        # 11/6 唐川さん：版の小さな文字（#app-build）は上の帯の右の端。詳細表示はそのすぐ左（間に別の物を置かない）
+        ab = r["items"]["#app-build"]
+        check(bool(eb and (eb["r"] >= w - 40 or (ab and ab["r"] >= w - 40 and 0 <= ab["x"] - eb["r"] <= 24))),
+              f"{tag}：読み込む前も「使い方」「詳細表示」は右の端（詳細表示の右 {eb and round(eb['r'])}px・その右は版の文字だけ {ab and round(ab['x'])}〜{ab and round(ab['r'])}px）")
         check(r["items"]["[data-tip=status]"] is None, f"{tag}：読み込む前（記録が出ていない）は ⓘ を出さない")
         check(pg.get_attribute("#approval-icon", "data-appr") == "none" and "読み込んでいません" in (pg.get_attribute("#approval-icon", "aria-label") or ""),
               f"{tag}：読み込む前の承認のアイコンは、承認と見間違えない形（点線の丸）・名前「JOB を読み込んでいません」")
@@ -1111,6 +1114,46 @@ def check_hold_after_approval(browser, check, shots: Path | None, out: Path) -> 
         pg.close()
     finally:
         sim.DEFAULT_OUT_DIR = old_out
+        srv.shutdown()
+        srv.server_close()
+
+
+def check_build_label(browser, check, shots: Path | None, out: Path) -> None:
+    """版の小さな文字（11/6 唐川さん）：上の帯の右の端に v＜番号＞-dev（既定のチャンネル dev）。番号は __version__ から。
+    SHA は小さな説明とアプリ情報の中。1280×720・1440×900 で、ほかのボタン・承認の状態のアイコン・3D に重ならず、横にはみ出さない。"""
+    import voice_teaching
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import server
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None, channel="dev")
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    want = "v" + voice_teaching.__version__.removesuffix("-dev") + "-dev"
+    rect = """(s) => { const e = document.querySelector(s); if (!e || !e.getClientRects().length) return null;
+      const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, r: r.right, b: r.bottom, w: r.width, h: r.height }; }"""
+    try:
+        for w, h in [(1280, 720), (1440, 900)]:
+            pg = browser.new_page(viewport={"width": w, "height": h})
+            pg.goto(url + "?opening=0")
+            pg.set_input_files("#file-input", str(REPO / "samples/dummy" / "DEMO_C_PLACE.JBI"))
+            pg.wait_for_selector("#job-area:not([hidden])")
+            pg.wait_for_timeout(300)
+            b = pg.evaluate(rect, "#app-build")
+            title = pg.get_attribute("#app-build", "title") or ""
+            detail = pg.text_content("#app-build-detail") or ""
+            others = {s: pg.evaluate(rect, s) for s in ["#approval-icon", "#help-button", "#engineer-toggle", ".app-info > summary",
+                                                         "#mode-banner", "#figure-panel", "#fig-3d"]}
+            hits = {s: _overlap(b, r) for s, r in others.items() if r and _overlap(b, r) > 0}
+            sw = pg.evaluate("[document.documentElement.scrollWidth, innerWidth]")
+            check(bool(b) and pg.inner_text("#app-build") == want and b["x"] >= 0 and b["r"] <= w and b["b"] <= 60
+                  and not hits and sw[0] <= sw[1],
+                  f"版（{w}×{h}）：上の帯の右の端に「{want}」。ほかのボタン・アイコン・3D に重ならない（{hits}）・横にはみ出さない（{sw}）")
+            fs = pg.evaluate("parseFloat(getComputedStyle(document.querySelector('#app-build')).fontSize)")
+            check(fs <= 12 and pg.locator("#app-build").evaluate("(e) => e.tagName") != "BUTTON",
+                  f"版（{w}×{h}）：小さく控えめ（{fs}px）・押す物ではない")
+            check(title == f"版：{want}（dev・{srv.build.sha}）" and detail == f"{want}（dev・{srv.build.sha}）",
+                  f"版（{w}×{h}）：SHA はふだん出さず、小さな説明とアプリ情報の中（{title} ／ {detail}）")
+            pg.close()
+    finally:
         srv.shutdown()
         srv.server_close()
 
@@ -3635,6 +3678,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check_voice_error_typing(b, check, shots, out)
             check_mic_after_undo(b, check, shots, out)
             check_hold_after_approval(b, check, shots, out)
+            check_build_label(b, check, shots, out)
             check_export_twice(b, check, shots, out)
             check_opening_click_through(b, check, shots, out)
             check_export_path_short(b, check, shots, out)

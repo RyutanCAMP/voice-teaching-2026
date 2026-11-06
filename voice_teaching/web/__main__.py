@@ -11,7 +11,7 @@ import argparse
 import os
 import sys
 
-from .. import claude_explain, claude_interpreter, claude_lead, sim, updown
+from .. import buildinfo, claude_explain, claude_interpreter, claude_lead, sim, updown
 from .server import DEFAULT_PORT, make_server
 
 
@@ -26,14 +26,21 @@ def main(argv: list[str] | None = None) -> int:
                     help=".env の場所（既定はリポジトリ直下。worktree からは本体の .env を指定できる）")
     ap.add_argument("--explain-model", default=None,
                     help="「Claude に聞く（読み取りだけ）」のモデル（無ければ ANTHROPIC_MODEL、それも無ければ claude-sonnet-5-5）")
+    ap.add_argument("--channel", choices=buildinfo.CHANNELS, default=None,
+                    help="画面の版の区別（dev／filming／release。無ければ環境変数 VT_CHANNEL、それも無ければ dev）")
     args = ap.parse_args(argv)
     # 任意：.env から ANTHROPIC_API_KEY・ANTHROPIC_MODEL を読む（環境変数があればそちら）
     if claude_interpreter.load_dotenv(args.env_file) == claude_interpreter.DOTENV_UNREADABLE:
         print(claude_interpreter.DOTENV_UNREADABLE_MESSAGE, flush=True)
     interp = claude_interpreter.from_env()
     explainer = claude_explain.Explainer.from_env(model=args.explain_model)
-    srv = make_server(port=args.port, interpreter=interp, updown_config=args.updown_config, robot=args.robot,
-                      explainer=explainer)
+    try:
+        srv = make_server(port=args.port, interpreter=interp, updown_config=args.updown_config, robot=args.robot,
+                          explainer=explainer, channel=args.channel)
+    except ValueError as e:  # チャンネルが3つ以外（環境変数 VT_CHANNEL）・タグ前の release：起動しない
+        ap.error(str(e))
+    if getattr(srv, "build", None) is not None:
+        print(f"版：{srv.build.detail}", flush=True)
     # Claude の言い添え（指示の道の答えの前の一言）：本物の Claude で、キーがあるときだけ。VOICE_TEACHING_CLAUDE_LEAD=0 で使わない
     srv.flow.claude_lead = claude_lead.enabled(interp, explainer, os.environ)
     print(f"解釈：{'本物の Claude（' + interp.model + '）' if interp.kind == 'claude' else '偽のClaude（モック）'}", flush=True)

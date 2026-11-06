@@ -11,12 +11,14 @@ from __future__ import annotations
 
 import base64
 import binascii
+import html
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
 
 from .. import __version__
+from .. import buildinfo
 from . import api
 from ..updown import DEFAULT_ROBOT
 from .flow import USE_DEFAULT, WebFlow
@@ -43,6 +45,9 @@ _STATIC = {
 # 「サンプルで試す」で読み込む、決まった1つの架空のジョブ。画面からは名前も場所も渡させない
 SAMPLE_JOB = Path(__file__).resolve().parents[2] / "samples" / "dummy" / "DEMO_C_PLACE.JBI"
 _VERSION_MARK = b"__VT_VERSION__"  # index.html の中の版の印（配信するときに __version__ を入れる）
+# 版の小さな文字（v1.00-dev など）と詳しい版（v1.00-dev（dev・a1b2c3d））の印。起動のときに決めた srv.build から入れる
+_BUILD_LABEL_MARK = b"__VT_BUILD_LABEL__"
+_BUILD_DETAIL_MARK = b"__VT_BUILD_DETAIL__"
 _CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
         "connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 
@@ -89,12 +94,19 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if not self._host_ok():
             return self._error(403, "このサーバーは 127.0.0.1 からだけ使えます")
-        entry = _STATIC.get(self.path.split("?", 1)[0])
+        path = self.path.split("?", 1)[0]
+        build = getattr(self.server, "build", None)
+        if path == "/api/version" and build is not None:
+            return self._json(200, {"ok": True, **build.as_dict()})  # 表示だけ（承認・出力の判定には使わない）
+        entry = _STATIC.get(path)
         if entry is None:
             return self._error(404, "ありません")
         body = _static_bytes(entry[0])
         if entry[0] == "index.html":
             body = body.replace(_VERSION_MARK, __version__.encode("ascii"))
+            if build is not None:
+                body = (body.replace(_BUILD_LABEL_MARK, html.escape(build.label).encode("utf-8"))
+                        .replace(_BUILD_DETAIL_MARK, html.escape(build.detail).encode("utf-8")))
         self._send(200, body, entry[1])
 
     # ---- POST ----
@@ -217,14 +229,18 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def make_server(host: str = HOST, port: int = DEFAULT_PORT, interpreter=None,
-                updown_config=USE_DEFAULT, robot: str = DEFAULT_ROBOT, explainer=None) -> ThreadingHTTPServer:
+                updown_config=USE_DEFAULT, robot: str = DEFAULT_ROBOT, explainer=None,
+                channel: str | None = None) -> ThreadingHTTPServer:
     """シミュレーション用の出力先は sim.DEFAULT_OUT_DIR（output/sim/）に固定。呼び出し側からは選べない。
 
     updown_config：上下の向きの設定ファイル（None なら設定なし＝未確認。渡さなければ flow.DEFAULT_UPDOWN_CONFIG）。robot：アプリで使うロボットの名前（照合で比べるだけ）。
     """
     if host != HOST:
         raise ValueError("127.0.0.1 以外では待ち受けません")
+    # 版・チャンネル・SHA（表示だけ）。チャンネルが dev / filming / release 以外なら、待ち受ける前に ValueError で止める
+    build = buildinfo.resolve(buildinfo.channel_from(channel))
     srv = ThreadingHTTPServer((HOST, port), Handler)
+    srv.build = build
     srv.daemon_threads = True
     srv.flow = WebFlow(interpreter=interpreter, updown_config=updown_config, robot=robot, explainer=explainer)
     return srv

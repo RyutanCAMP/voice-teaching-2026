@@ -59,7 +59,7 @@
     <p id="app-info-interp" class="fine app-info-line"></p>
     <p id="app-info-status" class="fine app-info-line"></p>
     <p id="readonly-note" class="fine app-info-line">元のジョブは変えません。実機用の出力・転送・ロボットの起動はしません。</p>
-    <p class="fine app-info-line"><span id="app-version" class="ver">Ver.__VT_VERSION__</span>
+    <p class="fine app-info-line"><span id="app-version" class="ver">Ver.__VT_VERSION__</span> <span id="app-build-detail" class="ver build-detail">__VT_BUILD_DETAIL__</span>
     <button type="button" id="opening-replay" class="link small op-replay" hidden title="起動の演出をもう一度（音あり）">▶ オープニング</button></p>
     </div>
   </details>
@@ -82,6 +82,9 @@
     </div><!-- /help-pop -->
   </div>
   <button type="button" id="engineer-toggle" class="icon-btn" aria-label="詳細表示" title="詳細表示" aria-expanded="false" aria-controls="engineer-view"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="16" cy="7" r="2.2" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="10" cy="17" r="2.2" fill="none" stroke="currentColor" stroke-width="1.7"/></svg></button>
+  <!-- 版（11/6 唐川さん）：上の帯の右の端に小さく（例 v＜番号＞-dev）。番号は __version__、チャンネルは起動のとき（--channel・VT_CHANNEL・既定 dev）。
+       SHA は小さな説明と、アプリ情報の中（例 v＜番号＞-dev（dev・＜SHA＞））。サーバーが配信のときに入れる。表示だけ -->
+  <span id="app-build" class="app-build" title="版：__VT_BUILD_DETAIL__">__VT_BUILD_LABEL__</span>
 </header>
 
 <section id="load-panel" class="load-panel">
