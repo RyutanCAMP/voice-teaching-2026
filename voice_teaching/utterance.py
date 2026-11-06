@@ -1113,9 +1113,21 @@ def _stop(msg: str) -> Verdict:
     return Verdict("stop", msg)
 
 
+# K6（11/6）：斜めの動きは扱わない（1つの軸ずつ）。止める・聞き返す決まりは同じで、次にすることを言う
+def diagonal_message(words: Sequence[str]) -> str:
+    quoted = "".join(f"「{w}」" for w in words)
+    return f"{quoted}は使えません。斜めには動かせないため、1つの軸ずつ、軸と向きと量を言ってください（例：「Zプラス○ミリ」）"
+
+
+def _is_diagonal(words: Sequence[str]) -> bool:
+    return any(re.search(r"斜め|ななめ|ナナメ", w) for w in words)
+
+
 def unknown_words_message(words: Sequence[str], op: str, updown: "ud.UpdownStatus | None" = None) -> str:
     """知らない言葉の聞き返し。上下の向きが確認済みのときだけ「下に3ミリ」を例に出す（渡さなければ未確認として扱う）。"""
     quoted = "".join(f"「{w}」" for w in words)
+    if _is_diagonal(words):
+        return diagonal_message(words)
     if op == "speed":
         return f"{quoted}が分かりませんでした。速度の向きと量を、もう一度言ってください（例：速度を10%下げて）"
     if _updown(updown).confirmed:
@@ -1569,6 +1581,8 @@ def _pre_check_core(facts: UtteranceFacts, selected: str | None = None,
         return _stop("。".join(facts.stop_reasons))
     if not facts.kinds:
         if facts.unknown_words:
+            if _is_diagonal(facts.unknown_words):
+                return _ask(diagonal_message(facts.unknown_words))
             return _ask(f"{''.join(f'「{w}」' for w in facts.unknown_words)}が分かりませんでした。何をするか、もう一度指示してください")
         return _ask("何をするか分かりませんでした。もう一度指示してください")
     ops = [k for k in facts.kinds if k in OPS]

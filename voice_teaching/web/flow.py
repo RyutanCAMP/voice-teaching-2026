@@ -84,6 +84,21 @@ def _status_line(has_candidate: bool, blocked: bool, approved: bool, exported: b
             f"／出力 {'済み（シミュレーション用）' if exported else 'まだ'}")
 
 
+# K2（11/6）：「このあとどうすればいい？」「使い方は？」：Claude に送らず、今の状態に合わせた決まった文で答える（状態は変えない）
+_NEXT_Q = re.compile(r"(?:この)?(?:あと|後|次|つぎ)(?:は|に)?(?:何|なに|どう)|どうやって使|使い方|どう使|どうすればいい|どうしたらいい"
+                     r"|何をすればいい|なにをすればいい|何をしたらいい|なにをしたらいい")
+M_NEXT_START = ("まず、右の図の点か下の番号で、変えたい位置を選んでください。そのあと「Zプラス○ミリ」のように、"
+                "軸と向きと量を一緒に言ってください。動きの説明を聞きたいときは「何をする動き？」と聞いてください")
+M_NEXT_SELECTED = ("選んだ位置（{pos}）を動かすなら、「Zプラス○ミリ」のように、軸と向きと量を一緒に言ってください。"
+                   "別の位置にするときは、図の点か下の番号で選び直してください")
+M_NEXT_CANDIDATE = ("今の変更候補（{summary}）を、確認表示で確かめてください。よければ承認ボタンを押します。"
+                    "やめる場合は［元に戻す］を押すか「取り消して」と言ってください")
+# K3（11/6）：数だけ（「3」）：何を言えばよいかを案内する（人の数を例に使わない。候補は作らない）
+_BARE_NUMBER = re.compile(r"[0-9]+(?:\.[0-9]+)?[？?。！!]*")
+M_BARE_NUMBER = ("数だけでは、何を変えるか決まりません。位置を動かすなら、軸と向きと量を一緒に言ってください（例：「Zプラス○ミリ」）。"
+                 "回数を変えるなら「○回にして」と言ってください")
+# K5（11/6）：回数を断ったとき、Claude の受け答えの代わりに出す文（理由と次にすることは、プログラムの断りの文が出す）
+M_COUNT_REFUSED_LEAD = "回数の変更のご希望ですね。この回数にはできません（理由は次の文です）"
 STEP_F_APPROVED_NEXT = "承認済みです。出力は画面の［シミュレーション用に出力］のボタンで行います（声や文字では出力しません）"
 SOURCES = ("voice", "text")
 NO_SESSION = "このジョブの画面の情報がありません（時間が経って捨てたか、サーバーを起動し直しました）。ジョブを読み込み直してください"
@@ -167,6 +182,19 @@ def _complete_instruction(text: str) -> bool:
         return False
     has_dir = bool(f.vertical) or (bool(f.axes) and (bool(f.axis_signs) or a.sign is not None))
     return has_dir
+
+
+_ONE_LIMIT = re.compile(r"^移動量 -?[0-9.]+mm は仮の上限 ([0-9.]+)mm")
+
+
+def _limit_next(msg: str) -> str:
+    """K4：上限を超えて止めた文に、次にすることを足す（数は止めた文の中のプログラムの数だけ）。上限の文でなければそのまま。"""
+    m = _ONE_LIMIT.match(msg or "")
+    if m:
+        return f"{msg}。{m.group(1)}ミリ以下の量で、もう一度言ってください"
+    if "累積の仮の上限" in (msg or "") or "丸めた後の実際の移動量が仮の上限" in (msg or ""):
+        return f"{msg}。量を減らして、もう一度言ってください"
+    return msg
 
 
 def _summary(ch) -> str:
@@ -751,9 +779,13 @@ class WebFlow:
                 e.sim_error = None
                 r = s.propose(args)
                 if r.status != "ok" and r.blocked_reason and e.sim_error:
-                    msg = f"{r.message}。シミュレーションの候補も作りません：{e.sim_error}"
                     s.log.append(("止めた理由", f"シミュレーションの候補も作りません：{e.sim_error}"))
-                    r = Reply(r.status, msg, facts=r.facts, blocked_reason=r.blocked_reason)
+                    # K4（11/6）：同じ上限の理由を2回言わない。理由は1回・次にすることを足す（判定は今のまま）
+                    msg = (f"{r.message}（シミュレーションの候補も作りません）" if "仮の上限" in r.message
+                           else f"{r.message}。シミュレーションの候補も作りません：{e.sim_error}")
+                    r = Reply(r.status, _limit_next(msg), facts=r.facts, blocked_reason=r.blocked_reason)
+                elif r.status != "ok" and r.blocked_reason:
+                    r = Reply(r.status, _limit_next(r.message), facts=r.facts, blocked_reason=r.blocked_reason)
             elif tool == "compare":
                 r = s.compare()
             elif tool == "undo":
@@ -994,6 +1026,16 @@ class WebFlow:
                 e.session.log.append(("止めた理由", msg))
             hear_out = {"ok": True, "status": "stop", "message": msg, "heard": text, "source": source}
             via.append(route if route in ("several", "purpose_or_change") else "button")
+        elif route in ("next", "bare_number"):
+            with e.lock:
+                if e.closed:
+                    return self._closed_reply(sid, e)
+                msg = self._next_text(e) if route == "next" else M_BARE_NUMBER
+                e.session.log.append(("発話", f"{'音声' if source == 'voice' else '文字'}：{text}"))
+                e.session.log.append(("案内" if route == "next" else "聞き返し", msg))
+            hear_out = {"ok": True, "status": "ok" if route == "next" else "ask", "message": msg, "heard": text,
+                        "source": source}
+            via.append(route)
         elif route == "hear":
             hear_out = self.hear(sid, text, source)
             if hear_out.get("session_closed"):
@@ -1027,6 +1069,11 @@ class WebFlow:
                         # 範囲の確認を始めた：「読み取りだけ」「候補は作りません」の文は、今の状態と合わないので、次にすることの文にする
                         ask_out["notes"] = [STEP_F_RANGE_NOTE]
                         ask_out["change_record"] = None
+                    elif isinstance(ask_out, dict) and isinstance(hear_out, dict) and hear_out.get("status") != "ok":
+                        # K5（11/6）：プログラムが断った回数：「受け取りました」「範囲のボタン」の文は今の状態と食い違うので出さない
+                        ask_out["reply"] = M_COUNT_REFUSED_LEAD
+                        ask_out["notes"] = []
+                        ask_out["change_record"] = None
         if (self.claude_lead and via == ["hear"] and isinstance(hear_out, dict) and hear_out.get("ok")
                 and isinstance(hear_out.get("message"), str) and hear_out["message"]):
             self._add_lead(e, text, hear_out)
@@ -1036,6 +1083,19 @@ class WebFlow:
             self._remember_talk(e, text, ask_out, hear_out)
             state = self._state(sid, e)
         return {"ok": True, "via": via, "ask": ask_out, "hear": hear_out, "state": state, "heard": text, "source": source}
+
+    def _next_text(self, e: _Entry) -> str:
+        """K2：次にすることの決まった文（錠の中で呼ぶ）。今の状態（保留・承認・候補・選択）から決める。状態は変えない。"""
+        s = e.session
+        if s.candidate is not None and e.hold:
+            return M_HOLD
+        if self._approved(e):
+            return STEP_F_APPROVED_NEXT
+        if s.candidate is not None:
+            return M_NEXT_CANDIDATE.format(summary=_summary(s.candidate))
+        if s.selected:
+            return M_NEXT_SELECTED.format(pos=s.selected)
+        return M_NEXT_START
 
     def _add_lead(self, e: _Entry, text: str, hear_out: dict) -> None:
         """Claude の言い添え（claude_lead）：プログラムの答え（hear_out の status・message）はそのまま。前に出す一言だけを足す。
@@ -1085,6 +1145,10 @@ class WebFlow:
             return "hear"  # 会話・範囲の確認の続き（「承認」と言ったときの2段階の案内も、今の道が出す）
         if _BUTTON_ONLY_WORDS.search(ut.normalize(text)) or (approved and f.stop_reasons):
             return "button"  # 承認・出力・起動など：状態を変えず（承認も取り消さず）、ボタンで行うことを伝えるだけ
+        if _NEXT_Q.search(nt) and not change:
+            return "next"  # K2：次にすることの質問（変更の言葉が無いときだけ）。決まった文で答える・状態は変えない
+        if _BARE_NUMBER.fullmatch(nt) and not s.awaiting_answer and e.talk.pending is None:
+            return "bare_number"  # K3：数だけ。聞き返しの答え（「何ミリですか？」→「3」）は今までの道
         # 止める理由のある文（「前・後ろ」など）は、承認の前なら今までどおり指示の道へ（止める文・場所の言葉の会話は指示の道が出す）
         if approved and not change:
             if f.question or _QUESTION_WORDS.search(ut.normalize(text)):

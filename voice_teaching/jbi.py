@@ -539,13 +539,15 @@ def repeat_count_problem(current: int, total: object, target: str) -> str | None
         return "回数が整数で決まっていないため、変更しません"
     if total == current:
         return f"{target} は今 {current} 回で、同じ回数のため、変更しません"
+    # K5（11/6）：断る条件は同じ。今が REPEAT_FROM 回のときは、扱える言い方（次にすること）を足す
+    nxt = f"。{REPEAT_TO}回にする場合は「{REPEAT_TO}回にして」と言ってください" if current == REPEAT_FROM else ""
     if total < current:
-        return f"{target} は今 {current} 回です。{REPEAT_DECREASE_MESSAGE}"
+        return f"{target} は今 {current} 回です。{REPEAT_DECREASE_MESSAGE}{nxt}"
     if current < 2:
         return (f"{target} は今 {current} 回です。回数は、今が2回以上のときだけ変えます"
                 "（1回から増やすと、区間と区間のつなぎの、新しい移動の線ができるため）。変更しません")
     if (current, total) != (REPEAT_FROM, REPEAT_TO):
-        return f"{target} は今 {current} 回です。{REPEAT_ONLY_MESSAGE}。{total}回にはしません"
+        return f"{target} は今 {current} 回です。{REPEAT_ONLY_MESSAGE}。{total}回にはしません{nxt}"
     return None
 
 
