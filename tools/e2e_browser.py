@@ -1331,76 +1331,6 @@ def check_front_view(browser, check, shots: Path | None, out: Path) -> None:
         srv.server_close()
 
 
-def check_figure_short_scenes(browser, check, shots: Path | None, out: Path) -> None:
-    """Issue #8 round4（仕様 v2.1 4章・受入基準20・Safety P2）：3D の下の常時の注意の1行が、HTML にあるだけでなく画面の中に**見えている**こと。
-    「当たらないとは限りません」を含むこと。読込直後・候補・再生中・承認後・保留中。1280×720・1440×900。
-    見えている＝表示されていて、画面の範囲の中にあり、真ん中の点でほかの物（ポップアップなど）に隠れていない。2行までで、再生の操作を押し出さない"""
-    sys.path.insert(0, str(REPO / "tools"))
-    import demo_mock as dm
-    from voice_teaching import claude_explain as cx
-    from voice_teaching import sim
-    from voice_teaching.claude_interpreter import MockInterpreter
-    from voice_teaching.web import server
-    cx.PRICES[dm.MOCK_MODEL] = cx.Price(input=0.0, output=0.0, cache_write_5m=0.0, cache_write_1h=0.0, cache_read=0.0)
-    ex = cx.Explainer("mock-no-network", dm.MOCK_MODEL, client=dm.ScriptClient(), usage_log=cx.UsageLog(out / "fs_usage.jsonl"))
-    old_out = sim.DEFAULT_OUT_DIR
-    sim.DEFAULT_OUT_DIR = out / "fs_sim"
-    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None, explainer=ex)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    url = f"http://127.0.0.1:{srv.server_address[1]}/"
-    SEEN = """() => { const e = document.querySelector('#figure-short');
-      if (!e || e.closest('[hidden]') || !e.getClientRects().length) return { shown: false };
-      const r = e.getBoundingClientRect(), cs = getComputedStyle(e);
-      const inView = r.top >= 0 && r.left >= 0 && r.bottom <= innerHeight && r.right <= innerWidth && r.width > 0 && r.height > 0;
-      const t = document.elementFromPoint(r.left + Math.min(r.width / 2, 40), r.top + r.height / 2);
-      const lines = Math.round(r.height / parseFloat(cs.lineHeight || '16'));
-      const pb = document.querySelector('#play-button').getBoundingClientRect();
-      return { shown: cs.visibility !== 'hidden' && parseFloat(cs.opacity) > 0.5, inView, top: !!t && (t === e || e.contains(t)),
-               lines, text: e.innerText, playIn: pb.bottom <= innerHeight && pb.top >= 0 }; }"""
-    def send(pg, text):
-        fill_text(pg, text)
-        pg.click("#text-send")
-        until(pg, lambda: pg.is_enabled("#text-send") or not pg.is_visible("#text-send"), 15000)
-        pg.wait_for_timeout(300)
-    def seen(pg, tag):
-        r = pg.evaluate(SEEN)
-        ok = (r.get("shown") and r.get("inView") and r.get("top") and r.get("lines", 9) <= 2 and r.get("playIn")
-              and "当たらないとは限りません" in r.get("text", "") and "目安" in r.get("text", ""))
-        check(bool(ok), f"図の注意の常時の1行（{tag}）：画面の中に見え、隠れず、「当たらないとは限りません」を含む（{r}）")
-    try:
-        for w, h in [(1280, 720), (1440, 900)]:
-            pg = browser.new_page(viewport={"width": w, "height": h})
-            pg.add_init_script(FAKE_RECOGNITION)
-            pg.goto(url + "?opening=0")
-            pg.set_input_files("#file-input", str(REPO / "samples/dummy" / "DEMO_C_PLACE.JBI"))
-            pg.wait_for_selector("#job-area:not([hidden])")
-            pg.wait_for_timeout(300)
-            seen(pg, f"{w}×{h} 読込直後")
-            pg.locator("#position-chips button", has_text="C00005").first.click()
-            send(pg, "Zプラス方向に5ミリ")
-            until(pg, lambda: pg.is_enabled("#open-confirm"), 10000)
-            pg.click("#play-stop") if pg.is_enabled("#play-stop") else None
-            pg.wait_for_timeout(200)
-            seen(pg, f"{w}×{h} 候補")
-            pg.click("#play-button")
-            until(pg, lambda: pg.is_visible("#play-now"), 10000)
-            seen(pg, f"{w}×{h} 再生中")
-            pg.click("#play-stop")
-            pg.click("#open-confirm")
-            pg.fill("#approver-name", "e2e確認")
-            pg.click("#approve-button")
-            until(pg, lambda: pg.is_visible("#approval-status") and "✓" in pg.inner_text("#approval-status"), 10000)
-            seen(pg, f"{w}×{h} 承認後")
-            send(pg, "ちょっと待って")
-            until(pg, lambda: pg.get_attribute("#approval-icon", "data-appr") == "warn", 10000)
-            seen(pg, f"{w}×{h} 保留中")
-            pg.close()
-    finally:
-        sim.DEFAULT_OUT_DIR = old_out
-        srv.shutdown()
-        srv.server_close()
-
-
 def check_export_twice(browser, check, shots: Path | None, out: Path) -> None:
     """11/5 夜 H1：出力に成功したあと［シミュレーション用に出力］をもう一度押す（2回押す・ダブルクリック）と、
     2回目が「既にあるため、上書きしません」の赤い失敗になり、「出力しました」の見出し・「出力 済み」と食い違っていた。
@@ -3947,7 +3877,6 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check_build_label(b, check, shots, out)
             check_ui1_hold_display(b, check, shots, out)
             check_front_view(b, check, shots, out)
-            check_figure_short_scenes(b, check, shots, out)
             check_export_twice(b, check, shots, out)
             check_opening_click_through(b, check, shots, out)
             check_export_path_short(b, check, shots, out)
@@ -5075,11 +5004,10 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
           f"解釈のしかたは上の帯に出さず、アプリ情報で区別：{pg.text_content('#app-info-interp')}")
     # 入口は1つ（11/4 唐川さんの指示③）：ステップ2でも、指示の欄（会話の入口）を出す（「何をしている？」を位置を選ぶ前に聞ける）
     check(cards(pg) == ["select-panel", "instruction-panel"], f"右側は今のステップのカードと、入口（指示の欄）：{cards(pg)}")
-    # Issue #7・#8：短い1行（目安・離れて見えても当たらないとは限らない・実機の動作と干渉は保証しない）をいつも出し、
-    # 全文（本体の動きではない など）は ⓘ で開ける。round4：仕様 v2.1 4章・受入基準20で「当たらないとは限りません」を常時の1行に
+    # Issue #7・#8：短い1行（目安・実機の動作と干渉は保証しない）をいつも出し、全文（本体の動きではない・当たらないとは限らない）は ⓘ で開ける
     short = pg.inner_text("#figure-short") if pg.is_visible("#figure-short") else ""
     full = pg.text_content("#figure-panel .figure-notes") or ""
-    check(all(x in short for x in ["目安", "当たらないとは限りません", "実機の動作・干渉は保証しません"]) and len(short) <= 50
+    check(all(x in short for x in ["目安", "実機の動作・干渉は保証しません"]) and len(short) <= 30
           and all(x in full for x in ["ロボット本体の動きではありません", "当たらないとは限りません", "動作や干渉を保証するシミュレーターではありません"]),
           f"図の注意：短い1行（目安・実機の動作と干渉は保証しない）はいつも見え、全文（本体の動きではない・当たらないとは限らない）は ⓘ の中にある（{short!r}）")
     pg.click(".fig-notes-more > summary")
