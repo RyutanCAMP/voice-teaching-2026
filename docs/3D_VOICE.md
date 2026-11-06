@@ -11,8 +11,9 @@
 ```
 cd C:\Users\User\voice-teaching
 git switch feat/3d-voice
-.venv\Scripts\python -m voice_teaching.web       # http://127.0.0.1:8765/ を Chrome で開く
+.venv\Scripts\python -m voice_teaching.web --mock   # キーなしで試す。http://127.0.0.1:8765/ を Chrome で開く
 ```
+（`--mock` はモックで試すとき。本物の Claude で動かすときは `--mock` を外し、キー（`.env`）を用意する。キーが無いまま `--mock` なしで起動すると止まります。撮影（`--channel filming`）では `--mock` は使えません）
 
 1. `samples/dummy/DEMO_C_PLACE.JBI` を画面にドロップ → 3D に点と経路が出る
 2. 3D をドラッグで回す・ホイールで拡大縮小・「視点を戻す」。点 C00005 を押す

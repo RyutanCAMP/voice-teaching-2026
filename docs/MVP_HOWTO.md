@@ -8,15 +8,17 @@ JBI読込 → 位置選択 → 音声または文字の指示 → 変更候補 �
   `voice_teaching/web/static/speech.js` に置いたもの。テストは `tests/speech.test.mjs`、import 先だけ変更）でつないでいます。
   認識した文は文字入力の欄に入るだけで、自動では送りません。人が確かめて直してから「指示を送る」を押します。
   音声も文字も同じ `/api/hear` に送ります（`source` は記録だけで、結果は変わりません）。
-- **解釈**は、環境変数 `ANTHROPIC_API_KEY` があれば本物の Claude（公式 SDK `anthropic`）、無ければ偽のClaude（モック）です。
+- **解釈**は、環境変数 `ANTHROPIC_API_KEY` があれば本物の Claude（公式 SDK `anthropic`）です。キーが無ければ起動を止めます。偽のClaude（モック）は `--mock` を付けて起動したときだけです。
   どちらで解釈しているかは、画面と作業ログに出ます。
 
 ## 起動
 
 ```
-python -m voice_teaching.web            # http://127.0.0.1:8765/
-python -m voice_teaching.web --port 0   # 空いているポートで起動（表示された URL を開く）
+python -m voice_teaching.web --mock            # キーなしで試す（モック）。http://127.0.0.1:8765/
+python -m voice_teaching.web --mock --port 0   # 空いているポートで起動（表示された URL を開く）
 ```
+
+（`--mock` はモックで試すとき。本物の Claude で動かすときは `--mock` を外し、キー（`.env`）を用意する。キーが無いまま `--mock` なしで起動すると止まります。撮影（`--channel filming`）では `--mock` は使えません）
 
 - 127.0.0.1 だけで待ち受けます。止めるときは Ctrl+C。
 - Chrome で表示された URL を開きます。
@@ -79,7 +81,7 @@ python -m voice_teaching.web --port 0   # 空いているポートで起動（�
 - 音声認識の無いブラウザーでは「このブラウザでは音声入力を使えません。文字で入力してください」と出ます。
 
 ### 実マイクで確かめる手順（唐川さん向け。まだ誰も確かめていません）
-1. `python -m voice_teaching.web` で起動し、Chrome で開く。
+1. `python -m voice_teaching.web --mock`（本物の Claude で試すときは `--mock` を外し、キーを用意する）で起動し、Chrome で開く。
 2. DEMO_PLACE.JBI を読み込み、C00004 を選び、「ブラウザー標準」を選ぶ。
 3. 「マイクで話す」→ マイクの許可を聞かれたら許可 →「この位置を上に10ミリ」と話す →「終了」。
 4. 入力欄の文を確かめる（「10ミリ」が「十ミリ」などになると量が分からず聞き返しになります。そのときは直して送る）。

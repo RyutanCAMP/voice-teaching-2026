@@ -11,8 +11,9 @@
 ## 使い方
 
 ```
-python -m voice_teaching.web     # http://127.0.0.1:8765/ を Chrome で開く
+python -m voice_teaching.web --mock   # キーなしで試す。http://127.0.0.1:8765/ を Chrome で開く
 ```
+（`--mock` はモックで試すとき。本物の Claude で動かすときは `--mock` を外し、キー（`.env`）を用意する。キーが無いまま `--mock` なしで起動すると止まります。撮影（`--channel filming`）では `--mock` は使えません）
 
 | ステップ | 画面でやること |
 |---|---|

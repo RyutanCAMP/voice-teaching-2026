@@ -8,6 +8,7 @@
   - 回数の言葉（「3回にして」）→ 回数の変更の希望（数は利用者の文から。画面にはプログラムの定型文が出る）
   - 人が教えた意味があれば → その言葉で説明する（「ボタンを押してる」動きをくり返しています）
   - それ以外 → 動きの説明と「何の作業か、教えてもらえますか？」
+- モック専用の道具なので「モックを明示した」扱い（dev だけ）。filming・release（--channel か VT_CHANNEL）と一緒なら起動を止める
 - 安全の決まりはアプリのまま（答えの検査・状態の1行・承認はボタンだけ・出力は合成ジョブだけ）
 """
 from __future__ import annotations
@@ -23,7 +24,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 from voice_teaching import claude_explain as cx  # noqa: E402
-from voice_teaching import buildinfo, updown  # noqa: E402
+from voice_teaching import buildinfo, launch_guard, updown  # noqa: E402
 from voice_teaching.claude_interpreter import MockInterpreter  # noqa: E402
 from voice_teaching.web.server import DEFAULT_PORT, make_server  # noqa: E402
 
@@ -88,6 +89,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--channel", choices=buildinfo.CHANNELS, default=None,
                     help="画面の版の区別（dev／filming／release。無ければ環境変数 VT_CHANNEL、それも無ければ dev）")
     args = ap.parse_args(argv)
+    reason = launch_guard.refuse_mock(launch_guard.channel_of(args.channel))
+    if reason is not None:  # filming・release：モックでは起動しない
+        print(reason, file=sys.stderr, flush=True)
+        return launch_guard.EXIT_REFUSED
     cx.PRICES[MOCK_MODEL] = cx.Price(input=0.0, output=0.0, cache_write_5m=0.0, cache_write_1h=0.0, cache_read=0.0)
     explainer = cx.Explainer("mock-no-network", MOCK_MODEL, client=ScriptClient(),
                              usage_log=cx.UsageLog(REPO / "records" / "mock_usage.jsonl"))
@@ -98,6 +103,7 @@ def main(argv: list[str] | None = None) -> int:
         ap.error(str(e))
     if getattr(srv, "build", None) is not None:
         print(f"版：{srv.build.detail}", flush=True)
+    print(launch_guard.MOCK_BANNER, flush=True)
     print("モックの通し：解釈の係も会話の係もモック（本物の Claude は呼びません。.env は読みません）", flush=True)
     print(f"Chrome で開いてください: http://127.0.0.1:{srv.server_address[1]}/  （止めるときは Ctrl+C）", flush=True)
     try:

@@ -8,6 +8,9 @@ P0（H02・H16・ジョブの読み直しのあとに古い候補が残る）が
 
 起動（リポジトリの直下で）:
     python tools/debug_review_only.py --port 8805 --env-file C:/アプリ/voice-teaching/.env
+
+本物の Claude のキーが無ければ起動を止める（python -m voice_teaching.web と同じ決まり・11/6 唐川さんの決定）。
+モックで試すときだけ --mock を付ける（filming・release とは一緒に使えない）。
 """
 from __future__ import annotations
 
@@ -19,7 +22,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
-from voice_teaching import buildinfo, claude_explain, claude_interpreter, claude_lead, sim, updown  # noqa: E402
+from voice_teaching import buildinfo, claude_explain, claude_interpreter, claude_lead, launch_guard, sim, updown  # noqa: E402
 from voice_teaching.web.flow import WebFlow  # noqa: E402
 from voice_teaching.web.server import DEFAULT_PORT, make_server  # noqa: E402
 
@@ -64,11 +67,28 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--explain-model", default=None)
     ap.add_argument("--channel", choices=buildinfo.CHANNELS, default=None,
                     help="画面の版の区別（dev／filming／release。無ければ環境変数 VT_CHANNEL、それも無ければ dev）")
+    ap.add_argument(launch_guard.MOCK_FLAG, dest="mock", action="store_true",
+                    help="モックで起動する（自動テスト・試し用。本物の Claude を呼ばない。.env を読まない。dev だけ）")
     args = ap.parse_args(argv)
-    if claude_interpreter.load_dotenv(args.env_file) == claude_interpreter.DOTENV_UNREADABLE:
-        print(claude_interpreter.DOTENV_UNREADABLE_MESSAGE, flush=True)
-    interp = claude_interpreter.from_env()
-    explainer = claude_explain.Explainer.from_env(model=args.explain_model)
+    channel = launch_guard.channel_of(args.channel)
+    if args.mock:
+        reason = launch_guard.refuse_mock(channel)
+        if reason is not None:
+            print(reason, file=sys.stderr, flush=True)
+            return launch_guard.EXIT_REFUSED
+        interp = claude_interpreter.MockInterpreter()
+        explainer = claude_explain.Explainer.from_env(env={}, model=args.explain_model)  # キーなし（通信しない）
+    else:
+        dotenv_status = claude_interpreter.load_dotenv(args.env_file)
+        if dotenv_status == claude_interpreter.DOTENV_UNREADABLE:
+            print(claude_interpreter.DOTENV_UNREADABLE_MESSAGE, flush=True)
+        interp = claude_interpreter.from_env()
+        explainer = claude_explain.Explainer.from_env(model=args.explain_model)
+        # 本物の Claude（解釈の係と説明の係の両方）が使えなければ止める。黙ってモックで動かさない
+        reason = launch_guard.refuse_real(channel, interp, explainer, dotenv_status)
+        if reason is not None:
+            print(reason, file=sys.stderr, flush=True)
+            return launch_guard.EXIT_REFUSED
     try:
         srv = make_server(port=args.port, interpreter=interp, updown_config=args.updown_config, robot=args.robot,
                           explainer=explainer, channel=args.channel)
@@ -80,10 +100,13 @@ def main(argv: list[str] | None = None) -> int:
     # Claude の言い添え（指示の道の答えの前の一言。表示だけ）：本物の Claude とキーがあるときだけ。VOICE_TEACHING_CLAUDE_LEAD=0 で使わない
     srv.flow.claude_lead = claude_lead.enabled(interp, explainer, os.environ)
     print("デバッグ専用：承認と出力はサーバーで断ります（候補・3D・会話は使えます）", flush=True)
+    if args.mock:
+        print(launch_guard.MOCK_BANNER, flush=True)
     print(f"解釈：{'本物の Claude（' + interp.model + '）' if interp.kind == 'claude' else '偽のClaude（モック）'}", flush=True)
     print(f"Claude の言い添え：{'使う' if srv.flow.claude_lead else '使わない'}", flush=True)
-    print(f"Claude に聞く（読み取りだけ）：{'キーあり・' + explainer.model if explainer.has_key else 'APIキーが設定されていません'}",
-          flush=True)
+    ask = ('キーあり・' + explainer.model if explainer.has_key
+           else 'モック（キーを使いません）' if args.mock else 'APIキーが設定されていません')
+    print(f"Claude に聞く（読み取りだけ）：{ask}", flush=True)
     print(f"Chrome で開いてください: http://127.0.0.1:{srv.server_address[1]}/  （止めるときは Ctrl+C）", flush=True)
     try:
         srv.serve_forever()
