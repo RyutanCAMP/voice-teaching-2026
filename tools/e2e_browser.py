@@ -1327,8 +1327,8 @@ def check_front_view(browser, check, shots: Path | None, out: Path) -> None:
             p2 = screen(pg)
             ax = pg.evaluate(AXES)
             lf = pg.evaluate(LABEL_OV, True)
-            check(not lf["out"] and sorted(lf["robot"]) == sorted(["ロボット（台座の中心）", "ロボットの正面（X＋）：手前の向き"]),
-                  f"札（{w}×{h}・正面）：台座と正面の札（「手前の向き」）・軸の文字・操作のヒントが重ならない（{lf}）")
+            check(not lf["out"] and sorted(lf["robot"]) == sorted(["ロボット（台座の中心）", "ロボットの正面（X＋）：画面に垂直"]),
+                  f"札（{w}×{h}・正面）：台座と正面の札（「画面に垂直」）・軸の文字・操作のヒントが重ならない（{lf}）")
             if shots:
                 pg.screenshot(path=str(shots / f"FRONT_{w}x{h}_2_front.png"))
             n, bad = agree(p2)
