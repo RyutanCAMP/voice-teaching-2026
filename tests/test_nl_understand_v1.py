@@ -368,3 +368,17 @@ def test_legacy_keeps_spoken_position_across_answers(out):
     w.talk(sid, "3ミリ")
     c = cand(w, sid)
     assert c is not None and c.target == "C00003 Y" and c.after_value - c.before_value == pytest.approx(-3.0)
+
+
+@pytest.mark.parametrize("cancel", ["やっぱりやめる", "だめ", "取り消して", "いや、いいです"])
+def test_frame_is_dropped_on_cancel_or_negation(out, cancel):
+    """聞き返しの途中で、やめる・否定の言葉：持っていた方向・量を、次の文（「5ミリ」）に当てない（11/7）。"""
+    w, sid, fake = setup(ans(direction="右", direction_evidence="右", amount_kind="vague",
+                             status="need_clarification", missing=["amount"]),
+                         ans(amount_kind="stated", amount_value=5, amount_unit="mm", amount_evidence="5ミリ"))
+    w.talk(sid, "もう少し右に寄せて")
+    assert w._entries[sid].nl_frame is not None
+    w.talk(sid, cancel)
+    assert w._entries[sid].nl_frame is None
+    w.talk(sid, "5ミリ")
+    assert cand(w, sid) is None

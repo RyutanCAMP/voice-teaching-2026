@@ -1168,6 +1168,12 @@ class WebFlow:
         if (facts.negations or facts.undo_negations or facts.stop_reasons or facts.place_ref or facts.repeat
                 or rc.is_repeat_request(text) or v.confirm_position is not None
                 or (facts.op is not None and facts.op != "move") or ut.is_updown_unset_ask(v.message)):
+            if (facts.negations or facts.undo_negations or facts.stop_reasons or facts.op == "undo"
+                    or _NEGATION_WHOLE.fullmatch(_bare(text))):
+                e.nl_frame = None  # 聞き返しの途中の「やっぱりやめる」「だめ」：持っていた方向・量は次の文に当てない
+            return None
+        if _NEGATION_WHOLE.fullmatch(_bare(text)):
+            e.nl_frame = None
             return None
         if e.nl_frame is not None:
             return "understand"  # 聞き返しの途中：前の枠と合わせて読む

@@ -92,9 +92,35 @@ def main() -> int:
         can_again = pg.is_enabled("#export-button")
         pg.locator("details.app-info > summary").click()
         shot("10_app_info", "アプリ情報（版・SHA を出さない）")
+        pg.locator("details.app-info > summary").click()
+
+        # 回数の変更（提出版は 2回 → 3回 だけ）：範囲はボタンで確かめる → 確認表示 → ボタンで承認 → SIM 出力
+        count = {}
+        pg.set_input_files("#file-input", str(ROOT / "samples" / "dummy" / "DEMO_BUTTON_REPEAT.JBI"))
+        pg.wait_for_selector("#job-area:not([hidden])")
+        pg.wait_for_timeout(1200)
+        shot("11_repeat_loaded", "回数の JOB を読み込んだ")
+        say("ボタンを押す動作を2回から3回にして")
+        pg.wait_for_selector("#range-yes", timeout=90000)
+        shot("12_repeat_range", "範囲をボタンで確かめる（声では決めない）")
+        pg.click("#range-yes")
+        pg.wait_for_function("() => document.querySelector('#open-confirm') && !document.querySelector('#open-confirm').disabled",
+                             timeout=60000)
+        shot("13_repeat_candidate", "回数の変更候補（2回 → 3回）")
+        pg.click("#open-confirm")
+        pg.wait_for_selector("#confirm-overlay:not([hidden])")
+        pg.fill("#approver-name", "唐川")
+        pg.click("#approve-button")
+        pg.wait_for_function("() => !document.querySelector('#export-button').disabled", timeout=30000)
+        pg.click("#export-button")
+        pg.wait_for_selector("#export-result:not([hidden])", timeout=30000)
+        shot("14_repeat_exported", "回数の変更を SIM 用に出力")
+        count["export_result"] = pg.inner_text("#export-result")[:300]
+        say("4回にして")
+        shot("15_repeat_4_refused", "4回は提出版では断る（2→3回だけ）")
         b.close()
     summary = {"url": args.url, "shots": log, "page_errors": errs, "export_result": export_text[:300],
-               "export_button_enabled_after_export": can_again}
+               "export_button_enabled_after_export": can_again, "repeat": count}
     (out / "flow.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
     print("export:", export_text[:120].replace("\n", " "), "| 2回目のボタン:", can_again, "| page errors:", errs)
     return 0
