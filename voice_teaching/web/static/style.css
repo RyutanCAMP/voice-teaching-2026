@@ -1570,3 +1570,7 @@ button.updown-chip { overflow-wrap: anywhere; max-width: min(360px, 100%); }
 .help-pop .help-sub { margin-top: 10px; }
 @media (max-width: 699.98px) { .top .safety-pop { position: fixed; left: 8px; right: 8px; top: 64px; width: auto; } }
 .top .safety-wrap + .app-info { margin-left: 4px; }  /* シールドの印を承認の状態のアイコンとアプリ情報の間に置いたので、並びを前のまま右に寄せる */
+/* round4：線の種類の凡例を外したので、変更前／変更後の凡例の行の高さをいつも取っておく（候補が出ても 3D の大きさ・点の位置が動かない。11/5 F7） */
+.stage .play-text { min-height: 18px; }
+/* round4：安全についての説明（図の注意）は、JOB を読み込んで図が出てから出す（最初の画面のボタンを増やさない） */
+body:has(#job-area[hidden]) .top .safety-wrap { display: none; }

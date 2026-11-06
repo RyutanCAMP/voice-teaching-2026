@@ -1593,14 +1593,17 @@ TEXT_SIZE_JS = """(sels) => { const r = {}; for (const s of sels) {
 _TS_SIDE = {".bubble.human .said": [14, 14], ".bubble.claude .said": [15, 15], ".bubble .who": [11, 11]}
 # Issue #7・11/6：記録（.status-line）は上の帯に出さない（承認の状態はアイコンだけ）。図の注意の全文は ⓘ（Issue #8 round3 で常時の短い1行は無くした）
 _TS_STATUS = {".status-line": [12, 12], ".status-line .st-chip": [12, 12]}
-_TS_ALL = {".legend.kinds": [12, 12]}  # round4：図の注意の全文（.figure-notes）は「安全についての説明」の小窓の中で、ふだんは見えない
+# round4：図の注意の全文（.figure-notes）は「安全についての説明」の小窓の中で、ふだんは見えない。線の種類の凡例（.legend.kinds）は 3D の下から外した
+_TS_ALL = {}
 TEXT_SIZE_BEFORE = {
-    "load": {**_TS_ALL, ".legend": [12, 12]},
-    "conversation": {**_TS_SIDE, **_TS_ALL, ".legend": [12, 12]},
+    # round4（11/6）：3D の下の線の種類の凡例（.legend.kinds・12px）を外したので、読込・会話・範囲の確認では .legend を測る物が無い。
+    # 候補・承認後の .legend は変更前／変更後の凡例だけで 13px（前は線の種類の凡例と合わせて [12, 13]）。文字の大きさそのものは変えていない
+    "load": {**_TS_ALL},
+    "conversation": {**_TS_SIDE, **_TS_ALL},
     "range": {**_TS_SIDE, **_TS_ALL, ".bubble.app .said": [14, 14], "#reply-message": [14, 14], "#reply-message .range-lines": [14, 14],
-              ".legend": [12, 12], ".range-button-note": [12, 12]},
-    "candidate": {**_TS_SIDE, **_TS_ALL, ".bubble.app .said": [13, 14], ".legend": [12, 13], ".cand-heard": [13, 13], ".cand-warn": [13, 13]},
-    "approved": {**_TS_SIDE, **_TS_ALL, ".bubble.app .said": [13, 14], "#reply-message": [14, 14], ".legend": [12, 13], ".cand-warn": [12, 12]},
+              ".range-button-note": [12, 12]},
+    "candidate": {**_TS_SIDE, **_TS_ALL, ".bubble.app .said": [13, 14], ".legend": [13, 13], ".cand-heard": [13, 13], ".cand-warn": [13, 13]},
+    "approved": {**_TS_SIDE, **_TS_ALL, ".bubble.app .said": [13, 14], "#reply-message": [14, 14], ".legend": [13, 13], ".cand-warn": [12, 12]},
 }
 # 1920×1080 で、これより小さくしない（会話の文字 16px・話し手 13px・状態の1行 14px・凡例と注意書き 13px）
 TEXT_SIZE_MIN_1080 = {".bubble.human .said": 16, ".bubble.claude .said": 16, ".bubble.app .said": 15, ".bubble .who": 13,
@@ -3695,7 +3698,7 @@ def check_3d_robot_base(browser, check, shots: Path | None, out: Path) -> None:
                 # 押すと詳しい小窓）と、図の向きのタブだけ
                 check(heads == ["updown-detail", "3d", "yz", "xz", "xy"] and pg.locator("#model-toggle").count() == 0 and pg.is_visible("#view-reset"),
                       f"台座（{tag}）：3D の上の欄は図の向き（3D・Y・Z・X・Z・X・Y）、正面に戻すは図の上にいつも見える：{heads}")
-                notes = pg.text_content("#figure-panel .figure-notes")  # 全文（Issue #7：ⓘ の中）
+                notes = pg.text_content("#safety-notes .figure-notes")  # 全文（round4：上の帯の「安全についての説明」の中）
                 body = pg.inner_text("body")
                 check("ロボット本体・関節は描いていません" in notes and "動作や干渉を保証するシミュレーターではありません" in notes
                       and "当たらないとは限りません" in notes and "腕やツールの根元は描いていません" in notes and "参考表示であり" in notes
