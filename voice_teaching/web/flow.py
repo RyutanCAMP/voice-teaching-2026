@@ -138,6 +138,13 @@ M_ASK_HOLD = ("この欄は説明だけで、変更はしません。変更の�
 M_HOLD_REVOKED = "新しい変更の指示かもしれないため、前の承認を取り消しました。"  # Q-3 の保留で承認を取り消したとき（文の頭）
 M_UNSURE = ("今の変更候補（{summary}）を取り消しますか？ 取り消す場合は、［元に戻す］を押すか「取り消して」と言ってください。"
             "残す場合は「このままでいい」と言ってください。確かめるまで、承認・出力はできません")
+# K1（11/6 唐川さんの許可）：「もうちょっと」「もう少し上」など、量・向きが足りない変更の意思。前の値・軸は案内に使わない
+M_MORE_SHIFT = ("量や向きが決まっていないため、今の変更候補（{summary}）を保留にしました（承認・出力はできません）。"
+                "どのくらい動かしますか？ 軸と向きと量を一緒に、もう一度言ってください（例：「Zプラス○ミリ」）。"
+                "今のままでよければ［このまま残す］を押してから、承認ボタンでもう一度承認してください")
+M_MORE_REPEAT = ("回数が決まっていないため、今の変更候補（{summary}）を保留にしました（承認・出力はできません）。"
+                 "回数を変える場合は、数で言ってください（例：「○回にして」）。"
+                 "今のままでよければ［このまま残す］を押してから、承認ボタンでもう一度承認してください")
 M_KEPT = "今の変更候補（{summary}）を残しました。承認はまだです。内容を確かめてから、確認表示の承認ボタンで承認してください"
 M_KEPT_APPROVAL = "前の承認は取り消しました。"
 M_HOLD = "取り消すか確かめている変更候補は、承認・出力できません。「取り消して」か「このままでいい」で答えてください"
@@ -1406,6 +1413,11 @@ class WebFlow:
             s.log.append(("保留", "取り消すか確かめるまで、変更候補を保留にしました（承認・出力はできません）"))
             if v.asked_form:
                 return None  # 「元に戻しますか」：今の道が［「元に戻します」でよいですか？］で確かめる（押すと取消）。保留のまま
+            if v.rule == "10 more":
+                # K1：足りないもの（量・向き／回数）を聞く。新しい候補は作らない・前の値は引き継がない
+                more = M_MORE_REPEAT if s.candidate.kind == "repeat" else M_MORE_SHIFT
+                msg = (M_HOLD_REVOKED if revoked else "") + more.format(summary=_summary(s.candidate))
+                return self._stale_out(e, text, source, "ask", msg, v.kind)
             msg = (M_HOLD_REVOKED if revoked else "") + M_UNSURE.format(summary=_summary(s.candidate))  # 承認は黙って消さない
             return self._stale_out(e, text, source, "ask", msg, v.kind)
         if v.kind == stale.QUESTION_ABOUT_CANCEL:

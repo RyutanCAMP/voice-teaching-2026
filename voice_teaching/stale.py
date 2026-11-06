@@ -106,6 +106,19 @@ _RELATIVE = re.compile(r"あと|もう|さらに|追加|足して|増やし|減�
 _VAGUE_CHANGE = re.compile(r"半分|倍に|小さく|大きく|減らし|増やし|少なめ|多め|少なく|多く|短く|長く|上げ|下げ|ずらし|動かし"
                            r"|ちいさく|おおきく|へらし|ふやし|すくなめ|おおめ"
                            r"|(?:^|[、,])(?:もう少し|もうちょっと|少し|ちょっと)?(?:上|下|右|左|前|後ろ|奥|手前|うえ|した)(?:に|へ|の方)")
+# K1（11/6 唐川さんの許可）：数も軸も無い「もうちょっと」「もう少し上」「もっと」「少しだけ」（文全体がこの形のときだけ）。
+# 変更の意思はあるが量・向きが足りない：保留にして聞き返す（前の値・軸は引き継がない・新しい候補は作らない）
+_MORE = re.compile(r"(?:もう(?:少し|すこし|ちょっと|ちょい|ちょこっと|ちょびっと)|もっと|少しだけ|すこしだけ|ちょっとだけ|あと少し|あとちょっと)"
+                   r"(?:だけ)?(?:上|下|右|左|前|後ろ|奥|手前|うえ|した)?(?:の方|のほう)?(?:に|へ)?"
+                   r"(?:お願い(?:します)?|して|ね|ねー|かな|で)?[？?！!。、ー〜\s]*")
+_KATA2HIRA = str.maketrans({chr(k): chr(k - 0x60) for k in range(0x30A1, 0x30F7)})
+
+
+def is_more(text: object) -> bool:
+    """K1 の言葉か（「もうちょっと」「もう少し上に」「モウチョット」）。"""
+    return isinstance(text, str) and bool(_MORE.fullmatch(_norm(text).translate(_KATA2HIRA).strip()))
+
+
 _VALUE_FILLER = re.compile(r"にして|にする|にします|に|で|のまま|まま|いい|よい|お願いします|お願い|します|ください|して|だけ")
 
 
@@ -253,6 +266,9 @@ def classify(text: object) -> Verdict:
         if _POINTER.match(t):
             return Verdict(UNSURE, asked_form=True, rule="3b pointer stop")  # 「それはやめて」：候補のことかもしれない。保留（今の文のまま）
         return Verdict(OTHER, rule="3b other stop")
+    # K1：「もうちょっと」「もう少し上」など、量・向きが足りない変更の意思（規則 10 の仲間：承認も取り消して保留）
+    if is_more(text):
+        return Verdict(UNSURE, rule="10 more")
     # 3c：ふつうの質問（取消の言葉が無い・印のあとに新しい値が無い・印のほかに中身がある疑問の文）
     if (has_m and not cancel_verb and not x_clauses and _ASKING.search(t)
             and not (m_before and (_values(t[m_before.end():]) or _BARE_NUMBER.search(rc.to_digits(t[m_before.end():]))))
