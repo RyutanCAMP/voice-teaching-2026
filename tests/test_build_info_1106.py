@@ -1,11 +1,11 @@
 """版・チャンネル・Git の SHA の表示（11/6 唐川さん・Issue #8 と一緒に）。実装より先に書いた。
 
-決まり（CHANGELOG.md「版の決まり」）：
+決まり（voice_teaching/buildinfo.py の先頭のコメント。CHANGELOG.md は変えない）：
 - 番号は voice_teaching/__init__.py の __version__ の1か所だけ。画面の版の文字はこの値から作る
 - チャンネルは dev / filming / release の3つだけ。決め方は1か所（起動の引数 --channel、無ければ環境変数 VT_CHANNEL、無ければ dev）。
   3つ以外の値は起動を止める（ValueError・起動の道具では終了）
-- 表示（11/6 唐川さんの決定）：v{__version__} をそのまま出し、チャンネルは後ろに足すだけ。dev は「v1.00-dev」、
-  filming は「v1.00-dev · 撮影用」（dev の表記を消さない）、release は「v{__version__}」。__version__ が「-dev」の間は release を断る
+- 表示（11/6 唐川さんの再決定）：__version__ から番号と「-dev」の印を分けて読み、チャンネルで末尾だけを決める。
+  dev は「v1.00-dev」、filming は「v1.00-TEST」、release は「v1.00」。画面に「撮影用」の日本語は出さない。__version__ が「-dev」の間は release を断る
 - SHA：git rev-parse --short HEAD。未コミットの変更があれば「-dirty」。取れなければ「unknown」（起動は止めない）
 """
 import subprocess
@@ -23,21 +23,23 @@ def test_number_comes_only_from_dunder_version(monkeypatch):
     b = buildinfo.resolve("dev", sha="abc1234")
     assert b.version == "3.21-dev" and b.number == "3.21"
     assert b.label == "v3.21-dev"
-    assert buildinfo.resolve("filming", sha="abc1234").label == "v3.21-dev · 撮影用"
+    assert buildinfo.resolve("filming", sha="abc1234").label == "v3.21-TEST"
 
 
 def test_labels_for_the_three_channels(monkeypatch):
     monkeypatch.setattr(voice_teaching, "__version__", "1.00")
-    assert buildinfo.resolve("dev", sha="x").label == "v1.00 · dev"  # 「-dev」の無い版を dev で起動：正式な版と見分ける
-    assert buildinfo.resolve("filming", sha="x").label == "v1.00 · 撮影用"
+    assert buildinfo.resolve("dev", sha="x").label == "v1.00-dev"  # dev チャンネルはいつも -dev
+    assert buildinfo.resolve("filming", sha="x").label == "v1.00-TEST"
     assert buildinfo.resolve("release", sha="x").label == "v1.00"
 
 
 def test_dev_version_labels(monkeypatch):
     monkeypatch.setattr(voice_teaching, "__version__", "1.00-dev")
     assert buildinfo.resolve("dev", sha="x").label == "v1.00-dev"
-    assert buildinfo.resolve("filming", sha="x").label == "v1.00-dev · 撮影用"  # 撮影用でも dev の表記を消さない
+    assert buildinfo.resolve("filming", sha="x").label == "v1.00-TEST"  # 撮影でも TEST を消さない。「撮影用」の日本語は出さない
     assert buildinfo.resolve("dev", sha="a1b2c3d").detail == "v1.00-dev（dev・a1b2c3d）"
+    assert buildinfo.resolve("filming", sha="a1b2c3d").detail == "v1.00-TEST（filming・a1b2c3d）"
+    assert all("撮影" not in buildinfo.resolve(c, sha="x").detail for c in ("dev", "filming"))
 
 
 def test_release_is_refused_while_version_is_dev(monkeypatch):
@@ -101,7 +103,7 @@ def test_server_serves_label_and_api(monkeypatch):
     try:
         base = f"http://127.0.0.1:{srv.server_address[1]}"
         page = urllib.request.urlopen(base + "/").read().decode("utf-8")
-        lab = f"v{voice_teaching.__version__} · 撮影用"
+        lab = "v" + voice_teaching.__version__.removesuffix("-dev") + "-TEST"
         assert lab in page and f"{lab}（filming・abc1234）" in page
         assert "__VT_BUILD_LABEL__" not in page and "__VT_BUILD_DETAIL__" not in page
         assert f"Ver.{voice_teaching.__version__}" in page  # アプリ情報の今の版の文字は今どおり

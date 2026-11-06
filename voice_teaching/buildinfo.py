@@ -1,10 +1,11 @@
 """画面に出す版の文字（番号・チャンネル・Git の SHA）。チャンネルと SHA の決まりはこのコメントの1か所（11/6 唐川さんの決定）。
 
 - 番号：voice_teaching/__init__.py の __version__ の1か所だけ（ここでは読むだけ。今は 1.00-dev）
-- 表示：「v{__version__}」をそのまま出し、チャンネルは後ろに足すだけ
-    dev     → v1.00-dev（__version__ に「-dev」が無い版を dev で起動したときは「v1.00 · dev」として、正式な版と見分ける）
-    filming → v1.00-dev · 撮影用（撮影用でも dev の表記は消さない。正式な版と見間違えないため）
-    release → v{__version__}（__version__ に「-dev」が付いている間は使えない。起動のときに ValueError で断る）
+- 表示：__version__ から番号（"1.00"）と「-dev」の印を分けて読み、チャンネルで末尾だけを決める（CHANNEL_SUFFIX）
+    dev     → v1.00-dev
+    filming → v1.00-TEST（画面に「撮影用」の日本語は出さない。正式リリースの前なので撮影でも TEST を消さない）
+    release → v1.00（__version__ に「-dev」が付いている間は使えない。起動のときに ValueError で断る。dev に倒さない）
+  詳しい版（SHA つき）は「v1.00-TEST（filming・a1b2c3d）」の形
 - チャンネル：dev / filming / release の3つだけ。起動の引数 --channel、無ければ環境変数 VT_CHANNEL、無ければ dev。
   3つ以外の値は ValueError（起動を止める。似た値を dev に倒すと、撮影用・リリース版と思って開発版を使うおそれがあるため）
 - SHA：起動のときに git rev-parse --short HEAD。追跡しているファイルに未コミットの変更があれば「-dirty」。
@@ -24,6 +25,7 @@ CHANNELS = ("dev", "filming", "release")
 DEFAULT_CHANNEL = "dev"
 ENV_NAME = "VT_CHANNEL"
 DEV_SUFFIX = "-dev"
+CHANNEL_SUFFIX = {"dev": "-dev", "filming": "-TEST", "release": ""}  # 画面の版の末尾（内部のチャンネル名は変えない）
 UNKNOWN_SHA = "unknown"
 _REPO = Path(__file__).resolve().parent.parent
 
@@ -37,13 +39,8 @@ class BuildInfo:
 
     @property
     def label(self) -> str:
-        """画面の小さな版の文字（v{__version__} にチャンネルを足すだけ）。"""
-        base = f"v{self.version}"
-        if self.channel == "filming":
-            return f"{base} · 撮影用"
-        if self.channel == "dev" and not self.version.endswith(DEV_SUFFIX):
-            return f"{base} · dev"
-        return base
+        """画面の小さな版の文字：v＜番号＞＋チャンネルの末尾（v1.00-dev・v1.00-TEST・v1.00）。"""
+        return f"v{self.number}{CHANNEL_SUFFIX[self.channel]}"
 
     @property
     def detail(self) -> str:
