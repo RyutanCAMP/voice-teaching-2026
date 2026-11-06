@@ -72,4 +72,6 @@ def test_backchannel_question_and_button_words_after_approval_keep_it(tmp_path):
     for text in ["はい", "OK", "保存して", "出力して", "このロボット、何をしている？", "3回にして、あと3ミリ下げて"]:
         r = w.talk(sid, text)
         assert r["state"]["approval"] == approval, text
-        assert "承認 済み" in r["state"]["status_line"], text
+        # UI-1（11/6）：承認の記録が残っていても、保留中（P0：「保存して」など）は状態の1行を「承認 済み」と言わない（文だけ。判定は前のまま）
+        want = "承認 保留中" if r["state"]["hold"] else "承認 済み"
+        assert want in r["state"]["status_line"], text
