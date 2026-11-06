@@ -1286,6 +1286,24 @@ def check_front_view(browser, check, shots: Path | None, out: Path) -> None:
                     if (sy < 0) != (dz > 0):
                         bad.append((a, b, "Z", dz, round(sy)))
         return n, bad
+    # round4：札・文字の四角が重ならない（台座と正面の札どうし、札と軸の文字・軸の線・台座の輪・点の名前・操作のヒント・格子の文字）
+    # withRing：台座の輪の四角も見る（正面のときだけ。斜めの視点では台座の札は前から輪の上の端に少しかかる置き方で、見た目を変えないため見ない）
+    LABEL_OV = """(withRing) => { const svg = document.querySelector('#fig-3d svg');
+      const R = (e) => { const r = e.getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom]; };
+      const tag = (n, e) => [n, R(e)];
+      const robot = [...svg.querySelectorAll('text.robot-label')].map((t) => tag(t.textContent, t.parentNode.querySelector('rect') || t));
+      const texts = [...svg.querySelectorAll('text.axis3, text.hint3, text.axis, g.pt3 > text, text.moved-label, text.repeat-label')].map((t) => tag(t.textContent, t));
+      const lines = [...svg.querySelectorAll('line.axis-line')].map((l) => tag('軸の線 ' + l.dataset.axis, l));
+      const ring = svg.querySelector('g.robot-base polygon');
+      const shapes = lines.concat(ring && withRing ? [tag('台座の輪', ring)] : []);
+      const ov = (a, b) => a[0] < b[2] - 0.5 && a[2] > b[0] + 0.5 && a[1] < b[3] - 0.5 && a[3] > b[1] + 0.5;
+      const out = [];
+      for (let i = 0; i < robot.length; i++) for (let j = i + 1; j < robot.length; j++) if (ov(robot[i][1], robot[j][1])) out.push([robot[i][0], robot[j][0]]);
+      for (const [n, r] of robot) for (const [m, q] of texts.concat(shapes)) if (ov(r, q)) out.push([n, m]);
+      const ax = texts.filter(([n]) => /^[XYZ][+−]$/.test(n)), others = texts.filter(([n]) => !/^[XYZ][+−]$/.test(n));
+      for (const [n, r] of ax) for (const [m, q] of others) if (ov(r, q)) out.push([n, m]);
+      for (const [m, q] of texts.filter(([n]) => n.startsWith('ドラッグ'))) for (const [n, r] of lines) if (ov(r, q)) out.push([n, m]);
+      return { out, robot: robot.map(([n]) => n) }; }"""
     try:
         for w, h in [(1280, 720), (1440, 900)]:
             pg = browser.new_page(viewport={"width": w, "height": h})
@@ -1293,6 +1311,8 @@ def check_front_view(browser, check, shots: Path | None, out: Path) -> None:
             pg.set_input_files("#file-input", str(REPO / "samples/dummy" / "DEMO_C_PLACE.JBI"))
             pg.wait_for_selector("#job-area:not([hidden])")
             pg.wait_for_timeout(300)
+            lo = pg.evaluate(LABEL_OV, False)
+            check(not lo["out"] and len(lo["robot"]) == 2, f"札（{w}×{h}・読み込んだときの斜めの視点）：札・文字が重ならない（{lo}）")
             p0 = screen(pg)
             if shots:
                 pg.screenshot(path=str(shots / f"FRONT_{w}x{h}_0_loaded.png"))
@@ -1306,6 +1326,9 @@ def check_front_view(browser, check, shots: Path | None, out: Path) -> None:
             pg.wait_for_timeout(250)
             p2 = screen(pg)
             ax = pg.evaluate(AXES)
+            lf = pg.evaluate(LABEL_OV, True)
+            check(not lf["out"] and sorted(lf["robot"]) == sorted(["ロボット（台座の中心）", "ロボットの正面（X＋）：手前の向き"]),
+                  f"札（{w}×{h}・正面）：台座と正面の札（「手前の向き」）・軸の文字・操作のヒントが重ならない（{lf}）")
             if shots:
                 pg.screenshot(path=str(shots / f"FRONT_{w}x{h}_2_front.png"))
             n, bad = agree(p2)

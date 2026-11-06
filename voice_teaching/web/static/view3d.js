@@ -63,6 +63,9 @@ function niceStep(span) {
 const C_ROBOT = "#f2c94c";  // 台座の目印・正面の矢印と札（軸の X・Y・Z の色、変更後のオレンジと見分ける。形と札でも見分ける）
 const BASE_LABEL = "ロボット（台座の中心）";
 const FRONT_LABEL = "ロボットの正面（X＋）";
+// 矢印が見る人の方を向いて画面でほとんど長さが無いとき（［正面に戻す］のあと）の正面の札。2D の Y・Z の図の「この図の面に垂直」と同じ考え
+const FRONT_LABEL_TOWARD = "ロボットの正面（X＋）：手前の向き";
+const SHORT_ARROW_PX = 24;
 // 台座の印の説明（印にマウスを重ねたときの文。確認表示の注意書きにも同じ文がある）。図の下の注意書きには足さない（1440×900 で 3D が縮むため）
 const BASE_NOTE = "台座の印は、ロボット座標の原点（0,0,0）の位置です。ロボットの大きさ・形ではありません。";
 
@@ -269,6 +272,7 @@ export class View3D {
   // ［正面に戻す］：X＋ の側から水平に見る（右＝Y＋・上＝Z＋・手前＝X＋）。拡大なし。正面の向きで枠に収め直す
   front() {
     this.yaw = FRONT_YAW; this.pitch = FRONT_PITCH; this.zoom = 1;
+    this.interacted = true;  // 押したあとは「ドラッグで回す・ホイールで拡大」を出さない（正面では床の軸の文字と重なるため。round4）
     if (this.data) this._fit(this.fitFocus, [FRONT_YAW, FRONT_PITCH]);
     this.closeChooser();
     this.render();
@@ -529,11 +533,24 @@ export class View3D {
       if (q) { const [x, y] = this.project(q.xyz); taken.push({ x0: x - 16, x1: x + 16, y0: y - 16, y1: y + 16 }); }
     }
     const { o, t } = this.baseAt;
-    for (const [text, at] of [[BASE_LABEL, o], [FRONT_LABEL, t]]) {
-      const spot = findSpot(at[0], at[1], textWidth(text), taken, this.W, this.H);
+    // 正面の矢印が短い（見る人の方を向いている）とき（round4）：2つの札が台座のまわりに詰まって重なって見えたので、
+    // 札の文字を「手前の向き」にし、台座の輪・矢印・床の軸の線と札のまわりに少し間をあけて置く。斜めの視点の置き方は前のまま
+    const short = Math.hypot(t[0] - o[0], t[1] - o[1]) < SHORT_ARROW_PX;
+    const gap = short ? 5 : 0;
+    if (short) {
+      const ring = Array.from({ length: 36 }, (_, i) => { const a = (i / 36) * Math.PI * 2, R = this.span * 0.07;
+        return this.project([R * Math.cos(a), R * Math.sin(a), 0]); });
+      const xs = ring.map((q) => q[0]).concat([o[0], t[0]]), ys = ring.map((q) => q[1]).concat([o[1], t[1]]);
+      taken.push({ x0: Math.min(...xs) - 4, x1: Math.max(...xs) + 4, y0: Math.min(...ys) - 6, y1: Math.max(...ys) + 6 });
+      for (const b of this._axisLineBoxes || []) taken.push(b);
+    }
+    const pad = (b) => ({ x0: b.x0 - gap, x1: b.x1 + gap, y0: b.y0 - gap, y1: b.y1 + gap });
+    const spaced = taken.map(pad);
+    for (const [text, at] of [[BASE_LABEL, o], [short ? FRONT_LABEL_TOWARD : FRONT_LABEL, short ? o : t]]) {
+      const spot = findSpot(at[0], at[1], textWidth(text) + 2 * gap, spaced, this.W, this.H, 16 + 2 * gap);
       if (!spot) continue;  // 枠の中に置ける所が無い（区間を大きく見せる図など）：札は出さない（切れた文字を出さない）
       svg.append(labelEl(spot[0], spot[1], text, C_ROBOT, "robot-label"));
-      taken.push(spot[2]);
+      taken.push(spot[2]); spaced.push(pad(spot[2]));
       boxes.push(spot[2]);
     }
   }
@@ -698,8 +715,11 @@ export class View3D {
       { x0: q[0] + 10, x1: q[0] + 110, y0: q[1] - 22, y1: q[1] - 2 }]);    // 点の名前（右上）
     const hit = (r) => taken.some((b) => r.x0 < b.x1 && r.x1 > b.x0 && r.y0 < b.y1 && r.y1 > b.y0);
     this._axisBoxes = [];
+    this._axisLineBoxes = [];
     for (const [name, dv, color] of axes) {
       const end = [o[0] + dv[0], o[1] + dv[1], o[2] + dv[2]];
+      { const a = this.project(o), b = this.project(end);
+        this._axisLineBoxes.push({ x0: Math.min(a[0], b[0]) - 3, x1: Math.max(a[0], b[0]) + 3, y0: Math.min(a[1], b[1]) - 3, y1: Math.max(a[1], b[1]) + 3 }); }
       line(o, end, { stroke: color, "stroke-width": 2, class: "axis-line", "data-axis": name,
         "data-sign": name === "X" ? sx : name === "Y" ? sy : 1 });
       let at = null;
