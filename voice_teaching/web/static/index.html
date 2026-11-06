@@ -53,6 +53,18 @@
   <!-- 承認の状態の小さなアイコン（11/6 唐川さんの決定）。サーバーの状態（approval・hold・voided）と、閉じた画面から app.js が決める。
        色だけでなく形・小さな説明・読み上げの名前で区別する。承認するボタンではない（承認は確認表示のボタンだけ） -->
   <span id="approval-icon" class="appr-icon" data-appr="none" role="img" aria-label="承認の状態：JOB を読み込んでいません" title="承認の状態：JOB を読み込んでいません"></span>
+  <!-- 安全についての説明（Issue #8 round4・11/6 唐川さんの決定。上の帯の小さなシールドの印。3D の下には置かない）：通常の画面に説明の文章を常時は出さない。図の一般的な注意
+           （仕様 v2.1 4章の文：目安・離れて見えても当たらないとは限らない・腕やツールの根元は描かない・実機の動作や干渉は保証しない など）は、
+           このシールドの印に合わせたとき・押したとき（クリック・タップ・Enter／Space）に読める。場面ごとの警告（上限・上下未確認・承認待ち・
+           保留・出力できない）はこれに畳まず、その場面で出す（app.js・サーバーの文のまま） -->
+      <div class="safety-wrap">
+        <button type="button" id="safety-button" class="icon-btn safety-btn" aria-label="安全についての説明" title="安全についての説明"
+                aria-expanded="false" aria-controls="safety-notes"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8 19.5 5.6v5.6c0 4.6-3.1 8.4-7.5 10-4.4-1.6-7.5-5.4-7.5-10V5.6z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 7.6v6M12 16.2v.2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+        <div id="safety-notes" class="safety-pop" role="note" aria-label="安全についての説明" hidden>
+          <p class="safety-head">安全についての説明</p>
+          <p class="fine figure-notes"><span id="figure-lead">図は目安です。離れて見えても当たらないとは限りません。実機の動作・干渉は保証しません。</span> <span id="play-note">点を命令の順に直線で結んだ目安です。ロボット本体の動きではありません。</span> <span id="view3d-note">3D はジョブの X・Y・Z をそのまま点で描いたもので、ロボット本体・関節は描いていません。動作や干渉を保証するシミュレーターではありません。</span> <span id="figure-note">この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。参考表示であり、実際のロボットの動きではありません。</span></p>
+        </div>
+      </div>
   <details class="app-info">
     <summary class="icon-btn" aria-label="アプリ情報を開く" title="アプリ情報"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 10.5v6M12 7.4v.2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></summary>
     <div class="app-info-body">
@@ -80,6 +92,9 @@
       <p class="help-line">話した文は欄に入るだけ。『送る』で送ります</p>
       <p class="help-line">聞き取った文がちがうときは、直してから送ってください</p>
       <p class="help-line">同じ動作を繰り返す回数を変えるときは「3回にして」（範囲はボタンで確かめます）</p>
+      <!-- 11/6 唐川さん（round4）：3D の下の線の種類の凡例をやめ、違いはここに書く -->
+      <p class="help-head help-sub">図の線の種類</p>
+      <p class="help-line" id="help-line-kinds">MOVL＝直線で移動（実線）。MOVJ＝関節を使って移動（細い点線。点線は順番だけで、実際の通り道ではありません）。破線＝直線とは限りません（目安）</p>
       <p class="help-line">承認は確認表示のボタンだけです</p>
     </div><!-- /help-pop -->
   </div>
@@ -321,18 +336,6 @@
         <button type="button" id="play-before" class="small" aria-pressed="false">変更前を再生</button>
         <button type="button" id="play-after" class="small" aria-pressed="false">変更後を再生</button>
       </div>
-      <!-- 安全についての説明（Issue #8 round4・11/6 唐川さんの決定）：通常の画面に説明の文章を常時は出さない。図の一般的な注意
-           （仕様 v2.1 4章の文：目安・離れて見えても当たらないとは限らない・腕やツールの根元は描かない・実機の動作や干渉は保証しない など）は、
-           このシールドの印に合わせたとき・押したとき（クリック・タップ・Enter／Space）に読める。場面ごとの警告（上限・上下未確認・承認待ち・
-           保留・出力できない）はこれに畳まず、その場面で出す（app.js・サーバーの文のまま） -->
-      <div class="safety-wrap">
-        <button type="button" id="safety-button" class="safety-btn" aria-label="安全についての説明" title="安全についての説明"
-                aria-expanded="false" aria-controls="safety-notes"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8 19.5 5.6v5.6c0 4.6-3.1 8.4-7.5 10-4.4-1.6-7.5-5.4-7.5-10V5.6z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 7.6v6M12 16.2v.2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
-        <div id="safety-notes" class="safety-pop" role="note" aria-label="安全についての説明" hidden>
-          <p class="safety-head">安全についての説明</p>
-          <p class="fine figure-notes"><span id="figure-lead">図は目安です。離れて見えても当たらないとは限りません。実機の動作・干渉は保証しません。</span> <span id="play-note">点を命令の順に直線で結んだ目安です。ロボット本体の動きではありません。</span> <span id="view3d-note">3D はジョブの X・Y・Z をそのまま点で描いたもので、ロボット本体・関節は描いていません。動作や干渉を保証するシミュレーターではありません。</span> <span id="figure-note">この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。参考表示であり、実際のロボットの動きではありません。</span></p>
-        </div>
-      </div>
     </div>
     <!-- 動きの並び（回数の変更の候補があるときだけ）。区間の前後は位置の番号だけ（意味は決めつけない）。数はサーバーのまま -->
     <div id="play-seq" class="play-seq" hidden>
@@ -342,13 +345,8 @@
       <p id="seq-summary" class="seq-summary"></p>
     </div>
     <div class="play-text">
-      <!-- 区間の種類（CHECKER_026 S-MOVJ）。MOVJ・目安の区間は、そのジョブにあるときだけ出す -->
-      <div id="legend-kinds" class="legend kinds" hidden>
-        <!-- 11/6 唐川さん：説明文はいつも出さない。短いラベルと ? だけ。違いは ? に合わせた（マウス・キーボード）ときだけ出す（highlight.js の TIPS） -->
-        <span class="lg-item"><span class="lg movl" title="MOVL：直線で移動">MOVL</span><button type="button" class="tip" data-tip="movl">?</button></span>
-        <span class="lg-item" id="legend-movj" hidden><span class="lg movj" title="MOVJ：関節を使って移動（点線は順番だけ）">MOVJ</span><button type="button" class="tip" data-tip="movj">?</button></span>
-        <span class="lg-item" id="legend-other" hidden><span class="lg other" title="破線：直線とは限りません（目安）">目安</span><button type="button" class="tip" data-tip="other">?</button></span>
-      </div>
+      <!-- 11/6 唐川さん（round4）：区間の種類の凡例（MOVL・MOVJ・目安）は 3D の下に出さない。違いは上の帯の「使い方」の中。
+           線そのものに合わせると、その区間の種類（「関節移動（MOVJ）：実際の通り道は直線ではありません」など）が出る（view3d.js の title） -->
       <div id="legend" class="legend" hidden>
         <span class="lg before">変更前</span>
         <span class="lg after" id="legend-after">変更後</span>

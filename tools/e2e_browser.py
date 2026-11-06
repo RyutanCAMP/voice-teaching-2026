@@ -300,7 +300,7 @@ def check_ux_polish(browser, url, check, shots: Path | None) -> None:
         page.wait_for_timeout(100)
         # Issue #8 round3：常時の短い1行は出さない。図の注意の ⓘ（全文を開くボタン）が隠れないことを見る
         return page.evaluate("""() => document.querySelector('.foot').getBoundingClientRect().top
-                                - document.querySelector('#safety-button').getBoundingClientRect().bottom""")  # round4：安全についての説明の印
+                                - document.querySelector('#play-button').getBoundingClientRect().bottom""")  # round4：3D の下の物（再生のボタン）が隠れない
 
 
     # ---- 1280×720：版・使い方の小窓・サンプルで試す・図の注意・止まった候補の帯 ----
@@ -2697,14 +2697,13 @@ def check_c026(browser, url, check, shots: Path | None) -> None:
               f"S-MOVJ 3D：MOVJ は細い灰色の点線、MOVL は実線（MOVJ {j['dash']}・{j['stroke']}・{j['width']} ／ MOVL {l['dash']}・{l['stroke']}・{l['width']}）")
         check(MOVJ_LABEL in j["title"] and MOVJ_LABEL not in l["title"],
               f"S-MOVJ 3D：MOVJ の区間に、マウスを重ねると「{MOVJ_LABEL}」が出る（{j['title']!r}）")
-    lg = pg.inner_text("#legend-kinds") if pg.is_visible("#legend-kinds") else ""
-    check("MOVL" in lg and "MOVJ" in lg and pg.is_visible("#legend-movj") and "実際の通り道ではありません" not in lg,
-          f"S-MOVJ：凡例は短いラベル「MOVL」「MOVJ」と ? だけ（11/6：説明文はいつも出さない）（{lg!r}）")
-    pg.hover('#legend-movj button.tip')
-    pg.wait_for_timeout(200)
-    tip = pg.inner_text("#tip-pop") if pg.is_visible("#tip-pop") else ""
-    check("関節を使って移動" in tip and "実際の通り道ではありません" in tip,
-          f"S-MOVJ：MOVJ の ? に合わせると「関節を使って移動…点線は順番だけで、実際の通り道ではありません」が出る（{tip!r}）")
+    # round4（11/6 唐川さん）：3D の下に MOVL・MOVJ の凡例を出さない。違いは上の帯の「使い方」の中
+    check(pg.locator("#legend-kinds").count() == 0, "S-MOVJ：3D の下に線の種類の凡例を出さない（round4）")
+    pg.click("#help-button")
+    tip = pg.inner_text("#help-line-kinds") if pg.is_visible("#help-line-kinds") else ""
+    check("MOVL＝直線で移動" in tip and "関節を使って移動" in tip and "実際の通り道ではありません" in tip,
+          f"S-MOVJ：使い方に「MOVJ＝関節を使って移動…点線は順番だけで、実際の通り道ではありません」がある（{tip!r}）")
+    pg.click("#help-button")
     pg.mouse.move(5, 5)
     pg.keyboard.press("Escape")
     shot(pg, "C026_1280_a_movj_3d.png")
@@ -3296,7 +3295,7 @@ def check_demo3d(browser, url, check, shots: Path | None, errors: list) -> None:
             shot(pg, "D6_1280x720_seq_after_3rd.png")
             fit = pg.evaluate("""() => { const f = document.querySelector('.foot').getBoundingClientRect().top;
               const b = (s) => document.querySelector(s).getBoundingClientRect();
-              return [f, b('#fig-3d svg').top, b('#play-seq').bottom, b('#play-compare').bottom, b('#safety-button').bottom,
+              return [f, b('#fig-3d svg').top, b('#play-seq').bottom, b('#play-compare').bottom, b('#play-button').bottom,
                       window.scrollY]; }""")
             shot_seq.append(fit)
     shot_seq = []

@@ -1561,3 +1561,12 @@ button.safety-btn:hover, button.safety-btn[aria-expanded="true"] { background: r
 /* round4：確認済みの短い表示にロボット名が入る。長い名前でも枠の外へはみ出さないよう折り返す（狭い画面でも） */
 button.updown-chip { overflow-wrap: anywhere; max-width: min(360px, 100%); }
 @media (max-width: 699.98px) { .stage-head .updown-wrap { min-width: 0; flex: 1 1 auto; } button.updown-chip { max-width: 100%; } }
+
+/* round4（11/6 唐川さん）：安全についての説明のシールドの印は上の帯（アプリ情報の左）。小窓は上の帯の下に右寄せで開く */
+.top .safety-wrap { position: relative; flex: none; margin-left: 4px; }
+.top button.safety-btn { width: 36px; height: 44px; min-height: 44px; border: 0; border-radius: 10px; }
+.top .safety-pop { top: calc(100% + 6px); bottom: auto; right: -96px; z-index: 40; width: min(520px, 90vw); }
+.appr-icon + .safety-wrap { margin-left: 4px; }
+.help-pop .help-sub { margin-top: 10px; }
+@media (max-width: 699.98px) { .top .safety-pop { position: fixed; left: 8px; right: 8px; top: 64px; width: auto; } }
+.top .safety-wrap + .app-info { margin-left: 4px; }  /* シールドの印を承認の状態のアイコンとアプリ情報の間に置いたので、並びを前のまま右に寄せる */

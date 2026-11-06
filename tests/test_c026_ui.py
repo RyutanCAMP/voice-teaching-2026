@@ -123,13 +123,13 @@ def test_screen_uses_segment_kind_not_only_solid():
 
 
 def test_legend_names_movl_and_movj():
-    """11/6 唐川さんの指示：図の下の線の説明文はいつも出さず、MOVL・MOVJ の短いラベルと ? だけにする。
-    違いは、? に合わせた（マウス・キーボード）ときだけ小さく出す。点線が実際の通り道ではないことは ? の説明に残す"""
+    """11/6 唐川さんの指示：図の下の線の説明文はいつも出さない。round4（11/6）：3D の下の MOVL・MOVJ の凡例もやめ、
+    違いは上の帯の「使い方」の中に書く。点線が実際の通り道ではないことは使い方と、線に合わせたときの説明に残す"""
     h = text("index.html")
-    lg = h[h.index('id="legend-kinds"'):h.index('id="legend"')]
-    assert ">MOVL<" in lg and ">MOVJ<" in lg
-    assert 'data-tip="movl"' in lg and 'data-tip="movj"' in lg and 'data-tip="other"' in lg
-    assert "直線移動" not in lg and "実際の通り道ではありません" not in lg  # 長い説明文は凡例にいつも出さない
+    assert 'id="legend-kinds"' not in h and 'data-tip="movl"' not in h  # 3D の下に凡例を出さない
+    help_pop = h[h.index('id="help-pop"'):h.index("<!-- /help-pop -->")]
+    assert "MOVL＝直線で移動" in help_pop and "MOVJ＝関節を使って移動" in help_pop and "実際の通り道ではありません" in help_pop
+    assert "直線とは限りません（目安）" in help_pop
     hl = text("highlight.js")
     tips = hl[hl.index("export const TIPS"):hl.index("};", hl.index("export const TIPS"))]
     assert "直線で移動" in tips and "関節を使って移動" in tips

@@ -1633,10 +1633,7 @@ function renderFigures() {
   // 止まった候補：変更後の線は灰色の点線。凡例もそれに合わせる
   $("legend-after").hidden = !!(c && c.blocked_reason);
   $("legend-stopped").hidden = !(c && c.blocked_reason);
-  // 区間の種類の凡例（MOVJ・目安の区間は、そのジョブにあるときだけ）
-  $("legend-kinds").hidden = !hasKind("movl") && !hasKind("movj") && !hasKind("other");
-  $("legend-movj").hidden = !hasKind("movj");
-  $("legend-other").hidden = !hasKind("other");
+  // 区間の種類の凡例は 3D の下に出さない（round4・11/6 唐川さん）。違いは「使い方」の中。線に合わせると種類が出る
   renderPlayButtons();
 }
 
