@@ -374,7 +374,9 @@ def test_qa_p2b_gate_d1_gives_two_readings_message():
 # 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
 @pytest.mark.usefixtures("updown_demo_c")
 # QA P3-A：推定（未確定）は、断られた・聞き返された発話では消さない
-@pytest.mark.parametrize("text", ["バイオ", "承認して", "そうじゃなくて", "置くところと取るところを3mm下げて"])
+# Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：「置くところと取るところを3mm下げて」でも
+# 古い候補と推定が残る）。その文は下の test_qa_p3a_new_change_instruction_invalidates_estimated_candidate へ分けた
+@pytest.mark.parametrize("text", ["バイオ", "承認して", "そうじゃなくて"])
 def test_qa_p3a_estimate_survives_refused_utterances(text):
     w, sid = start()
     w.hear(sid, "置くところを3mm下げて")
@@ -382,6 +384,22 @@ def test_qa_p3a_estimate_survives_refused_utterances(text):
     assert r["state"]["candidate"]["estimated"] is not None
     r = w.hear(sid, text)
     assert r["state"]["candidate"] is not None and r["state"]["candidate"]["estimated"] is not None
+
+
+# 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
+# Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：古い候補と推定を残す）
+@pytest.mark.usefixtures("updown_demo_c")
+def test_qa_p3a_new_change_instruction_invalidates_estimated_candidate():
+    w, sid = start()
+    w.hear(sid, "置くところを3mm下げて")
+    r = w.hear(sid, "はい")
+    assert r["state"]["candidate"]["estimated"] is not None
+    old_gen = w.candidate_gen_of(sid)
+    r = w.hear(sid, "置くところと取るところを3mm下げて")
+    assert r["state"]["candidate"] is None and r["state"]["approval"] is None and not r["candidate_made"]
+    assert "取り消しました" in r["message"]
+    assert w.approve(sid, "QA", candidate_gen=old_gen)["ok"] is False
+    assert w.export(sid, candidate_gen=old_gen)["ok"] is False
 
 
 def test_qa_p3a_estimate_survives_refusal_in_ask_move():

@@ -82,9 +82,15 @@ def test_pending_candidate_blocks_new_change_requests(tmp_path):
     r = w.talk(sid, "じゃあ、3回にして")
     w.repeat_choose(sid, "yes", r["state"]["repeat_range"]["turn"])
     n = calls(f)
+    assert w.state(sid)["state"]["candidate"]["kind"] == "repeat"
+    # Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：古い候補を残す）
+    old_gen = w.candidate_gen_of(sid)
     r = w.talk(sid, "4回にして")
-    assert r["state"]["repeat_range"] is None and r["state"]["candidate"]["kind"] == "repeat"
+    assert r["state"]["repeat_range"] is None and r["state"]["candidate"] is None and r["state"]["approval"] is None
+    assert "取り消しました" in r["hear"]["message"] and not r["hear"]["candidate_made"]
     assert calls(f) == n  # 承認待ちの候補があるときは、変更の希望で Claude を呼ばない
+    assert w.approve(sid, "QA", candidate_gen=old_gen)["ok"] is False
+    assert w.export(sid, candidate_gen=old_gen)["ok"] is False
 
 
 # ---- はっきりした指示：プログラムだけ（Claude を呼ばない） ----

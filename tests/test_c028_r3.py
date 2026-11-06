@@ -246,6 +246,7 @@ def _ops():
 @pytest.mark.parametrize("op", list(_ops()))
 def test_message_and_state_always_agree(op, tmp_path):
     w, sid = approved(tmp_path)
+    old_gen = w.candidate_gen_of(sid)
     r = _ops()[op](w, sid)
     msg = r.get("message") or ""
     st = r["state"]
@@ -253,6 +254,12 @@ def test_message_and_state_always_agree(op, tmp_path):
         assert st["candidate"] is not None and st["approval"] is None, op
     elif msg.startswith(DROPPED):
         assert st["candidate"] is None and st["approval"] is None, op
+    elif msg.startswith("言い直しを受け取ったため"):
+        # Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：古い候補を残す）
+        assert st["candidate"] is None and st["approval"] is None, op
+        assert "前の承認も取り消しました" in msg, (op, msg)
+        assert w.approve(sid, "QA", candidate_gen=old_gen)["ok"] is False
+        assert w.export(sid, candidate_gen=old_gen)["ok"] is False
     else:
         # どちらの文も出さないのは、承認が残っているときだけ（何も変えていない）
         assert st["approval"] is not None and st["candidate"] is not None, (op, msg)

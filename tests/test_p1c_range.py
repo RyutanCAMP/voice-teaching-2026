@@ -86,8 +86,15 @@ def test_said_range_after_approval_does_not_make_a_widened_candidate(tmp_path):
     T.repeat_to_three(w, sid)
     w.approve(sid, "テスト", candidate_gen=w.candidate_gen_of(sid))
     before = w.state(sid)["state"]["candidate"]
-    st = w.talk(sid, "C00002からC00003を3回にして")["state"]
-    assert st["repeat_range"] is None and st["candidate"] == before  # 広がった範囲の確認も、新しい候補も作らない
+    assert before is not None
+    # Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：古い候補を残す）
+    old_gen = w.candidate_gen_of(sid)
+    r = w.talk(sid, "C00002からC00003を3回にして")
+    st = r["state"]
+    assert st["repeat_range"] is None and st["candidate"] is None  # 広がった範囲の確認も、新しい候補も作らない
+    assert st["approval"] is None and "取り消しました" in r["hear"]["message"]
+    assert w.approve(sid, "テスト", candidate_gen=old_gen)["ok"] is False
+    assert w.export(sid, candidate_gen=old_gen)["ok"] is False
 
 
 @pytest.mark.parametrize("text,said", [

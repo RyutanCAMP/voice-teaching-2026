@@ -60,13 +60,17 @@ def test_restated_count_leaves_no_approvable_old_candidate(tmp_path, text):
     not_approvable(w, sid)
 
 
-# 「やっぱり4回にして」は言い直し（H02）として直した。「4回にして」（印の無い同じ種類の値）は唐川さんの Q-3 の判断待ちで xfail のまま
-@pytest.mark.parametrize("text", ["やっぱり4回にして", pytest.param("4回にして", marks=pytest.mark.xfail(
-    strict=True, reason=P0 + " 別の回数の希望で古い候補が残る（Q-3 待ち）"))])
+# 「やっぱり4回にして」は言い直し（H02）として直した。
+# Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：「4回にして」は古い候補が残るので xfail）。
+# 「4回にして」（印の無い同じ種類の値）も直ったので xfail を外した
+@pytest.mark.parametrize("text", ["やっぱり4回にして", "4回にして"])
 def test_different_count_wish_freezes_old_candidate(tmp_path, text):
     w, _, sid = pending_three(tmp_path)
+    old_gen = w.candidate_gen_of(sid)
     w.talk(sid, text)
     not_approvable(w, sid)
+    assert not w.approve(sid, "QA", candidate_gen=old_gen)["ok"]
+    assert not w.export(sid, candidate_gen=old_gen)["ok"]
 
 
 # P0 H16：fix/p0-h02-h16-1105 で直したので xfail を外した

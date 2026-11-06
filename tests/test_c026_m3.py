@@ -225,9 +225,14 @@ def test_old_want_change_after_other_work_is_a_normal_instruction():
     old = w.hear(sid, "Yのマイナス3ミリずらします")
     r = w.hear(sid, "Xのプラス2ミリ移動して")
     assert cand(r) == ("C00005 X", "+2.000")
+    # Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：古い候補を残す）
+    old_gen = w.candidate_gen_of(sid)
     r2 = press(w, sid, old, "変更したい")
-    assert r2["status"] == "stop" and r2["message"].startswith("承認待ちの変更候補があります")
-    assert cand(r2) == ("C00005 X", "+2.000") and r2["tool_calls"] == []
+    assert r2["message"].startswith("言い直しを受け取ったため") and "取り消しました" in r2["message"]
+    assert cand(r2) is None and r2["state"]["approval"] is None and r2["tool_calls"] == []
+    assert not r2["candidate_made"]
+    assert w.approve(sid, "テスト太郎", candidate_gen=old_gen)["ok"] is False
+    assert w.export(sid, candidate_gen=old_gen)["ok"] is False
 
 
 def test_after_two_choices_an_answer_is_not_merged():
@@ -255,8 +260,13 @@ def test_shimasu_answer_after_amount_question_keeps_the_earlier_axis():
 def test_shimasu_with_pending_candidate_says_pending():
     w, sid = new()
     assert cand(w.hear(sid, "Xのプラス2ミリ移動して")) == ("C00005 X", "+2.000")
+    # Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：古い候補を残す）
+    old_gen = w.candidate_gen_of(sid)
     r = w.hear(sid, "Yのマイナス3ミリずらします")
-    assert r["status"] == "stop" and r["message"].startswith("承認待ちの変更候補があります") and r["choices"] == []
+    assert r["message"].startswith("言い直しを受け取ったため") and "取り消しました" in r["message"] and r["choices"] == []
+    assert cand(r) is None and r["state"]["approval"] is None and r["tool_calls"] == []
+    assert w.approve(sid, "テスト太郎", candidate_gen=old_gen)["ok"] is False
+    assert w.export(sid, candidate_gen=old_gen)["ok"] is False
 
 
 # ======================================================================
@@ -348,31 +358,49 @@ def test_s_msg_after_approval():
     w, sid = new()
     assert cand(w.hear(sid, "Xのプラス2ミリ移動して")) == ("C00005 X", "+2.000")
     assert w.approve(sid, "テスト太郎", candidate_gen=w.candidate_gen_of(sid))["ok"] is True
+    # Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：古い候補を残す）
+    old_gen = w.candidate_gen_of(sid)
     r = w.hear(sid, "Yのマイナス3ミリ移動して")
-    assert r["status"] == "stop" and r["message"].startswith(APPROVED_PENDING)
-    assert r["message"] == "新しい指示を受け取ったため、前の承認を取り消しました。変更候補は残しています。内容を確認して、もう一度承認してください。"
+    assert r["message"].startswith("言い直しを受け取ったため")
     assert "承認待ち" not in r["message"]
-    assert r["tool_calls"] == [] and cand(r) == ("C00005 X", "+2.000")
-    # 新しい指示があったので、承認は今どおり取り消す（文もそれを伝える）
-    assert r["state"]["approval"] is None and "承認を取り消しました" in r["message"]
+    assert r["tool_calls"] == [] and cand(r) is None
+    # 新しい指示があったので、承認も取り消す（文もそれを伝える）
+    assert r["state"]["approval"] is None and "前の承認も取り消しました" in r["message"]
+    assert w.approve(sid, "テスト太郎", candidate_gen=old_gen)["ok"] is False
+    assert w.export(sid, candidate_gen=old_gen)["ok"] is False
 
 
 def test_s_msg_before_approval_is_unchanged():
     w, sid = new()
     assert cand(w.hear(sid, "Xのプラス2ミリ移動して")) == ("C00005 X", "+2.000")
+    # Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：古い候補を残す）
+    old_gen = w.candidate_gen_of(sid)
     r = w.hear(sid, "Yのマイナス3ミリ移動して")
-    assert r["status"] == "stop" and r["message"] == session_mod.PENDING_MESSAGE
+    assert r["message"].startswith("言い直しを受け取ったため") and "取り消しました" in r["message"]
+    assert "前の承認も取り消しました" not in r["message"]  # 承認前：承認の文は付けない
+    assert cand(r) is None and r["state"]["approval"] is None and r["tool_calls"] == []
+    assert w.approve(sid, "テスト太郎", candidate_gen=old_gen)["ok"] is False
+    assert w.export(sid, candidate_gen=old_gen)["ok"] is False
 
 
 def test_s_msg_question_after_approval():
     w, sid = new()
     assert cand(w.hear(sid, "Xのプラス2ミリ移動して")) == ("C00005 X", "+2.000")
     assert w.approve(sid, "テスト太郎", candidate_gen=w.candidate_gen_of(sid))["ok"] is True
+    # Q-3／F-2（11/6 唐川さんの方針）：値の確かめの質問は保留、新しい変更の指示では古い候補・承認を無効にする
+    # （前の期待：質問で承認だけ取り消して古い候補を残し、2回目は「承認待ちの変更候補があります…」）
+    old_gen = w.candidate_gen_of(sid)
     r = w.hear(sid, "Yのマイナス3ミリ移動して？")
-    assert r["status"] == "stop" and r["message"].startswith(APPROVED_PENDING)
-    # 2回目は、もう承認されていないので今の文
+    assert r["state"]["hold"] is True and cand(r) == ("C00005 X", "+2.000") and r["tool_calls"] == []
+    assert r["state"]["can_approve"] is False and r["state"]["can_export"] is False
+    assert w.approve(sid, "テスト太郎", candidate_gen=old_gen)["ok"] is False
+    assert w.export(sid, candidate_gen=old_gen)["ok"] is False
+    # 2回目（質問でない指示）は、古い候補と承認を無効にする
     r = w.hear(sid, "Yのマイナス3ミリ移動して")
-    assert r["message"] == session_mod.PENDING_MESSAGE
+    assert r["message"].startswith("言い直しを受け取ったため")
+    assert cand(r) is None and r["state"]["approval"] is None and r["tool_calls"] == []
+    assert w.approve(sid, "テスト太郎", candidate_gen=old_gen)["ok"] is False
+    assert w.export(sid, candidate_gen=old_gen)["ok"] is False
 
 
 def test_s_msg_place_word_after_approval():

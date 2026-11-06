@@ -5,7 +5,7 @@
 - 結果で新しくできることは、候補を無効にすること・保留にすること（止める側）と、決まった文を返すことだけ。
   候補・範囲・承認を新しく作る道は無い（K4）
 - 迷う形（ためらい・推量・条件・疑問・読めない残り）は、無効にしないで確かめる（K3）。そのときは承認を保留にする
-- 設計の規則 9（同じ種類の値だけ「4回にして」）は今回入れない（今の道のまま。唐川さんの Q-3 の判断を待つ）
+- 規則 10（Q-3／F-2・11/6 唐川さんの方針）：印の無い新しい値は言い直し（古い候補・承認を無効にする）。確かめの質問は保留
 """
 from __future__ import annotations
 
@@ -94,6 +94,13 @@ _R = re.compile(r"今の|さっきの|さっき|この|その|それ|提案|変�
 _SPLIT = re.compile(r"[、,。.！!]+|(?<=て)から|それから|そして")
 _AFTER_CANCEL_TE = re.compile(r"((?:取り消|取消|キャンセル|元に戻|もとに戻|戻|やめ)(?:し)?て)(?!から)(?=[^\s、,。.！!?？くほ])")
 # 値の節の、値のほかに許す言葉（「4回にして」「2回のままでいい」）。ほかの言葉（「理由を説明して」）が残れば値の節にしない
+# おおよその量（Q-3・K3）：「3回くらい」「5ミリぐらい」「約3ミリ」は保留にして確かめる
+_APPROX = re.compile(r"くらい|ぐらい|程度|ほど|前後|約|およそ|大体|だいたい|ちょっと|ちょい")
+# 相対の量（「あと1回」「もう3ミリ」「さらに」）
+_RELATIVE = re.compile(r"あと|もう|さらに|追加|足して|増やし|減らし")
+# 数の無い量・向きの変更の言葉（Q-3）：候補があるときに言われたら保留にする
+_VAGUE_CHANGE = re.compile(r"半分|倍に|小さく|大きく|減らし|増やし|少なめ|多め|少なく|多く|短く|長く|上げ|下げ|ずらし|動かし"
+                           r"|ちいさく|おおきく|へらし|ふやし|すくなめ|おおめ")
 _VALUE_FILLER = re.compile(r"にして|にする|にします|に|で|のまま|まま|いい|よい|お願いします|お願い|します|ください|して|だけ")
 
 
@@ -228,7 +235,7 @@ def classify(text: object) -> Verdict:
     cancel_verb = bool(_CANCEL_VERB.search(t))
     # 1・2：承認・出力などの言葉
     if _BUTTON.search(t):
-        if x_clauses or has_m or cancel_verb:
+        if x_clauses or has_m or cancel_verb or _values(t):  # 「3ミリで出力して」：新しい値と出力の頼みが一緒（Q-3）。確かめる
             return Verdict(UNSURE, rule="1 button+cancel")  # 「取り消して承認して」：矛盾する頼み。何も変えずに確かめる
         return Verdict(OTHER, rule="2 button")
     # 3：取消の打ち消し・候補を残す言葉
@@ -294,4 +301,26 @@ def classify(text: object) -> Verdict:
     if cancel_verb and not _E.fullmatch(t):
         # 取消の動詞があるが、明示の形ではない（「3回はやめて」「やめとこうかな」など）：消さずに確かめる
         return Verdict(UNSURE, asked_form=True, rule="cancel verb not explicit")  # 保留にして、返事は今の道の文のまま
+    # 10（Q-3／F-2・唐川さんの方針 11/6「新しい変更の指示では古い候補・承認を無効にする」）：印の無い新しい値
+    # （量・回数・軸と符号・位置番号）。ふつうの質問は今の道のまま・確かめの質問とためらいは保留・それ以外は言い直し
+    # （古い候補と承認を無効にする。新しい候補はここでは作らない：もう一度の指示からやり直す）
+    vals = _values(t)
+    if vals and all(v.startswith("C") for v in vals):
+        # 位置番号だけ（「C00004を選択して」）：位置の選び直しは今の道（選び直すと候補を無効にする：P0）に任せる
+        return Verdict(OTHER, rule="10 position only")
+    if vals:
+        if is_plain_question(t):
+            return Verdict(OTHER, rule="10 plain question")
+        if _H.search(t) or _ASKING.search(t) or _APPROX.search(t):
+            return Verdict(UNSURE, rule="10 value question")  # 確かめの質問・ためらい・「3回くらい」（K3）：保留
+        if not any(re.search(r"[0-9]", v) for v in vals):
+            # 軸・符号だけ（「マイナス」「Zプラス」）：量が無く直す先が決まらない。F-1 の「いやX」と同じく保留にして確かめる
+            return Verdict(UNSURE, rule="10 sign only")
+        if _RELATIVE.search(t):
+            # 「あと1回」「もう3ミリ」：相対の言い方。値をそのまま案内に使うと意味を取り違える（「1回にして」と案内しない）
+            return Verdict(CORRECTION, value=None, rule="10 new value relative")
+        return Verdict(CORRECTION, value=vals[-1], rule="10 new value")
+    # 数の無い量の変更（「半分にして」「もう少し小さく」）：直す先が分からないので保留にして確かめる
+    if _VAGUE_CHANGE.search(t):
+        return Verdict(UNSURE, rule="10 vague change")
     return Verdict(OTHER, rule="11 other")

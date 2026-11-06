@@ -97,9 +97,10 @@ def approved(make_updown, select="C00005"):
     return w, sid
 
 
+# Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：「3ミリ」「Yのマイナス3ミリ」
+# 「下げて」「動かします」も承認だけ取り消して古い候補を残す）。変わった文は下の2つのテストへ分けた
 @pytest.mark.parametrize("source", SOURCES)
-@pytest.mark.parametrize("text", ["比較して", "えーと", "下げて", "置くところを少し上に", "3ミリ", "バイオ", "承認して",
-                                  "Yのマイナス3ミリ", "動かします", "下げないで"])
+@pytest.mark.parametrize("text", ["比較して", "えーと", "置くところを少し上に", "バイオ", "承認して"])
 def test_p2_any_utterance_that_cancels_approval_says_so(text, source, make_updown):
     w, sid = approved(make_updown)
     r = w.hear(sid, text, source)
@@ -109,6 +110,37 @@ def test_p2_any_utterance_that_cancels_approval_says_so(text, source, make_updow
     # 2回目はもう承認されていないので付けない
     r = w.hear(sid, text, source)
     assert CANCELLED not in r["message"]
+
+
+# Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：古い候補を残し、承認だけ取り消す）
+@pytest.mark.parametrize("source", SOURCES)
+@pytest.mark.parametrize("text", ["3ミリ", "Yのマイナス3ミリ"])
+def test_p2_new_value_after_approval_invalidates_candidate_and_approval(text, source, make_updown):
+    w, sid = approved(make_updown)
+    old_gen = w.candidate_gen_of(sid)
+    r = w.hear(sid, text, source)
+    assert r["state"]["approval"] is None and r["state"]["candidate"] is None, (text, r["message"])
+    assert "取り消しました" in r["message"] and "前の承認も取り消しました" in r["message"], (text, r["message"])
+    assert CANCELLED not in r["message"]
+    assert w.approve(sid, "唐川", candidate_gen=old_gen)["ok"] is False
+    assert w.export(sid, candidate_gen=old_gen)["ok"] is False
+
+
+# Q-3／F-2（11/6 唐川さんの方針）：数の無い量の言葉は保留にする（前の期待：古い候補を残し、承認だけ取り消す）。
+# 承認の記録は残るが、保留のあいだは承認・出力できない
+@pytest.mark.parametrize("source", SOURCES)
+# 「下げないで」（候補の向きの打ち消し）も保留（前は承認だけ取り消して、古い候補をボタンで承認し直せた）。クローク 11/6
+@pytest.mark.parametrize("text", ["下げて", "動かします", "下げないで"])
+def test_p2_vague_change_after_approval_holds_candidate(text, source, make_updown):
+    w, sid = approved(make_updown)
+    old_gen = w.candidate_gen_of(sid)
+    r = w.hear(sid, text, source)
+    st = r["state"]
+    assert st["hold"] is True and cand(r) == ("C00005 Z", "-3.000"), (text, r["message"])
+    assert st["can_export"] is False and st["can_approve"] is False
+    assert CANCELLED not in r["message"]
+    assert w.approve(sid, "唐川", candidate_gen=old_gen)["ok"] is False
+    assert w.export(sid, candidate_gen=old_gen)["ok"] is False
 
 
 def test_p2_explain_choice_does_not_cancel(make_updown):

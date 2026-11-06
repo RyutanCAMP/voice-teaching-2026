@@ -320,9 +320,16 @@ def test_ask_while_candidate_pending_does_not_touch_candidate(tmp_path):
     w.hear(sid, "Zプラス方向に10mm", "text")
     st = w.state(sid)["state"]
     assert st["candidate"] is not None
-    before = dump(st)
-    assert w.ask(sid, "じゃあ3回にして")["ok"]
-    assert dump(w.state(sid)["state"]) == before
+    # Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：古い候補を残す・状態は変えない）
+    old_gen = w.candidate_gen_of(sid)
+    n = len(fake.requests)
+    r = w.ask(sid, "じゃあ3回にして")
+    assert r["ok"] and "取り消しました" in r["reply"]
+    after = w.state(sid)["state"]
+    assert after["candidate"] is None and after["approval"] is None and after["repeat_range"] is None
+    assert len(fake.requests) == n  # Claude には送らない
+    assert w.approve(sid, "QA", candidate_gen=old_gen)["ok"] is False
+    assert w.export(sid, candidate_gen=old_gen)["ok"] is False
 
 
 # ---- 4. 会話の文脈（書き換えずに次へ） ----

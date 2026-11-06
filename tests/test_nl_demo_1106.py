@@ -125,8 +125,15 @@ def test_natural_direction_with_pending_candidate_is_refused(tmp_path):
     """A1-54：承認待ちの候補があるときは、今どおり断る（新しい候補にしない）。"""
     w, _, sid = A.place_flow(tmp_path)
     first = w.talk(sid, "Y-方向に10mm")["state"]["candidate"]
+    assert first
+    # Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：古い候補を残して断る）。
+    # 新しい候補にしないのは今どおり
+    old_gen = w.candidate_gen_of(sid)
     r = w.talk(sid, "Y-の方向に5mm")
-    assert r["state"]["candidate"] == first and not r["state"]["approval"]
+    assert r["state"]["candidate"] is None and not r["state"]["approval"]
+    assert not (r.get("hear") or {}).get("candidate_made") and "取り消しました" in hear_msg(r)
+    assert w.approve(sid, "QA", candidate_gen=old_gen)["ok"] is False
+    assert w.export(sid, candidate_gen=old_gen)["ok"] is False
 
 
 def test_natural_direction_candidate_needs_the_button(tmp_path):
@@ -755,11 +762,16 @@ def test_short_position_confirm_text_is_not_an_approval(tmp_path):
     """［はい］の文は位置を言い直すだけ（承認ではない）。承認待ちの候補があるときは、今どおり断る。"""
     w, _, sid = A.place_flow(tmp_path)
     first = w.talk(sid, "Y-方向に10mm")["state"]["candidate"]
+    assert first
+    # Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：古い候補を残して断る）
+    old_gen = w.candidate_gen_of(sid)
     r = w.talk(sid, "c0004をYマイナスに3ミリ")
     yes = next((c["text"] for c in (r.get("hear") or {}).get("choices", []) if c["label"].startswith("はい")), None)
     if yes is not None:
         r = w.talk(sid, yes)
-    assert r["state"]["candidate"] == first and r["state"]["approval"] is None
+    assert r["state"]["candidate"] is None and r["state"]["approval"] is None
+    assert w.approve(sid, "QA", candidate_gen=old_gen)["ok"] is False
+    assert w.export(sid, candidate_gen=old_gen)["ok"] is False
 
 
 # ---- c：回数の変更の自然な言い方 ----

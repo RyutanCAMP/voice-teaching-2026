@@ -141,10 +141,19 @@ def test_p1b_several_changes_keep_a_pending_candidate_and_the_approval(tmp_path)
     w.talk(sid, "Zマイナス3ミリ")
     w.approve(sid, "テスト", candidate_gen=w.candidate_gen_of(sid))
     before = w.state(sid)["state"]
+    assert before["approval"] is not None
+    old_gen = w.candidate_gen_of(sid)
+    n_req = len(f.requests)
     r = w.talk(sid, "3回にして、あと3ミリ下げて")
-    # P0（11/5 夜・Safety 再検証）：承認のあとの、相づち・否定の無い質問ではない文は保留。どちらの変更も受け付けない（候補はそのまま）。
-    # 承認の記録は残るが、保留の間は出力できない（前は承認がそのまま使えた。止める側への変更。唐川さんの確認事項）
-    assert r["state"]["candidate"] == before["candidate"] and r["state"]["hold"] is True and not r["state"]["can_export"]
+    # P0（11/5 夜・Safety 再検証）：承認のあとの、相づち・否定の無い質問ではない文は保留にしていた。
+    # Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：古い候補を保留で残す）。
+    # どちらの変更も受け付けない（新しい候補は作らない）
+    assert r["state"]["candidate"] is None and r["state"]["approval"] is None and not r["state"]["can_export"]
+    assert r["state"]["repeat_range"] is None and not r["hear"].get("candidate_made")
+    assert "取り消しました" in r["hear"]["message"]
+    assert len(f.requests) == n_req  # Claude を呼ばない
+    assert w.approve(sid, "テスト", candidate_gen=old_gen)["ok"] is False
+    assert w.export(sid, candidate_gen=old_gen)["ok"] is False
 
 
 # ---- 「登録」「保存」：作業目的の意味付けと、ジョブの変更・出力を分ける（11/4 の決定4） ----

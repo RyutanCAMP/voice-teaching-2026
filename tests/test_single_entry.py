@@ -69,9 +69,17 @@ def test_backchannel_question_and_button_words_after_approval_keep_it(tmp_path):
     w.talk(sid, "Zマイナス3ミリ")
     w.approve(sid, "テスト", candidate_gen=w.candidate_gen_of(sid))
     approval = w.state(sid)["state"]["approval"]
-    for text in ["はい", "OK", "保存して", "出力して", "このロボット、何をしている？", "3回にして、あと3ミリ下げて"]:
+    # Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：「3回にして、あと3ミリ下げて」でも
+    # 承認を残す）。その文はループから外して、下で無効になることを確かめる
+    for text in ["はい", "OK", "保存して", "出力して", "このロボット、何をしている？"]:
         r = w.talk(sid, text)
         assert r["state"]["approval"] == approval, text
         # UI-1（11/6）：承認の記録が残っていても、保留中（P0：「保存して」など）は状態の1行を「承認 済み」と言わない（文だけ。判定は前のまま）
         want = "承認 保留中" if r["state"]["hold"] else "承認 済み"
         assert want in r["state"]["status_line"], text
+    old_gen = w.candidate_gen_of(sid)
+    r = w.talk(sid, "3回にして、あと3ミリ下げて")
+    assert r["state"]["approval"] is None and r["state"]["candidate"] is None
+    assert "承認 済み" not in r["state"]["status_line"]
+    assert w.approve(sid, "テスト", candidate_gen=old_gen)["ok"] is False
+    assert w.export(sid, candidate_gen=old_gen)["ok"] is False

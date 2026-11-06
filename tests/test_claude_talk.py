@@ -638,7 +638,9 @@ def test_e5_pending_candidate_explain_only(tmp_path):
     assert w.hear(sid, "Zプラス方向に10mm", "text")["candidate_made"]
     before = dump(w.state(sid)["state"])
     n = len(fake.requests)
-    for said in ("じゃあ3回にして", "C00002を3mm下げて", "承認して"):
+    # Q-3／F-2（11/6 唐川さんの方針）：値のある新しい変更の指示（「じゃあ3回にして」「C00002を3mm下げて」）は古い候補を
+    # 無効にする（前の期待：説明だけ答えて古い候補を残す）。下の test_e5_pending_candidate_new_change_invalidates へ分けた
+    for said in ("承認して",):
         r = w.ask(sid, said)
         assert r["reply"] == talk.PENDING_EXPLAIN_ONLY and r["status"] == "explain_only"
     assert len(fake.requests) == n  # Claude には送らない
@@ -651,6 +653,25 @@ def test_e5_pending_candidate_explain_only(tmp_path):
     facts = json.loads(first["content"][0]["text"])["job_facts"]
     assert facts["change_state"]["pending_candidate"] is True  # 新しい会話の事実に、承認待ちの候補があることを入れる
     assert dump(w.state(sid)["state"]) == before
+
+
+# Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：説明だけ答えて古い候補を残す）
+@pytest.mark.parametrize("said", ["じゃあ3回にして", "C00002を3mm下げて"])
+def test_e5_pending_candidate_new_change_invalidates(tmp_path, said):
+    w, fake = flow(tmp_path)
+    sid = first_turn(w, fake)
+    w.select(sid, "C00004")
+    assert w.hear(sid, "Zプラス方向に10mm", "text")["candidate_made"]
+    old_gen = w.candidate_gen_of(sid)
+    n = len(fake.requests)
+    r = w.ask(sid, said)
+    assert r["reply_by"] == "app" and "取り消しました" in r["reply"]
+    st = w.state(sid)["state"]
+    assert st["candidate"] is None and st["approval"] is None and st["repeat_range"] is None
+    assert w._entries[sid].session.candidate is None
+    assert len(fake.requests) == n  # Claude には送らない
+    assert w.approve(sid, "QA", candidate_gen=old_gen)["ok"] is False
+    assert w.export(sid, candidate_gen=old_gen)["ok"] is False
 
 
 def test_e5_data_change_separates_conversation(tmp_path):

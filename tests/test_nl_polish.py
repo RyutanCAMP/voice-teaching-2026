@@ -243,9 +243,16 @@ def with_candidate(source):
 @pytest.mark.parametrize("text", ["5mm下げて？", "Y座標を5mm下げますか", "下に5mmですか"])
 def test_s_p2_1_question_with_pending_candidate_returns_pending_message(text, source):
     w, sid = with_candidate(source)
+    # Q-3／F-2（11/6 唐川さんの方針）：値の確かめの質問は古い候補を保留にする（前の期待：「承認待ちの変更候補があります…」で古い候補を残す）。
+    # 選択肢は保留の答え（取り消す・このまま残す）だけ。保留のあいだは承認・出力できない
+    old_gen = w.candidate_gen_of(sid)
     r = w.hear(sid, text, source=source)
-    assert r["status"] == "stop" and r["message"].startswith(PENDING) and r["choices"] == []
-    assert cand(r) == ("Z", "-3.000")
+    assert r["state"]["hold"] is True and not r["message"].startswith(PENDING)
+    assert [c["text"] for c in r["choices"]] == ["取り消して", "このままでいい"]
+    assert cand(r) == ("Z", "-3.000") and r["state"]["approval"] is None and not r["candidate_made"]
+    assert r["state"]["can_approve"] is False and r["state"]["can_export"] is False
+    assert w.approve(sid, "QA", candidate_gen=old_gen)["ok"] is False
+    assert w.export(sid, candidate_gen=old_gen)["ok"] is False
 
 
 @pytest.mark.parametrize("source", SOURCES)

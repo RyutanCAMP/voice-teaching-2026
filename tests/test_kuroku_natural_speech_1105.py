@@ -124,13 +124,20 @@ def test_wish_ending_without_a_selected_position_is_read_like_the_request(tmp_pa
 
 def test_wish_ending_with_a_pending_candidate_is_read_like_the_request(tmp_path):
     """承認待ちの候補があるときも「〜て」と同じ返事（候補を作り直さない。P0 の扱いはシクロの担当なので比べるだけ）。"""
+    # Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：古い候補 +3.000 を残す）。
+    # 「〜たい」も「〜て」と同じく無効にする（新しい候補は作らない）
     out = []
     for i, text in enumerate(("Zプラス5ミリ動かしたい", "Zプラス5ミリ動かして")):
         w, _, sid = A.place_flow(tmp_path / str(i))
         w.talk(sid, "Zプラス3ミリ")
+        assert w.state(sid)["state"]["candidate"]["delta"] == "+3.000"
+        old_gen = w.candidate_gen_of(sid)
         r = w.talk(sid, text, "voice")
-        out.append((hear(r).get("message"), r["state"]["candidate"]["delta"]))
-    assert out[0] == out[1] and out[0][1] == "+3.000", out
+        assert w.approve(sid, "QA", candidate_gen=old_gen)["ok"] is False
+        assert w.export(sid, candidate_gen=old_gen)["ok"] is False
+        out.append((hear(r).get("message"), r["state"]["candidate"], r["state"]["approval"]))
+    assert out[0] == out[1] and out[0][1] is None and out[0][2] is None, out
+    assert "取り消しました" in out[0][0]
 
 
 # ---- 3. 止めるべきものは今どおり止める ----

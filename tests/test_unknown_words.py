@@ -545,11 +545,24 @@ def test_plain_undo_commands_still_undo(text, source):
 
 @pytest.mark.parametrize("source", ["voice", "text"])
 @pytest.mark.parametrize("text,word", [("いいえ", "いいえ"), ("下に3mm止めて", "止めて"), ("ちょっと待って", "待って"),
-                                       ("結構です", "結構です"), ("下に3mm無し", "無し"), ("無理", "無理")])
+                                       ("結構です", "結構です"), ("無理", "無理")])
 def test_p3_3_more_negation_words(text, word, source):
     w, sid = flow_with_candidate(source)
     r = w.hear(sid, text, source=source)
     assert r["status"] == "stop" and f"「{word}」" in r["message"] and cand(r) == ("Z", "-3.000")
+
+
+# Q-3／F-2（11/6 唐川さんの方針）：「下に3mm無し」は値のある文なので、古い候補を無効にする（前の期待：打ち消しで止めて古い候補を残す）。
+# 承認・出力はどの世代でもできない（安全側に厳しくなった）。クローク 11/6
+@pytest.mark.parametrize("source", ["voice", "text"])
+def test_p3_3_value_with_nashi_invalidates_old_candidate(source):
+    w, sid = flow_with_candidate(source)
+    old_gen = w.candidate_gen_of(sid)
+    r = w.hear(sid, "下に3mm無し", source=source)
+    assert r["state"]["candidate"] is None and r["state"]["approval"] is None
+    assert "取り消しました" in r["message"]
+    assert w.approve(sid, "QA", candidate_gen=old_gen)["ok"] is False
+    assert w.export(sid, candidate_gen=old_gen)["ok"] is False
 
 
 @pytest.mark.parametrize("text,word", [("ワイヤーを3mm下げて", "ワイヤー"), ("ダメージ下に3mm", "ダメージ")])

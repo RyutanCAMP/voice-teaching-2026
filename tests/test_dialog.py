@@ -520,9 +520,14 @@ def test_pending_candidate_stops_new_move_before_interpreter(counting):
     w, sid = start(counting, select="C00004")
     assert w.hear(sid, "この位置を上に2mm")["candidate_made"]
     assert counting.decides == 1
+    # Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：「承認待ちの変更候補があります…」で古い候補を残す）
+    old_gen = w.candidate_gen_of(sid)
     r = w.hear(sid, "この位置を下に3mm")
-    assert r["status"] == "stop" and r["message"] == "承認待ちの変更候補があります。比べるか、元に戻してから指示してください"
+    assert r["message"].startswith("言い直しを受け取ったため") and "取り消しました" in r["message"]
+    assert r["state"]["candidate"] is None and r["state"]["approval"] is None and not r["candidate_made"]
     assert counting.decides == 1 and r["tool_calls"] == []
+    assert w.approve(sid, "QA", candidate_gen=old_gen)["ok"] is False
+    assert w.export(sid, candidate_gen=old_gen)["ok"] is False
 
 
 # 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる
@@ -534,8 +539,14 @@ def test_pending_candidate_with_real_claude_sends_nothing():
     s.hear("この位置を上に2mm")
     s.propose({"kind": "shift", "position": "C00004", "axis": "Z", "delta_mm": 2.0})
     assert s.candidate is not None
+    # Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：「承認待ちの変更候補があります…」で古い候補を残す）
+    old_gen = w.candidate_gen_of(sid)
     r = w.hear(sid, "この位置を下に3mm")
-    assert r["status"] == "stop" and r["message"].startswith("承認待ち")
+    assert r["message"].startswith("言い直しを受け取ったため") and s.candidate is None
+    assert r["state"]["approval"] is None and not r["candidate_made"] and r["tool_calls"] == []
+    assert c.messages.calls == []  # Claude には送らない（送れば create が AssertionError を投げる）
+    assert w.approve(sid, "QA", candidate_gen=old_gen)["ok"] is False
+    assert w.export(sid, candidate_gen=old_gen)["ok"] is False
 
 
 # 上下の向き（CHECKER_026 M2）：「上・下」を Z として読むことを前提にしたテスト。一時フォルダの確認済みの設定を当てる

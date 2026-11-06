@@ -583,19 +583,31 @@ def test_s_msg_text_is_the_decided_one():
 
 
 def test_s_msg_only_when_approval_was_really_cancelled(make_updown, tmp_path):
+    # Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする
+    # （前の期待：未承認なら「承認待ちの変更候補があります…」、承認済みなら承認だけ取り消して古い候補を残す）
     w, sid, _ = start("confirmed", make_updown, tmp_path)
     assert cand(w.hear(sid, "Zマイナス3ミリ")) == ("C00005 Z", "-3.000")
-    # 承認していない：今の「承認待ちの変更候補があります…」のまま
+    # 承認していない：古い候補を無効にする（承認の文は付けない）
+    old_gen = w.candidate_gen_of(sid)
     r = w.hear(sid, "Yのマイナス3ミリ")
-    assert r["status"] == "stop" and r["message"] == session_mod.PENDING_MESSAGE
-    # 承認した：新しい指示で承認を取り消したときだけ、決まった文
+    assert cand(r) is None and r["state"]["approval"] is None
+    assert "取り消しました" in r["message"] and APPROVAL_CANCELLED not in r["message"]
+    assert "前の承認も取り消しました" not in r["message"]
+    assert w.approve(sid, "テスト太郎", candidate_gen=old_gen)["ok"] is False
+    assert w.export(sid, candidate_gen=old_gen)["ok"] is False
+    # 承認した：新しい指示で、古い候補と承認を両方無効にする（承認も取り消したことを伝える）
+    assert cand(w.hear(sid, "Zマイナス3ミリ")) == ("C00005 Z", "-3.000")
     assert w.approve(sid, "テスト太郎", candidate_gen=w.candidate_gen_of(sid))["ok"] is True
+    old_gen = w.candidate_gen_of(sid)
     r = w.hear(sid, "Yのマイナス3ミリ", source="voice")
-    assert r["status"] == "stop" and r["message"] == APPROVAL_CANCELLED and r["state"]["approval"] is None
-    assert cand(r) == ("C00005 Z", "-3.000")
-    # もう承認されていない：次は今の文
+    assert r["state"]["approval"] is None and cand(r) is None
+    assert "取り消しました" in r["message"] and "前の承認も取り消しました" in r["message"]
+    assert APPROVAL_CANCELLED not in r["message"]
+    assert w.approve(sid, "テスト太郎", candidate_gen=old_gen)["ok"] is False
+    assert w.export(sid, candidate_gen=old_gen)["ok"] is False
+    # もう承認されていない：次は承認の文を付けない
     r = w.hear(sid, "Yのマイナス3ミリ")
-    assert r["message"] == session_mod.PENDING_MESSAGE
+    assert r["state"]["approval"] is None and APPROVAL_CANCELLED not in r["message"]
 
 
 def test_messages_have_no_forbidden_words():

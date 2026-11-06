@@ -279,9 +279,14 @@ def test_f2_ato_with_pending_candidate_says_a_candidate_is_waiting(tmp_path):
     w, fake = T.flow(tmp_path)
     sid = w.load(T.demo_bytes())["session_id"]
     T.repeat_to_three(w, sid)
+    # Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：「承認待ちの変更候補」と知らせて古い候補を残す）
+    old_gen = w.candidate_gen_of(sid)
     r = w.talk(sid, "あと1回押して")
-    assert "承認待ちの変更候補" in msg(r) and "まだ変更候補は作りません" not in msg(r)
+    assert "取り消しました" in msg(r) and "まだ変更候補は作りません" not in msg(r)
+    assert r["state"]["candidate"] is None and r["state"]["approval"] is None and r["state"]["repeat_range"] is None
     assert not fake.requests
+    assert w.approve(sid, "QA", candidate_gen=old_gen)["ok"] is False
+    assert w.export(sid, candidate_gen=old_gen)["ok"] is False
 
 
 @pytest.mark.parametrize("text, now", [("あと1回減らして", True), ("あと2回減らして", True),

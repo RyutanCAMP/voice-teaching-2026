@@ -80,9 +80,13 @@ def test_approximate_count_with_existing_candidate_still_asks(tmp_path):
     sid = w.load(T.demo_bytes())['session_id']
     repeat_candidate(w, sid)
     old = w.state(sid)['state']['candidate']
+    old_gen = w.candidate_gen_of(sid)
     r = w.talk(sid, '3回くらい')
-    assert '3回でよいですか' in r['ask']['reply']
-    assert r['state']['candidate'] == old and not r['state']['approval']
+    # Q-3／F-2（11/6 唐川さんの方針）：候補があるときの「3回くらい」（おおよその値・K3）は保留にして確かめる
+    # （前の期待：「3回でよいですか」と聞き、候補はそのまま承認できた）。クローク 11/6
+    assert r['state']['candidate'] == old and r['state']['hold'] is True and not r['state']['approval']
+    assert r['state']['can_approve'] is False and r['state']['can_export'] is False
+    assert w.approve(sid, 'QA', candidate_gen=old_gen)['ok'] is False
     assert not fake.requests and not r['state']['repeat_range']
 
 
