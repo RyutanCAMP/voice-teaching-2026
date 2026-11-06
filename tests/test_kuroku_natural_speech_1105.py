@@ -424,7 +424,7 @@ def test_kore_and_motto_never_make_a_candidate_on_their_own(tmp_path, text):
 def test_self_correction_asks_the_last_wording_by_button(tmp_path, said, final, target, delta):
     w, fake, sid = A.place_flow(tmp_path)
     r = w.talk(sid, said, "voice")
-    assert not cand(r) and not w.approve(sid, "QA")["ok"]
+    assert not cand(r) and not w.approve(sid, "QA", candidate_gen=w.candidate_gen_of(sid))["ok"]  # 確かめる前は承認できるものが無い（P0 で世代番号が必須になった）
     msg = hear(r).get("message", "")
     assert f"最後の言い方「{final}」" in msg, msg
     (label, text), = [(c["label"], c["text"]) for c in hear(r)["choices"]]
@@ -460,12 +460,16 @@ def test_self_correction_over_the_limit_is_still_refused(tmp_path):
 
 
 def test_self_correction_is_not_offered_with_a_pending_candidate(tmp_path):
-    """候補があるときの言い直しは P0（シクロ）：今までどおり（ボタンを出さず、打ち消しの文）。候補は作り直さない。"""
+    """候補があるときの言い直しは P0（シクロ）の道：ボタンを出さない。古い候補（+3）は無効になり、承認・出力できない。
+    新しい候補もその場では作らない（11/6：P0・F-1 の修正のあとの挙動に合わせた。前の期待「+3 の候補が残る」は古い）。"""
     w, _, sid = A.place_flow(tmp_path)
     w.talk(sid, "Zプラス3ミリ")
+    g0 = w.candidate_gen_of(sid)
     r = w.talk(sid, "Zプラス10ミリ、いや5ミリ", "voice")
     assert "最後の言い方" not in hear(r).get("message", "") and not labels(r)
-    assert r["state"]["candidate"]["delta"] == "+3.000"
+    assert r["state"]["candidate"] is None
+    assert not w.approve(sid, "QA", candidate_gen=g0)["ok"]
+    assert not w.export(sid, candidate_gen=g0)["ok"]
 
 
 @pytest.mark.parametrize("said,n", [("10ミリ、いや5ミリ", "5"), ("10ミリ、ごめん、5ミリ", "5"), ("十ミリ、いや三ミリ", "3")])
