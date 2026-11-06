@@ -664,11 +664,15 @@ def test_e5_pending_candidate_new_change_invalidates(tmp_path, said):
     assert w.hear(sid, "Zプラス方向に10mm", "text")["candidate_made"]
     old_gen = w.candidate_gen_of(sid)
     n = len(fake.requests)
+    old = w._entries[sid].session.candidate
     r = w.ask(sid, said)
-    assert r["reply_by"] == "app" and "取り消しました" in r["reply"]
+    # /api/ask の Option 1（11/6 唐川さんの決定）：ask は候補を作らない・前の候補は保留（承認・出力できない）
+    # （前の期待：Q-3 の第1段では失効）。クローク 11/6
+    assert r["reply_by"] == "app" and "保留" in r["reply"]
     st = w.state(sid)["state"]
-    assert st["candidate"] is None and st["approval"] is None and st["repeat_range"] is None
-    assert w._entries[sid].session.candidate is None
+    assert st["hold"] is True and st["approval"] is None and st["repeat_range"] is None
+    assert st["can_approve"] is False and st["can_export"] is False
+    assert w._entries[sid].session.candidate is old  # 新しい候補を作らない
     assert len(fake.requests) == n  # Claude には送らない
     assert w.approve(sid, "QA", candidate_gen=old_gen)["ok"] is False
     assert w.export(sid, candidate_gen=old_gen)["ok"] is False

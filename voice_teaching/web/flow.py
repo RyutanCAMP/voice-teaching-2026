@@ -131,6 +131,10 @@ M_CXEX_NOASK = ("前の変更候補（{summary}）を取り消しました。元
 M_HOWCX = ("取り消す場合は、［元に戻す］を押すか「取り消して」と言ってください。取り消しても元の動作データは変わりません。"
            "今の変更候補はそのままです")
 M_CORR_REMADE = "言い直しを受け取ったため、前の変更候補（{summary}）を取り消しました。承認・出力はできません。新しい指示として読みます。"
+M_ASK_REVOKED = "前の承認を取り消しました。"
+M_ASK_HOLD = ("この欄は説明だけで、変更はしません。変更の指示は、指示の欄（マイク・文字）でどうぞ。{revoked}"
+              "今の変更候補（{summary}）を保留にしました（承認・出力はできません）。残す場合は［このまま残す］を押してから、"
+              "承認ボタンでもう一度承認してください。やめる場合は［取り消す］を押してください")
 M_HOLD_REVOKED = "新しい変更の指示かもしれないため、前の承認を取り消しました。"  # Q-3 の保留で承認を取り消したとき（文の頭）
 M_UNSURE = ("今の変更候補（{summary}）を取り消しますか？ 取り消す場合は、［元に戻す］を押すか「取り消して」と言ってください。"
             "残す場合は「このままでいい」と言ってください。確かめるまで、承認・出力はできません")
@@ -963,7 +967,7 @@ class WebFlow:
             via.append("hear")
             if explain is not None:
                 hear_out["message"] = M_CXEX.format(summary=summary) + tail
-                ask_out = self.ask(sid, explain, source=source)
+                ask_out = self.ask(sid, explain, source=source, via_talk=True)
                 if ask_out.get("session_closed"):
                     return ask_out
                 via.append("ask")
@@ -989,7 +993,7 @@ class WebFlow:
                 return hear_out
             via.append("hear")
         else:
-            ask_out = self.ask(sid, text, source=source)
+            ask_out = self.ask(sid, text, source=source, via_talk=True)
             if ask_out.get("session_closed"):
                 return ask_out
             via.append("ask")
@@ -1117,7 +1121,8 @@ class WebFlow:
         return rc.canonical(block.positions[0], block.positions[-1], block.count, count.total)
 
     def ask(self, sid: object, text: object = None, reset: object = False, info: object = False,
-            source: object = "text", choose: object = None, token: object = None, sync: object = False) -> dict:
+            source: object = "text", choose: object = None, token: object = None, sync: object = False,
+            via_talk: bool = False) -> dict:
         """読み込んだジョブについて Claude に聞く。Session（候補・承認・選択・作業ログ）には触らない。
         会話の文脈と人が教えた意味は、この画面の中だけ（保存しない）。データ（ジョブ・候補・承認・上下の向きの照合）が
         変わったら、会話を区切る（新しい会話にして「データが変わったので…」と知らせる）。
@@ -1167,7 +1172,8 @@ class WebFlow:
             if not isinstance(text, str) or not text.strip() or len(text) > claude_explain.MAX_TEXT:
                 return {**self.explainer.ask(conv, text), "talk": self._talk_state(e, notices)}
             text = text.strip()
-            pre = self._stale_check(e, text, source, said_by_person=True)
+            # via_talk：talk の入口が中で呼んだとき（talk の側で取消・言い直しをもう見分けてある）。/api/ask の Option 1 は使わない
+            pre = self._stale_check(e, text, source, said_by_person=True, from_ask=not via_talk)
             if pre is not None:
                 # /api/ask にも取消・言い直しが届く（P0 設計 0-2 (2)）：無効・保留にしてから答える。説明の頼みなら説明の節だけを聞く
                 summary, tail = pre.pop("summary", None), pre.pop("tail", "")
@@ -1175,6 +1181,7 @@ class WebFlow:
                 if explain is None:
                     out = self._app_reply(e, pre["message"], notices, source, "stale_" + pre["stale"], text)
                     out["stale"] = pre["stale"]
+                    out["choices"] = pre.get("choices") or []  # 保留なら［取り消す］［このまま残す］（押すと決まった文を /api/hear へ）
                     return out
                 notices = notices + [M_CXEX.format(summary=summary) + tail]
                 text = explain
@@ -1337,7 +1344,7 @@ class WebFlow:
                 + (M_HAD_EXPORT.format(name=v["exported_name"]) if v["exported_name"] else ""))
 
     def _stale_check(self, e: _Entry, text: str, source: str, said_by_person: bool = False,
-                     remake: bool = False) -> "dict | None":
+                     remake: bool = False, from_ask: bool = False) -> "dict | None":
         """取消・言い直し・保留の見分け（プログラム。錠の中で、文を受け取る入口の最初に呼ぶ）。
         候補が無いとき・今の道のままのときは None。扱ったときは、指示の道の答えの形（hear と同じ）を返す。
         取消＋説明なら "explain"（説明の節）・"summary"・"tail" を入れて返す（呼んだ側が使って外す）。"""
@@ -1367,6 +1374,10 @@ class WebFlow:
             if info["exported_name"]:
                 msg += M_HAD_EXPORT.format(name=info["exported_name"])
             return self._stale_out(e, text, source, "ok", msg, v.kind)
+        if from_ask and ((v.rule.startswith("10") and v.kind == stale.CORRECTION) or v.kind == stale.UNSURE):
+            # /api/ask（読み取りの入口）に、印の無い変更の指示・承認した中身への確認の質問（Option 1・11/6 唐川さんの決定）：
+            # 候補は作らない・前の承認を取り消して（取り消しの印）、候補を保留にする（承認・出力できない）
+            return self._ask_hold(e, text, source)
         if v.kind == stale.CORRECTION:
             info = self._invalidate(e, "言い直し")
             if remake and v.rest and _complete_instruction(v.rest):
@@ -1399,6 +1410,11 @@ class WebFlow:
             return self._stale_out(e, text, source, "ask", msg, v.kind)
         if v.kind == stale.QUESTION_ABOUT_CANCEL:
             return self._stale_out(e, text, source, "ok", M_HOWCX, v.kind)
+        if (from_ask and v.kind == stale.OTHER and v.rule != "3c question" and s.candidate is not None and talk.looks_like_change(said)
+                and not stale.is_ack(said) and not stale.is_plain_question(said) and not stale.is_plain_button_request(said)):
+            # ask に変更の意思のある文（承認済みでも未承認でも）：ask には指示の道（hear）が無いので、ここで保留にする
+            # （f42676a では承認が残り、ボタンで古い中身を出力できた：CHECKER_039 の ask 23件）
+            return self._ask_hold(e, text, source)
         if (said_by_person and v.kind == stale.OTHER and self._approved(e) and not stale.is_ack(said) and not stale.is_plain_question(said)
                 and not stale.is_plain_button_request(said) and self._talk_route(e, text) != "hear"):
             # 承認済みの候補があるとき、承認を残す文は、はっきりした相づち・否定の無い質問・否定の無い「出力して」だけ。
@@ -1408,6 +1424,15 @@ class WebFlow:
             s.log.append(("保留", "承認のあとの文が相づち・ふつうの質問ではないため、変更候補を保留にしました（承認・出力はできません）"))
             return self._stale_out(e, text, source, "ask", M_UNSURE.format(summary=_summary(s.candidate)), stale.UNSURE)
         return None
+
+    def _ask_hold(self, e: _Entry, text: str, source: str) -> dict:
+        """ask の保留（Option 1）：前の承認を取り消し（取り消しの印を立てる）、候補を保留にする。返事は決まった文で、状態と一致させる。"""
+        s = e.session
+        revoked = self._cancel_approval(e, "説明の欄に変更の指示・確かめの質問があったため")
+        e.hold = True
+        s.log.append(("保留", "説明の欄に変更の指示・確かめの質問があったため、変更候補を保留にしました（承認・出力はできません）"))
+        msg = M_ASK_HOLD.format(revoked=M_ASK_REVOKED if revoked else "", summary=_summary(s.candidate))
+        return self._stale_out(e, text, source, "ask", msg, stale.UNSURE)
 
     @staticmethod
     def _corr_next(info: dict, value: str | None) -> str:

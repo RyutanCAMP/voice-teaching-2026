@@ -323,10 +323,14 @@ def test_ask_while_candidate_pending_does_not_touch_candidate(tmp_path):
     # Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：古い候補を残す・状態は変えない）
     old_gen = w.candidate_gen_of(sid)
     n = len(fake.requests)
+    old = w._entries[sid].session.candidate
     r = w.ask(sid, "じゃあ3回にして")
-    assert r["ok"] and "取り消しました" in r["reply"]
+    # /api/ask の Option 1（11/6 唐川さんの決定）：候補を作らず、前の候補を保留（承認・出力できない）（前の期待：失効）。クローク 11/6
+    assert r["ok"] and "保留" in r["reply"]
     after = w.state(sid)["state"]
-    assert after["candidate"] is None and after["approval"] is None and after["repeat_range"] is None
+    assert after["hold"] is True and after["approval"] is None and after["repeat_range"] is None
+    assert after["can_approve"] is False and after["can_export"] is False
+    assert w._entries[sid].session.candidate is old
     assert len(fake.requests) == n  # Claude には送らない
     assert w.approve(sid, "QA", candidate_gen=old_gen)["ok"] is False
     assert w.export(sid, candidate_gen=old_gen)["ok"] is False
