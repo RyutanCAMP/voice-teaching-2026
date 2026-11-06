@@ -1543,3 +1543,16 @@ button.updown-chip[data-tone="warn"] { color: var(--accent-text); font-weight: 7
 .updown-full { position: absolute; right: 0; top: calc(100% + 6px); z-index: 12; width: max-content; max-width: min(340px, 40vw); margin: 0;
   padding: 10px 12px; border-radius: 10px; background: #0d1628; border: 1px solid var(--line); box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
   font-size: 13px; line-height: 1.6; color: var(--text); overflow-wrap: anywhere; }
+
+/* ===== Issue #8 round4（11/6 唐川さんの決定）：安全についての説明はシールドの印（再生の行の右の端）。合わせる・押すと読める =====
+   常時の説明の文は出さない（図の注意の行を無くした分、3D は広くなる）。場面ごとの警告は畳まない */
+.fig-notes-min, .fig-notes-more { display: none; }
+.play-row .safety-wrap { position: relative; margin-left: auto; flex: none; }
+button.safety-btn { width: 44px; height: 44px; min-height: 44px; padding: 0; border-radius: 50%; display: inline-flex; align-items: center;
+  justify-content: center; background: transparent; border: 1px solid var(--line); color: #a9cbff; box-shadow: none; }
+button.safety-btn svg { width: 24px; height: 24px; }
+button.safety-btn:hover, button.safety-btn[aria-expanded="true"] { background: rgba(169, 203, 255, 0.12); border-color: #4b6aa0; transform: none; }
+.safety-pop { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 20; width: min(560px, 60vw); margin: 0;
+  padding: 12px 14px; border-radius: 12px; background: #0d1628; border: 1px solid var(--line); box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45); }
+.safety-pop .safety-head { margin: 0 0 6px; font-size: 13px; font-weight: 700; color: #a9cbff; }
+.safety-pop .figure-notes { margin: 0; font-size: 13px; line-height: 1.6; color: var(--text); }

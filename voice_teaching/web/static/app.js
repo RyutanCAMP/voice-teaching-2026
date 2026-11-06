@@ -370,6 +370,23 @@ function renderUpdown(u) {
   }));
 }
 
+// 安全についての説明（シールドの印。Issue #8 round4）：合わせたとき（マウス・キーボードのフォーカス）に開き、離すと閉じる。
+// 押すと開いたままにする（もう一度押す・Esc・外を押すと閉じる）。表示だけ。場面ごとの警告はここに畳まない
+const safety = { pinned: false };
+function setSafety(open, pin) {
+  if (pin !== undefined) safety.pinned = pin;
+  const on = !!open || safety.pinned;
+  $("safety-notes").hidden = !on;
+  $("safety-button").setAttribute("aria-expanded", on ? "true" : "false");
+}
+$("safety-button").addEventListener("click", () => setSafety(!safety.pinned, !safety.pinned));
+$("safety-button").addEventListener("mouseenter", () => setSafety(true));
+$("safety-button").addEventListener("mouseleave", () => setSafety(false));
+$("safety-button").addEventListener("focus", () => setSafety(true));
+$("safety-button").addEventListener("blur", () => setSafety(false));
+document.addEventListener("click", (ev) => { if (!ev.target.closest(".safety-wrap")) setSafety(false, false); });
+document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && !$("safety-notes").hidden) { setSafety(false, false); } });
+
 // 上下の向きの詳しい小窓（押す・Enter/Space で開く・閉じる。Esc・外を押すと閉じる）。表示だけ
 function setUpdownFull(open) {
   const on = !!open && !!$("updown-full").textContent;

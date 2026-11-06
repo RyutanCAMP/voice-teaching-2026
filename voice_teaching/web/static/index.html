@@ -319,6 +319,18 @@
         <button type="button" id="play-before" class="small" aria-pressed="false">変更前を再生</button>
         <button type="button" id="play-after" class="small" aria-pressed="false">変更後を再生</button>
       </div>
+      <!-- 安全についての説明（Issue #8 round4・11/6 唐川さんの決定）：通常の画面に説明の文章を常時は出さない。図の一般的な注意
+           （仕様 v2.1 4章の文：目安・離れて見えても当たらないとは限らない・腕やツールの根元は描かない・実機の動作や干渉は保証しない など）は、
+           このシールドの印に合わせたとき・押したとき（クリック・タップ・Enter／Space）に読める。場面ごとの警告（上限・上下未確認・承認待ち・
+           保留・出力できない）はこれに畳まず、その場面で出す（app.js・サーバーの文のまま） -->
+      <div class="safety-wrap">
+        <button type="button" id="safety-button" class="safety-btn" aria-label="安全についての説明" title="安全についての説明"
+                aria-expanded="false" aria-controls="safety-notes"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8 19.5 5.6v5.6c0 4.6-3.1 8.4-7.5 10-4.4-1.6-7.5-5.4-7.5-10V5.6z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 7.6v6M12 16.2v.2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+        <div id="safety-notes" class="safety-pop" role="note" aria-label="安全についての説明" hidden>
+          <p class="safety-head">安全についての説明</p>
+          <p class="fine figure-notes"><span id="figure-lead">図は目安です。離れて見えても当たらないとは限りません。実機の動作・干渉は保証しません。</span> <span id="play-note">点を命令の順に直線で結んだ目安です。ロボット本体の動きではありません。</span> <span id="view3d-note">3D はジョブの X・Y・Z をそのまま点で描いたもので、ロボット本体・関節は描いていません。動作や干渉を保証するシミュレーターではありません。</span> <span id="figure-note">この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。参考表示であり、実際のロボットの動きではありません。</span></p>
+        </div>
+      </div>
     </div>
     <!-- 動きの並び（回数の変更の候補があるときだけ）。区間の前後は位置の番号だけ（意味は決めつけない）。数はサーバーのまま -->
     <div id="play-seq" class="play-seq" hidden>
@@ -340,14 +352,6 @@
         <span class="lg after" id="legend-after">変更後</span>
         <span class="lg stopped" id="legend-stopped" hidden>灰色の点線と ✕＝変更できない案（参考・承認できません）</span>
       </div>
-    </div>
-    <!-- Issue #7・#8：図の注意の全文（目安であること・ロボット本体の動きではない・離れて見えても当たらないとは限らない・
-         本体や関節は描かない・実機の動作と干渉は保証しない など）は ⓘ で開く。11/6 唐川さんの指示で常時の短い1行は出さない
-         （出してよいかは独立の Safety レビューにかける。SIM の印・候補の注意・確認表示の文・止めた理由・承認の状態は操作の場面で出る） -->
-    <div class="fig-notes-min">
-      <details class="fig-notes-more"><summary class="tip" aria-label="図の注意を読む（図は目安・実機の動作と干渉は保証しません）" title="図の注意（図は目安です。実機の動作・干渉は保証しません）">i</summary>
-    <p class="fine figure-notes"><span id="figure-lead">図は目安です。実機の動作・干渉は保証しません。</span> <span id="play-note">点を命令の順に直線で結んだ目安です。ロボット本体の動きではありません。</span> <span id="view3d-note">3D はジョブの X・Y・Z をそのまま点で描いたもので、ロボット本体・関節は描いていません。動作や干渉を保証するシミュレーターではありません。</span> <span id="figure-note">この図で離れて見えても、当たらないとは限りません。腕やツールの根元は描いていません。参考表示であり、実際のロボットの動きではありません。</span></p>
-      </details>
     </div>
   </section>
 

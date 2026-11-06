@@ -300,7 +300,7 @@ def check_ux_polish(browser, url, check, shots: Path | None) -> None:
         page.wait_for_timeout(100)
         # Issue #8 round3：常時の短い1行は出さない。図の注意の ⓘ（全文を開くボタン）が隠れないことを見る
         return page.evaluate("""() => document.querySelector('.foot').getBoundingClientRect().top
-                                - document.querySelector('.fig-notes-more > summary').getBoundingClientRect().bottom""")
+                                - document.querySelector('#safety-button').getBoundingClientRect().bottom""")  # round4：安全についての説明の印
 
 
     # ---- 1280×720：版・使い方の小窓・サンプルで試す・図の注意・止まった候補の帯 ----
@@ -1327,6 +1327,96 @@ def check_front_view(browser, check, shots: Path | None, out: Path) -> None:
             check(screen(pg) == p0, f"正面（{w}×{h}）：読み込んだときの最初の視点（斜め）は前のまま")
             pg.close()
     finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def check_safety_notes_scenes(browser, check, shots: Path | None, out: Path) -> None:
+    """Issue #8 round4（11/6 唐川さんの決定）：通常の画面に説明の文章を常時は出さない（仕様 v2.1 4章・受入基準20からの相違。引き継ぎに記録）。
+    - 常時の説明の1行（#figure-short）は無い。「安全についての説明」（シールドの印）はどの場面でも画面の中に見えていて、隠れていない
+    - 合わせる（ホバー）と開き、離すと閉じる。押すと開いたまま、Esc で閉じる。中に「当たらないとは限りません」など仕様の文
+    - 場面ごとの警告は畳まない：上限を超えた理由・上下方向 未確認・承認待ち・保留・出力できない（保留中）が、その場面で見えている
+    1280×720・1440×900"""
+    sys.path.insert(0, str(REPO / "tools"))
+    import demo_mock as dm
+    from voice_teaching import claude_explain as cx
+    from voice_teaching import sim
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import server
+    cx.PRICES[dm.MOCK_MODEL] = cx.Price(input=0.0, output=0.0, cache_write_5m=0.0, cache_write_1h=0.0, cache_read=0.0)
+    ex = cx.Explainer("mock-no-network", dm.MOCK_MODEL, client=dm.ScriptClient(), usage_log=cx.UsageLog(out / "sn_usage.jsonl"))
+    old_out = sim.DEFAULT_OUT_DIR
+    sim.DEFAULT_OUT_DIR = out / "sn_sim"
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None, explainer=ex)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    SEEN = """(sel) => { const e = document.querySelector(sel);
+      if (!e || e.closest('[hidden]') || !e.getClientRects().length) return false;
+      const r = e.getBoundingClientRect();
+      if (!(r.top >= 0 && r.left >= 0 && r.bottom <= innerHeight && r.right <= innerWidth)) return false;
+      const t = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return !!t && (t === e || e.contains(t)); }"""
+
+    def send(pg, text):
+        fill_text(pg, text)
+        pg.click("#text-send")
+        until(pg, lambda: pg.is_enabled("#text-send") or not pg.is_visible("#text-send"), 15000)
+        pg.wait_for_timeout(300)
+
+    def base(pg, tag):
+        ok = pg.locator("#figure-short").count() == 0 and pg.evaluate(SEEN, "#safety-button") and pg.is_hidden("#safety-notes")
+        check(bool(ok and pg.evaluate(SEEN, "#mode-banner") and pg.evaluate(SEEN, "#approval-icon")
+                   and pg.inner_text("#updown-detail") == "上下方向 未確認" and pg.evaluate(SEEN, "#updown-detail")),
+              f"安全の表示（{tag}）：常時の説明の1行は無い。安全についての説明の印・SIM・承認の状態・上下方向 未確認が見えている")
+    try:
+        for w, h in [(1280, 720), (1440, 900)]:
+            pg = browser.new_page(viewport={"width": w, "height": h})
+            pg.add_init_script(FAKE_RECOGNITION)
+            pg.goto(url + "?opening=0")
+            pg.set_input_files("#file-input", str(REPO / "samples/dummy" / "DEMO_C_PLACE.JBI"))
+            pg.wait_for_selector("#job-area:not([hidden])")
+            pg.wait_for_timeout(300)
+            base(pg, f"{w}×{h} 読込直後")
+            # 合わせる → 開く・離す → 閉じる・押す → 開いたまま・Esc → 閉じる
+            pg.hover("#safety-button")
+            hov = pg.is_visible("#safety-notes") and "当たらないとは限りません" in pg.inner_text("#safety-notes")
+            pg.mouse.move(5, h - 5)
+            gone = pg.is_hidden("#safety-notes")
+            pg.click("#safety-button")
+            pg.mouse.move(5, h - 5)
+            pinned = pg.is_visible("#safety-notes") and pg.get_attribute("#safety-button", "aria-expanded") == "true"
+            if shots:
+                pg.screenshot(path=str(shots / f"SAFETY_{w}x{h}_open.png"))
+            pg.keyboard.press("Escape")
+            check(bool(hov and gone and pinned and pg.is_hidden("#safety-notes")),
+                  f"安全についての説明（{w}×{h}）：合わせると開き離すと閉じる・押すと開いたまま・Esc で閉じる（{hov}, {gone}, {pinned}）")
+            pg.locator("#position-chips button", has_text="C00005").first.click()
+            send(pg, "Zプラス方向に30ミリ")
+            rm = pg.inner_text("#reply-message") if pg.is_visible("#reply-message") else ""
+            check(bool(pg.evaluate(SEEN, "#reply-message") and "超え" in rm and pg.is_hidden("#open-confirm")),
+                  f"場面の警告（{w}×{h}）：上限を超えた理由がその場面で見える（{' '.join(rm.split())[:60]}）")
+            base(pg, f"{w}×{h} 上限超え")
+            send(pg, "Zプラス方向に5ミリ")
+            until(pg, lambda: pg.is_enabled("#open-confirm"), 10000)
+            check(bool(pg.evaluate(SEEN, "#open-confirm") and "未承認" in (pg.get_attribute("#approval-icon", "aria-label") or "")
+                       and pg.evaluate(SEEN, "#candidate-view .cand-warn")),
+                  f"場面の警告（{w}×{h}）：承認待ち（未承認・確認して承認へ）と候補の注意がその場面で見える")
+            base(pg, f"{w}×{h} 候補")
+            pg.click("#open-confirm")
+            pg.fill("#approver-name", "e2e確認")
+            pg.click("#approve-button")
+            until(pg, lambda: pg.is_visible("#approval-status") and "✓" in pg.inner_text("#approval-status"), 10000)
+            base(pg, f"{w}×{h} 承認後")
+            send(pg, "ちょっと待って")
+            until(pg, lambda: pg.get_attribute("#approval-icon", "data-appr") == "warn", 10000)
+            st = pg.inner_text("#approval-status")
+            check(bool(pg.evaluate(SEEN, "#approval-status") and "保留中" in st and "承認・出力はできません" in st
+                       and pg.is_disabled("#export-button") and "承認・出力はできません" in pg.inner_text("#next-action")),
+                  f"場面の警告（{w}×{h}）：保留中・出力できない（理由）がその場面で見える（{st}）")
+            base(pg, f"{w}×{h} 保留中")
+            pg.close()
+    finally:
+        sim.DEFAULT_OUT_DIR = old_out
         srv.shutdown()
         srv.server_close()
 
@@ -3131,7 +3221,7 @@ def check_demo3d(browser, url, check, shots: Path | None, errors: list) -> None:
             shot(pg, "D6_1280x720_seq_after_3rd.png")
             fit = pg.evaluate("""() => { const f = document.querySelector('.foot').getBoundingClientRect().top;
               const b = (s) => document.querySelector(s).getBoundingClientRect();
-              return [f, b('#fig-3d svg').top, b('#play-seq').bottom, b('#play-compare').bottom, b('.fig-notes-more > summary').bottom,
+              return [f, b('#fig-3d svg').top, b('#play-seq').bottom, b('#play-compare').bottom, b('#safety-button').bottom,
                       window.scrollY]; }""")
             shot_seq.append(fit)
     shot_seq = []
@@ -3877,6 +3967,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check_build_label(b, check, shots, out)
             check_ui1_hold_display(b, check, shots, out)
             check_front_view(b, check, shots, out)
+            check_safety_notes_scenes(b, check, shots, out)
             check_export_twice(b, check, shots, out)
             check_opening_click_through(b, check, shots, out)
             check_export_path_short(b, check, shots, out)
@@ -5004,19 +5095,17 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
           f"解釈のしかたは上の帯に出さず、アプリ情報で区別：{pg.text_content('#app-info-interp')}")
     # 入口は1つ（11/4 唐川さんの指示③）：ステップ2でも、指示の欄（会話の入口）を出す（「何をしている？」を位置を選ぶ前に聞ける）
     check(cards(pg) == ["select-panel", "instruction-panel"], f"右側は今のステップのカードと、入口（指示の欄）：{cards(pg)}")
-    # Issue #8 round3（11/6 唐川さん）：図の注意の常時の1行は出さない（独立の Safety レビューで可否を見る）。ⓘ のボタンはいつも見え、
-    # 名前・小さな説明に「目安」「実機の動作・干渉は保証しません」があり、押すと全文（目安・本体の動きではない・当たらないとは限らない・保証しない）
-    full = pg.text_content("#figure-panel .figure-notes") or ""
-    tip = (pg.get_attribute(".fig-notes-more > summary", "aria-label") or "") + (pg.get_attribute(".fig-notes-more > summary", "title") or "")
-    check(pg.locator("#figure-short").count() == 0 and pg.is_visible(".fig-notes-more > summary")
-          and "目安" in tip and "実機の動作・干渉は保証しません" in tip
-          and all(x in full for x in ["図は目安です。実機の動作・干渉は保証しません。", "ロボット本体の動きではありません", "当たらないとは限りません",
-                                      "動作や干渉を保証するシミュレーターではありません"]),
-          f"図の注意：常時の短い1行は出さず、ⓘ はいつも見える（名前「{tip[:30]}…」）。全文は ⓘ の中にある")
-    pg.click(".fig-notes-more > summary")
-    check(all(pg.is_visible(s) for s in ["#figure-lead", "#figure-note", "#play-note", "#view3d-note"]),
-          "図の注意の全文（ロボット本体・関節は描かない・動作や干渉を保証しない）は ⓘ で読める")
-    pg.click(".fig-notes-more > summary")
+    # Issue #8 round4（11/6 唐川さんの決定）：常時の説明の1行は出さない。安全についての説明（シールドの印）はいつも見え、押すと全文が読める
+    full = pg.text_content("#safety-notes .figure-notes") or ""
+    check(pg.locator("#figure-short").count() == 0 and pg.is_visible("#safety-button")
+          and pg.get_attribute("#safety-button", "aria-label") == "安全についての説明" and pg.is_hidden("#safety-notes")
+          and all(x in full for x in ["図は目安です。離れて見えても当たらないとは限りません。実機の動作・干渉は保証しません。",
+                                      "ロボット本体の動きではありません", "腕やツールの根元は描いていません", "動作や干渉を保証するシミュレーターではありません"]),
+          "図の注意：常時の1行は無く、「安全についての説明」の印がいつも見える。全文はその中にある")
+    pg.click("#safety-button")
+    check(all(pg.is_visible(s) for s in ["#safety-notes", "#figure-lead", "#figure-note", "#play-note", "#view3d-note"]),
+          "安全についての説明の印を押すと、全文（目安・当たらないとは限らない・根元は描かない・保証しない）が読める")
+    pg.click("#safety-button")
 
     # 3D の点はジョブの座標そのもの（名前・行・数がジョブと一致する。作った点は無い）
     lines = {p["name"]: p["line"] for p in api.job_view(data)["positions"] if p["xyz"]}
@@ -5211,7 +5300,7 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     check(pg.locator("#fig-3d circle.marker").count() == 1, "再生の印が 3D の中を動く")
     shot(pg, "4_playing.png")
     until(pg, lambda: "終わりました" in pg.inner_text("#play-status"), timeout_ms=60000)
-    check("目安" in (pg.get_attribute(".fig-notes-more > summary", "title") or "") and "ロボット本体の動きではありません" in pg.text_content("#play-note"),
+    check(pg.is_visible("#safety-button") and "ロボット本体の動きではありません" in pg.text_content("#play-note"),
           "再生の限界を出す（ⓘ の名前に「目安」・ⓘ の全文に「ロボット本体の動きではない」）")
     press(pg, "C00002")
     pg.wait_for_timeout(200)
