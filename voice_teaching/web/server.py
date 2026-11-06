@@ -48,6 +48,10 @@ _VERSION_MARK = b"__VT_VERSION__"  # index.html の中の版の印（配信す�
 # 版の小さな文字（v1.00-dev など）と詳しい版（v1.00-dev（dev・a1b2c3d））の印。起動のときに決めた srv.build から入れる
 _BUILD_LABEL_MARK = b"__VT_BUILD_LABEL__"
 _BUILD_DETAIL_MARK = b"__VT_BUILD_DETAIL__"
+# 上の帯の MOCK の印の場所（Issue #8 round4）。モックなら印を入れ、本物の Claude なら空（要素ごと出さない）
+_MOCK_MARK = b"<!--__VT_MOCK_BANNER__-->"
+_MOCK_BANNER = ('<p id="mock-banner" class="mode-banner mock-banner" title="モック：解釈か説明の係が本物の Claude ではありません" '
+                'aria-label="モック（解釈か説明の係が本物の Claude ではありません）">MOCK</p>').encode("utf-8")
 _CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
         "connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 
@@ -104,6 +108,8 @@ class Handler(BaseHTTPRequestHandler):
         body = _static_bytes(entry[0])
         if entry[0] == "index.html":
             body = body.replace(_VERSION_MARK, __version__.encode("ascii"))
+            flow = getattr(self.server, "flow", None)
+            body = body.replace(_MOCK_MARK, _MOCK_BANNER if (flow is None or flow.uses_mock()) else b"")
             if build is not None:
                 body = (body.replace(_BUILD_LABEL_MARK, html.escape(build.label).encode("utf-8"))
                         .replace(_BUILD_DETAIL_MARK, html.escape(build.detail).encode("utf-8")))

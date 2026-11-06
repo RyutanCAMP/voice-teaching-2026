@@ -1421,6 +1421,58 @@ def check_safety_notes_scenes(browser, check, shots: Path | None, out: Path) -> 
         srv.server_close()
 
 
+def check_mock_badge(browser, check, shots: Path | None, out: Path) -> None:
+    """Issue #8 round4（11/6 唐川さんの決定）：モックのときは上の帯に「MOCK」（SIM と同じ形の小さな印）。本物の Claude のときは要素ごと無い。
+    判定はサーバー（flow.uses_mock・state.uses_mock）。本物の側は偽の client を渡した本物の係で、API は呼ばない（JOB も読み込まない）。
+    1280×720・1440×900 で、ほかの上の帯の物と重ならない。SIM は両方で見える"""
+    from voice_teaching import claude_explain as cx
+    from voice_teaching import claude_interpreter as ci
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import server
+
+    class NoCall:
+        def __init__(self):
+            self.messages = self
+
+        def create(self, **kw):
+            raise AssertionError("API を呼んではいけない")
+    rect = """(s) => { const e = document.querySelector(s); if (!e || e.closest('[hidden]') || !e.getClientRects().length) return null;
+      const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, r: r.right, b: r.bottom }; }"""
+    cases = [("モック", MockInterpreter(), cx.Explainer("", "claude-sonnet-5-5"), True),
+             ("本物（偽の client）", ci.ClaudeInterpreter("test-key-not-real", "claude-sonnet-5-5", client=NoCall()),
+              cx.Explainer("test-key-not-real", "claude-sonnet-5-5", client=NoCall()), False)]
+    for name, interp, ex, want in cases:
+        srv = server.make_server(port=0, interpreter=interp, updown_config=None, explainer=ex)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        url = f"http://127.0.0.1:{srv.server_address[1]}/"
+        try:
+            for w, h in [(1280, 720), (1440, 900)]:
+                pg = browser.new_page(viewport={"width": w, "height": h})
+                pg.goto(url + "?opening=0")
+                pg.wait_for_timeout(300)
+                if want:
+                    pg.set_input_files("#file-input", str(REPO / "samples/dummy" / "DEMO_C_PLACE.JBI"))
+                    pg.wait_for_selector("#job-area:not([hidden])")
+                    pg.wait_for_timeout(300)
+                mb = pg.evaluate(rect, "#mock-banner")
+                sim_r = pg.evaluate(rect, "#mode-banner")
+                others = {s: pg.evaluate(rect, s) for s in ["#mode-banner", "#approval-icon", ".app-info > summary", "#help-button",
+                                                             "#engineer-toggle", "#app-build", ".logo"]}
+                hits = [s for s, r in others.items() if r and mb and s != "#mode-banner" and _overlap(mb, r) > 0]
+                if want:
+                    check(bool(mb) and pg.inner_text("#mock-banner") == "MOCK" and bool(sim_r) and _overlap(mb, sim_r) == 0 and not hits,
+                          f"MOCK の印（{name}・{w}×{h}）：上の帯に「MOCK」が見え、SIM もほかの物とも重ならない（{hits}）")
+                    if shots:
+                        pg.screenshot(path=str(shots / f"MOCK_{w}x{h}_header.png"), clip={"x": 0, "y": 0, "width": w, "height": 60})
+                else:
+                    check(pg.locator("#mock-banner").count() == 0 and bool(sim_r),
+                          f"MOCK の印（{name}・{w}×{h}）：本物の Claude のときは要素ごと無い。SIM は見える")
+                pg.close()
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+
 def check_export_twice(browser, check, shots: Path | None, out: Path) -> None:
     """11/5 夜 H1：出力に成功したあと［シミュレーション用に出力］をもう一度押す（2回押す・ダブルクリック）と、
     2回目が「既にあるため、上書きしません」の赤い失敗になり、「出力しました」の見出し・「出力 済み」と食い違っていた。
@@ -3968,6 +4020,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check_ui1_hold_display(b, check, shots, out)
             check_front_view(b, check, shots, out)
             check_safety_notes_scenes(b, check, shots, out)
+            check_mock_badge(b, check, shots, out)
             check_export_twice(b, check, shots, out)
             check_opening_click_through(b, check, shots, out)
             check_export_path_short(b, check, shots, out)

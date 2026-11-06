@@ -420,6 +420,8 @@ function renderState() {
   window.dispatchEvent(new CustomEvent("vt:state", { detail: { sessionId: state.sessionId,
     key: JSON.stringify([c ? c.kind : null, c ? c.target : null, c ? c.after_value : null, st.approval ? st.approval.approved_at : null]) } }));
   $("mock-notice").textContent = st.mock_notice;
+  // MOCK の印（Issue #8 round4）：サーバーの state.uses_mock だけで出す・隠す（印は配信のときにサーバーが入れたものだけ。画面で作らない）
+  if (document.getElementById("mock-banner")) $("mock-banner").hidden = st.uses_mock !== true;
   // 解釈のしかた（モックか本物の Claude か）を、いつも見える上の帯で区別する
   const claude = st.interpreter && st.interpreter.kind === "claude";
   $("interp-badge").textContent = claude ? `解釈：Claude（${st.interpreter.model}）` : "解釈：モック";

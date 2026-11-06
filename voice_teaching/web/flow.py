@@ -1584,6 +1584,8 @@ class WebFlow:
             "after_approval": self._after_approval(e) if approved else None,
             "out_dir": str(Path(sim.DEFAULT_OUT_DIR).resolve()),
             "mock_notice": self.interpreter.notice,
+            # 上の帯の MOCK の印（Issue #8 round4）：解釈の係か説明の係がモック・キーなしなら True。表示だけ（承認・出力の判定には使わない）
+            "uses_mock": self.uses_mock(),
             "interpreter": {"kind": self.interpreter.kind, "model": self.interpreter.model,
                             "notice": self.interpreter.notice},
             "log": _log_entries(s.log),
@@ -1596,6 +1598,13 @@ class WebFlow:
                                         hold=e.hold and ch is not None,
                                         voided_why=e.voided["why"] if e.voided and ch is None else None),
         }
+
+    def uses_mock(self) -> bool:
+        """解釈の係か説明の係のどちらかが本物の Claude でないか（モック・台本の答え・キーなし）。上の帯の MOCK の印だけに使う。"""
+        interp_mock = getattr(self.interpreter, "kind", None) != "claude"
+        ex = self.explainer
+        ex_mock = (not getattr(ex, "has_key", False)) or str(getattr(ex, "model", "") or "").startswith("claude-mock")
+        return bool(interp_mock or ex_mock)
 
     def _dialog_state(self, e: _Entry) -> dict:
         d = e.dialog

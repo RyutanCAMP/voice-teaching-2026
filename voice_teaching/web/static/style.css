@@ -1556,3 +1556,5 @@ button.safety-btn:hover, button.safety-btn[aria-expanded="true"] { background: r
   padding: 12px 14px; border-radius: 12px; background: #0d1628; border: 1px solid var(--line); box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45); }
 .safety-pop .safety-head { margin: 0 0 6px; font-size: 13px; font-weight: 700; color: #a9cbff; }
 .safety-pop .figure-notes { margin: 0; font-size: 13px; line-height: 1.6; color: var(--text); }
+/* MOCK の印（Issue #8 round4）：SIM と同じ形の小さな印。色は控えめな黄（本物の Claude ではないことが分かる） */
+.top .mode-banner.mock-banner { color: #ffd59a; border-color: #8a6a2e; background: #2b2213; }
