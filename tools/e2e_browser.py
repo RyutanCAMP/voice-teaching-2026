@@ -298,9 +298,9 @@ def check_ux_polish(browser, url, check, shots: Path | None) -> None:
         # 画面のいちばん上（scrollY=0）で、図の注意の下の端と、下の固定の帯の上の端の間（負なら隠れている）
         page.evaluate("window.scrollTo(0, 0)")
         page.wait_for_timeout(100)
-        # Issue #7：いつも見える図の注意は短い1行（#figure-short。全文は ⓘ）
+        # Issue #8 round3：常時の短い1行は出さない。図の注意の ⓘ（全文を開くボタン）が隠れないことを見る
         return page.evaluate("""() => document.querySelector('.foot').getBoundingClientRect().top
-                                - document.querySelector('#figure-short').getBoundingClientRect().bottom""")
+                                - document.querySelector('.fig-notes-more > summary').getBoundingClientRect().bottom""")
 
 
     # ---- 1280×720：版・使い方の小窓・サンプルで試す・図の注意・止まった候補の帯 ----
@@ -1420,15 +1420,15 @@ def check_export_twice(browser, check, shots: Path | None, out: Path) -> None:
 # 11/5 夜 F6：1920×1080 で撮る動画の文字。測る要素（会話の吹き出し・話し手・状態の1行・返事の札・凡例・図の注意書き）
 TEXT_SIZE_SELS = [".bubble.human .said", ".bubble.claude .said", ".bubble.app .said", ".bubble .who", ".status-line",
                   ".status-line .st-chip", "#reply-message", "#reply-message .range-lines", ".legend", ".legend.kinds",
-                  ".figure-notes", ".figure-short", ".range-button-note", ".cand-heard", ".cand-warn"]
+                  ".figure-notes", ".range-button-note", ".cand-heard", ".cand-warn"]
 TEXT_SIZE_JS = """(sels) => { const r = {}; for (const s of sels) {
   const v = [...document.querySelectorAll(s)].filter(e => e.offsetParent !== null).map(e => parseFloat(getComputedStyle(e).fontSize));
   if (v.length) r[s] = [Math.min(...v), Math.max(...v)]; } return r; }"""
 # 直す前（9671245）に同じ手順で測った値。1280×720・1366×768・1440×900 はこのまま（小さな画面の文字は変えない）
 _TS_SIDE = {".bubble.human .said": [14, 14], ".bubble.claude .said": [15, 15], ".bubble .who": [11, 11]}
-# Issue #7・11/6：記録（.status-line）は上の帯に出さない（承認の状態はアイコンだけ）。図の注意は短い1行（.figure-short・全文は ⓘ）
+# Issue #7・11/6：記録（.status-line）は上の帯に出さない（承認の状態はアイコンだけ）。図の注意の全文は ⓘ（Issue #8 round3 で常時の短い1行は無くした）
 _TS_STATUS = {".status-line": [12, 12], ".status-line .st-chip": [12, 12]}
-_TS_ALL = {".legend.kinds": [12, 12], ".figure-notes": [12, 12], ".figure-short": [12, 12]}
+_TS_ALL = {".legend.kinds": [12, 12], ".figure-notes": [12, 12]}  # Issue #8 round3：常時の短い1行（.figure-short）は無くした
 TEXT_SIZE_BEFORE = {
     "load": {**_TS_ALL, ".legend": [12, 12]},
     "conversation": {**_TS_SIDE, **_TS_ALL, ".legend": [12, 12]},
@@ -1440,7 +1440,7 @@ TEXT_SIZE_BEFORE = {
 # 1920×1080 で、これより小さくしない（会話の文字 16px・話し手 13px・状態の1行 14px・凡例と注意書き 13px）
 TEXT_SIZE_MIN_1080 = {".bubble.human .said": 16, ".bubble.claude .said": 16, ".bubble.app .said": 15, ".bubble .who": 13,
                       ".status-line": 14, ".status-line .st-chip": 14, "#reply-message": 16, "#reply-message .range-lines": 15,
-                      ".legend": 13, ".legend.kinds": 13, ".figure-notes": 13, ".figure-short": 13, ".range-button-note": 13, ".cand-heard": 14, ".cand-warn": 14}
+                      ".legend": 13, ".legend.kinds": 13, ".figure-notes": 13, ".range-button-note": 13, ".cand-heard": 14, ".cand-warn": 14}
 # 1920×1080 の 3D の大きさ（直す前 9671245 に同じ手順で測った値）。これより小さくしない
 FIG_BEFORE_1080 = {"load": (1342, 742), "conversation": (1342, 742), "range": (1342, 742), "candidate": (1342, 681), "approved": (1342, 681)}
 
@@ -3130,7 +3130,7 @@ def check_demo3d(browser, url, check, shots: Path | None, errors: list) -> None:
             shot(pg, "D6_1280x720_seq_after_3rd.png")
             fit = pg.evaluate("""() => { const f = document.querySelector('.foot').getBoundingClientRect().top;
               const b = (s) => document.querySelector(s).getBoundingClientRect();
-              return [f, b('#fig-3d svg').top, b('#play-seq').bottom, b('#play-compare').bottom, b('#figure-short').bottom,
+              return [f, b('#fig-3d svg').top, b('#play-seq').bottom, b('#play-compare').bottom, b('.fig-notes-more > summary').bottom,
                       window.scrollY]; }""")
             shot_seq.append(fit)
     shot_seq = []
@@ -5003,14 +5003,17 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
           f"解釈のしかたは上の帯に出さず、アプリ情報で区別：{pg.text_content('#app-info-interp')}")
     # 入口は1つ（11/4 唐川さんの指示③）：ステップ2でも、指示の欄（会話の入口）を出す（「何をしている？」を位置を選ぶ前に聞ける）
     check(cards(pg) == ["select-panel", "instruction-panel"], f"右側は今のステップのカードと、入口（指示の欄）：{cards(pg)}")
-    # Issue #7・#8：短い1行（目安・実機の動作と干渉は保証しない）をいつも出し、全文（本体の動きではない・当たらないとは限らない）は ⓘ で開ける
-    short = pg.inner_text("#figure-short") if pg.is_visible("#figure-short") else ""
+    # Issue #8 round3（11/6 唐川さん）：図の注意の常時の1行は出さない（独立の Safety レビューで可否を見る）。ⓘ のボタンはいつも見え、
+    # 名前・小さな説明に「目安」「実機の動作・干渉は保証しません」があり、押すと全文（目安・本体の動きではない・当たらないとは限らない・保証しない）
     full = pg.text_content("#figure-panel .figure-notes") or ""
-    check(all(x in short for x in ["目安", "実機の動作・干渉は保証しません"]) and len(short) <= 30
-          and all(x in full for x in ["ロボット本体の動きではありません", "当たらないとは限りません", "動作や干渉を保証するシミュレーターではありません"]),
-          f"図の注意：短い1行（目安・実機の動作と干渉は保証しない）はいつも見え、全文（本体の動きではない・当たらないとは限らない）は ⓘ の中にある（{short!r}）")
+    tip = (pg.get_attribute(".fig-notes-more > summary", "aria-label") or "") + (pg.get_attribute(".fig-notes-more > summary", "title") or "")
+    check(pg.locator("#figure-short").count() == 0 and pg.is_visible(".fig-notes-more > summary")
+          and "目安" in tip and "実機の動作・干渉は保証しません" in tip
+          and all(x in full for x in ["図は目安です。実機の動作・干渉は保証しません。", "ロボット本体の動きではありません", "当たらないとは限りません",
+                                      "動作や干渉を保証するシミュレーターではありません"]),
+          f"図の注意：常時の短い1行は出さず、ⓘ はいつも見える（名前「{tip[:30]}…」）。全文は ⓘ の中にある")
     pg.click(".fig-notes-more > summary")
-    check(all(pg.is_visible(s) for s in ["#figure-note", "#play-note", "#view3d-note"]),
+    check(all(pg.is_visible(s) for s in ["#figure-lead", "#figure-note", "#play-note", "#view3d-note"]),
           "図の注意の全文（ロボット本体・関節は描かない・動作や干渉を保証しない）は ⓘ で読める")
     pg.click(".fig-notes-more > summary")
 
@@ -5207,8 +5210,8 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     check(pg.locator("#fig-3d circle.marker").count() == 1, "再生の印が 3D の中を動く")
     shot(pg, "4_playing.png")
     until(pg, lambda: "終わりました" in pg.inner_text("#play-status"), timeout_ms=60000)
-    check("目安" in pg.inner_text("#figure-short") and "ロボット本体の動きではありません" in pg.text_content("#play-note"),
-          "再生の限界を出す（いつも見える短い1行は「目安」・ⓘ の全文に「ロボット本体の動きではない」）")
+    check("目安" in (pg.get_attribute(".fig-notes-more > summary", "title") or "") and "ロボット本体の動きではありません" in pg.text_content("#play-note"),
+          "再生の限界を出す（ⓘ の名前に「目安」・ⓘ の全文に「ロボット本体の動きではない」）")
     press(pg, "C00002")
     pg.wait_for_timeout(200)
     check(pg.get_attribute("#step-4", "aria-current") == "step" and "選び直せません" in pg.inner_text("#play-status"),
