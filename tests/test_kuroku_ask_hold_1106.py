@@ -45,6 +45,21 @@ def made(tmp_path, state):
 CHANGE = ["Zプラス方向に3ミリ", "3ミリにして", "C00004をZプラス方向に5ミリ", "下げて", "Zプラス3ミリ動かして", "4回にして",
           "3ミリで出力して"]
 CONFIRM = ["5ミリで合ってる？", "Zプラスで良かった？", "これ5ミリで大丈夫？", "違くない？", "ちょっと待って", "これ逆？"]
+# 承認済みのときだけ保留になるあいまいな文（「うーん」）：ask では前の承認も取り消す（CHECKER_039）
+AMBIG_APPROVED = ["うーん", "えーと"]
+
+
+@pytest.mark.parametrize("state", ["approved", "exported"])
+@pytest.mark.parametrize("said", AMBIG_APPROVED)
+def test_ask_ambiguous_after_approval_revokes_and_holds(tmp_path, out, state, said):
+    w, fake, sid = made(tmp_path, state)
+    approval = w._entries[sid].approval
+    g0 = w.candidate_gen_of(sid)
+    r = w.ask(sid, said, source="voice")
+    st = w.state(sid)["state"]
+    assert st["hold"] is True and st["approval"] is None and approval.revocation.revoked, (state, said)
+    assert "前の承認を取り消しました" in r["reply"] and "保留" in r["reply"]
+    assert not w.export(sid, candidate_gen=g0)["ok"]
 
 
 @pytest.mark.parametrize("state", ["pending", "approved", "exported"])

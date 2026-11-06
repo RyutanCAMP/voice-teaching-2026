@@ -1420,6 +1420,9 @@ class WebFlow:
             # 承認済みの候補があるとき、承認を残す文は、はっきりした相づち・否定の無い質問・否定の無い「出力して」だけ。
             # 指示の道（hear）は今までどおり承認を取り消す。ほかの道（相づち・説明・ボタンの案内・回数）は保留（Safety 再検証：
             # 言葉の一覧に足す直し方では「消しといて」「中止」「違くない？」などが抜ける）。ほかの文は保留にして確かめる
+            if from_ask:
+                # /api/ask（Option 1）：保留なら前の承認も取り消す（返事の文と状態を一致させる。CHECKER_039「うーん」）
+                return self._ask_hold(e, text, source)
             e.hold = True
             s.log.append(("保留", "承認のあとの文が相づち・ふつうの質問ではないため、変更候補を保留にしました（承認・出力はできません）"))
             return self._stale_out(e, text, source, "ask", M_UNSURE.format(summary=_summary(s.candidate)), stale.UNSURE)
