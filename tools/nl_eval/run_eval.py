@@ -34,6 +34,9 @@ def parse_expect(e: str):
     if e.startswith("cand:"):
         _, pos, axis, mm = e.split(":")
         return ("cand", pos, axis, float(mm))
+    if e.startswith("safe:cand:"):
+        _, _, pos, axis, mm = e.split(":")
+        return ("safe", pos, axis, float(mm))  # その候補か、候補なし（聞き返し）なら合格
     return (e,)
 
 
@@ -93,6 +96,15 @@ def run_case(w: WebFlow, data: bytes, case: dict, default_select: str | None) ->
                  and abs(cand["delta_mm"] - exp[3]) < 1e-6 and not cand["approved"])
         ok = match
         wrong = cand is not None and not match
+    elif exp[0] == "safe":
+        match = (cand is not None and cand["position"] == exp[1] and cand["axis"] == exp[2]
+                 and abs(cand["delta_mm"] - exp[3]) < 1e-6 and not cand["approved"])
+        ok = cand is None or match
+        wrong = cand is not None and not match
+    elif exp[0] == "kept":
+        st = w.state(sid)["state"]
+        ok = e.approval is not None and not e.hold and bool(st.get("can_export"))
+        wrong = False
     elif exp[0] == "nocand":
         ok = cand is None
         wrong = cand is not None
@@ -114,6 +126,8 @@ def main() -> int:
     ap.add_argument("--cases", default=str(Path(__file__).with_name("cases_v1.json")))
     ap.add_argument("--out")
     ap.add_argument("--only")
+    ap.add_argument("--budget-usd", type=float, default=2.0,
+                    help="本物の Claude のときの料金の上限（この評価の記録 output/nl-eval/api_usage.jsonl の累計。既定 2ドル）")
     args = ap.parse_args()
     spec = json.loads(Path(args.cases).read_text(encoding="utf-8"))
     data = (ROOT / "samples" / "dummy" / spec["job"]).read_bytes()
@@ -126,6 +140,10 @@ def main() -> int:
         interp = ci.from_env(env)
         if interp.kind != "claude":
             print("キーが読めないため止めます（モックにしません）"); return 2
+        # 評価の料金も記録し、上限を超えそうなら呼ばない（11/7。API は Max の枠とは別の費用）
+        usage = cx.UsageLog(ROOT / "output" / "nl-eval" / "api_usage.jsonl")
+        interp.meter = cx.ApiMeter(usage, args.budget_usd)
+        print(f"評価の料金：これまで {usage.total():.4f} ドル・上限 {args.budget_usd} ドル")
     else:
         interp = ci.MockInterpreter()
     # 説明の係（読み取りだけ）はキーなし：本物の Claude を呼ばない（評価するのは変更の候補。説明の文は評価しない）
@@ -169,7 +187,9 @@ def main() -> int:
               f"{'' if not r['candidate'] else r['candidate']['position'] + ' ' + r['candidate']['axis'] + ' ' + format(r['candidate']['delta_mm'], 'g')} |"
               for r in rows]
     (out / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print("\n".join(lines[:3]))
+    if args.mode == "live":
+        lines.insert(3, f"- 評価の料金の累計（output/nl-eval/api_usage.jsonl）：{interp.meter.usage_log.total():.4f} ドル")
+    print("\n".join(lines[:4]))
     print("書いた場所：", out)
     return 0
 

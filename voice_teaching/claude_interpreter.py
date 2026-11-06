@@ -108,6 +108,8 @@ def error_message(ex: BaseException) -> str:
     クラスの名前（親クラスも）と status_code だけを見る。ふつうの例外は「その他」（FAILED）。
     """
     names = {c.__name__ for c in type(ex).__mro__}
+    if "BudgetRefused" in names:
+        return f"{ex}。変更候補は作りません"  # 料金の上限・使用量の記録（呼んでいない。接続の問題ではない）
     if names & _NETWORK_ERRORS:
         return NETWORK
     status = getattr(ex, "status_code", None) if "APIStatusError" in names else None
@@ -241,6 +243,10 @@ def _convert_locate(response) -> list:
         raise InterpreterError(FAILED) from None
 
 
+class BudgetRefused(Exception):
+    """料金の上限・使用量の記録の問題で、呼ぶ前に止めた（文は決まった文。キーは入らない）。"""
+
+
 class ClaudeInterpreter:
     kind = "claude"
 
@@ -252,6 +258,8 @@ class ClaudeInterpreter:
         self._model = model
         self.model = model if self._model_ok else MODEL_HIDDEN
         self.locator_label = f"Claude（{self.model}）"
+        # 本番候補 v1.0（11/7）：料金の上限と使用量の記録（claude_explain.ApiMeter）。起動のときに説明の係と同じものを入れる
+        self.meter = None
         if self._model_ok:
             self.notice = (f"本物の Claude（{model}）で解釈します。送るのは、指示の文・選んでいる位置番号・"
                            "位置番号の一覧です。「置くところ」などの場所の言葉のときだけ、架空のサンプルのジョブの"
@@ -290,10 +298,23 @@ class ClaudeInterpreter:
         names = [p for p in positions if _POS.fullmatch(p)]
         client = self._get_client()
         try:
-            response = client.messages.create(**build_request(self._model, facts.raw, selected, names))
+            response = self._create(client, build_request(self._model, facts.raw, selected, names), "interpret")
         except Exception as ex:
             raise InterpreterError(error_message(ex)) from None
         return _convert(response, names)
+
+    def _create(self, client, request: dict, kind: str):
+        """料金の上限を確かめてから呼び、使用量を記録する（meter が無ければそのまま呼ぶ：テスト・道具）。
+        上限を超える・記録が読めないときは呼ばない（BudgetRefused。呼んだ側が決まった文で止める）。"""
+        if self.meter is not None:
+            try:
+                self.meter.check(self._model, request)
+            except Exception as ex:  # ApiMeter.Refused（import の輪を作らないため型では受けない）
+                raise BudgetRefused(str(ex)) from None
+        response = client.messages.create(**request)
+        if self.meter is not None:
+            self.meter.record(self._model, request, response, kind)
+        return response
 
     def understand(self, state: Mapping, utterance: str) -> dict:
         """意味理解（本番候補 v1.0。voice_teaching/nl_understand.py）。構造化出力で読みを返す。
@@ -305,7 +326,7 @@ class ClaudeInterpreter:
         except InterpreterError as ex:
             raise nu.UnderstandError("api", str(ex)) from None
         try:
-            response = client.messages.create(**nu.build_request(self._model, state, utterance))
+            response = self._create(client, nu.build_request(self._model, state, utterance), "understand")
         except Exception as ex:
             raise nu.UnderstandError("api", error_message(ex)) from None
         return nu.parse_response(response)
@@ -318,7 +339,7 @@ class ClaudeInterpreter:
             raise InterpreterError(LOCATE_TOO_LONG)
         client = self._get_client()
         try:
-            response = client.messages.create(**build_locate_request(self._model, utterance, place_word, names, lines))
+            response = self._create(client, build_locate_request(self._model, utterance, place_word, names, lines), "locate")
         except Exception as ex:
             raise InterpreterError(error_message(ex)) from None
         return _convert_locate(response)

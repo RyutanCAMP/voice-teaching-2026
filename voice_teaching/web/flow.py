@@ -98,6 +98,18 @@ M_NEXT_CANDIDATE = ("今の変更候補（{summary}）を、確認表示で確�
 _BARE_NUMBER = re.compile(r"[0-9]+(?:\.[0-9]+)?[？?。！!]*")
 # D3（11/6）：承認のあとの否定の言葉。保留のうえで、承認も取り消す（声で承認しない・古い承認を使わない）
 _NEGATION_ONLY = re.compile(r"だめ|ダメ|駄目|ノー|^NO[!！。]*$|違う|ちがう|違います|出さないで|やめ|キャンセル|きゃんせる|不要|いらない")
+# XC-02（11/7）：それだけの文の否定（正規化したあと、文の終わりの記号を外して全体が一致するときだけ）
+_NEGATION_WHOLE = re.compile(r"(?:いや、?)?(?:だめ|ダメ|駄目|ノー|NO|いいえ|違う|ちがう|違います|出さないで|出力しないで|"
+                             r"あかん|それじゃない|それじゃなくて|やだ|嫌|不要|いらない|きゃんせる|キャンセル|いや|イヤ)(?:です|だ|だよ|だね|でしょ|かな|かも)?")
+def _bare(text: str) -> str:
+    """否定・ためらいの言葉を全体で比べるための形（正規化して、文の終わりの記号と空白を外す。長音「ー」は外さない）。"""
+    return re.sub(r"[\s。、．，,.!！?？…〜~]+$", "", ut.normalize(text).strip())
+
+
+# XC-03（11/7）：承認のあとのためらい（「どう〜」の形の、決めかねている言葉）
+_HESITATION = re.compile(r"どうしよ|どうかな|どうだろ|どうしたもの|どうするか")
+M_Q_ANSWER = ("確かめたいのですね。今の変更候補は {summary} です。図と変更前→変更後の数で確かめてください"
+              "（図は目安で、当たらないことの保証ではありません）。決めるのは画面のボタンだけです。")
 M_ALREADY_EXPORTED = ("この承認の変更は、もう出力しました（{name}）。同じ中身をもう一度は出力しません。"
                       "別の変更をするときは、新しく指示してください")
 M_BARE_NUMBER = ("数だけでは、何を変えるか決まりません。位置を動かすなら、軸と向きと量を一緒に言ってください（例：「Zプラス○ミリ」）。"
@@ -1638,7 +1650,7 @@ class WebFlow:
             return out
         if v.kind == stale.UNSURE:
             revoked = False
-            if _NEGATION_ONLY.search(ut.normalize(said)):
+            if _NEGATION_ONLY.search(ut.normalize(said)) or _NEGATION_WHOLE.fullmatch(_bare(said)):
                 # D3（11/6 唐川さんの決定）：「だめ」「ノー」などの否定は、少なくとも承認を無効にする（保留のうえで取り消す）
                 revoked = self._cancel_approval(e, "否定の言葉があったため")
             if v.rule.startswith("10"):
@@ -1658,6 +1670,20 @@ class WebFlow:
             return self._stale_out(e, text, source, "ask", msg, v.kind)
         if v.kind == stale.QUESTION_ABOUT_CANCEL:
             return self._stale_out(e, text, source, "ok", M_HOWCX, v.kind)
+        bare = _bare(said)
+        if v.kind == stale.OTHER and _NEGATION_WHOLE.fullmatch(bare):
+            # XC-02・D3（11/6 唐川さんの決定）：候補があるときの「だめ」「ノー」「出さないで」など（それだけの文）。
+            # 未承認でも承認できない状態（保留）にする。承認済みなら承認も取り消す。取り消すかは［取り消す］［このまま残す］で
+            revoked = self._cancel_approval(e, "否定の言葉があったため")
+            e.hold = True
+            s.log.append(("保留", "否定の言葉があったため、変更候補を保留にしました（承認・出力はできません）"))
+            return self._stale_out(e, text, source, "ask", (M_HOLD_REVOKED if revoked else "")
+                                   + M_UNSURE.format(summary=_summary(s.candidate)), stale.UNSURE)
+        if v.kind == stale.OTHER and self._approved(e) and _HESITATION.search(bare):
+            # XC-03：承認済みの「どうしよう」「どうかな」「どうだろう」：ためらい。保留にして確かめる（出力はできない）
+            e.hold = True
+            s.log.append(("保留", "承認のあとのためらいの言葉のため、変更候補を保留にしました（承認・出力はできません）"))
+            return self._stale_out(e, text, source, "ask", M_UNSURE.format(summary=_summary(s.candidate)), stale.UNSURE)
         if (from_ask and v.kind == stale.OTHER and v.rule != "3c question" and s.candidate is not None and talk.looks_like_change(said)
                 and not stale.is_ack(said) and not stale.is_plain_question(said) and not stale.is_plain_button_request(said)):
             # ask に変更の意思のある文（承認済みでも未承認でも）：ask には指示の道（hear）が無いので、ここで保留にする
@@ -1673,7 +1699,8 @@ class WebFlow:
                 return self._ask_hold(e, text, source)
             e.hold = True
             s.log.append(("保留", "承認のあとの文が相づち・ふつうの質問ではないため、変更候補を保留にしました（承認・出力はできません）"))
-            revoked = bool(_NEGATION_ONLY.search(ut.normalize(said))) and self._cancel_approval(e, "否定の言葉があったため")
+            revoked = (bool(_NEGATION_ONLY.search(ut.normalize(said)) or _NEGATION_WHOLE.fullmatch(_bare(said)))
+                       and self._cancel_approval(e, "否定の言葉があったため"))
             return self._stale_out(e, text, source, "ask", (M_HOLD_REVOKED if revoked else "")
                                    + M_UNSURE.format(summary=_summary(s.candidate)), stale.UNSURE)
         return None
@@ -1707,6 +1734,11 @@ class WebFlow:
 
     def _stale_out(self, e: _Entry, text: str, source: str, status: str, msg: str, kind: str) -> dict:
         s = e.session
+        if (kind == stale.UNSURE and s.candidate is not None and ut.read_utterance(text).question
+                and not _NEGATION_WHOLE.fullmatch(_bare(text))):
+            # XC-07・D3（11/6）：「大丈夫？」「合ってる？」などの確かめの質問には、まず質問として答える（今の候補の中身と、
+            # 決めるのは人のボタンであること）。状態は保留のまま（承認・出力はできない）。安全の保証はしない
+            msg = M_Q_ANSWER.format(summary=_summary(s.candidate)) + msg
         s.log.append(("発話", f"{'音声' if source == 'voice' else '文字'}：{text}"))
         s.log.append(("聞き返し" if status == "ask" else "結果", msg))
         s.facts = ut.read_utterance(text)  # 状態の「最後に聞いた文」の読み取りも、この発話にそろえる（表示。Session.hear と同じ）

@@ -3986,7 +3986,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             fill_text(pg3, "少し動かして")
             pg3.click("#text-send")
             until(pg3, lambda: pg3.is_visible("#reply-message"))
-            check(pg3.inner_text("#next-action") == "もう一度、言い直してください"
+            check(pg3.inner_text("#next-action") == "もう少し教えてください"  # 11/7：読めない言葉の無い聞き返し
                   and "primary" in (pg3.get_attribute("#copy-url", "class") or ""),
                   f"Chrome 以外でも、聞き返しの間は聞き返しの見出しを出す：{pg3.inner_text('#next-action')}")
             # 別のジョブを読んでも、Chrome 以外なら案内は残す
@@ -5381,8 +5381,9 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     reply = pg.inner_text("#reply-message")
     check(pg.get_attribute("#step-3", "aria-current") == "step" and pg.is_visible("#reply-message .friendly strong"),
           f"はっきりしない指示には、次にすることを出す：{' / '.join(reply.splitlines())[:60]}")
-    check(pg.inner_text("#next-action") == "もう一度、言い直してください",
-          f"選択肢の無い聞き返しの見出しは「もう一度、言い直してください」：{pg.inner_text('#next-action')}")
+    # 本番候補 v1.0（11/7）：足りないことを聞く聞き返し（読めない言葉は無い）の見出しは、返事の欄と同じ「もう少し教えてください」
+    check(pg.inner_text("#next-action") == "もう少し教えてください",
+          f"選択肢の無い聞き返しの見出しは「もう少し教えてください」：{pg.inner_text('#next-action')}")
     shot(pg, "3b_ask.png")
     pg.wait_for_timeout(1500)
     check(not pg.is_enabled("#voice-stop") and pg.inner_text("#mic-label") == "マイク OFF",

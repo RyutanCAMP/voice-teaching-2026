@@ -296,8 +296,8 @@ class UsageLog:
             total += c
         return round(total, 6)
 
-    def append(self, model: str, usage: Mapping[str, int], cost: float, estimated: bool) -> None:
-        rec = {"at": self._now().isoformat(timespec="seconds"), "kind": "explain", "model": model,
+    def append(self, model: str, usage: Mapping[str, int], cost: float, estimated: bool, kind: str = "explain") -> None:
+        rec = {"at": self._now().isoformat(timespec="seconds"), "kind": kind, "model": model,
                "input_tokens": usage.get("input_tokens", 0), "output_tokens": usage.get("output_tokens", 0),
                "cache_creation_input_tokens": usage.get("cache_creation_input_tokens", 0),
                "cache_read_input_tokens": usage.get("cache_read_input_tokens", 0),
@@ -309,6 +309,47 @@ class UsageLog:
                     f.write(json.dumps(rec, ensure_ascii=False) + "\n")
             except OSError:
                 raise ExplainError(USAGE_UNWRITABLE) from None
+
+
+class ApiMeter:
+    """本番候補 v1.0（11/7）：解釈の係（decide・locate）と意味理解（understand）の呼び出しも、説明の係と同じ
+    使用量の記録（records/api_usage.jsonl）と料金の上限（VOICE_TEACHING_API_BUDGET_USD・既定 5ドル）に入れる。
+    呼ぶ前：累計＋この1回の最大の見積もりが上限を超えるなら呼ばない（BudgetExceeded）。呼んだあと：usage から料金を記録する。
+    記録できない・読めない・料金の表に無いモデル・上限の設定が読めないときも呼ばない（安全側）。"""
+
+    class Refused(Exception):
+        pass
+
+    def __init__(self, usage_log: UsageLog, budget_usd: float | None):
+        self.usage_log = usage_log
+        self.budget_usd = budget_usd
+        self.broken: str | None = None
+
+    def check(self, model: str, request: dict) -> None:
+        if self.broken:
+            raise ApiMeter.Refused(self.broken)
+        if self.budget_usd is None:
+            raise ApiMeter.Refused(BUDGET_INVALID)
+        worst = worst_case_usd(model, request)
+        if worst is None:
+            raise ApiMeter.Refused(PRICE_UNKNOWN)
+        try:
+            total = self.usage_log.total()
+        except ExplainError as ex:
+            raise ApiMeter.Refused(str(ex)) from None
+        if total + worst > self.budget_usd:
+            raise ApiMeter.Refused(BUDGET_OVER.format(total=money(total), worst=money(worst), limit=money(self.budget_usd)))
+
+    def record(self, model: str, request: dict, response, kind: str) -> None:
+        usage = usage_of(response)
+        estimated = usage is None
+        cost = worst_case_usd(model, request) if estimated else cost_usd(model, usage)
+        usage = usage or {"input_tokens": 0, "output_tokens": 0,
+                          "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
+        try:
+            self.usage_log.append(model, usage, cost or 0.0, estimated, kind=kind)
+        except ExplainError as ex:
+            self.broken = str(ex)  # 記録できない：これ以上呼ばない（この1回の答えは使う）
 
 
 # ---- 送る内容（プログラムが作る） ----

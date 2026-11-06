@@ -560,8 +560,10 @@ function renderSteps() {
     // 聞き返しの間は、見出しも聞き返しに合わせる（選択肢があれば「どちらですか？」）
     const reply = $("reply-message");
     const asking = !reply.hidden && (reply.classList.contains("ask") || (state.dialogNotice && reply.classList.contains("stop")));
+    // 本番候補 v1.0（11/7）：読めなかった言葉があるときだけ「言い直して」。足りないことを聞いている（「何ミリですか？」）ときは、
+    // 返事の欄の見出しと同じ「もう少し教えてください」（人の言い方が悪いように見せない）
     const askText = asking && reply.querySelector("button.choice:not([disabled])") && !state.unknownWords.length
-      ? "どちらですか？" : "もう一度、言い直してください";
+      ? "どちらですか？" : state.unknownWords.length ? "もう一度、言い直してください" : "もう少し教えてください";
     if (recording()) {
       text = asking ? askText : "どうぞ、話してください";
       primary = "voice-stop";

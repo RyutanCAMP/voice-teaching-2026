@@ -1199,6 +1199,8 @@ def is_updown_unset_ask(text: object) -> bool:
 FACING_SIDES = {"手前": ("X", 1), "奥": ("X", -1), "右": ("Y", 1), "左": ("Y", -1)}
 FACING_STATE_MESSAGE = "向き：正面から見た向き（この画面で確かめ済み）"
 FACING_CANDIDATE_NOTE = "この画面で確かめた向きです"
+FACING_REJECTED_SIDE = ("この画面では、さきほど向きの確かめで［違う］を選んだので、右・左を軸に当てません。"
+                        "Yプラス・Xマイナスのように、軸と向きで言ってください（例：Yプラス5ミリ）")
 FACING_NO_REPLY = "分かりました。Zプラス・Yマイナスのように、軸と向きで言ってください"
 FACING_STALE = "この向きの確かめは、もう使えません（新しい指示がありました）。もう一度指示してください"
 FACING_YES_LABEL, FACING_NO_LABEL = "合っている", "違う"

@@ -241,6 +241,9 @@ class Session:
             fb = ut.front_back_ask(facts)
             if fb is not None:
                 return fb
+        if (self.facing == "rejected" and v.status in ("stop", "ask")
+                and v.message in (ut.SIDE_MESSAGE, ut.SIDE_MESSAGE_UPDOWN)):
+            return ut.Verdict("ask", ut.FACING_REJECTED_SIDE)
         if self.facing is not None or not self._facing_applies(st) or facts.place_ref:
             return v  # 場所の言葉（「置く位置を右に」）は、場所の聞き返しを先にする
         side = v.message in (ut.SIDE_MESSAGE, ut.SIDE_MESSAGE_UPDOWN) or (v.status == "stop" and v.message == ut.FRONT_BACK_MESSAGE)
@@ -251,10 +254,26 @@ class Session:
         if found is None or (found[1] == "Z" and st.status != ud.UNCONFIRMED):
             return v
         token = secrets.token_hex(8)
-        self._facing_pending = {"token": token, "text": text, "selected": self.selected}
+        self._facing_pending = {"token": token, "text": self._facing_replay_text(text, facts, found), "selected": self.selected}
         return ut.Verdict("ask", ut.facing_ask_message(facts, found, updown_unset=found[1] == "Z"),
                           ((ut.FACING_YES_LABEL, ut.facing_choice_text(ut.FACING_YES_LABEL, token)),
                            (ut.FACING_NO_LABEL, ut.facing_choice_text(ut.FACING_NO_LABEL, token))))
+
+    def _facing_replay_text(self, text: str, facts: ut.UtteranceFacts, found) -> str:
+        """［合っている］のあとに読み直す文。前の聞き返しと合わせた発話（「もう少し右に寄せて」→「5ミリ」）は、生の「5ミリ」
+        だけでは向きの言葉が無く、行き止まりになっていた（R10・XC-04）。合わせた事実の位置・向きの言葉・量（mm 1つ）から、
+        ふつうの指示の文を作り直す（ほかの検査は読み直しのときに全部通る）。作れなければ今までどおり生の文。"""
+        if facts.raw == text or found is None:
+            return text
+        pos = facts.position or self.selected
+        a = facts.amount
+        if pos is None or a is None or a.unit != "mm" or a.sign is not None or facts.unclear_amounts or len(facts.amounts) != 1:
+            return text
+        word, axis, sign, _ = found
+        amt = format(float(a.value), "g")
+        if word in ("上", "下"):
+            return f"{pos}を{amt}ミリ{'上げて' if word == '上' else '下げて'}"
+        return f"{pos}を{word}に{amt}ミリ動かして"
 
     def forget_facing(self) -> None:
         """前の向きの確かめのボタンを使えなくする（新しい発話。どの道でも）。"""
@@ -278,6 +297,8 @@ class Session:
         if got[0] == ut.FACING_YES_LABEL:
             self.facing = "confirmed"
             return "yes", pending["text"]
+        # ［違う］：この画面では、右・左・上・下を軸に当てない（同じ確かめを繰り返さない。11/5 の決定のまま）。
+        # 右・左を言ったときは、理由と次にすることの文を出す（XC-05・11/7：前は「専門家が枠の設定で…」で分かりにくかった）
         self.facing = "rejected"
         self.forget_question()
         return "no", self._reply("ask", ut.FACING_NO_REPLY)

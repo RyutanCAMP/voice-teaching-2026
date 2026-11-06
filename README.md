@@ -1,93 +1,100 @@
-# ボイスティーチング（Voice Teaching）
+# ボイスティーチング（Voice Teaching）v1.0
 
-**専門家が決めた枠の中で、現場の人がロボットに声で直しを頼める。**
+**ロボットの教示データ（JOB）を、普段の言葉で直す相談ができるアプリ。決めるのは、いつも人です。**
 
-既存の安川ロボット（今回の実証：HC20＋YRC1000）のジョブを、普段の言葉で直すためのアプリです。
-「置く位置を右に10ミリ」と話しかけると、Claudeがジョブを読んで対象を特定し、専門家が決めた範囲の中かどうかをプログラムが検査し、人が画面で確認・承認してから、新しいジョブ名で書き出します。元のジョブは変えません。現在の MVP は、実機用の出力とロボットへの転送をしません（シミュレーション用の書き出しだけです）。
+「もう少し上に寄せたいな」と話しかけると、Claude が意味を読み取って「C00004 を上にですね。何ミリ動かしますか？」と聞き返します。
+「5ミリ」と答えると、プログラムが上限や JOB の形を検査し、3D で変更前と変更後を見せます。人が画面のボタンで承認したときだけ、
+**シミュレーション用の JOB** を新しいファイルに書き出します。元の JOB は変えません。実機への転送・ロボットの起動はしません。
 
 > このリポジトリは **Built with Claude: Japan 2026** の提出作品です。
 > **2026年11月2日のキックオフ以降に、新しく作り始めました。** 開発の経過はコミット履歴で確認できます。
 
-## 状態
-開発中です（2026-11-04）。合成ジョブとシミュレーションで、読込 → 位置選択 → 文字/音声の指示 → 変更候補 → 比較 → ボタン承認 → シミュレーション用の出力 が一通り動きます。現在の MVP は実機へ転送しません。操作は `docs/MVP_HOWTO.md` を参照。
+## 状態（2026-11-07）
+- 提出用の本番候補：ブランチ **`release/v1.0-rc`**（報告：`handoff/REPORT_V1_RC_20261107.md`）
+- 撮影に使った版：タグ **`filming-60f3d24`**
+- 実機の JOB・実機への出力は扱いません。動かせるのは合成 JOB（`samples/dummy/`）のシミュレーションだけです
+- 独立した安全レビューと、最終の承認は、提出の前に別に行います（このリポジトリのテストは内部の確かめです）
 
-## 大事な注意
-- アプリは**ロボットを起動しません**。動かすのは人が、ロボット側のスタートボタンで行います。
-- 画面の図は変更前後を見比べるためのもので、**干渉や安全を保証するものではありません**。実機では必ず低速で動作を確認してください。
-- ロボット・ペンダント・ジョブの転送機能は、安川電機の既存製品です。現在の MVP は、それらへジョブを送る機能を持ちません。このリポジトリで作っているのは、ジョブを読んで変更案を作り、人の承認のあとに書き出す部分です。
-
-## 開発を始める・別のPCで続きをする（2026-11-02 時点）
-
-### いまの作業ブランチ
-| ブランチ | 中身 | 状態 |
+## しくみ（Claude は読む、プログラムは確かめる、人が決める）
+| 役 | すること | しないこと |
 |---|---|---|
-| `feat/mvp` | **動く最小構成**（JBI読込 → 位置選択 → 文字/音声の指示 → 変更候補 → 変更前後の図と差分 → ボタン承認 → シミュレーション用の出力）。合成ジョブだけ出力できる | 開発の中心。音声と本物の Claude の接続は統合済み。実マイク・実 API・Chrome での目視は未確認（`docs/MVP_HOWTO.md` の「未完了」を参照） |
-| `fix/safety-guards` | 実機用モードの安全ガード（jbi.py）とレビュー記録 `reviews/` | レビュー中（Safety 3回目は CONDITIONAL PASS） |
-| `feat/readonly-inspect` | 実機のジョブを読むだけで確かめる道具と手順書 `docs/REAL_MACHINE_CHECK.md` | レビュー中（Safety 3回目は CONDITIONAL PASS） |
-| `feat/preview-workflow` | 別チャットで作った音声入力の元の成果物（引き継ぎ資料 `docs/VOICE_INPUT_HANDOFF.md`） | 参照用。`feat/mvp` へ取り込み中 |
-| `docs/export-design`・`docs/speed-spec`・`docs/demo-plan`・`chore/quality` | 書き出しの設計、速度の調査、デモの構成案、CI と品質レポート | 文書・道具。レビュー待ち |
+| **Claude**（claude-sonnet-5-5・構造化出力） | 話し言葉から、意図・対象の位置・方向・量・足りない項目を読む。足りなければ聞き返す。会話の続き（「5ミリ」）をつなぐ | 数の計算・単位の換算・安全の判定・承認・出力 |
+| **プログラム**（Python） | Claude の読みを独立に確かめる（根拠の言葉が本当に発話にあるか・量は自分で読み直して mm に換算・位置は JOB の一覧）。1回 20mm・累計の上限、座標系、共用の位置、JOB の形、差分を検査する | 推測で量や軸を決めること |
+| **人** | 3D と変更前→変更後を見て、画面のボタンで承認する。上・下・右・左が軸のどれかは、ボタンで確かめる | 声だけの承認（できません） |
 
-`main` には、レビューと唐川さんの承認が済むまで統合しません。
+- 「少し」「くらい」など、数のない量や「だいたい」の量では候補を作りません（聞き返します）
+- 候補や承認のあとに言い直し・否定・ためらいがあれば、古い候補と承認は使えなくなります（取り消し、または保留）
+- Claude につながらないときは、黙ってモックにはなりません（理由を出して止めます）
 
+## 使い方（Windows・PowerShell）
 ### 必要なもの
-| もの | 版 | 用途 |
-|---|---|---|
-| Git | 何でもよい | GitHub から取得 |
-| Python | **3.11 以上**（3.13.1 で確認） | アプリ本体とテスト |
-| pip のパッケージ | `requirements.txt`（pytest、anthropic） | テスト、本物の Claude への接続 |
-| Chrome | 最新 | 画面と音声入力（音声は Chrome の音声認識を使う） |
-| Node.js（任意） | 18 以上（22.14.0 で確認） | 音声モジュールのテスト `node --test tests/speech.test.mjs` |
-| Playwright（任意） | `pip install playwright` → `python -m playwright install chromium` | ブラウザの自動操作で通しを確かめる |
+| もの | 版 |
+|---|---|
+| Python | 3.11 以上（3.13 で確認） |
+| Chrome | 最新（音声入力は Chrome の音声認識） |
+| Claude API のキー | 本物の Claude で動かすとき |
+| Node.js・Playwright | テストだけ（任意） |
 
-VS Code は不要です。PowerShell（またはコマンドプロンプト）と Chrome だけで動きます。
-
-### 最初に実行するコマンド（PowerShell）
+### 起動
 ```powershell
 git clone https://github.com/RyutanCAMP/voice-teaching.git
 cd voice-teaching
-git checkout feat/mvp
-python --version                      # 3.11 以上か確かめる
+git checkout release/v1.0-rc
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1          # 実行できないときは: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+.\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-python -m pytest -q                   # すべて通ることを確かめる
-python -m voice_teaching.web --mock   # キーなしで試す（モック）。表示された http://127.0.0.1:8765/ を Chrome で開く
+copy .env.example .env          # .env に自分のキーを書く（下の「API キー」）
+$env:PYTHONUTF8="1"; $env:PYTHONIOENCODING="utf-8"
+python -m voice_teaching.web --port 8901 --channel filming
 ```
-（`--mock` はモックで試すとき。本物の Claude で動かすときは `--mock` を外し、キー（`.env`）を用意する。キーが無いまま `--mock` なしで起動すると止まります。撮影（`--channel filming`）では `--mock` は使えません）
+- Chrome で **http://127.0.0.1:8901/** を開きます（アプリの中で開いた画面では、音声が使えないことがあります）
+- 起動の窓に「解釈：本物の Claude」「意味理解（Claude）：準備ができました」と出れば準備完了です（最初の1回だけ 30〜40 秒）
+- キーが無い・`.env` が読めないと、`--channel filming` では起動しません
+- キーなしで試すときは `python -m voice_teaching.web --mock`（モック。Claude の意味理解は使わず、決まった読み方だけ）
 
-画面で `samples/dummy/DEMO_PLACE.JBI` を選び、位置 C00004 を選んで「この位置をZのプラス10mm」と入力すると（「上に10mm」は、下の「上下の向きの設定」が無ければ聞き返しになります）、確認表示 → 承認 → シミュレーション用の出力（`output/sim/` に `.JBI.txt` で書きます。実機には入れません）まで進みます。止めるときは Ctrl+C。
+### 画面の流れ
+1. JOB を読み込む（例：`samples/dummy/DEMO_RJ_XYZ.JBI`）。3D に位置が出ます
+2. 位置（例：C00004）を選ぶ
+3. マイクか文字で話す：「Zプラスに3センチ動かして」→ 上限 20mm で止まる／「もう少し上に寄せたいな」→「何ミリ？」→「5ミリ」
+4. 向きの確かめ（上・下・右・左）はボタンで答える
+5. 変更前→変更後を見て、［確認して承認へ］→ 名前を入れて［承認する］
+6. ［シミュレーション用に出力］→ `output\sim\` に `<JOB名>_SIM.JBI.txt`（同じ名前があれば `_02`…。上書きはしません）
 
-### 上下の向きの設定（CHECKER_026 M2。設定が無ければ「上・下」は使えません）
-- 「上に」「下げて」などを Z＋・Z− として読むのは、専門家が上下の向きを確かめて登録した設定（既定 `records/updown.json`。`records/` は git に入りません）の照合に通ったときだけです。床置き・架台固定の情報だけでは決めません。
-- 設定が無い・形が正しくない・確認のあとで変わった・座標系の違うジョブ（`///USER` 付き・ツール番号違い・PULSE・相対ジョブかどうか（RJ・`////FRAME ROBOT`）の違い）・別のロボットのときは、「上・下」を軸にせず、「Zプラス・Zマイナスのように、軸と向きで言ってください」と聞き返します。「Zマイナス3ミリ」「Z座標を3mm下げて」は設定が無くても使えます。
-- 設定を書くのは、確かめた本人が次のコマンドで（内容を表示し、`yes` と入力したときだけ書きます。AI や画面からは書きません）：
+## 大事な注意
+- アプリは**ロボットを起動しません**。実機への転送・実機用の出力の機能はありません
+- 図は目安です。**干渉や安全を保証するものではありません**。ロボット本体・関節は描いていません
+- 上限（1回 20mm・累計 20mm）は仮の値です（確認待ち）。専門家が位置ごとに決める枠（FRAME）は、まだ作っていません
+- 書き出したファイルはシミュレーション用です。実機には入れないでください
+
+## 上下の向きの設定
+- 「上に」「下げて」を Z＋・Z− として読むのは、専門家が確かめて登録した設定（既定 `records/updown.json`。git に入りません）に合うときだけです。無ければ、そのたびにボタンで確かめます
+- 登録は確かめた本人が次のコマンドで行います（AI や画面からは書きません）
   ```
   python -m voice_teaching.updown register --job samples/dummy/DEMO_C_PLACE.JBI --robot HC20DT --by （名前） --evidence （何で確かめたか）
-  python -m voice_teaching.updown check --job samples/dummy/DEMO_C_PLACE.JBI
   ```
-- サーバーは `python -m voice_teaching.web --updown-config records/updown.json --robot HC20DT`（どちらも既定値）。
-- 上下の向きはロボットの設置と座標系の性質なので、照合するのは適用条件（ロボット名・`///POSTYPE ROBOT`・`///RECTAN`・`///USER` なし・ツール番号・FRAME と `///ATTR` の RJ の有無）だけです。ジョブの中身（位置の値・命令）は照合しません（CHECKER_028 K4）。`--job` のジョブは座標系を読むためだけに使います。座標系が同じなら、ほかのジョブでも上下の向きは確認済みになります。
-- どのジョブのどの位置を変えてよいか（変更の許可の範囲）は、この設定では決めません。専門家の枠（FRAME v1.1。まだ作っていません）で、ジョブの指紋（`voice_teaching/job_scope.py`）を使って別に照合します。
-- この設定は「誰が何を根拠に確かめたか」の記録で、本人確認（署名）でも、安全の保証でもありません。
 
-### Claude API の設定（秘密の情報はリポジトリに入れない）
-- APIキーが無いときは、起動を止めます（「本物の Claude のキーがありません。…モックで試すときは --mock を付けてください」）。モックで動かすのは `--mock` を付けたときだけです（起動の窓に「モックで起動しています（自動テスト・試し用。撮影には使いません）」、画面と作業ログに「モック」と出ます）。
-- `--channel filming`・`--channel release`（または環境変数 `VT_CHANNEL`）では、本物の Claude が使えない（キーが無い・`.env` を読めない）と起動しません。`--mock` とも一緒に使えません。
-- 本物の Claude を使うときは、リポジトリ直下に `.env` を作り（`.env.example` をコピー）、自分のキーを書きます。`.env` は `.gitignore` で除外されていて、GitHub には上がりません。
+## API キーと料金
+- `.env`（`.gitignore` で除外。GitHub に上がりません）に書きます
   ```
   ANTHROPIC_API_KEY=（自分のキー）
-  ANTHROPIC_MODEL=claude-opus-5-5
+  ANTHROPIC_MODEL=claude-sonnet-5-5
   ```
-  または、その PowerShell の中だけで設定します：`$env:ANTHROPIC_API_KEY = "（自分のキー）"`
-- キーをコード・コミット・チャット・スクリーンショットに書かないでください。
+- 料金の上限：`VOICE_TEACHING_API_BUDGET_USD`（既定 5ドル）。説明・意味理解・解釈のすべての呼び出しを `records/api_usage.jsonl` に記録し（送った中身・キーは書きません）、累計が上限を超えそうなら呼びません
+- キーをコード・コミット・チャット・スクリーンショットに書かないでください
 
-### Claude Code で続きを始めるとき
-リポジトリのフォルダで Claude Code を起動し、次のように伝えると続きから始められます：
-「`feat/mvp` の `docs/MVP_HOWTO.md` の『未完了』と、`fix/safety-guards` の `reviews/REVIEW_PR1_FIX_001.md` の『未解決事項』を読んで、続きから進めて」
+## テスト
+```powershell
+python -m pytest -q --ignore=tests/test_e2e_browser.py   # 全部（偽の Claude）
+node --test tests/*.mjs                                  # 画面の部品
+python tools/e2e_browser.py                              # ブラウザーの通し（Playwright）
+python tools/nl_eval/run_eval.py --mode mock --cases tools/nl_eval/cases_v2.json            # 自然言語の評価（モック）
+python tools/nl_eval/run_eval.py --mode live --env-file .env --cases tools/nl_eval/cases_v2.json  # 本物の Claude（費用がかかる）
+```
+結果と画面：`docs/v1.0-rc/`
 
-### 守ること
-- 実機のジョブ・会社のデータ・APIキーをリポジトリに入れない（`.gitignore` が `*.JBI` を除外。許可されているのは `samples/dummy/` の合成ジョブだけ）
-- 開発ルールは `CLAUDE.md` を参照
+## 守ること
+- 実機の JOB・会社のデータ・API キーをリポジトリに入れない（`*.JBI` は `.gitignore` で除外。入れてよいのは `samples/dummy/` の合成 JOB だけ）
+- 開発の決まりは `CLAUDE.md`
 
 ## ライセンス
 [MIT License](LICENSE)

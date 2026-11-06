@@ -72,6 +72,9 @@ def main(argv: list[str] | None = None) -> int:
     ask = ('キーあり・' + explainer.model if explainer.has_key
            else 'モック（キーを使いません）' if args.mock else 'APIキーが設定されていません')
     print(f"Claude に聞く（読み取りだけ）：{ask}", flush=True)
+    if interp.kind == "claude" and hasattr(interp, "meter"):
+        # 解釈の係・意味理解の料金も、説明の係と同じ記録と上限に入れる（11/7。前は説明の係だけ数えていた）
+        interp.meter = claude_explain.ApiMeter(explainer.usage_log, explainer.budget_usd)
     if interp.kind == "claude" and callable(getattr(interp, "understand", None)):
         # 意味理解の最初の1回は、形（JSON Schema）の準備で遅い（実測 約38秒）。起動のときに1回だけ、作り文で先に呼んでおく。
         # 画面の Session・候補には何もしない。結果は使わない（失敗しても起動は止めない。画面で話したときに理由を出す）
