@@ -736,7 +736,9 @@ svg .dest-mark { pointer-events: none; }
 body.hero .side-scroll { display: none; }
 body.hero .side { justify-content: center; }
 body.hero .side-head { align-items: center; text-align: center; padding: 0 8px; }
-body.hero .next-action { font-size: 26px; letter-spacing: 0.02em; text-shadow: 0 0 22px rgba(61, 139, 255, 0.35); }
+body.hero .next-action { font-size: 26px; letter-spacing: 0.02em; text-shadow: 0 0 22px rgba(61, 139, 255, 0.35);
+  /* 11/6 唐川さん：見出しを言葉の途中（「につい／て」）で折り返さない。文節で折り返し、2行なら行の長さをそろえる（文字は変えない） */
+  word-break: auto-phrase; text-wrap: balance; }
 body.hero .side-head::after { content: ""; display: block; width: 60%; height: 2px; margin: 12px auto 0; border-radius: 2px;
   background: linear-gradient(90deg, transparent, rgba(110, 170, 255, 0.95), transparent); box-shadow: 0 0 12px rgba(61, 139, 255, 0.7); }
 body.hero #instruction-panel { background: transparent; border-color: transparent; padding: 8px 0 0; }
