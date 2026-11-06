@@ -18,8 +18,13 @@ import { displayMinus, segmentLook, segmentTitle, askHighlightLook, askContextLo
 import { Player } from "/static/player.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
-const DEFAULT_YAW = -0.75;    // 最初の向き（ラジアン）
+const DEFAULT_YAW = -0.75;    // 最初の向き（ラジアン）。読み込んだときと、確認表示の図（reset）
 const DEFAULT_PITCH = 0.42;
+// ［正面に戻す］の向き（Issue #8 round3・11/6 唐川さん）：ロボットの正面（X＋）の側から、水平に（仰ぎも俯きも無く）見る。
+// project() は「画面の右＝x1＝x·cos(yaw) − y·sin(yaw)・奥＝y1・上＝z」なので、yaw = −π/2 で 右＝Y＋・奥＝X−（手前＝X＋）、pitch = 0 で水平・上＝Z＋。
+// Y・Z の 2D の図（横＝Y、上＝Z）と左右・上下が同じ。カメラの向きだけで、点の座標・描く点や線は変えない
+const FRONT_YAW = -Math.PI / 2;
+const FRONT_PITCH = 0;
 const OVERLAP_PX = 6;         // この距離より近く見える点は、まとめて選び分ける
 const C_AFTER = "#ff6a1a", C_AFTER_TEXT = "#ffa266";
 const C_STOPPED = "#9aa3b5";  // 止まった候補（承認できない）の変更後：オレンジにしない
@@ -171,7 +176,8 @@ export class View3D {
     }
     // 枠に収める割合とずれは、JOB の点（と focus）が変わったときだけ決め直す。選ぶ・候補・元に戻す・再生では図を動かさない
     const fitKey = JSON.stringify([data.points.map((p) => [p.name, p.xyz]), fp.map((p) => p.name)]);
-    if (fitKey !== this.fitKey) { this.fitKey = fitKey; this._fit(fp.length >= 2); }
+    this.fitFocus = fp.length >= 2;
+    if (fitKey !== this.fitKey) { this.fitKey = fitKey; this._fit(this.fitFocus, this.fitView); }
     this.render();
   }
 
@@ -179,11 +185,14 @@ export class View3D {
   // 縮める・広げる割合（fitK・0.3〜2.5）と、真ん中に寄せるずれ（fitX・fitY、画面の px）を決める（11/5 夜 F7）。
   // 回す・拡大するときは、この割合とずれのまま（回している間に大きさは変えない）。focus のとき（区間を大きく見せる）は今のまま。
   // JOB の点だけで決める（変更後の点・右上の窓は、出る前から場所を空けておく。候補が出ても図が動かないように）
-  _fit(focus) {
+  // fitView：収める向き（無ければ最初の向き。［正面に戻す］のときは正面の向き [FRONT_YAW, FRONT_PITCH]）
+  _fit(focus, fitView = null) {
     this.fitK = 1; this.fitX = 0; this.fitY = 0;
+    this.fitView = fitView;
     if (focus) return;
     const view = [this.yaw, this.pitch, this.zoom];
-    this.yaw = DEFAULT_YAW; this.pitch = DEFAULT_PITCH; this.zoom = 1;
+    [this.yaw, this.pitch] = fitView || [DEFAULT_YAW, DEFAULT_PITCH];
+    this.zoom = 1;
     const d = this.data, M = 10;
     // 世界座標で決まる所（縮めると近づく）と、そのまわりの文字の余白（px のまま）
     const marks = [];
@@ -248,11 +257,27 @@ export class View3D {
     [this.yaw, this.pitch, this.zoom] = view;
   }
 
+  // 最初の向き・大きさに戻す（確認表示の図で使う。初期の視点は今のまま）
   reset() {
     this.yaw = DEFAULT_YAW; this.pitch = DEFAULT_PITCH; this.zoom = 1;
+    if (this.data && this.fitView) this._fit(this.fitFocus, null);
     this.closeChooser();
     this.render();
     this.onView && this.onView();
+  }
+
+  // ［正面に戻す］：X＋ の側から水平に見る（右＝Y＋・上＝Z＋・手前＝X＋）。拡大なし。正面の向きで枠に収め直す
+  front() {
+    this.yaw = FRONT_YAW; this.pitch = FRONT_PITCH; this.zoom = 1;
+    if (this.data) this._fit(this.fitFocus, [FRONT_YAW, FRONT_PITCH]);
+    this.closeChooser();
+    this.render();
+    this.onView && this.onView();
+  }
+
+  // 今のカメラの向き（確かめ用。表示だけ）
+  camera() {
+    return { yaw: this.yaw, pitch: this.pitch, zoom: this.zoom };
   }
 
   // 最初の向き・大きさから変えたか

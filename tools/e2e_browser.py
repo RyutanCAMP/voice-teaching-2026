@@ -1250,6 +1250,87 @@ def check_ui1_hold_display(browser, check, shots: Path | None, out: Path) -> Non
         srv.server_close()
 
 
+def check_front_view(browser, check, shots: Path | None, out: Path) -> None:
+    """Issue #8 round3（11/6 唐川さん）：［正面に戻す］を押すと、ロボットの正面（X＋）の側から水平に見る視点になる。
+    画面の右＝Y＋・上＝Z＋・手前＝X＋（Y・Z の図と同じ向き）。JOB の点の画面の位置と、軸の文字の位置で確かめる。
+    読み込んだときの最初の視点（斜め）は変えない。1280×720・1440×900。"""
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import api, server
+    data = (REPO / "samples/dummy/DEMO_C_PLACE.JBI").read_bytes()
+    xyz = {p["name"]: p["xyz"] for p in api.job_view(data)["positions"] if p["xyz"]}
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    POS = """() => Object.fromEntries([...document.querySelectorAll('#fig-3d g.pt3')].map((g) => {
+      const cs = g.querySelectorAll('circle'); const r = cs[cs.length - 1].getBoundingClientRect();
+      return [g.dataset.names, [r.x + r.width / 2, r.y + r.height / 2]]; }))"""
+    AXES = """() => Object.fromEntries([...document.querySelectorAll('#fig-3d text.axis3')].map((t) => {
+      const r = t.getBoundingClientRect(); return [t.textContent, [r.x + r.width / 2, r.y + r.height / 2]]; }))"""
+    def screen(pg):
+        raw = pg.evaluate(POS)
+        return {n: v for names, v in raw.items() for n in names.split(" ")}
+    def agree(pos):
+        """点の組の、画面の左右と Y・画面の上下と Z の向きが合うか（差が 20mm 以上の組だけ。X は奥行きなので見ない）"""
+        bad, n = [], 0
+        names = [k for k in pos if k in xyz]
+        for i, a in enumerate(names):
+            for b in names[i + 1:]:
+                dy, dz = xyz[b][1] - xyz[a][1], xyz[b][2] - xyz[a][2]
+                sx, sy = pos[b][0] - pos[a][0], pos[b][1] - pos[a][1]
+                if abs(dy) >= 20:
+                    n += 1
+                    if (sx > 0) != (dy > 0):
+                        bad.append((a, b, "Y", dy, round(sx)))
+                if abs(dz) >= 20:
+                    n += 1
+                    if (sy < 0) != (dz > 0):
+                        bad.append((a, b, "Z", dz, round(sy)))
+        return n, bad
+    try:
+        for w, h in [(1280, 720), (1440, 900)]:
+            pg = browser.new_page(viewport={"width": w, "height": h})
+            pg.goto(url + "?opening=0")
+            pg.set_input_files("#file-input", str(REPO / "samples/dummy" / "DEMO_C_PLACE.JBI"))
+            pg.wait_for_selector("#job-area:not([hidden])")
+            pg.wait_for_timeout(300)
+            p0 = screen(pg)
+            if shots:
+                pg.screenshot(path=str(shots / f"FRONT_{w}x{h}_0_loaded.png"))
+            fb = pg.locator("#fig-3d svg").bounding_box()
+            sx0, sy0 = fb["x"] + fb["width"] * 0.3, fb["y"] + fb["height"] * 0.8
+            pg.mouse.move(sx0, sy0); pg.mouse.down(); pg.mouse.move(sx0 + 160, sy0 - 60, steps=8); pg.mouse.up()
+            pg.wait_for_timeout(200)
+            if shots:
+                pg.screenshot(path=str(shots / f"FRONT_{w}x{h}_1_rotated.png"))
+            pg.click("#view-reset")
+            pg.wait_for_timeout(250)
+            p2 = screen(pg)
+            ax = pg.evaluate(AXES)
+            if shots:
+                pg.screenshot(path=str(shots / f"FRONT_{w}x{h}_2_front.png"))
+            n, bad = agree(p2)
+            check(n >= 4 and not bad, f"正面（{w}×{h}）：［正面に戻す］のあと、画面の右＝Y＋・上＝Z＋（点の組 {n}・合わない {bad}）")
+            # 軸の文字：Y の軸は横（右へ「Y+」）、Z の軸は上（「Z+」）、X の軸は手前を向くので画面ではほとんど動かない
+            yk = next((k for k in ax if k.startswith("Y")), None)
+            zk = next((k for k in ax if k.startswith("Z")), None)
+            check(yk == "Y+" and zk == "Z+" and ax[zk][1] < ax[yk][1] - 10,
+                  f"正面（{w}×{h}）：床の軸の文字は「Y+」が右・「Z+」が上（{ax}）")
+            # 水平：同じ Z の点は画面で同じ高さ（仰ぎ・俯きが無い。遠近で少しずれるので 3px まで）
+            same_z = [(a, b) for a in p2 for b in p2 if a < b and a in xyz and b in xyz and abs(xyz[a][2] - xyz[b][2]) < 0.5
+                      and abs(xyz[a][0] - xyz[b][0]) < 0.5]
+            check(all(abs(p2[a][1] - p2[b][1]) <= 3 for a, b in same_z),
+                  f"正面（{w}×{h}）：X と Z が同じ点は画面で同じ高さ（水平に見る。組 {len(same_z)}）")
+            pg.reload(); pg.wait_for_timeout(300)
+            pg.set_input_files("#file-input", str(REPO / "samples/dummy" / "DEMO_C_PLACE.JBI"))
+            pg.wait_for_selector("#job-area:not([hidden])")
+            pg.wait_for_timeout(300)
+            check(screen(pg) == p0, f"正面（{w}×{h}）：読み込んだときの最初の視点（斜め）は前のまま")
+            pg.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 def check_export_twice(browser, check, shots: Path | None, out: Path) -> None:
     """11/5 夜 H1：出力に成功したあと［シミュレーション用に出力］をもう一度押す（2回押す・ダブルクリック）と、
     2回目が「既にあるため、上書きしません」の赤い失敗になり、「出力しました」の見出し・「出力 済み」と食い違っていた。
@@ -3481,9 +3562,11 @@ def check_3d_robot_base(browser, check, shots: Path | None, out: Path) -> None:
                 pg.click("#view-reset")
                 pg.wait_for_timeout(200)
                 r2 = pg.evaluate(ROBOT3D_JS, "#fig-3d")
-                same = bool(r2["front"]) and all(abs(a - b) < 1 for a, b in zip(r2["front"], r0["front"])) and all(
-                    n in r2["pts"] and abs(r2["pts"][n][0] - r0["pts"][n][0]) < 1 and abs(r2["pts"][n][1] - r0["pts"][n][1]) < 1 for n in r0["pts"])
-                check(same and not r2["out"], f"台座（{tag}）：［視点を戻す］で最初の視点に戻る（台座と全部の点が枠に入る。はみ出し {r2['out']}）")
+                # Issue #8 round3（11/6 唐川さん）：［正面に戻す］は最初の斜めの視点ではなく、X＋ の側から水平に見る視点。
+                # 正面の矢印（原点 → X＋）は見る人の方へ向くので、画面ではほとんど長さが無い。台座と全部の点は枠に入る
+                fr2 = r2["front"]
+                flat = bool(fr2) and abs(fr2[2] - fr2[0]) < 3
+                check(flat and not r2["out"], f"台座（{tag}）：［正面に戻す］で X＋ の側から見る（正面の矢印は手前を向く {fr2}）。台座と全部の点が枠に入る（はみ出し {r2['out']}）")
                 # 点を押して選べる
                 c2 = r2["client"].get("C00002")
                 if c2:
@@ -3792,6 +3875,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check_hold_after_approval(b, check, shots, out)
             check_build_label(b, check, shots, out)
             check_ui1_hold_display(b, check, shots, out)
+            check_front_view(b, check, shots, out)
             check_export_twice(b, check, shots, out)
             check_opening_click_through(b, check, shots, out)
             check_export_path_short(b, check, shots, out)
@@ -4962,7 +5046,8 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     d2 = abs(p[0] - q[0]) + abs(p[1] - q[1])
     check(d2 > d1 * 1.3, f"ホイールで拡大できる（点の間 {d1}px → {d2}px）")
     pg.click("#view-reset")
-    check(pos_of(pg, "C00005") == a0 and pg.is_visible("#view-reset"), "「正面に戻す」で最初の向き・大きさに戻る（ボタンは出たまま）")
+    # Issue #8 round3：「正面に戻す」は X＋ の側から水平に見る向き（最初の斜めの向きとは違う。詳しくは check_front_view）
+    check(pos_of(pg, "C00005") != a0 and pg.is_visible("#view-reset"), "「正面に戻す」で正面の向き（拡大なし）になる（ボタンは出たまま）")
     check("ドラッグで回す" not in pg.text_content("#fig-3d svg"), "視点を戻しても、操作のヒントは出し直さない")
 
     # 重なって見える点（C00000 と C00007）は、押すと選び分けの一覧が出る

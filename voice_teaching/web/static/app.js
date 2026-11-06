@@ -1589,7 +1589,8 @@ function askHighlight() {
   return { positions: [], lines: [], context_lines: [] };
 }
 
-$("view-reset").addEventListener("click", () => view3d.reset());
+// ［正面に戻す］：X＋ の側から水平に見る（Issue #8 round3）。読み込んだときの最初の視点（斜め）は今のまま
+$("view-reset").addEventListener("click", () => view3d.front());
 
 function renderFigures() {
   stopPlayback();
