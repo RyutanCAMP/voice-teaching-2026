@@ -238,11 +238,17 @@ def test_non_synthetic_bytes_are_refused_at_export(wf, tmp_path):
     assert not (tmp_path / "sim").exists() or list((tmp_path / "sim").iterdir()) == []
 
 
-def test_second_export_does_not_overwrite(wf):
+def test_second_export_does_not_overwrite(wf, tmp_path):
+    """同じ承認の2回目の出力は断る（N-1・11/7：断る理由は「もう出力しました」。ファイルは上書きもしないし、増やしもしない）。
+    出力のボタンも押せなくする（can_export）"""
     sid = approved(wf)
-    assert wf.export(sid, candidate_gen=wf.candidate_gen_of(sid))["ok"] is True
+    first = wf.export(sid, candidate_gen=wf.candidate_gen_of(sid))
+    assert first["ok"] is True
+    before = sorted((p.name, p.read_bytes()) for p in (tmp_path / "sim").iterdir())
     e = wf.export(sid, candidate_gen=wf.candidate_gen_of(sid))
-    assert e["ok"] is False and "上書き" in e["error"]
+    assert e["ok"] is False and "もう出力しました" in e["error"] and first["file_name"] in e["error"]
+    assert sorted((p.name, p.read_bytes()) for p in (tmp_path / "sim").iterdir()) == before
+    assert wf.state(sid)["state"]["can_export"] is False
 
 
 # ---- 6. シミュレーションだけの候補（実機用の検査で止まる） ----

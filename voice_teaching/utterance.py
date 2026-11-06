@@ -993,7 +993,10 @@ def is_direction_answer(previous: UtteranceFacts, answer: UtteranceFacts, select
     """
     if (previous.op in ("move", "speed") and answer.op == previous.op and signs_conflict(previous, answer)):
         return True
-    if not (previous.op == "move" and previous.amount is not None and previous.amount.sign is None
+    # 本番候補 v1.0（11/7・自然言語の評価 NLR-C02）：「C00003を動かしたい」（位置だけを言い、量も向きも無い）→「Yのマイナス」も
+    # 前の発話に足す（足さないと、口で言った C00003 を捨てて、画面で選んでいる別の位置で候補を作っていた）。量はこのあと聞き返す
+    pinned_only = previous.op == "move" and previous.amount is None and bool(previous.position) and not previous.axes
+    if not (previous.op == "move" and (pinned_only or (previous.amount is not None and previous.amount.sign is None))
             and not previous.unclear_amounts and not previous.axis_signs and not previous.sides
             and not previous.vertical and not previous.speed_signs):
         return False

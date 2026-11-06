@@ -321,15 +321,7 @@ def export_sim(proposal: SimProposal, approval: Approval) -> Path:
     if out.resolve() == SAMPLES_DIR.resolve():
         raise SimError("合成ジョブの置き場所には出力しません")
     out.mkdir(parents=True, exist_ok=True)
-    path = out / f"{new_name}{SIM_EXTENSION}"
-    try:
-        with open(path, "xb") as f:
-            f.write(data)
-    except FileExistsError:
-        raise SimError(f"{path.name} が既にあるため、上書きしません") from None
-    except OSError as e:
-        _remove_quietly(path)
-        raise SimError(f"書き出しに失敗しました（{e}）") from None
+    path = _write_new(out, new_name, data)
 
     # 書いた後に：読み戻して一致を確かめる
     try:
@@ -386,15 +378,7 @@ def _export_repeat(proposal: SimRepeatProposal, approval: Approval) -> Path:
     if out.resolve() == SAMPLES_DIR.resolve():
         raise SimError("合成ジョブの置き場所には出力しません")
     out.mkdir(parents=True, exist_ok=True)
-    path = out / f"{new_name}{SIM_EXTENSION}"
-    try:
-        with open(path, "xb") as f:
-            f.write(data)
-    except FileExistsError:
-        raise SimError(f"{path.name} が既にあるため、上書きしません") from None
-    except OSError as e:
-        _remove_quietly(path)
-        raise SimError(f"書き出しに失敗しました（{e}）") from None
+    path = _write_new(out, new_name, data)
     try:
         back = _read_back(path)
     except OSError:
@@ -406,6 +390,29 @@ def _export_repeat(proposal: SimRepeatProposal, approval: Approval) -> Path:
 
 
 # ---- 内部 ----
+MAX_SAME_NAME = 99  # N-1（11/7）：同じ名前のファイルがあれば _02 〜 _99 を付けて新しく書く（今あるファイルは上書きしない）
+
+
+def output_path_for(out: Path, new_name: str, n: int) -> Path:
+    return out / (f"{new_name}{SIM_EXTENSION}" if n == 1 else f"{new_name}_{n:02d}{SIM_EXTENSION}")
+
+
+def _write_new(out: Path, new_name: str, data: bytes) -> Path:
+    """新しいファイルにだけ書く（open の "xb"。今あるファイルは決して上書きしない）。同じ名前があれば番号を付ける。
+    ファイルの中の //NAME は <ジョブ名>_SIM のまま（番号はファイル名だけ）。"""
+    for n in range(1, MAX_SAME_NAME + 1):
+        path = output_path_for(out, new_name, n)
+        try:
+            with open(path, "xb") as f:
+                f.write(data)
+        except FileExistsError:
+            continue
+        except OSError as e:
+            _remove_quietly(path)
+            raise SimError(f"書き出しに失敗しました（{e}）") from None
+        return path
+    raise SimError(f"{new_name} の名前のファイルが {MAX_SAME_NAME} 個あるため、上書きしません。"
+                   "出力のフォルダの古いファイルを別の場所へ移してください")
 def _read_back(path: Path) -> bytes:
     return Path(path).read_bytes()
 

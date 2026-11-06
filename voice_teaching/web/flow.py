@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import claude_explain, claude_interpreter, claude_lead, jbi, mock_claude, sim
+from .. import nl_understand as nu
 from .. import stale
 from .. import claude_talk as talk
 from .. import repeat_count as rc
@@ -95,6 +96,10 @@ M_NEXT_CANDIDATE = ("今の変更候補（{summary}）を、確認表示で確�
                     "やめる場合は［元に戻す］を押すか「取り消して」と言ってください")
 # K3（11/6）：数だけ（「3」）：何を言えばよいかを案内する（人の数を例に使わない。候補は作らない）
 _BARE_NUMBER = re.compile(r"[0-9]+(?:\.[0-9]+)?[？?。！!]*")
+# D3（11/6）：承認のあとの否定の言葉。保留のうえで、承認も取り消す（声で承認しない・古い承認を使わない）
+_NEGATION_ONLY = re.compile(r"だめ|ダメ|駄目|ノー|^NO[!！。]*$|違う|ちがう|違います|出さないで|やめ|キャンセル|きゃんせる|不要|いらない")
+M_ALREADY_EXPORTED = ("この承認の変更は、もう出力しました（{name}）。同じ中身をもう一度は出力しません。"
+                      "別の変更をするときは、新しく指示してください")
 M_BARE_NUMBER = ("数だけでは、何を変えるか決まりません。位置を動かすなら、軸と向きと量を一緒に言ってください（例：「Zプラス○ミリ」）。"
                  "回数を変えるなら「○回にして」と言ってください")
 # K5（11/6）：回数を断ったとき、Claude の受け答えの代わりに出す文（理由と次にすることは、プログラムの断りの文が出す）
@@ -243,6 +248,14 @@ class _Entry:
     # 保留：取消・言い直しかもしれない文で、はっきりしないとき。承認・出力はできない（承認の記録は残すが使えない）
     hold: bool = False
     voided: dict | None = None  # 最後に無効にした記録（理由・要約）。新しい候補ができたら消す
+    # 意味理解（本番候補 v1.0・nl_understand）：聞き返しの途中の会話の枠・直前の候補・Claude に送る直近の発話（メモリの中だけ）
+    nl_frame: "nu.Frame | None" = None
+    nl_prev: "nu.Previous | None" = None
+    nl_hist: list = field(default_factory=list)
+    nl_cand_seen: object | None = None
+    nl_seed: object | None = None  # 今までの道が聞き返した発話の読み（次の発話で枠の元にする。プログラムが読んだ事実だけ）
+    # N-1：この承認の世代で出力した（同じ承認でもう一度出力しない）
+    exported_gen: int | None = None
 
     # Session に渡すシミュレーション（実機用の検査に断られたときだけ呼ばれる）
     def simulate(self, job: jbi.Job, p: ut.ProposedChange, reason: str) -> jbi.ChangeProposal | None:
@@ -816,9 +829,15 @@ class WebFlow:
 
     def _select_body(self, e: _Entry, position: object) -> dict:
         """位置の選び直しの本体。承認の取り消しの文は呼んだ側（select）が付ける。"""
+        before = e.session.selected
         r = e.session.select(position if isinstance(position, str) else "")
         d = e.dialog
         if r.status == "ok":
+            fr = e.nl_frame
+            if fr is not None and (fr.position is not None and fr.position != e.session.selected):
+                e.nl_frame = None  # 聞き返しの途中で別の位置：持っていた方向・量を別の位置に当てない
+            if before is not None and e.session.selected != before:
+                e.session.forget_facing_confirmation()  # D5（11/6）：右・左の対応は、確かめた位置の中だけで覚える
             d.estimated = None  # 人が選び直した：推定の名前は使わない
             if d.step == "pick":  # 「ほかの位置」のあとの手で選ぶ段：選んだ位置で続ける
                 d.say("人", f"{e.session.selected} を選びました", "human")
@@ -951,6 +970,9 @@ class WebFlow:
                 return self._fail(e, M_STALEGEN)
             if e.hold:
                 return self._fail(e, M_HOLD)
+            if e.exported_gen is not None and e.exported_gen == e.approval_gen and e.exported:
+                # N-1（11/7）：同じ承認では1回だけ出力する（押し直しで同じ中身のファイルを増やさない）
+                return self._fail(e, M_ALREADY_EXPORTED.format(name=Path(e.exported).name))
             if not self._updown_unchanged(e):  # 設定を読み直す。変わっていれば承認を消して断る
                 self._cancel_approval(e, UPDOWN_CHANGED_WHY)
                 return self._fail(e, UPDOWN_CHANGED_EXPORT)
@@ -960,6 +982,7 @@ class WebFlow:
                 return self._fail(e, f"出力しませんでした：{ex}")
             full = str(Path(path).resolve())
             e.exported = full
+            e.exported_gen = e.approval_gen
             e.session.log.append(("出力", f"シミュレーション用のジョブを出力しました：{full}（実機には入れないでください）。"
                                           f"{_updown_note(e.approval_updown)}"))
             return {"ok": True, "path": full, "file_name": Path(path).name}
@@ -995,9 +1018,34 @@ class WebFlow:
                 # 指示の道以外（会話・ボタンの案内・変更が2つ・回数）へ回した発話のあとに、前の聞き返しへの答えを当てない
                 # （Safety F1・QA M-1。11/5）。捨てるのは未確定の聞き返しだけ（候補・承認・選択は変えない）
                 e.session.forget_question()
+            nl_mode = self._nl_mode(e, text, route)
+            if route not in ("hear", "ask"):
+                e.nl_frame = None  # 取消・ボタンの案内・回数などへ回した：聞き返しの途中の枠は使わない
         ask_out = hear_out = None
         via: list[str] = []
-        if route == "stale":
+        if nl_mode == "understand":
+            # 意味理解（Claude）を先に使う。Claude の読みは Python が確かめ、決まった文にして今までの道（hear）に通す
+            got = self._nl_turn(sid, e, text, source)
+            if got is not None and got.get("session_closed"):
+                return got
+            if got is not None:
+                hear_out, route = got, "nl"
+                via.append("hear")
+        elif nl_mode == "rescue":
+            hear_out = self.hear(sid, text, source)
+            if hear_out.get("session_closed"):
+                return hear_out
+            via.append("hear")
+            route = "nl"
+            if self._nl_rescuable(e, hear_out):
+                got = self._nl_turn(sid, e, text, source, legacy=hear_out)
+                if got is not None and got.get("session_closed"):
+                    return got
+                if got is not None:
+                    hear_out = got
+        if route == "nl":
+            pass
+        elif route == "stale":
             # 取消・言い直し・保留（P0 H02・H16）：前の候補は錠の中で、もう無効・保留にしてある。説明の頼みがあれば、
             # 説明の節だけを Claude に聞く（読み取りだけ。取消の節は送らない。候補はもう無い）
             summary, tail = pre.pop("summary", None), pre.pop("tail", "")
@@ -1025,6 +1073,9 @@ class WebFlow:
                 e.session.log.append(("発話", f"{'音声' if source == 'voice' else '文字'}：{text}"))
                 e.session.log.append(("止めた理由", msg))
             hear_out = {"ok": True, "status": "stop", "message": msg, "heard": text, "source": source}
+            if route in ("button", "approved"):
+                # N-2（11/7）：承認・出力はボタンで行う案内・相づち（「はい」）は、エラーの見出しで出さない（状態・判定は変えない）
+                hear_out["tone"] = "guide"
             via.append(route if route in ("several", "purpose_or_change") else "button")
         elif route in ("next", "bare_number"):
             with e.lock:
@@ -1081,8 +1132,126 @@ class WebFlow:
             if e.closed:
                 return self._closed_reply(sid, e)
             self._remember_talk(e, text, ask_out, hear_out)
+            self._nl_after(e, text, hear_out)
             state = self._state(sid, e)
         return {"ok": True, "via": via, "ask": ask_out, "hear": hear_out, "state": state, "heard": text, "source": source}
+
+    # ---- 意味理解（本番候補 v1.0・voice_teaching/nl_understand.py） ----
+    def _nl_available(self, e: _Entry) -> bool:
+        """意味理解を使える状態か（錠の中で呼ぶ）。候補・承認・会話・範囲の確認・回数の確かめの途中は、今までの道だけ。"""
+        s = e.session
+        return (callable(getattr(self.interpreter, "understand", None)) and s.candidate is None
+                and not self._approved(e) and e.dialog.step is None and s.repeat_range is None
+                and (e.talk is None or e.talk.pending is None))
+
+    def _nl_mode(self, e: _Entry, text: str, route: str) -> str | None:
+        """"understand"（先に Claude）／"rescue"（今までの道のあと、聞き返しなら Claude）／None（今までの道だけ）。錠の中で呼ぶ。"""
+        if route not in ("hear", "ask") or not self._nl_available(e):
+            e.nl_frame = None if route not in ("hear", "ask") else e.nl_frame
+            return None
+        if ut.read_facing_choice(text) is not None or ut.is_explain_choice(text):
+            return None  # 画面のボタンの文（向きの確かめ・説明です）は今までの道
+        facts, v = e.session.dry_check(text)
+        # 安全のための止め・聞き返しは、今までの道が決める（Claude に回さない）
+        if (facts.negations or facts.undo_negations or facts.stop_reasons or facts.place_ref or facts.repeat
+                or rc.is_repeat_request(text) or v.confirm_position is not None
+                or (facts.op is not None and facts.op != "move") or ut.is_updown_unset_ask(v.message)):
+            return None
+        if e.nl_frame is not None:
+            return "understand"  # 聞き返しの途中：前の枠と合わせて読む
+        if route == "ask":
+            nt = ut.normalize(text)
+            if facts.question or _QUESTION_WORDS.search(nt):
+                return None  # 質問：説明の係（読み取りだけ）
+            return "understand"
+        if v.status == "ok":
+            return "rescue"  # 今までの道で読める指示：そのまま（位置が無いときの聞き返しだけ Claude で補う）
+        return "understand"
+
+    def _nl_rescuable(self, e: _Entry, out: dict) -> bool:
+        """今までの道の答えが、選択肢の無い聞き返しか（上下の向きの案内は除く）。"""
+        if not isinstance(out, dict) or out.get("status") != "ask" or out.get("choices") or out.get("candidate_made"):
+            return False
+        msg = out.get("message") or ""
+        with e.lock:
+            return (not e.closed and self._nl_available(e) and not ut.is_updown_unset_ask(msg)
+                    and e.session._updown_followup is None)
+
+    def _nl_turn(self, sid: object, e: _Entry, text: str, source: str, legacy: dict | None = None) -> dict | None:
+        """Claude に読ませ、Python で確かめる。決まった文ができたら今までの道（hear）に通す。
+        None：位置の移動ではない（今までの道・説明の係へ）。"""
+        with e.lock:
+            if e.closed:
+                return self._closed_reply(sid, e)
+            s = e.session
+            positions = list(s.original.positions)
+            state = nu.build_state(positions, s.selected, e.nl_prev, e.nl_frame, e.nl_hist)
+            frame, selected, prev = e.nl_frame, s.selected, e.nl_prev
+            if frame is None and legacy is None and e.nl_seed is not None:
+                # 今までの道の聞き返し（「上に動かしたい」→ 向きの確かめ）への答え：前の発話の確かな項目から枠を作る。
+                # 方向を軸にするのは、決まった文を通したあとの今までの確かめ（ボタン）だけ
+                frame = nu.frame_from_facts(e.nl_seed, selected)
+                state = nu.build_state(positions, selected, prev, frame, e.nl_hist)
+        try:
+            data = self.interpreter.understand(state, text)
+        except nu.UnderstandError as ex:
+            with e.lock:
+                if e.closed:
+                    return self._closed_reply(sid, e)
+                e.session.log.append(("Claude の読み", f"使えませんでした（{ex}）"))
+                if legacy is not None:
+                    return None  # 今までの道の聞き返しのまま
+                e.nl_frame = None
+                msg = f"{ex}。位置番号・方向・量（mm）をはっきり言えば、プログラムだけで進められます（例：C00003 を Zプラス 5ミリ）"
+                e.session.log.append(("止めた理由", msg))
+            return {"ok": True, "status": "stop", "message": msg, "heard": text, "source": source, "choices": [],
+                    "candidate_made": False, "blocked_reason": None, "nl": {"error": ex.kind}}
+        with e.lock:
+            if e.closed:
+                return self._closed_reply(sid, e)
+            s = e.session
+            if not self._nl_available(e) or s.selected != selected:
+                return None  # Claude を待つ間に状態が変わった：今までの道へ（読みは使わない）
+            o = nu.interpret(data, text, positions=positions, selected=selected, previous=prev, frame=frame)
+            s.log.append(("発話", f"{'音声' if source == 'voice' else '文字'}：{text}") if legacy is None else ("Claude の読み", "聞き返しを補います"))
+            s.log.append(("Claude の読み", nu.summary(data, o)))
+            if o.kind == "not_move":
+                e.nl_frame = None
+                return None
+            if o.kind == "ask":
+                e.nl_frame = o.frame
+                s.forget_question()  # 今までの道の聞き返しには合わせない（枠で続ける）
+                s.log.append(("聞き返し", o.text))
+                return {"ok": True, "status": "ask", "message": o.text, "heard": text, "source": source, "choices": [],
+                        "candidate_made": False, "blocked_reason": None, "nl": {"ask": o.frame.missing() if o.frame else []}}
+            e.nl_frame = None
+            s.forget_question()
+            canon = o.text
+        out = self.hear(sid, canon, "text")  # プログラムが作った決まった文（今までの検査・ボタン・上限・承認を全部通る）
+        if out.get("session_closed"):
+            return out
+        out["heard"] = text
+        out["nl"] = {"canonical": canon}
+        return out
+
+    def _nl_after(self, e: _Entry, text: str, hear_out: dict | None) -> None:
+        """会話の記録（Claude に送る直近の文）と、直前の候補（「同じだけ」「あと2ミリ」）を残す。錠の中で呼ぶ。"""
+        h = e.nl_hist
+        h.append({"who": "人", "text": text[:120]})
+        if isinstance(hear_out, dict) and hear_out.get("status") == "ask" and isinstance(hear_out.get("message"), str):
+            h.append({"who": "アプリ", "text": hear_out["message"][:120]})
+        del h[:-nu.MAX_HISTORY]
+        e.nl_seed = (e.session.facts if isinstance(hear_out, dict) and hear_out.get("status") == "ask"
+                     and "nl" not in hear_out and e.session.candidate is None else None)
+        c = e.session.candidate
+        if c is not None and c is not e.nl_cand_seen and getattr(c, "kind", None) == "shift":
+            e.nl_cand_seen = c
+            e.nl_frame = None
+            parts = c.target.split()
+            if len(parts) == 2:
+                e.nl_prev = nu.Previous(parts[0], parts[1], float(c.after_value) - float(c.baseline_value
+                                                                                         if c.baseline_value is not None
+                                                                                         else c.before_value))
 
     def _next_text(self, e: _Entry) -> str:
         """K2：次にすることの決まった文（錠の中で呼ぶ）。今の状態（保留・承認・候補・選択）から決める。状態は変えない。"""
@@ -1469,10 +1638,13 @@ class WebFlow:
             return out
         if v.kind == stale.UNSURE:
             revoked = False
+            if _NEGATION_ONLY.search(ut.normalize(said)):
+                # D3（11/6 唐川さんの決定）：「だめ」「ノー」などの否定は、少なくとも承認を無効にする（保留のうえで取り消す）
+                revoked = self._cancel_approval(e, "否定の言葉があったため")
             if v.rule.startswith("10"):
                 # Q-3（規則 10）の保留：新しい変更の指示かもしれない。承認も取り消す（取り消しの印を立てる・2層目。
                 # 前は hear の道で承認を取り消していた。安全を保留の印 1つだけに頼らない：11/6 Safety レビュー F1）
-                revoked = self._cancel_approval(e, "新しい変更の指示かもしれないため")
+                revoked = self._cancel_approval(e, "新しい変更の指示かもしれないため") or revoked
             e.hold = True
             s.log.append(("保留", "取り消すか確かめるまで、変更候補を保留にしました（承認・出力はできません）"))
             if v.asked_form:
@@ -1501,7 +1673,9 @@ class WebFlow:
                 return self._ask_hold(e, text, source)
             e.hold = True
             s.log.append(("保留", "承認のあとの文が相づち・ふつうの質問ではないため、変更候補を保留にしました（承認・出力はできません）"))
-            return self._stale_out(e, text, source, "ask", M_UNSURE.format(summary=_summary(s.candidate)), stale.UNSURE)
+            revoked = bool(_NEGATION_ONLY.search(ut.normalize(said))) and self._cancel_approval(e, "否定の言葉があったため")
+            return self._stale_out(e, text, source, "ask", (M_HOLD_REVOKED if revoked else "")
+                                   + M_UNSURE.format(summary=_summary(s.candidate)), stale.UNSURE)
         return None
 
     def _ask_hold(self, e: _Entry, text: str, source: str) -> dict:
@@ -1540,7 +1714,8 @@ class WebFlow:
                 "facts": _facts(s.facts),
                 "tool_calls": [], "dialog": False, "blocked_reason": None, "candidate_made": False,
                 "choices": ([{"label": a, "text": b} for a, b in self.HOLD_CHOICES] if kind == stale.UNSURE else []),
-                "no_change": kind not in stale.INVALIDATING, "stale": kind}
+                "no_change": kind not in stale.INVALIDATING, "stale": kind,
+                "tone": "guide"}  # N-2：保留・取り消しの知らせはエラーの見出しで出さない（状態・判定は変えない）
 
     def _closed_reply(self, sid: object, e: "_Entry | None" = None) -> dict:
         """閉じた画面・見つからない画面への要求を断る（状態は変えない・返さない）。
@@ -1713,7 +1888,8 @@ class WebFlow:
             "voided": ({"why": e.voided["why"], "summary": e.voided["summary"]} if e.voided and ch is None else None),
             # 出力できるのは合成ジョブ（samples/dummy と同じバイト列）だけ。実機の JOB は承認しても出力ボタンを押せない（画面で明示する）
             "exportable": sim._is_synthetic(s.original_bytes),
-            "can_export": approved and sim._is_synthetic(s.original_bytes) and not e.hold,
+            "can_export": (approved and sim._is_synthetic(s.original_bytes) and not e.hold
+                           and not (e.exported and e.exported_gen is not None and e.exported_gen == e.approval_gen)),
             "exported": e.exported if approved else None,
             # 承認のあとの3つの状態（台本 Ver.6.1 Scene 3-3）。表示だけ。承認していなければ None
             "after_approval": self._after_approval(e) if approved else None,

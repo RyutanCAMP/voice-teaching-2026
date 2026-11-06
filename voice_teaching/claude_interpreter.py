@@ -295,6 +295,21 @@ class ClaudeInterpreter:
             raise InterpreterError(error_message(ex)) from None
         return _convert(response, names)
 
+    def understand(self, state: Mapping, utterance: str) -> dict:
+        """意味理解（本番候補 v1.0。voice_teaching/nl_understand.py）。構造化出力で読みを返す。
+        送るのは発話・位置番号の一覧・選んでいる位置・直前の操作（位置・軸・量）・聞き返しの途中の項目・直近の会話の文だけ。
+        失敗は nl_understand.UnderstandError（api／malformed／refused）。モックへは切り替えない。"""
+        from . import nl_understand as nu  # noqa: PLC0415
+        try:
+            client = self._get_client()
+        except InterpreterError as ex:
+            raise nu.UnderstandError("api", str(ex)) from None
+        try:
+            response = client.messages.create(**nu.build_request(self._model, state, utterance))
+        except Exception as ex:
+            raise nu.UnderstandError("api", error_message(ex)) from None
+        return nu.parse_response(response)
+
     def locate(self, utterance: str, place_word: str, positions: Sequence[str],
                lines: Sequence[tuple[int, str]]) -> list:
         """場所の言葉の位置の候補（生の形）。呼ぶのは合成ジョブのときだけ（web/flow.py が確かめる）。"""

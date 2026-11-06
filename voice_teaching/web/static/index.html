@@ -6,7 +6,7 @@
 <title>Voice Teaching — 話して、動きを確かめる</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
+<body data-channel="__VT_CHANNEL__">
 <!-- オープニング（11/5 UI 最終仕様）：起動のときだけの短い演出（約3秒・押すかキーで飛ばせる・動きを減らす設定では止めた絵だけ）。
      表示だけ。ROBOT・TOOL・JOB・READY は、確かめていない接続・安全を言わない（実機に接続しない・TOOL は確認していない・READY はシミュレーションの操作を始められるだけ） -->
 <div id="opening" class="opening" role="dialog" aria-modal="true" aria-label="起動の演出（押すと飛ばします）" hidden>
@@ -73,7 +73,7 @@
     <p id="app-info-interp" class="fine app-info-line"></p>
     <p id="app-info-status" class="fine app-info-line"></p>
     <p id="readonly-note" class="fine app-info-line">元のジョブは変えません。実機用の出力・転送・ロボットの起動はしません。</p>
-    <p class="fine app-info-line"><span id="app-version" class="ver">Ver.__VT_VERSION__</span> <span id="app-build-detail" class="ver build-detail">__VT_BUILD_DETAIL__</span>
+    <p class="fine app-info-line"><span id="app-product" class="ver product-ver">Voice Teaching（シミュレーション専用）</span><span id="app-version" class="ver">Ver.__VT_VERSION__</span> <span id="app-build-detail" class="ver build-detail">__VT_BUILD_DETAIL__</span>
     <button type="button" id="opening-replay" class="link small op-replay" hidden title="起動の演出をもう一度（音あり）">▶ オープニング</button></p>
     </div>
   </details>

@@ -1574,3 +1574,55 @@ button.updown-chip { overflow-wrap: anywhere; max-width: min(360px, 100%); }
 .stage .play-text { min-height: 18px; }
 /* round4：安全についての説明（図の注意）は、JOB を読み込んで図が出てから出す（最初の画面のボタンを増やさない） */
 body:has(#job-area[hidden]) .top .safety-wrap { display: none; }
+
+/* ===== 本番候補 v1.0（11/7 唐川さんの指示）：版・チャンネル・SHA・開発者向けの詳細表示は、dev のときだけ画面に出す =====
+   filming・release では出さない（GET /api/version には今までどおりある）。SIM の印・安全の説明・承認の状態のアイコンは残す */
+body[data-channel="filming"] #app-build,
+body[data-channel="release"] #app-build,
+body[data-channel="filming"] #app-build-detail,
+body[data-channel="release"] #app-build-detail,
+body[data-channel="filming"] #app-version,
+body[data-channel="release"] #app-version,
+body[data-channel="filming"] #engineer-toggle,
+body[data-channel="release"] #engineer-toggle,
+body[data-channel="filming"] #engineer-view,
+body[data-channel="release"] #engineer-view { display: none !important; }
+.product-ver { display: none; }
+body[data-channel="filming"] .product-ver,
+body[data-channel="release"] .product-ver { display: inline; }
+/* N-2（11/7）：ボタンの案内・相づち・保留の知らせ（エラーの見出しなし） */
+.reply.guide .guide-text { margin: 0; font-size: 16px; line-height: 1.6; }
+
+/* ↓ コックの UI 改善（ui/cock-ux-1106 acb4145・Cock (Codex)・11/6）をそのまま取り込み（本番候補 v1.0） */
+
+/* ===== 独立UI監査 11/6（60f3d24基準）：操作を増やさず、入口と確認する数値を読みやすく =====
+   DOM・状態・承認条件・警告文・3Dの計算には触れない。MOCK/SIM・保留・方向未確認の表示は維持する。 */
+/* 説明の本文が下のボタンを遮らない。説明は表示したまま、×は従来どおり押せる。
+   安全についての説明（.safety-pop）や、確認表示の背景には適用しない。 */
+.tip-pop { pointer-events: none; padding-right: 56px; }
+.tip-pop.tip-small { padding-right: 54px; }
+.tip-pop .tip-close, .tip-pop.tip-small .tip-close {
+  pointer-events: auto; width: 44px; height: 44px; min-height: 44px; top: 2px; right: 2px;
+}
+
+/* 最初の文字入力は、既存のキーボードボタンに既存のラベルを添える。押す回数は変わらない。 */
+body.hero #kbd-button { width: auto; min-width: 140px; height: 44px; padding-inline: 16px; gap: 8px; }
+body.hero #kbd-button > span { display: inline; font-size: 14px; }
+
+/* 再生の入口もアイコンだけにしない。aria-labelと再生の処理はそのまま。 */
+#play-button { width: auto; min-width: 88px; display: inline-flex; align-items: center; justify-content: center;
+  gap: 8px; padding-inline: 12px; border-radius: 12px; }
+#play-button::after { content: "再生"; font-size: 14px; font-weight: 600; }
+
+/* C番号と座標は読み違えを避ける。点番号の左右の余白を調整し、行数を増やさない。 */
+#position-chips .chip { font-size: 14px; padding-inline: 8px; }
+.cand-pop .xyz table { font-size: 14px; font-variant-numeric: tabular-nums; }
+.file-name { font-size: 12px; opacity: 1; }
+.bubble.claude { border-left: 3px solid var(--purple); }
+@media (min-width: 1100px) and (max-width: 1699px), (min-width: 1100px) and (max-height: 949px) {
+  .bubble .said, .bubble.claude .said { font-size: 15px; line-height: 1.65; }
+  .bubble.app.notice .said { font-size: 14px; }
+  .bubble .who { font-size: 12px; }
+}
+/* 会話の幅は保ち、3Dの内側の余白を詰める。候補の前後で図の位置を動かさない。 */
+@media (min-width: 1100px) { .stage { padding-inline: 10px; } }

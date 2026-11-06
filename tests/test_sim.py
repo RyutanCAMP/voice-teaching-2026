@@ -245,13 +245,26 @@ def test_export_rejects_crlf_copy_of_dummy(tmp_path):
 
 
 def test_export_does_not_overwrite(tmp_path):
+    """N-1（11/7）：同じ名前のファイルがあっても上書きしない。番号を付けた新しいファイルに書く（撮り直しで止まらない）"""
     (tmp_path / "sim").mkdir()
     existing = tmp_path / "sim" / "DEMO_PLACE_SIM.JBI.txt"
     existing.write_bytes(b"keep me")
     p = sim.simulate_shift(job(), "C00004", "Y", 10)
+    out = sim.export_sim(p, sim.approve(p, "テスト担当"))
+    assert existing.read_bytes() == b"keep me"
+    assert out.name == "DEMO_PLACE_SIM_02.JBI.txt"
+    assert b"//NAME DEMO_PLACE_SIM\n" in out.read_bytes() or b"//NAME DEMO_PLACE_SIM\r\n" in out.read_bytes()
+
+
+def test_export_refuses_when_all_numbers_are_used(tmp_path):
+    d = tmp_path / "sim"
+    d.mkdir()
+    for n in range(1, sim.MAX_SAME_NAME + 1):
+        sim.output_path_for(d, "DEMO_PLACE_SIM", n).write_bytes(b"keep")
+    p = sim.simulate_shift(job(), "C00004", "Y", 10)
     with pytest.raises(sim.SimError):
         sim.export_sim(p, sim.approve(p, "テスト担当"))
-    assert existing.read_bytes() == b"keep me"
+    assert all(f.read_bytes() == b"keep" for f in d.iterdir())
 
 
 def test_export_rejects_extra_line_change(tmp_path):

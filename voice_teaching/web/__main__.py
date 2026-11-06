@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import threading
 
 from .. import buildinfo, claude_explain, claude_interpreter, claude_lead, launch_guard, sim, updown
 from .server import DEFAULT_PORT, make_server
@@ -71,6 +72,18 @@ def main(argv: list[str] | None = None) -> int:
     ask = ('キーあり・' + explainer.model if explainer.has_key
            else 'モック（キーを使いません）' if args.mock else 'APIキーが設定されていません')
     print(f"Claude に聞く（読み取りだけ）：{ask}", flush=True)
+    if interp.kind == "claude" and callable(getattr(interp, "understand", None)):
+        # 意味理解の最初の1回は、形（JSON Schema）の準備で遅い（実測 約38秒）。起動のときに1回だけ、作り文で先に呼んでおく。
+        # 画面の Session・候補には何もしない。結果は使わない（失敗しても起動は止めない。画面で話したときに理由を出す）
+        def _warm() -> None:
+            from .. import nl_understand as nu  # noqa: PLC0415
+            try:
+                interp.understand(nu.build_state(["C00001"], "C00001", None, None, []), "Zプラス5ミリ")
+                print("意味理解（Claude）：準備ができました", flush=True)
+            except Exception as ex:  # noqa: BLE001
+                print(f"意味理解（Claude）：準備の呼び出しが使えませんでした（{ex}）", flush=True)
+        threading.Thread(target=_warm, daemon=True).start()
+        print("意味理解（Claude）：準備中（最初の1回だけ時間がかかります）", flush=True)
     print(f"Chrome で開いてください: http://127.0.0.1:{srv.server_address[1]}/  （止めるときは Ctrl+C）", flush=True)
     try:
         srv.serve_forever()

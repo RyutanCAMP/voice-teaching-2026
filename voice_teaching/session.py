@@ -207,6 +207,13 @@ class Session:
             self._updown_followup = (st, ut.updown_word(facts))
         return self._reply(v.status, v.message, facts=facts, choices=self.pin_choices(v.choices))
 
+    def dry_check(self, text: str) -> tuple[ut.UtteranceFacts, ut.Verdict]:
+        """状態を変えずに、今までの読み取り（向きの確かめ済みの書き換え → read_utterance → pre_check）だけを試す。
+        意味理解（nl_understand）を先に使うかどうかを決めるためだけに使う。前の聞き返しとは合わせない。"""
+        st = self.updown_status()
+        facts = ut.read_utterance(self._facing_text(text, st))
+        return facts, ut.pre_check(facts, self.selected, st)
+
     def pin_choices(self, choices: Sequence[tuple[str, str]]) -> tuple[tuple[str, str], ...]:
         """選択肢の文に、聞き返したときの選んでいる位置を入れる（あとで別の位置を選んでも、その位置に当てない）。
         ［説明です］（何もしない）と、場所の言葉の入った文（位置は会話で人が選ぶ）には足さない。"""
@@ -252,6 +259,13 @@ class Session:
     def forget_facing(self) -> None:
         """前の向きの確かめのボタンを使えなくする（新しい発話。どの道でも）。"""
         self._facing_pending = None
+
+    def forget_facing_confirmation(self) -> None:
+        """D5（11/6 唐川さんの決定）：確かめた右・左の対応を忘れる（対象の位置が変わった）。次に右・左を言えば確かめ直す。
+        JOB・座標系が変わったときは、新しい Session になるので、もともと覚えていない。"""
+        self._facing_pending = None
+        if self.facing == "confirmed":
+            self.facing = None
 
     def facing_choose(self, text: str, source: str = "text") -> tuple[str, "Reply | str"]:
         """確かめのボタン（画面の選択肢）。("yes", 確かめた発話) か ("no"／"stale", 返事)。ボタンだけで確かめる。"""

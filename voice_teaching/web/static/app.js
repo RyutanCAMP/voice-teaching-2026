@@ -825,6 +825,9 @@ function applyResult(res, showOk = true) {
     clearReply();
   } else if (res.ok === false) {
     showReply("stop", res.error || "理由が分かりません");
+  } else if (res.tone === "guide" && res.message) {
+    // N-2（11/7）：ボタンの案内・相づち・保留の知らせ：エラーの見出しは付けない（選択肢はそのまま出す）
+    showReply("guide", res.message, res.choices);
   } else if (res.status && res.status !== "ok") {
     showReply(res.status, res.message, res.choices);
   } else if (res.message && (showOk || res.dialog || res.no_change)) {
@@ -944,8 +947,8 @@ function showReply(status, message, choices) {
   const box = $("reply-message");
   box.className = "reply " + status;
   if (status === "ok") box.replaceChildren(el("p", {}, message));
-  else if (status === "ask") {
-    box.replaceChildren(friendly("ask", message));
+  else if (status === "ask" || status === "guide") {
+    box.replaceChildren(status === "guide" ? el("p", { class: "guide-text" }, message) : friendly("ask", message));
     // 読めなかった言葉があれば、聞き取った文の中で目立たせる（言い直すときの手がかり）
     if (state.unknownWords.length && state.lastHeard) {
       box.append(el("p", { class: "heard-line" }, "聞き取った文：「", ...heardNodes(state.lastHeard), "」"));
@@ -967,8 +970,8 @@ function showReply(status, message, choices) {
   }
   else if (/上限[^。]*を超え/.test(message || "")) box.replaceChildren(friendly("limit", message));  // 移動量の上限を超えたときだけ
   else box.replaceChildren(friendly("stop", message));
-  if (status !== "ok") { const r = rephraseRow(message); if (r) box.append(r); }
-  if (status !== "ok") { const n = nextStepLine(message); if (n) box.append(n); }
+  if (status !== "ok" && status !== "guide") { const r = rephraseRow(message); if (r) box.append(r); }
+  if (status !== "ok" && status !== "guide") { const n = nextStepLine(message); if (n) box.append(n); }
   box.hidden = false;
   $("voice-status").textContent = "";
   syncRangeDock();
