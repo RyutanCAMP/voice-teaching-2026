@@ -2266,12 +2266,15 @@ def check_c026(browser, url, check, shots: Path | None) -> None:
             pg.click("#sample-button")
             pg.wait_for_selector("#job-area:not([hidden])")
             pg.wait_for_timeout(200)
-            check(pg.is_visible("#interp-badge") and pg.is_visible("#mode-banner"),
-                  f"M1 {tag}：「シミュレーションモード」と解釈の印は、狭い画面でも見えている")
-            rows = pg.evaluate("""() => ['.top h1', '#mode-banner', '#interp-badge'].map(
+            # Issue #8（11/6 唐川さん）：解釈の印（解釈：モック）は上の帯に出さない。SIM の印は狭い画面でも見える。
+            # 解釈のしかた（モックか本物の Claude か）はアプリ情報（ⓘ）にサーバーの値のまま出る
+            check(pg.is_hidden("#interp-badge") and pg.is_visible("#mode-banner")
+                  and (pg.text_content("#app-info-interp") or "").startswith("解釈："),
+                  f"M1 {tag}：SIM の印は狭い画面でも見えている。解釈の印は上の帯に出さず、アプリ情報に出す（{pg.text_content('#app-info-interp')}）")
+            rows = pg.evaluate("""() => ['.top h1', '#mode-banner'].map(
                 (q) => Math.round(document.querySelector(q).getBoundingClientRect().top))""")
-            check(rows[1] > rows[0] + 10 and abs(rows[1] - rows[2]) <= 4,
-                  f"M1 {tag}：1行目はアプリ名、2行目に「シミュレーションモード」と解釈の印を並べる（上の端 {rows}）")
+            check(rows[1] > rows[0] + 10,
+                  f"M1 {tag}：1行目はアプリ名、2行目に SIM の印（上の端 {rows}）")
             fits(pg, f"M1 {tag}：読み込んだあと")
             if w == 390 and not wide:
                 shot(pg, "C026_390_a_loaded.png")
@@ -4752,13 +4755,17 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     check(pg.get_attribute("#step-2", "aria-current") == "step", "ドロップで読み込むと、ステップ2（位置を選ぶ）になる")
     check(pg.get_attribute('.view-tab[data-view="3d"]', "aria-selected") == "true" and pg.is_visible("#fig-3d svg"),
           "読み込むと、最初に 3D を大きく出す")
-    check(pg.inner_text("#interp-badge") == "解釈：モック", f"解釈のしかたを上の帯で区別：{pg.inner_text('#interp-badge')}")
+    # Issue #8（11/6 唐川さん）：解釈の印は上の帯に出さない。モックであることはアプリ情報（サーバーの値のまま）で区別できる
+    check(pg.is_hidden("#interp-badge") and pg.text_content("#app-info-interp") == "解釈：モック",
+          f"解釈のしかたは上の帯に出さず、アプリ情報で区別：{pg.text_content('#app-info-interp')}")
     # 入口は1つ（11/4 唐川さんの指示③）：ステップ2でも、指示の欄（会話の入口）を出す（「何をしている？」を位置を選ぶ前に聞ける）
     check(cards(pg) == ["select-panel", "instruction-panel"], f"右側は今のステップのカードと、入口（指示の欄）：{cards(pg)}")
-    # Issue #7：短い1行をいつも出し、全文は ⓘ で開ける
+    # Issue #7・#8：短い1行（目安・実機の動作と干渉は保証しない）をいつも出し、全文（本体の動きではない・当たらないとは限らない）は ⓘ で開ける
     short = pg.inner_text("#figure-short") if pg.is_visible("#figure-short") else ""
-    check(all(x in short for x in ["目安", "ロボット本体の動きではありません", "当たらないとは限りません", "実機の動作・干渉は保証しません"]),
-          f"図の注意・再生の限界・3D の限界（目安・本体の動きではない・当たらないとは限らない・保証しない）は、短い1行でいつも見える（{short!r}）")
+    full = pg.text_content("#figure-panel .figure-notes") or ""
+    check(all(x in short for x in ["目安", "実機の動作・干渉は保証しません"]) and len(short) <= 30
+          and all(x in full for x in ["ロボット本体の動きではありません", "当たらないとは限りません", "動作や干渉を保証するシミュレーターではありません"]),
+          f"図の注意：短い1行（目安・実機の動作と干渉は保証しない）はいつも見え、全文（本体の動きではない・当たらないとは限らない）は ⓘ の中にある（{short!r}）")
     pg.click(".fig-notes-more > summary")
     check(all(pg.is_visible(s) for s in ["#figure-note", "#play-note", "#view3d-note"]),
           "図の注意の全文（ロボット本体・関節は描かない・動作や干渉を保証しない）は ⓘ で読める")
@@ -4956,8 +4963,8 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
     check(pg.locator("#fig-3d circle.marker").count() == 1, "再生の印が 3D の中を動く")
     shot(pg, "4_playing.png")
     until(pg, lambda: "終わりました" in pg.inner_text("#play-status"), timeout_ms=60000)
-    check("ロボット本体の動きではありません" in pg.inner_text("#figure-short") and "ロボット本体の動きではありません" in pg.text_content("#play-note"),
-          "再生の限界（ロボット本体の動きではない）を出す（いつも見える短い1行・ⓘ の全文）")
+    check("目安" in pg.inner_text("#figure-short") and "ロボット本体の動きではありません" in pg.text_content("#play-note"),
+          "再生の限界を出す（いつも見える短い1行は「目安」・ⓘ の全文に「ロボット本体の動きではない」）")
     press(pg, "C00002")
     pg.wait_for_timeout(200)
     check(pg.get_attribute("#step-4", "aria-current") == "step" and "選び直せません" in pg.inner_text("#play-status"),
