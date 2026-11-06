@@ -51,8 +51,10 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1          # 実行できないときは: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 python -m pip install -r requirements.txt
 python -m pytest -q                   # すべて通ることを確かめる
-python -m voice_teaching.web          # 表示された http://127.0.0.1:8765/ を Chrome で開く
+python -m voice_teaching.web --mock   # キーなしで試す（モック）。表示された http://127.0.0.1:8765/ を Chrome で開く
 ```
+（`--mock` はモックで試すとき。本物の Claude で動かすときは `--mock` を外し、キー（`.env`）を用意する。キーが無いまま `--mock` なしで起動すると止まります。撮影（`--channel filming`）では `--mock` は使えません）
+
 画面で `samples/dummy/DEMO_PLACE.JBI` を選び、位置 C00004 を選んで「この位置をZのプラス10mm」と入力すると（「上に10mm」は、下の「上下の向きの設定」が無ければ聞き返しになります）、確認表示 → 承認 → シミュレーション用の出力（`output/sim/` に `.JBI.txt` で書きます。実機には入れません）まで進みます。止めるときは Ctrl+C。
 
 ### 上下の向きの設定（CHECKER_026 M2。設定が無ければ「上・下」は使えません）
@@ -69,7 +71,8 @@ python -m voice_teaching.web          # 表示された http://127.0.0.1:8765/ �
 - この設定は「誰が何を根拠に確かめたか」の記録で、本人確認（署名）でも、安全の保証でもありません。
 
 ### Claude API の設定（秘密の情報はリポジトリに入れない）
-- APIキーが無いときは、偽の Claude（モック）で動きます（画面と作業ログに「モック」と出ます）。
+- APIキーが無いときは、起動を止めます（「本物の Claude のキーがありません。…モックで試すときは --mock を付けてください」）。モックで動かすのは `--mock` を付けたときだけです（起動の窓に「モックで起動しています（自動テスト・試し用。撮影には使いません）」、画面と作業ログに「モック」と出ます）。
+- `--channel filming`・`--channel release`（または環境変数 `VT_CHANNEL`）では、本物の Claude が使えない（キーが無い・`.env` を読めない）と起動しません。`--mock` とも一緒に使えません。
 - 本物の Claude を使うときは、リポジトリ直下に `.env` を作り（`.env.example` をコピー）、自分のキーを書きます。`.env` は `.gitignore` で除外されていて、GitHub には上がりません。
   ```
   ANTHROPIC_API_KEY=（自分のキー）

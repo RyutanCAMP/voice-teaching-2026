@@ -309,11 +309,13 @@ def test_launcher_uses_enabled(monkeypatch):
     monkeypatch.setattr(m, "make_server", lambda **kw: Srv())
     monkeypatch.setattr(m.claude_interpreter, "load_dotenv", lambda path: None)
     monkeypatch.setattr(m.claude_explain.Explainer, "from_env",
-                        classmethod(lambda cls, model=None: SimpleNamespace(has_key=True, model="m")))
+                        classmethod(lambda cls, model=None, **kw: SimpleNamespace(has_key=True, model="m")))
+    monkeypatch.delenv("VT_CHANNEL", raising=False)
+    # モック（--mock）：11/6 から、モックは --mock を付けたときだけ（キーが無いと黙ってモックにはならない）
     for env_value, kind, expect in (("", "claude", True), ("0", "claude", False), ("", "mock", False)):
         monkeypatch.setenv(lead.ENV, env_value)
         monkeypatch.setattr(m.claude_interpreter, "from_env", lambda k=kind: SimpleNamespace(kind=k, model="m"))
-        m.main(["--port", "0"])
+        assert m.main(["--port", "0"] + (["--mock"] if kind == "mock" else [])) == 0
         assert made["lead"] is expect, (env_value, kind)
 
 
