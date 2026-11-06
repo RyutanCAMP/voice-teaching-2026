@@ -2534,9 +2534,19 @@ def check_c026(browser, url, check, shots: Path | None) -> None:
     pg.click("#sample-button")
     pg.wait_for_selector("#job-area:not([hidden])")
     # CHECKER_030 S30-1：確認済みのサーバー：図の欄の上に、ロボット名と確認した人・日時を、マウスを重ねなくても出す
-    det = pg.inner_text("#updown-detail") if pg.is_visible("#updown-detail") else ""
-    check(det.startswith("上下の向き：HC20DT・e2e（一時フォルダの仮の設定）（") and det.endswith("）で確認済み"),
-          f"S30-1：確認済みは「上下の向き：HC20DT・確認した人（日時）で確認済み」を常に出す（{det!r}）")
+    # Issue #8 round3（11/6 唐川さん）：いつも見せるのは短い状態。ロボット名・確認した人・日時は小さな説明と押したときの小窓
+    short = pg.inner_text("#updown-detail") if pg.is_visible("#updown-detail") else ""
+    det = (pg.text_content("#updown-full") or "").split("。")[0]
+    tip = pg.get_attribute("#updown-detail", "title") or ""
+    check(short == "上下方向 確認済み" and det.startswith("上下の向き：HC20DT・e2e（一時フォルダの仮の設定）（") and det.endswith("）で確認済み")
+          and tip.startswith(det),
+          f"S30-1：確認済みは「上下方向 確認済み」を常に出し、「上下の向き：HC20DT・確認した人（日時）で確認済み」は詳しい説明（{short!r}／{det!r}）")
+    pg.click("#updown-detail")
+    check(pg.is_visible("#updown-full") and pg.get_attribute("#updown-detail", "aria-expanded") == "true"
+          and pg.inner_text("#updown-full").startswith(det),
+          "S30-1：上下の向きの短い表示を押すと、ロボット名・確認した人・日時の小窓が開く")
+    pg.keyboard.press("Escape")
+    check(pg.is_hidden("#updown-full") and pg.get_attribute("#updown-detail", "aria-expanded") == "false", "S30-1：Esc で小窓を閉じる")
     to_candidate(pg, "C00005", "Zプラス方向に10mm")
     pg.click("#open-confirm")
     pg.wait_for_selector("#confirm-overlay:not([hidden])")
@@ -2622,11 +2632,16 @@ def check_c026(browser, url, check, shots: Path | None) -> None:
         # Issue #7：左の「上下の向き」の行は出さない（文は作る）。同じ状態は図の欄の上の1行（#updown-detail）にいつも見える（下の check）
         got = pg.text_content("#updown-status") or ""
         check(got == want and pg.is_hidden("#updown-status"), f"上下の向き：{value['status']} は「{want}」（左の行は出さない・Issue #7）（{got!r}）")
-        det = pg.inner_text("#updown-detail") if pg.is_visible("#updown-detail") else ""
+        # Issue #8 round3：図の欄の上には短い状態をいつも出し、ロボット名（と理由）は小さな説明・押したときの小窓
+        short = pg.inner_text("#updown-detail") if pg.is_visible("#updown-detail") else ""
+        det = (pg.text_content("#updown-full") or "").split("。")[0]
+        shorts = {"unconfirmed": "上下方向 未確認", "mismatch": "上下方向 設定と違います", "changed": "上下方向 設定が変わっています",
+                  "confirmed": "上下方向 確認済み"}
         # 音声のカード（.side）の外に置く：右側の 80文字の決まり（下の check_updown_unconfirmed・4ステップで数える）を変えない
         inside = pg.evaluate("() => !!document.querySelector('.side #updown-detail')")
-        check(det == details[value["status"]] and not inside,
-              f"S30-1：{value['status']} は図の欄の上に「{details[value['status']]}」（{det!r}）。音声のカードの外に置く")
+        check(short == shorts.get(value["status"], "上下方向 未確認") and det == details[value["status"]]
+              and (pg.get_attribute("#updown-detail", "title") or "").startswith(det) and not inside,
+              f"S30-1：{value['status']} は図の欄の上に「{short}」をいつも出し、「{details[value['status']]}」は詳しい説明（{det!r}）。音声のカードの外に置く")
         if value["status"] == "unconfirmed":
             fs = pg.evaluate("() => parseFloat(getComputedStyle(document.querySelector('#updown-status')).fontSize)")
             check(fs <= 13, f"上下の向き：目立たせすぎない（文字 {fs}px）")
@@ -2643,10 +2658,14 @@ def check_c026(browser, url, check, shots: Path | None) -> None:
         pg.wait_for_selector("#job-area:not([hidden])")
         pg.locator("#position-chips button", has_text="C00005").click()
         until(pg, lambda: pg.inner_text("#voice-position strong") == "C00005")
-        det = pg.inner_text("#updown-detail") if pg.is_visible("#updown-detail") else ""
+        # Issue #8 round3：長い名前は詳しい説明（小窓）に全部出す。開いても横にはみ出さない
+        pg.click("#updown-detail")
+        det = pg.inner_text("#updown-full") if pg.is_visible("#updown-full") else ""
         o = pg.evaluate(OVERFLOW_JS, 8)
-        check("R" * 40 in "".join(det.split()) and "確" * 40 in "".join(det.split()) and o["scroll"] <= o["vw"] and not o["out"],
-              f"S30-1 {width}px：長い名前でも全部出し、はみ出さない（{o['out']}）")
+        check(pg.is_visible("#updown-detail") and "R" * 40 in "".join(det.split()) and "確" * 40 in "".join(det.split())
+              and o["scroll"] <= o["vw"] and not o["out"],
+              f"S30-1 {width}px：短い状態はいつも見え、長い名前でも小窓に全部出し、はみ出さない（{o['out']}）")
+        pg.keyboard.press("Escape")
         pg.close()
 
 
@@ -3426,8 +3445,9 @@ def check_3d_robot_base(browser, check, shots: Path | None, out: Path) -> None:
                 outside = pg.evaluate(TEXT3D_OUTSIDE_JS, False)
                 check(not outside, f"台座（{tag}）：3D の文字が枠の中に収まる：{outside}")
                 heads = pg.evaluate("""() => [...document.querySelectorAll('#figure-panel .stage-head button')].map((b) => b.id || b.dataset.view)""")
-                # 本番UI：「正面に戻す」（#view-reset）は 3D の左上（図の上）。見出しの欄は図の向きのタブだけ
-                check(heads == ["3d", "yz", "xz", "xy"] and pg.locator("#model-toggle").count() == 0 and pg.is_visible("#view-reset"),
+                # 本番UI：「正面に戻す」（#view-reset）は 3D の左上（図の上）。見出しの欄は、上下の向きの短い表示（Issue #8 round3：
+                # 押すと詳しい小窓）と、図の向きのタブだけ
+                check(heads == ["updown-detail", "3d", "yz", "xz", "xy"] and pg.locator("#model-toggle").count() == 0 and pg.is_visible("#view-reset"),
                       f"台座（{tag}）：3D の上の欄は図の向き（3D・Y・Z・X・Z・X・Y）、正面に戻すは図の上にいつも見える：{heads}")
                 notes = pg.text_content("#figure-panel .figure-notes")  # 全文（Issue #7：ⓘ の中）
                 body = pg.inner_text("body")
@@ -4320,8 +4340,10 @@ def check_updown_unconfirmed(browser, check, shots: Path | None, errors: list) -
               f"上下の設定なし：入力欄・使い方・？の例文に上下の言葉を使わない（{ph!r}）")
         check(pg.text_content("#updown-status") == "上下の向き：未確認（Z＋・Z−で指示）",
               f"上下の設定なし：「上下の向き：未確認（Z＋・Z−で指示）」と出す（{pg.text_content('#updown-status')!r}）")
-        det = pg.inner_text("#updown-detail") if pg.is_visible("#updown-detail") else ""
-        check(det == "上下の向き：未確認（HC20DT）", f"S30-1：設定なしのサーバーでもロボット名（--robot）を出す（{det!r}）")
+        short = pg.inner_text("#updown-detail") if pg.is_visible("#updown-detail") else ""
+        det = (pg.text_content("#updown-full") or "").split("。")[0]
+        check(short == "上下方向 未確認" and det == "上下の向き：未確認（HC20DT）",
+              f"S30-1：設定なしのサーバーでも「上下方向 未確認」をいつも出し、ロボット名（--robot）は詳しい説明に出す（{short!r}／{det!r}）")
         side = len("".join(pg.evaluate("""() => { const tips = [...document.querySelectorAll('button.tip')]; tips.forEach((b) => { b.style.display = 'none'; });
             const s = [...document.querySelectorAll('.side > :not(#ask-panel):not(#status-line):not(#side-scroll), #side-scroll > :not(#ask-panel)')]
             .filter((e) => e.offsetParent !== null).map((e) => e.innerText).join('');
@@ -4632,7 +4654,7 @@ def check_above_fold(browser, check, shots: Path | None, errors: list, out: Path
             pg.click("#play-button")
             until(pg, lambda: pg.is_visible("#play-now"))
             r = pg.evaluate(FOLD_JS, ["#updown-detail", "#play-now"])
-            ok = all(v.startswith("OK") for v in r.values()) and "上下の向き" in pg.inner_text("#updown-detail")
+            ok = all(v.startswith("OK") for v in r.values()) and "上下方向" in pg.inner_text("#updown-detail")
             table[(tag + "S4p 再生中の上下の向き", f"{w}x{h}")] = "OK" if ok else "NG"
             check(ok, f"{tag}S4p 再生中（{w}×{h}）：「いま」の帯と一緒に、上下の向きの表示も見える：{r}")
             if shots is not None:

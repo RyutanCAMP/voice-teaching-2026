@@ -252,11 +252,15 @@
   <section id="figure-panel" class="stage" aria-label="位置の図">
     <div class="stage-head">
       <div class="stage-source"><span class="stage-title">3Dで確かめる</span><span id="file-name" class="file-name"></span></div>
-      <!-- 上下の向きの、ロボット名と確認した人・日時（CHECKER_030 S30-1）。マウスを重ねなくても常に見せる。文は highlight.js の updownDetail。
-           3D を広く取るため、図の上の帯（ファイル名の横）に置く -->
-      <p id="updown-detail" class="updown updown-detail" hidden></p>
       <!-- 再生中の「いま：24行目 MOVL C00001 V=150.0（2回目）」。サーバーの区間の線の文字だけ。図の点に重ねない（図の上の帯に出す） -->
       <div id="play-now" class="play-now" aria-live="polite" hidden></div>
+      <!-- 上下の向き（CHECKER_030 S30-1：いつも見せる。再生中も）。Issue #8 round3（11/6 唐川さん）：ファイル名と分けて、図の向きのタブの左に
+           短い状態（「上下方向 未確認」など。highlight.js の updownShort）だけを出す。ロボット名・確認した人と日時・理由（updownDetail と
+           state.updown.message）は、合わせたときの小さな説明と、押したときの小窓（#updown-full）。文の出どころは state.updown のまま -->
+      <div class="updown-wrap">
+        <button type="button" id="updown-detail" class="updown updown-chip" aria-expanded="false" aria-controls="updown-full" hidden></button>
+        <p id="updown-full" class="updown-full" role="note" hidden></p>
+      </div>
       <div class="view-tabs" role="tablist" aria-label="図の向き">
         <button type="button" class="view-tab" data-view="3d" role="tab" title="ドラッグで回す・ホイールで拡大縮小">3D</button>
         <button type="button" class="view-tab" data-view="yz" role="tab" title="X方向から見る">Y・Z</button>

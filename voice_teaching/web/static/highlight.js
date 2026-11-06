@@ -167,6 +167,17 @@ export function updownDetail(u) {
   return `上下の向き：未確認${tail}`;
 }
 
+// 3D の上にいつも見せる、上下の向きの短い状態（Issue #8 round3・11/6 唐川さん）。ロボット名・確認した人・日時・理由は
+// updownDetail と u.message を詳しい説明（小さな説明・押したときの小窓）に出す。状態の出どころは state.updown のまま。
+// 確認済みと言うのは status が confirmed のときだけ（分からない状態は未確認）
+export function updownShort(u) {
+  if (!u || typeof u !== "object" || Array.isArray(u)) return "";
+  if (u.status === "confirmed") return "上下方向 確認済み";
+  if (u.status === "mismatch") return "上下方向 設定と違います";
+  if (u.status === "changed") return "上下方向 設定が変わっています";
+  return "上下方向 未確認";
+}
+
 // 確認表示に出す、上下の向きを確認した人と日時の1行（確認済みのときだけ。ほかは ""）。u は候補を作ったときの照合の結果
 export function updownConfirmLine(u) {
   if (!u || typeof u !== "object" || Array.isArray(u) || u.status !== "confirmed") return "";

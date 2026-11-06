@@ -12,7 +12,7 @@
 import { SpeechInput } from "/static/speech.js";
 import { View3D, drawBase2d } from "/static/view3d.js";
 import { Player } from "/static/player.js";
-import { splitUnknown, displayMinus, segmentLook, segmentTitle, confirmHeading, updownStatus, updownConfirmLine, updownDetail,
+import { splitUnknown, displayMinus, segmentLook, segmentTitle, confirmHeading, updownStatus, updownConfirmLine, updownDetail, updownShort,
   speechExamples, repeatCountLabel, cycleStatus, nowPlaying, nowText, sequenceChips, tallyParts, rephraseExamples,
   nextStep, attachTips } from "/static/highlight.js";
 
@@ -331,6 +331,11 @@ function renderFacing(f) {
   const detail = $("updown-detail");
   detail.textContent = detail.textContent ? `${detail.textContent}／${f.message}` : f.message;
   detail.hidden = false;
+  // 詳しい説明・小窓にも同じ文を足す（Issue #8 round3）
+  const full = $("updown-full").textContent;
+  $("updown-full").textContent = full ? `${full}／${f.message}` : f.message;
+  detail.title = $("updown-full").textContent;
+  detail.setAttribute("aria-label", `${detail.textContent}（${detail.title}）`);
 }
 
 // 上下の向きの状態（サーバーの state.updown）。無いときは何も出さない。文は highlight.js の updownStatus が作る
@@ -341,11 +346,17 @@ function renderUpdown(u) {
   box.title = v ? v.title : "";
   box.dataset.tone = v ? v.tone : "";
   box.hidden = !v;
-  // ロボット名と確認した人・日時の1行（CHECKER_030 S30-1）。図の欄の上に、マウスを重ねなくても見えるように出す
+  // 上下の向き（CHECKER_030 S30-1：図の欄の上にいつも見せる）。Issue #8 round3：見せるのは短い状態だけ。
+  // ロボット名・確認した人と日時（updownDetail）と理由（サーバーの state.updown.message）は、小さな説明と押したときの小窓
   const detail = $("updown-detail");
-  detail.textContent = updownDetail(u);
+  const full = [updownDetail(u), u && typeof u.message === "string" ? u.message : ""].filter((x) => x).join("。");
+  detail.textContent = updownShort(u);
+  detail.title = full;
+  detail.setAttribute("aria-label", full ? `${detail.textContent}（${full}）` : detail.textContent);
   detail.dataset.tone = v ? v.tone : "";
   detail.hidden = !detail.textContent;
+  $("updown-full").textContent = full;
+  if (detail.hidden || !full) setUpdownFull(false);
   // 話し方の例：確認済みのときだけ上下の例。ほかは軸と符号の例（そのまま送れば候補になる文）
   const ex = speechExamples(u);
   $("text-input").placeholder = ex.placeholder;
@@ -358,6 +369,16 @@ function renderUpdown(u) {
     return el("li", {}, b);
   }));
 }
+
+// 上下の向きの詳しい小窓（押す・Enter/Space で開く・閉じる。Esc・外を押すと閉じる）。表示だけ
+function setUpdownFull(open) {
+  const on = !!open && !!$("updown-full").textContent;
+  $("updown-full").hidden = !on;
+  $("updown-detail").setAttribute("aria-expanded", on ? "true" : "false");
+}
+$("updown-detail").addEventListener("click", () => setUpdownFull($("updown-full").hidden));
+document.addEventListener("click", (ev) => { if (!ev.target.closest(".updown-wrap")) setUpdownFull(false); });
+document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && !$("updown-full").hidden) { setUpdownFull(false); $("updown-detail").focus(); } });
 
 // 例・言い換えの例を、入力欄に入れるだけ（自動では送らない。声から入った文ではないので source は text）
 function fillInput(text) {

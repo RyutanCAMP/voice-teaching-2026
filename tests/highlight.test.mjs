@@ -1,7 +1,7 @@
 // 読めなかった言葉（facts.unknown_words）を、聞き取った文の中で目立たせるための分け方（CHECKER_023 B1）。
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { splitUnknown, displayMinus, segmentLook, segmentTitle, trimDecimal, confirmHeading, updownStatus, updownConfirmLine, updownDetail, speechExamples }
+import { splitUnknown, displayMinus, segmentLook, segmentTitle, trimDecimal, confirmHeading, updownStatus, updownConfirmLine, updownDetail, updownShort, speechExamples }
   from '../voice_teaching/web/static/highlight.js';
 
 test('unknown words are split out in order', () => {
@@ -191,4 +191,15 @@ test('前後の移動は控えめ：強調と違う色・細い・薄い。MOVJ 
     assert.equal(c.dash, segmentLook(k).dash);
   }
   assert.notEqual(ASK_CONTEXT_COLOR, ASK_HIGHLIGHT_COLOR);
+});
+
+// ---- Issue #8 round3（11/6 唐川さん）：3D の上の上下の向きは短い状態だけをいつも見せ、ロボット名・確認した人・日時・理由は詳しい説明へ ----
+test('updownShort: short state for the figure head', () => {
+  assert.equal(updownShort({ status: 'unconfirmed', app_robot: 'HC20DT' }), '上下方向 未確認');
+  assert.equal(updownShort({ status: 'confirmed', robot: 'HC20DT', confirmed_by: '唐川' }), '上下方向 確認済み');
+  assert.equal(updownShort({ status: 'mismatch', app_robot: 'HC20DT' }), '上下方向 設定と違います');
+  assert.equal(updownShort({ status: 'changed', app_robot: 'HC20DT' }), '上下方向 設定が変わっています');
+  assert.equal(updownShort({}), '上下方向 未確認');  // 分からない状態は未確認（確認済みにしない）
+  assert.equal(updownShort(null), '');
+  assert.equal(updownShort([]), '');
 });

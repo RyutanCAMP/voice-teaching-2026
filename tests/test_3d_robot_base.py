@@ -59,8 +59,9 @@ def test_stage_head_buttons_are_as_before():
     h = text("index.html")
     head = h[h.index('<div class="stage-head">'):h.index('<p id="figure-message"')]
     buttons = re.findall(r'<button[^>]*id="([a-z0-9-]+)"', head)
-    # 本番UI（ミニマル確定案 11/5 夜）：「正面に戻す」は図の上（3D の左上）にいつも出す。見出しの帯のボタンは図の向きのタブだけ
-    assert buttons == []
+    # 本番UI（ミニマル確定案 11/5 夜）：「正面に戻す」は図の上（3D の左上）にいつも出す。見出しの帯のボタンは図の向きのタブだけ。
+    # Issue #8 round3（11/6 唐川さん）：上下の向きの短い表示（押すと詳しい小窓）だけを足した
+    assert buttons == ["updown-detail"]
     fig = h[h.index('<div class="fig-wrap">'):h.index('<div id="cand-pop"')]
     assert 'id="view-reset"' in fig and 'aria-label="正面に戻す"' in fig
     tabs = re.findall(r'class="view-tab" data-view="([a-z0-9]+)"', head)
