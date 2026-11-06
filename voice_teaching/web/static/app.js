@@ -1469,6 +1469,10 @@ function exportNextStep(reason) {
   if (/が既にあるため、上書きしません/.test(reason)) {
     return "次にすること：同じ名前のファイルが output\\sim\\ にあります。消してから、もう一度［出力］";
   }
+  if (/個あるため、上書きしません/.test(reason)) {
+    // N-1（11/7）：同じ名前（番号つき）のファイルが上限まである。消さずに別の場所へ移してもらう
+    return "次にすること：output\\sim\\ の古いファイルを別の場所へ移してから、もう一度［出力］";
+  }
   return "次にすること：理由を確かめてから、もう一度［出力］";
 }
 function exportFailed() {

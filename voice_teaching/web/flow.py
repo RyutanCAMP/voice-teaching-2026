@@ -1888,8 +1888,9 @@ class WebFlow:
             "voided": ({"why": e.voided["why"], "summary": e.voided["summary"]} if e.voided and ch is None else None),
             # 出力できるのは合成ジョブ（samples/dummy と同じバイト列）だけ。実機の JOB は承認しても出力ボタンを押せない（画面で明示する）
             "exportable": sim._is_synthetic(s.original_bytes),
-            "can_export": (approved and sim._is_synthetic(s.original_bytes) and not e.hold
-                           and not (e.exported and e.exported_gen is not None and e.exported_gen == e.approval_gen)),
+            # 出力のあとのボタンは、画面が state.exported で押せなくする（can_export は「承認が使える」の意味にも使うので変えない。
+            # 11/7：ここを False にすると、画面が出力のあとを「保留中」と出した。2回目の出力はサーバーの export が断る）
+            "can_export": approved and sim._is_synthetic(s.original_bytes) and not e.hold,
             "exported": e.exported if approved else None,
             # 承認のあとの3つの状態（台本 Ver.6.1 Scene 3-3）。表示だけ。承認していなければ None
             "after_approval": self._after_approval(e) if approved else None,

@@ -1561,7 +1561,7 @@ def check_export_twice(browser, check, shots: Path | None, out: Path) -> None:
                     shots.mkdir(parents=True, exist_ok=True)
                     pg.screenshot(path=str(shots / f"H1_{w}_export_twice.png"))
                 pg.close()
-        # 1回目が本当に失敗したとき（同じ名前のファイルが既にある）は、今までどおり失敗を出す（隠さない）
+        # N-1（11/7）：同じ名前のファイルが既にある → 上書きせず、番号を付けた新しいファイル（_02）に出力できる（撮り直し）
         d = out / "h1_sim_exists"
         d.mkdir(parents=True, exist_ok=True)
         (d / "DEMO_C_PLACE_SIM.JBI.txt").write_text("e2e：前からあるファイル（上書きしないことを確かめる）", encoding="utf-8")
@@ -1571,9 +1571,26 @@ def check_export_twice(browser, check, shots: Path | None, out: Path) -> None:
         pg.wait_for_selector("#export-result:not([hidden])")
         pg.wait_for_timeout(300)
         box = pg.inner_text("#export-result")
+        check(pg.get_attribute("#export-result", "data-ok") == "true" and "DEMO_C_PLACE_SIM_02.JBI.txt" in box and len(exports) == 1
+              and (d / "DEMO_C_PLACE_SIM.JBI.txt").read_text(encoding="utf-8").startswith("e2e：")
+              and (d / "DEMO_C_PLACE_SIM_02.JBI.txt").exists() and pg.is_disabled("#export-button"),
+              f"N-1（11/7）：同じ名前のファイルがあっても上書きせず、_02 の新しいファイルに出力する（そのあと押せない）：{' '.join(box.split())[:80]}")
+        pg.close()
+        # 1回目が本当に失敗したとき（番号を付けた名前も全部ある）は、今までどおり失敗を出す（隠さない・上書きしない）
+        d = out / "h1_sim_full"
+        d.mkdir(parents=True, exist_ok=True)
+        for n in range(1, sim.MAX_SAME_NAME + 1):
+            sim.output_path_for(d, "DEMO_C_PLACE_SIM", n).write_text("e2e：前からあるファイル", encoding="utf-8")
+        sim.DEFAULT_OUT_DIR = d
+        pg, exports = approved_page(1280, 720)
+        pg.click("#export-button")
+        pg.wait_for_selector("#export-result:not([hidden])")
+        pg.wait_for_timeout(300)
+        box = pg.inner_text("#export-result")
         check(pg.get_attribute("#export-result", "data-ok") == "false" and "上書きしません" in box and len(exports) == 1
               and "出力 まだ" in (pg.text_content("#status-line") or "")
-              and (d / "DEMO_C_PLACE_SIM.JBI.txt").read_text(encoding="utf-8").startswith("e2e："),
+              and all(p.read_text(encoding="utf-8").startswith("e2e：") for p in d.iterdir())
+              and len(list(d.iterdir())) == sim.MAX_SAME_NAME,
               f"11/5 H1：1回目の出力が本当に失敗したときは、失敗をそのまま出す（ファイルは上書きしない）：{' '.join(box.split())[:60]}")
         pg.close()
     finally:
@@ -1590,7 +1607,9 @@ TEXT_SIZE_JS = """(sels) => { const r = {}; for (const s of sels) {
   const v = [...document.querySelectorAll(s)].filter(e => e.offsetParent !== null).map(e => parseFloat(getComputedStyle(e).fontSize));
   if (v.length) r[s] = [Math.min(...v), Math.max(...v)]; } return r; }"""
 # 直す前（9671245）に同じ手順で測った値。1280×720・1366×768・1440×900 はこのまま（小さな画面の文字は変えない）
-_TS_SIDE = {".bubble.human .said": [14, 14], ".bubble.claude .said": [15, 15], ".bubble .who": [11, 11]}
+# 本番候補 v1.0（11/7）：コックの UI 改善（ui/cock-ux-1106 acb4145）を取り込み、1100〜1699px の会話の文字を 14→15px・
+# 話し手を 11→12px・アプリの知らせを 13→14px にした（大きくしただけ。1920×1080 の「小さくしない」の確かめは今のまま）
+_TS_SIDE = {".bubble.human .said": [15, 15], ".bubble.claude .said": [15, 15], ".bubble .who": [12, 12]}
 # Issue #7・11/6：記録（.status-line）は上の帯に出さない（承認の状態はアイコンだけ）。図の注意の全文は ⓘ（Issue #8 round3 で常時の短い1行は無くした）
 _TS_STATUS = {".status-line": [12, 12], ".status-line .st-chip": [12, 12]}
 # round4：図の注意の全文（.figure-notes）は「安全についての説明」の小窓の中で、ふだんは見えない。線の種類の凡例（.legend.kinds）は 3D の下から外した
@@ -1600,10 +1619,10 @@ TEXT_SIZE_BEFORE = {
     # 候補・承認後の .legend は変更前／変更後の凡例だけで 13px（前は線の種類の凡例と合わせて [12, 13]）。文字の大きさそのものは変えていない
     "load": {**_TS_ALL},
     "conversation": {**_TS_SIDE, **_TS_ALL},
-    "range": {**_TS_SIDE, **_TS_ALL, ".bubble.app .said": [14, 14], "#reply-message": [14, 14], "#reply-message .range-lines": [14, 14],
+    "range": {**_TS_SIDE, **_TS_ALL, ".bubble.app .said": [15, 15], "#reply-message": [14, 14], "#reply-message .range-lines": [14, 14],
               ".range-button-note": [12, 12]},
-    "candidate": {**_TS_SIDE, **_TS_ALL, ".bubble.app .said": [13, 14], ".legend": [13, 13], ".cand-heard": [13, 13], ".cand-warn": [13, 13]},
-    "approved": {**_TS_SIDE, **_TS_ALL, ".bubble.app .said": [13, 14], "#reply-message": [14, 14], ".legend": [13, 13], ".cand-warn": [12, 12]},
+    "candidate": {**_TS_SIDE, **_TS_ALL, ".bubble.app .said": [14, 15], ".legend": [13, 13], ".cand-heard": [13, 13], ".cand-warn": [13, 13]},
+    "approved": {**_TS_SIDE, **_TS_ALL, ".bubble.app .said": [14, 15], "#reply-message": [14, 14], ".legend": [13, 13], ".cand-warn": [12, 12]},
 }
 # 1920×1080 で、これより小さくしない（会話の文字 16px・話し手 13px・状態の1行 14px・凡例と注意書き 13px）
 TEXT_SIZE_MIN_1080 = {".bubble.human .said": 16, ".bubble.claude .said": 16, ".bubble.app .said": 15, ".bubble .who": 13,
@@ -2056,6 +2075,7 @@ IN_VIEW_TOP_JS = """(s) => { const e = document.querySelector(s); if (!e || !e.g
   return [0.2, 0.5, 0.8].every((f) => { const t = document.elementFromPoint(Math.min(innerWidth - 1, b.left + b.width * f), Math.min(innerHeight - 1, y));
     return !!t && (t === e || e.contains(t)); }); }"""
 EXPORT_EXISTS_NEXT = "次にすること：同じ名前のファイルが output\\sim\\ にあります。消してから、もう一度［出力］"
+EXPORT_FULL_NEXT = "次にすること：output\\sim\\ の古いファイルを別の場所へ移してから、もう一度［出力］"  # N-1（11/7）
 
 
 def check_export_fail_next(browser, check, shots: Path | None, out: Path) -> None:
@@ -2110,8 +2130,11 @@ def check_export_fail_next(browser, check, shots: Path | None, out: Path) -> Non
 
     try:
         for (w, h) in [(1280, 720), (1920, 1080)]:
+            # N-1（11/7）：番号を付けた名前（_02〜_99）まで全部あるときだけ失敗する。失敗の見せ方（K2）と上書きしないこと（K1）を確かめる
             d = out / f"k1_sim_exists_{w}"
             d.mkdir(parents=True, exist_ok=True)
+            for n in range(2, sim.MAX_SAME_NAME + 1):
+                sim.output_path_for(d, "DEMO_C_PLACE_SIM", n).write_text("e2e：前からあるファイル", encoding="utf-8")
             f = d / "DEMO_C_PLACE_SIM.JBI.txt"
             f.write_text("e2e：前からあるファイル（上書きしないことを確かめる）", encoding="utf-8")
             before = (f.read_bytes(), f.stat().st_mtime_ns)
@@ -2120,20 +2143,22 @@ def check_export_fail_next(browser, check, shots: Path | None, out: Path) -> Non
             for i in (1, 2):  # 押し直しても同じ：理由と次にすること。上書きしない
                 box = press_export(pg, exports)
                 check(pg.get_attribute("#export-result", "data-ok") == "false"
-                      and "出力しませんでした：DEMO_C_PLACE_SIM.JBI.txt が既にあるため、上書きしません" in box
-                      and EXPORT_EXISTS_NEXT in box,
-                      f"11/5 確定版 K2（{w}×{h}・{i}回目）：「既にある」で失敗したら、サーバーの理由のまま＋次にすること（消してから、もう一度［出力］）：{box[:120]}")
+                      and f"出力しませんでした：DEMO_C_PLACE_SIM の名前のファイルが {sim.MAX_SAME_NAME} 個あるため、上書きしません" in box
+                      and EXPORT_FULL_NEXT in box,
+                      f"11/5 確定版 K2（{w}×{h}・{i}回目）：「既にある」で失敗したら、サーバーの理由のまま＋次にすること（古いファイルを移してから、もう一度［出力］）：{box[:120]}")
                 check(pg.is_enabled("#export-button") and not primary(pg) and pg.inner_text("#next-action") == "出力できませんでした",
                       f"11/5 確定版 K2（{w}×{h}・{i}回目）：失敗のあと［出力］は押せる・目立たせない・見出しは「出力できませんでした」"
                       f"（押せる={pg.is_enabled('#export-button')}・目立つ={primary(pg)}・見出し「{pg.inner_text('#next-action')}」）")
                 check(str(out) not in box and not re.search(r"[A-Za-z]:\\|(/[A-Za-z0-9._-]+){2,}", box),
                       f"11/5 確定版 K2（{w}×{h}・{i}回目）：失敗の欄に絶対パスを出さない：{box[:120]}")
-                check((f.read_bytes(), f.stat().st_mtime_ns) == before and len(list(d.iterdir())) == 1,
+                check((f.read_bytes(), f.stat().st_mtime_ns) == before and len(list(d.iterdir())) == sim.MAX_SAME_NAME,
                       f"11/5 確定版 K1（{w}×{h}・{i}回目）：同じ名前のファイルは上書きしない（中身と日時が同じ・ほかのファイルを作らない）")
             if shots is not None:
                 shots.mkdir(parents=True, exist_ok=True)
                 pg.screenshot(path=str(shots / f"K2_{w}_export_exists.png"))
-            f.unlink()  # 次にすること（消してから、もう一度［出力］）のとおりにすると、出力できる
+            moved = out / f"k1_moved_{w}"
+            moved.mkdir(parents=True, exist_ok=True)
+            f.replace(moved / f.name)  # 次にすること（古いファイルを別の場所へ移してから、もう一度［出力］）のとおりにすると、出力できる
             box = press_export(pg, exports)
             check(pg.get_attribute("#export-result", "data-ok") == "true" and "出力しました" in box and "次にすること" not in box
                   and pg.is_disabled("#export-button") and pg.inner_text("#next-action") == "出力しました" and f.exists(),
@@ -2142,7 +2167,8 @@ def check_export_fail_next(browser, check, shots: Path | None, out: Path) -> Non
         # 失敗のあと［元に戻す］→ 新しい候補：前の結果の欄は消す（もう今の承認のものではない。11/5 確定版 1 の表）
         d = out / "k1_sim_exists_undo"
         d.mkdir(parents=True, exist_ok=True)
-        (d / "DEMO_C_PLACE_SIM.JBI.txt").write_text("e2e：前からあるファイル", encoding="utf-8")
+        for n in range(1, sim.MAX_SAME_NAME + 1):  # N-1：番号つきの名前も全部ある（本当に失敗する）
+            sim.output_path_for(d, "DEMO_C_PLACE_SIM", n).write_text("e2e：前からあるファイル", encoding="utf-8")
         sim.DEFAULT_OUT_DIR = d
         pg, exports = approved_page(1280, 720)
         press_export(pg, exports)
@@ -4337,16 +4363,28 @@ def check_dialog(browser, check, shots: Path | None, errors: list, updown_config
         until(pg, lambda: pg.is_visible("#approval-status"))
         check(True, "会話：承認ボタンで承認できる（声では承認しない）")
 
-        # 承認待ち（承認済み・未出力）の候補がある間：新しい移動の指示は、解釈の係を呼ぶ前に断る
+        # 承認済み・未出力の候補がある間の、完全な新しい移動の指示（仕様 A・11/6 12:29 唐川さんの決定。クロークの F-2 の直し）：
+        # 古い候補と承認を取り消し、新しい内容だけをふつうの道で読んで、新しい「未承認」の候補にする（解釈の係を1回呼ぶ）。
+        # 古い世代の承認・出力は使えない。そのあとの場所の言葉の指示（「置くところを上に2mm」）も言い直しとして、新しい候補を
+        # 取り消して、どの位置かを確かめる（候補も承認も残さない。11/7：仕様 A の前は「承認待ちの変更候補があります」で断っていた）
         sid = next(iter(srv.flow._entries))
         before = interp.decides
+        old_gen = srv.flow.candidate_gen_of(sid)
         r = pg.request.post(url + "api/hear", data={"session_id": sid, "text": "この位置を上に2mm", "source": "text"}).json()
+        st = srv.flow.state(sid)["state"]
+        new_gen = srv.flow.candidate_gen_of(sid)
+        old = pg.request.post(url + "api/approve", data={"session_id": sid, "approver": "e2e", "candidate_gen": old_gen}).json()
+        check(r["status"] == "ok" and "取り消しました" in r["message"] and st["approval"] is None and st["candidate"] is not None
+              and new_gen != old_gen and interp.decides == before + 1 and old.get("ok") is False,
+              f"仕様 A：承認のあとの完全な新しい指示は、古い候補と承認を取り消して新しい未承認の候補にする。古い世代は承認できない"
+              f"（解釈の係 {interp.decides - before}回・古い世代の承認 {old.get('ok')}・「{r['message'][:60]}」）")
         r2 = pg.request.post(url + "api/hear", data={"session_id": sid, "text": "置くところを上に2mm", "source": "text"}).json()
-        # 1つ目は承認したあと（承認を取り消したときだけの決まった文。唐川さんの決定）、2つ目は承認前の文
-        check(r["status"] == "stop" and r["message"] == "新しい指示を受け取ったため、前の承認を取り消しました。変更候補は残しています。内容を確認して、もう一度承認してください。"
-              and r2["status"] == "stop" and r2["message"].startswith("承認待ちの変更候補があります")
-              and interp.decides == before and interp.locates == 1,
-              f"承認待ちの候補があるとき、新しい移動の指示は解釈の係を呼ばずに断る（{interp.decides - before}回）")
+        st2 = srv.flow.state(sid)["state"]
+        old2 = pg.request.post(url + "api/approve", data={"session_id": sid, "approver": "e2e", "candidate_gen": new_gen}).json()
+        check(r2["status"] in ("ask", "stop") and "取り消しました" in r2["message"] and st2["approval"] is None
+              and st2["candidate"] is None and old2.get("ok") is False,
+              f"仕様 A：未承認の候補のあとの場所の言葉の言い直しは、候補を取り消して確かめる（候補・承認を残さない）"
+              f"（{r2['status']}「{r2['message'][:60]}」・候補 {st2['candidate'] is not None}・前の世代の承認 {old2.get('ok')}）")
         ctx.close()
 
         # ---- 2. 途中の打ち消し（「そうじゃなくて」）→ 止まって同じ所。ほかの位置 → 手で選ぶ → 6つの方向 ----

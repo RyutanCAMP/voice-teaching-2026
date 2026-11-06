@@ -1,0 +1,85 @@
+{
+ "url": "http://127.0.0.1:8901/",
+ "shots": [
+  {
+   "shot": "00_start",
+   "note": "最初の画面",
+   "reply": "",
+   "approval_icon": "承認の状態：JOB を読み込んでいません（承認はありません）",
+   "dev_info_visible": []
+  },
+  {
+   "shot": "01_loaded",
+   "note": "JOB を読み込んだ（3D）",
+   "reply": "",
+   "approval_icon": "承認の状態：未承認（承認は確認表示のボタンだけ）",
+   "dev_info_visible": []
+  },
+  {
+   "shot": "02_selected",
+   "note": "C00004 を選んだ",
+   "reply": "",
+   "approval_icon": "承認の状態：未承認（承認は確認表示のボタンだけ）",
+   "dev_info_visible": []
+  },
+  {
+   "shot": "03_over_limit",
+   "note": "3センチ（30mm）→ 20mm の上限で止まる",
+   "reply": "1回に動かせる量を超えています。小さい量で、もう一度どうぞ\n\n移動量 30mm は仮の上限 20mm（確認待ち）を超えるため、変更しません（シミュレーションの候補も作りません）。20ミリ以下の量で、もう一度言ってください",
+   "approval_icon": "承認の状態：未承認（承認は確認表示のボタンだけ）",
+   "dev_info_visible": []
+  },
+  {
+   "shot": "04_ask_amount",
+   "note": "あいまいな量 → 何ミリか聞き返す",
+   "reply": "もう少し教えてください\n\nC00004 を上にですね。何ミリ動かしますか？",
+   "approval_icon": "承認の状態：未承認（承認は確認表示のボタンだけ）",
+   "dev_info_visible": []
+  },
+  {
+   "shot": "05_confirm_direction",
+   "note": "上の向き（未確認）をボタンで確かめる",
+   "reply": "もう少し教えてください\n\n5mm上げたいんですね。この設備では、まだ「上」の方向が決まっていません。ロボットを正面から見て、上は Zプラス で合っていますか？ 違うときは、ZプラスとZマイナスのどちらかを、「Zプラス5ミリ」か「Zマイナス5ミリ」のように言ってください\n\n合っている\n違う",
+   "approval_icon": "承認の状態：未承認（承認は確認表示のボタンだけ）",
+   "dev_info_visible": []
+  },
+  {
+   "shot": "06_candidate",
+   "note": "変更候補（3D・差分）",
+   "reply": "",
+   "approval_icon": "承認の状態：未承認（承認は確認表示のボタンだけ）",
+   "dev_info_visible": []
+  },
+  {
+   "shot": "07_confirm",
+   "note": "確認表示（変更前→変更後・承認する人）",
+   "reply": "",
+   "approval_icon": "承認の状態：未承認（承認は確認表示のボタンだけ）",
+   "dev_info_visible": []
+  },
+  {
+   "shot": "08_approved",
+   "note": "画面のボタンで承認",
+   "reply": "",
+   "approval_icon": "承認の状態：承認済み（唐川 さんが画面のボタンで承認）",
+   "dev_info_visible": []
+  },
+  {
+   "shot": "09_exported",
+   "note": "SIM 用の JOB を出力",
+   "reply": "",
+   "approval_icon": "承認の状態：承認済み（唐川 さんが画面のボタンで承認）",
+   "dev_info_visible": []
+  },
+  {
+   "shot": "10_app_info",
+   "note": "アプリ情報（版・SHA を出さない）",
+   "reply": "",
+   "approval_icon": "承認の状態：承認済み（唐川 さんが画面のボタンで承認）",
+   "dev_info_visible": []
+  }
+ ],
+ "page_errors": [],
+ "export_result": "✓ シミュレーション用に出力しました（実機には入れないでください）\n\nDEMO_RJ_XYZ_SIM.JBI.txt（場所：…\\output\\sim\\）",
+ "export_button_enabled_after_export": false
+}

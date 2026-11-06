@@ -248,7 +248,8 @@ def test_second_export_does_not_overwrite(wf, tmp_path):
     e = wf.export(sid, candidate_gen=wf.candidate_gen_of(sid))
     assert e["ok"] is False and "もう出力しました" in e["error"] and first["file_name"] in e["error"]
     assert sorted((p.name, p.read_bytes()) for p in (tmp_path / "sim").iterdir()) == before
-    assert wf.state(sid)["state"]["can_export"] is False
+    st = wf.state(sid)["state"]
+    assert st["exported"] and st["exported"].endswith(first["file_name"])  # 画面は exported で出力のボタンを押せなくする
 
 
 # ---- 6. シミュレーションだけの候補（実機用の検査で止まる） ----
