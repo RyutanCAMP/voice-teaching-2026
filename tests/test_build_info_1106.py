@@ -4,8 +4,8 @@
 - 番号は voice_teaching/__init__.py の __version__ の1か所だけ。画面の版の文字はこの値から作る
 - チャンネルは dev / filming / release の3つだけ。決め方は1か所（起動の引数 --channel、無ければ環境変数 VT_CHANNEL、無ければ dev）。
   3つ以外の値は起動を止める（ValueError・起動の道具では終了）
-- 表示：dev は「v1.00-dev」、filming は「v1.00 撮影用」、release は「v1.00」。__version__ の「-dev」は番号から外して使い、
-  __version__ が「-dev」のまま（タグ前）の間は release を断る
+- 表示（11/6 唐川さんの決定）：v{__version__} をそのまま出し、チャンネルは後ろに足すだけ。dev は「v1.00-dev」、
+  filming は「v1.00-dev · 撮影用」（dev の表記を消さない）、release は「v{__version__}」。__version__ が「-dev」の間は release を断る
 - SHA：git rev-parse --short HEAD。未コミットの変更があれば「-dirty」。取れなければ「unknown」（起動は止めない）
 """
 import subprocess
@@ -23,14 +23,20 @@ def test_number_comes_only_from_dunder_version(monkeypatch):
     b = buildinfo.resolve("dev", sha="abc1234")
     assert b.version == "3.21-dev" and b.number == "3.21"
     assert b.label == "v3.21-dev"
-    assert buildinfo.resolve("filming", sha="abc1234").label == "v3.21 撮影用"
+    assert buildinfo.resolve("filming", sha="abc1234").label == "v3.21-dev · 撮影用"
 
 
 def test_labels_for_the_three_channels(monkeypatch):
     monkeypatch.setattr(voice_teaching, "__version__", "1.00")
-    assert buildinfo.resolve("dev", sha="x").label == "v1.00-dev"
-    assert buildinfo.resolve("filming", sha="x").label == "v1.00 撮影用"
+    assert buildinfo.resolve("dev", sha="x").label == "v1.00 · dev"  # 「-dev」の無い版を dev で起動：正式な版と見分ける
+    assert buildinfo.resolve("filming", sha="x").label == "v1.00 · 撮影用"
     assert buildinfo.resolve("release", sha="x").label == "v1.00"
+
+
+def test_dev_version_labels(monkeypatch):
+    monkeypatch.setattr(voice_teaching, "__version__", "1.00-dev")
+    assert buildinfo.resolve("dev", sha="x").label == "v1.00-dev"
+    assert buildinfo.resolve("filming", sha="x").label == "v1.00-dev · 撮影用"  # 撮影用でも dev の表記を消さない
     assert buildinfo.resolve("dev", sha="a1b2c3d").detail == "v1.00-dev（dev・a1b2c3d）"
 
 
@@ -95,14 +101,14 @@ def test_server_serves_label_and_api(monkeypatch):
     try:
         base = f"http://127.0.0.1:{srv.server_address[1]}"
         page = urllib.request.urlopen(base + "/").read().decode("utf-8")
-        n = voice_teaching.__version__.removesuffix("-dev")
-        assert f"v{n} 撮影用" in page and f"v{n} 撮影用（filming・abc1234）" in page
+        lab = f"v{voice_teaching.__version__} · 撮影用"
+        assert lab in page and f"{lab}（filming・abc1234）" in page
         assert "__VT_BUILD_LABEL__" not in page and "__VT_BUILD_DETAIL__" not in page
         assert f"Ver.{voice_teaching.__version__}" in page  # アプリ情報の今の版の文字は今どおり
         import json
         v = json.loads(urllib.request.urlopen(base + "/api/version").read().decode("utf-8"))
         assert v == {"ok": True, "version": voice_teaching.__version__, "channel": "filming", "sha": "abc1234",
-                     "label": f"v{n} 撮影用", "detail": f"v{n} 撮影用（filming・abc1234）"}
+                     "label": lab, "detail": f"{lab}（filming・abc1234）"}
     finally:
         srv.shutdown()
         srv.server_close()

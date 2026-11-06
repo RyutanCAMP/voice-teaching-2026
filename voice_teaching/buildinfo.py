@@ -1,10 +1,14 @@
-"""画面に出す版の文字（番号・チャンネル・Git の SHA）。決まりは CHANGELOG.md の「版の決まり」。
+"""画面に出す版の文字（番号・チャンネル・Git の SHA）。チャンネルと SHA の決まりはこのコメントの1か所（11/6 唐川さんの決定）。
 
-- 番号：voice_teaching/__init__.py の __version__ の1か所だけ（ここでは読むだけ）。「-dev」は番号から外して使う
+- 番号：voice_teaching/__init__.py の __version__ の1か所だけ（ここでは読むだけ。今は 1.00-dev）
+- 表示：「v{__version__}」をそのまま出し、チャンネルは後ろに足すだけ
+    dev     → v1.00-dev（__version__ に「-dev」が無い版を dev で起動したときは「v1.00 · dev」として、正式な版と見分ける）
+    filming → v1.00-dev · 撮影用（撮影用でも dev の表記は消さない。正式な版と見間違えないため）
+    release → v{__version__}（__version__ に「-dev」が付いている間は使えない。起動のときに ValueError で断る）
 - チャンネル：dev / filming / release の3つだけ。起動の引数 --channel、無ければ環境変数 VT_CHANNEL、無ければ dev。
   3つ以外の値は ValueError（起動を止める。似た値を dev に倒すと、撮影用・リリース版と思って開発版を使うおそれがあるため）
-- __version__ が「-dev」で終わる間（タグ前）は release を断る（ValueError）
-- SHA：git rev-parse --short HEAD。未コミットの変更があれば「-dirty」。git が無い・失敗したら「unknown」（起動は止めない）
+- SHA：起動のときに git rev-parse --short HEAD。追跡しているファイルに未コミットの変更があれば「-dirty」。
+  git が無い・失敗したら「unknown」（起動は止めない）。ふだんは出さず、版の文字の小さな説明とアプリ情報（ⓘ）・GET /api/version
 表示だけ。承認・出力などの判定には使わない。
 """
 from __future__ import annotations
@@ -33,12 +37,13 @@ class BuildInfo:
 
     @property
     def label(self) -> str:
-        """画面の小さな版の文字。"""
-        if self.channel == "dev":
-            return f"v{self.number}{DEV_SUFFIX}"
+        """画面の小さな版の文字（v{__version__} にチャンネルを足すだけ）。"""
+        base = f"v{self.version}"
         if self.channel == "filming":
-            return f"v{self.number} 撮影用"
-        return f"v{self.number}"
+            return f"{base} · 撮影用"
+        if self.channel == "dev" and not self.version.endswith(DEV_SUFFIX):
+            return f"{base} · dev"
+        return base
 
     @property
     def detail(self) -> str:
