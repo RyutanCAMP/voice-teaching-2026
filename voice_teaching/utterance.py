@@ -342,6 +342,8 @@ def _fold_kana(text: str) -> str:
 
 
 _UNDO_FOLDED = re.compile(_fold_kana(_UNDO.pattern))
+# ていねいな頼み方の頭の言葉（ひらがなにした形で探す）。この中の「ません」は打ち消しに数えない
+_POLITE_SORRY = re.compile(r"すみません|すいません|もうしわけありません|申し訳ありません")
 
 
 _NEGATION_RE = re.compile(
@@ -389,9 +391,12 @@ def _negation_words(text: str, heard: str | None = None) -> tuple[tuple[str, ...
     undo = [m.span() for m in _UNDO_FOLDED.finditer(folded)]
     out: list[str] = []
     of_undo: list[str] = []
+    polite = [m.span() for m in _POLITE_SORRY.finditer(folded)]
     for m in _NEGATION_RE.finditer(folded):
         if _inside_katakana_word(text, m.start(), m.end()):
             continue  # 「ワイヤー」の「イヤ」、「ダメージ」の「ダメ」は打ち消しではない
+        if any(a <= m.start() and m.end() <= b for a, b in polite):
+            continue  # XC-18（11/7）：ていねいな頼み方の「すみません」「すいません」の「ません」は打ち消しではない
         start = _negation_start(text, m.start())
         word = (heard or text)[start:m.end()]  # 示すのは聞こえたとおりの書き方（「さげません」）
         target = of_undo if any(a < m.end() and m.start() < b for a, b in undo) else out

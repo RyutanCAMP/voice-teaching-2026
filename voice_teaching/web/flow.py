@@ -1203,8 +1203,12 @@ class WebFlow:
                 return self._closed_reply(sid, e)
             s = e.session
             positions = list(s.original.positions)
-            state = nu.build_state(positions, s.selected, e.nl_prev, e.nl_frame, e.nl_hist)
-            frame, selected, prev = e.nl_frame, s.selected, e.nl_prev
+            # XC-14（11/7・クローク）：意味理解を使うのは候補が無いときだけなので、「直前の候補」はいつも、元に戻した・
+            # 取り消した・無効にした候補になる。計画書 4章（取り消しのあとに古い候補を使わない）のとおり、Claude にも Python の
+            # 計算にも渡さない。「あと3ミリ」「さっきと同じだけ」は、量を聞き返す
+            prev = None
+            state = nu.build_state(positions, s.selected, prev, e.nl_frame, e.nl_hist)
+            frame, selected = e.nl_frame, s.selected
             if frame is None and legacy is None and e.nl_seed is not None:
                 # 今までの道の聞き返し（「上に動かしたい」→ 向きの確かめ）への答え：前の発話の確かな項目から枠を作る。
                 # 方向を軸にするのは、決まった文を通したあとの今までの確かめ（ボタン）だけ

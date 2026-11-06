@@ -119,3 +119,19 @@ def test_xc01_confirmation_is_forgotten_when_the_position_changes():
     r = w.talk(sid, "右に3ミリ")
     assert w._entries[sid].session.candidate is None
     assert [c["label"] for c in r["hear"]["choices"]] == ["合っている", "違う"]
+
+
+@pytest.mark.parametrize("said,remade", [("3ミリに訂正して", None), ("3ミリに修正して", None), ("Zプラス3ミリに訂正して", 3.0)])
+def test_xc19_teisei_is_a_correction_with_consistent_reply(said, remade):
+    """XC-19（11/7）：「〜に訂正して」も言い直しの印（前に新しい内容）。古い候補・承認を取り消し、全部そろっていれば新しい
+    未承認の候補。返事に「変更候補は残しています…承認してください」と「分かりませんでした」を並べない。"""
+    w, sid, g = made(True)
+    r = w.talk(sid, said)
+    msg = r["hear"]["message"]
+    assert "取り消しました" in msg and "分かりませんでした" not in msg and "変更候補は残しています" not in msg
+    assert not w.approve(sid, "QA", candidate_gen=g)["ok"] and r["state"]["approval"] is None
+    c = w._entries[sid].session.candidate
+    if remade is None:
+        assert c is None
+    else:
+        assert c is not None and c.after_value - c.before_value == pytest.approx(remade)

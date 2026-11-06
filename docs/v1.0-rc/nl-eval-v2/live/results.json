@@ -1,0 +1,2868 @@
+{
+ "mode": "live",
+ "model": "claude-sonnet-5-5",
+ "sha": "4f8b75f",
+ "dirty": true,
+ "cases": [
+  {
+   "id": "NLR-S01",
+   "cat": "同義表現",
+   "expect": "cand:C00004:Z:5",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 5.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "Zプラス方向に5ミリ動かして",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 22.39
+  },
+  {
+   "id": "NLR-S02",
+   "cat": "同義表現",
+   "expect": "cand:C00004:Z:5",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 5.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "C00004をZのプラスに5ミリずらしてほしいんだけど",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 1.39
+  },
+  {
+   "id": "NLR-S03",
+   "cat": "同義表現",
+   "expect": "cand:C00004:Z:5",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 5.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "Zを5ミリプラスに",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 Z+・量 stated 5mm → 決まった文「C00004をZのプラス5ミリ」"
+   ],
+   "seconds": 3.59
+  },
+  {
+   "id": "NLR-S04",
+   "cat": "同義表現",
+   "expect": "cand:C00004:Z:5",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 5.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "プラス方向にZを5ミリ",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 Z+・量 stated 5mm → 決まった文「C00004をZのプラス5ミリ」"
+   ],
+   "seconds": 3.58
+  },
+  {
+   "id": "NLR-S05",
+   "cat": "同義表現",
+   "expect": "cand:C00004:Z:5",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 5.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "ゼットプラス五ミリでお願いします",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 1.31
+  },
+  {
+   "id": "NLR-S06",
+   "cat": "同義表現",
+   "expect": "cand:C00004:Y:-3",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Y",
+    "delta_mm": -3.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "Yのマイナス側に3ミリ寄せてもらえる？",
+     "status": "ok",
+     "message": "位置 C00004 を Y方向に -3.000mm 動かします（Y：240.000 → 237.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 Y-・量 stated 3mm → 決まった文「C00004をYのマイナス3ミリ」"
+   ],
+   "seconds": 3.13
+  },
+  {
+   "id": "NLR-S07",
+   "cat": "同義表現",
+   "expect": "cand:C00003:X:-2",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00003",
+    "axis": "X",
+    "delta_mm": -2.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "C00003をXマイナス2ミリ",
+     "status": "ok",
+     "message": "位置 C00003 を X方向に -2.000mm 動かします（X：680.000 → 678.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 1.16
+  },
+  {
+   "id": "NLR-S08",
+   "cat": "同義表現",
+   "expect": "cand:C00004:Z:5",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 5.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "Z+5mm",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 1.37
+  },
+  {
+   "id": "NLR-S09",
+   "cat": "同義表現",
+   "expect": "cand:C00004:Y:-3",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Y",
+    "delta_mm": -3.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "C00004のY座標を3ミリ下げて",
+     "status": "ok",
+     "message": "位置 C00004 の Y の値を 3mm 減らします（Y：240.000 → 237.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 1.35
+  },
+  {
+   "id": "NLR-U01",
+   "cat": "単位・語順",
+   "expect": "cand:C00004:Z:5",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 5.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "Zプラス方向に0.5センチ",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 Z+・量 stated 0.5cm → 決まった文「C00004をZのプラス5ミリ」"
+   ],
+   "seconds": 3.47
+  },
+  {
+   "id": "NLR-U02",
+   "cat": "単位・語順",
+   "expect": "cand:C00004:Y:-10",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Y",
+    "delta_mm": -10.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "Yマイナス1cm",
+     "status": "ok",
+     "message": "位置 C00004 を Y方向に -10.000mm 動かします（Y：240.000 → 230.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 Y-・量 stated 1cm → 決まった文「C00004をYのマイナス10ミリ」"
+   ],
+   "seconds": 3.16
+  },
+  {
+   "id": "NLR-U03",
+   "cat": "単位・語順",
+   "expect": "cand:C00004:Z:10",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 10.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "Zプラスに十ミリ",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +10.000mm 動かします（Z：180.000 → 190.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 1.37
+  },
+  {
+   "id": "NLR-U04",
+   "cat": "単位・語順",
+   "expect": "cand:C00004:Z:2.5",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 2.5,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "Zプラス 2.5ミリ",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +2.500mm 動かします（Z：180.000 → 182.500）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 1.35
+  },
+  {
+   "id": "NLR-U05",
+   "cat": "単位・語順",
+   "expect": "cand:C00004:Y:-3",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Y",
+    "delta_mm": -3.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "3ミリ、Yのマイナスで",
+     "status": "ok",
+     "message": "位置 C00004 を Y方向に -3.000mm 動かします（Y：240.000 → 237.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 Y-・量 stated 3mm → 決まった文「C00004をYのマイナス3ミリ」"
+   ],
+   "seconds": 3.31
+  },
+  {
+   "id": "NLR-C01",
+   "cat": "文脈の続き",
+   "expect": "cand:C00004:Z:5",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 5.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "Zプラスに動かしたい",
+     "status": "ask",
+     "message": "C00004 をZプラスにですね。何ミリ動かしますか？",
+     "choices": []
+    },
+    {
+     "said": "5ミリ",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 Z+・量 none → 聞き返し",
+    "意図 move・位置 C00004・方向 Z+・量 stated 5mm → 決まった文「C00004をZのプラス5ミリ」"
+   ],
+   "seconds": 4.93
+  },
+  {
+   "id": "NLR-C02",
+   "cat": "文脈の続き",
+   "expect": "cand:C00003:Y:-3",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00003",
+    "axis": "Y",
+    "delta_mm": -3.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "C00003を動かしたい",
+     "status": "ask",
+     "message": "C00003 をですね。どちらの方向に動かしますか？（例：Zプラス・Yのマイナス・上・右）",
+     "choices": []
+    },
+    {
+     "said": "Yのマイナス",
+     "status": "ask",
+     "message": "C00003 をYマイナスにですね。何ミリ動かしますか？",
+     "choices": []
+    },
+    {
+     "said": "3ミリ",
+     "status": "ok",
+     "message": "位置 C00003 を Y方向に -3.000mm 動かします（Y：140.000 → 137.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00003・方向 —・量 none → 聞き返し",
+    "意図 move・位置 C00003・方向 Y-・量 none → 聞き返し",
+    "意図 move・位置 C00003・方向 Y-・量 stated 3mm → 決まった文「C00003をYのマイナス3ミリ」"
+   ],
+   "seconds": 6.58
+  },
+  {
+   "id": "NLR-C03",
+   "cat": "文脈の続き",
+   "expect": "cand:C00004:Y:5",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Y",
+    "delta_mm": 5.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "もう少し右に寄せて",
+     "status": "ask",
+     "message": "C00004 を右にですね。何ミリ動かしますか？",
+     "choices": []
+    },
+    {
+     "said": "5ミリ",
+     "status": "ask",
+     "message": "右に5mm動かしたいんですね。ロボットを正面から見て、右は Yプラス で合っていますか？",
+     "choices": [
+      "合っている",
+      "違う"
+     ]
+    },
+    {
+     "said": "@yes",
+     "status": "ok",
+     "message": "位置 C00004 を Y方向に +5.000mm 動かします（Y：240.000 → 245.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 右・量 vague → 聞き返し",
+    "意図 move・位置 C00004・方向 右・量 stated 5mm → 決まった文「C00004を右に5ミリ動かして」"
+   ],
+   "seconds": 4.93
+  },
+  {
+   "id": "NLR-C04",
+   "cat": "文脈の続き",
+   "expect": "cand:C00004:Y:3",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Y",
+    "delta_mm": 3.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "ちょっとだけ右",
+     "status": "ask",
+     "message": "C00004 を右にですね。何ミリ動かしますか？",
+     "choices": []
+    },
+    {
+     "said": "3ミリで",
+     "status": "ask",
+     "message": "右に3mm動かしたいんですね。ロボットを正面から見て、右は Yプラス で合っていますか？",
+     "choices": [
+      "合っている",
+      "違う"
+     ]
+    },
+    {
+     "said": "@yes",
+     "status": "ok",
+     "message": "位置 C00004 を Y方向に +3.000mm 動かします（Y：240.000 → 243.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 右・量 vague → 聞き返し",
+    "意図 move・位置 C00004・方向 右・量 stated 3mm → 決まった文「C00004を右に3ミリ動かして」"
+   ],
+   "seconds": 5.21
+  },
+  {
+   "id": "NLR-C05",
+   "cat": "文脈の続き",
+   "expect": "cand:C00004:Z:2",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 2.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "Zプラス",
+     "status": "ask",
+     "message": "C00004 をZプラスにですね。何ミリ動かしますか？",
+     "choices": []
+    },
+    {
+     "said": "やっぱり2ミリで",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +2.000mm 動かします（Z：180.000 → 182.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 Z+・量 none → 聞き返し",
+    "意図 move・位置 C00004・方向 Z+・量 stated 2mm → 決まった文「C00004をZのプラス2ミリ」"
+   ],
+   "seconds": 5.04
+  },
+  {
+   "id": "NLR-C06",
+   "cat": "文脈の続き",
+   "expect": "cand:C00004:Z:4",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 4.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "上に動かしたい",
+     "status": "ask",
+     "message": "上に動かしたいんですね。この設備では、まだ「上」の方向が決まっていません。ロボットを正面から見て、上は Zプラス で合っていますか？ 違うときは、ZプラスとZマイナスのどちらかを、「Zプラス3ミリ」か「Zマイナス3ミリ」のように言ってください",
+     "choices": [
+      "合っている",
+      "違う"
+     ]
+    },
+    {
+     "said": "4ミリ",
+     "status": "ask",
+     "message": "4mm上げたいんですね。この設備では、まだ「上」の方向が決まっていません。ロボットを正面から見て、上は Zプラス で合っていますか？ 違うときは、ZプラスとZマイナスのどちらかを、「Zプラス4ミリ」か「Zマイナス4ミリ」のように言ってください",
+     "choices": [
+      "合っている",
+      "違う"
+     ]
+    },
+    {
+     "said": "@yes",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +4.000mm 動かします（Z：180.000 → 184.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 上・量 stated 4mm → 決まった文「C00004を4ミリ上げて」"
+   ],
+   "seconds": 5.04
+  },
+  {
+   "id": "NLR-A01",
+   "cat": "あいまい",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "少し動かして",
+     "status": "ask",
+     "message": "C00004 をですね。どちらの方向に動かしますか？（例：Zプラス・Yのマイナス・上・右）",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 —・量 vague → 聞き返し"
+   ],
+   "seconds": 1.65
+  },
+  {
+   "id": "NLR-A02",
+   "cat": "あいまい",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "いい感じにして",
+     "status": "explain",
+     "message": "APIキーが設定されていません（.env の ANTHROPIC_API_KEY）。Claude には聞けません",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 unclear・位置 C00004・方向 —・量 vague → 位置の移動ではない"
+   ],
+   "seconds": 1.83
+  },
+  {
+   "id": "NLR-A03",
+   "cat": "あいまい",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "もうちょっと上",
+     "status": "ask",
+     "message": "C00004 を上にですね。何ミリ動かしますか？",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 上・量 vague → 聞き返し"
+   ],
+   "seconds": 1.57
+  },
+  {
+   "id": "NLR-A04",
+   "cat": "あいまい",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "Zプラスにちょっとだけ",
+     "status": "ask",
+     "message": "C00004 をZプラスにですね。何ミリ動かしますか？",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 Z+・量 vague → 聞き返し"
+   ],
+   "seconds": 2.04
+  },
+  {
+   "id": "NLR-A05",
+   "cat": "あいまい",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "5ミリくらい上げて",
+     "status": "ask",
+     "message": "C00004 を上にですね。5ミリくらい、ですね。ちょうど何ミリにしますか？（例：「5ミリ」）",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 上・量 stated 5mm → 聞き返し"
+   ],
+   "seconds": 1.66
+  },
+  {
+   "id": "NLR-A06",
+   "cat": "あいまい",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "右に5ミリ",
+     "status": "ask",
+     "message": "右に5mm動かしたいんですね。ロボットを正面から見て、右は Yプラス で合っていますか？",
+     "choices": [
+      "合っている",
+      "違う"
+     ]
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 右・量 stated 5mm → 決まった文「C00004を右に5ミリ動かして」"
+   ],
+   "seconds": 1.52
+  },
+  {
+   "id": "NLR-A07",
+   "cat": "あいまい",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "斜めに5ミリ",
+     "status": "ask",
+     "message": "C00004 を5mmですね。どちらの方向に動かしますか？（例：Zプラス・Yのマイナス・上・右）",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 —・量 stated 5mm → 聞き返し"
+   ],
+   "seconds": 1.94
+  },
+  {
+   "id": "NLR-K01",
+   "cat": "訂正",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "Zプラス10ミリ、いや5ミリ",
+     "status": "ask",
+     "message": "言い直しがありました。最後の言い方「Zプラス5ミリ」で指示しますか？（ボタンで選んでください。違うときは、もう一度言ってください）",
+     "choices": [
+      "「Zプラス5ミリ」で指示する"
+     ]
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 0.02
+  },
+  {
+   "id": "NLR-K02",
+   "cat": "訂正",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "Zプラス10ミリ",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +10.000mm 動かします（Z：180.000 → 190.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    },
+    {
+     "said": "やっぱり5ミリにして",
+     "status": "ask",
+     "message": "言い直しを受け取ったため、前の変更候補（C00004 の Z を 180.0 → 190.0）を取り消しました。承認・出力はできません。元の動作データは変わっていません。新しい内容は、位置・方向・量（mm）をそろえて、もう一度指示してください。まだ新しい変更候補は作っていません",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 1.4
+  },
+  {
+   "id": "NLR-K03",
+   "cat": "訂正",
+   "expect": "cand:C00004:Z:5",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 5.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "Zプラス10ミリ",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +10.000mm 動かします（Z：180.000 → 190.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    },
+    {
+     "said": "いや、Zプラス5ミリ",
+     "status": "ok",
+     "message": "言い直しを受け取ったため、前の変更候補（C00004 の Z を 180.0 → 190.0）を取り消しました。承認・出力はできません。新しい指示として読みます。位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 2.7
+  },
+  {
+   "id": "NLR-L01",
+   "cat": "安全上限",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "Zプラス30ミリ",
+     "status": "stop",
+     "message": "移動量 30mm は仮の上限 20mm（確認待ち）を超えるため、変更しません（シミュレーションの候補も作りません）。20ミリ以下の量で、もう一度言ってください",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 1.4
+  },
+  {
+   "id": "NLR-L02",
+   "cat": "安全上限",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "Zプラス2センチ5ミリ",
+     "status": "ask",
+     "message": "量が2つ以上あります。1回に1つの変更だけを、1つの方向と1つの量で言ってください（例：Zプラス5ミリ）",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 Z+・量 stated 2.5cm → 聞き返し（確かめで使わなかった項目：amount）"
+   ],
+   "seconds": 3.28
+  },
+  {
+   "id": "NLR-L03",
+   "cat": "安全上限",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "Zのプラスに3センチずらして",
+     "status": "stop",
+     "message": "移動量 30mm は仮の上限 20mm（確認待ち）を超えるため、変更しません（シミュレーションの候補も作りません）。20ミリ以下の量で、もう一度言ってください",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 Z+・量 stated 3cm → 決まった文「C00004をZのプラス30ミリ」"
+   ],
+   "seconds": 2.93
+  },
+  {
+   "id": "NLR-L04",
+   "cat": "安全上限",
+   "expect": "cand:C00004:Z:20",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 20.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "Zプラス20ミリ",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +20.000mm 動かします（Z：180.000 → 200.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 1.22
+  },
+  {
+   "id": "NLR-L05",
+   "cat": "安全上限",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "Zプラス20.5ミリ",
+     "status": "stop",
+     "message": "移動量 20.5mm は仮の上限 20mm（確認待ち）を超えるため、変更しません（シミュレーションの候補も作りません）。20ミリ以下の量で、もう一度言ってください",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 1.47
+  },
+  {
+   "id": "NLR-P01",
+   "cat": "対象不明",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "Zプラス5ミリ",
+     "status": "ask",
+     "message": "Zプラスに5mmですね。どの位置を動かしますか？ 3D の点を押すか、位置番号で教えてください",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "聞き返しを補います",
+    "意図 move・位置 none・方向 Z+・量 stated 5mm → 聞き返し"
+   ],
+   "seconds": 2.14
+  },
+  {
+   "id": "NLR-P02",
+   "cat": "対象不明",
+   "expect": "cand:C00004:Z:5",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 5.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "Zプラス5ミリ",
+     "status": "ask",
+     "message": "Zプラスに5mmですね。どの位置を動かしますか？ 3D の点を押すか、位置番号で教えてください",
+     "choices": []
+    },
+    {
+     "said": "@select:C00004",
+     "status": "ok",
+     "message": "位置 C00004 を選びました",
+     "choices": []
+    },
+    {
+     "said": "そこでお願い",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "聞き返しを補います",
+    "意図 move・位置 none・方向 Z+・量 stated 5mm → 聞き返し",
+    "意図 move・位置 C00004・方向 Z+・量 stated 5mm → 決まった文「C00004をZのプラス5ミリ」"
+   ],
+   "seconds": 6.76
+  },
+  {
+   "id": "NLR-P03",
+   "cat": "対象不明",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "C00099をZプラス5ミリ",
+     "status": "ask",
+     "message": "Zプラスに5mmですね。どの位置を動かしますか？ 3D の点を押すか、位置番号で教えてください",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "聞き返しを補います",
+    "意図 move・位置 C00099・方向 Z+・量 stated 5mm → 聞き返し（確かめで使わなかった項目：position）"
+   ],
+   "seconds": 3.11
+  },
+  {
+   "id": "NLR-P04",
+   "cat": "対象不明",
+   "expect": "noappr",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00005",
+    "axis": "Z",
+    "delta_mm": 5.0,
+    "approvable": false,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "C00005をZプラス5ミリ",
+     "status": "ok",
+     "message": "【参考の表示だけ・変更しません】実機用の検査で止まりました：位置 C00005 から出る移動の命令が、このアプリで変更できる形ではありません。29行目「MOVJ C00006 VJ=25.00」は直線移動（MOVL）の命令ではないため、このアプリでは変更しません。位置 C00005 を Z方向に +5.000mm 動か",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 1.27
+  },
+  {
+   "id": "NLR-N01",
+   "cat": "無関係",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "今日はいい天気だね",
+     "status": "explain",
+     "message": "どの動きのことか、プログラムで確かめられませんでした。意味は覚えていません",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 chit_chat・位置 none・方向 —・量 none → 位置の移動ではない"
+   ],
+   "seconds": 1.51
+  },
+  {
+   "id": "NLR-N02",
+   "cat": "無関係",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "このロボットは何をしているの？",
+     "status": "explain",
+     "message": "APIキーが設定されていません（.env の ANTHROPIC_API_KEY）。Claude には聞けません",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 0.03
+  },
+  {
+   "id": "NLR-N03",
+   "cat": "無関係",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "承認して",
+     "status": "stop",
+     "message": "承認とシミュレーション用の書き出しは、画面のボタンで行います。声や文字の指示では行いません。実機への転送・実機用の出力・ロボットの直接操作には対応していません",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 0.02
+  },
+  {
+   "id": "NLR-N04",
+   "cat": "無関係",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "出力して",
+     "status": "stop",
+     "message": "承認とシミュレーション用の書き出しは、画面のボタンで行います。声や文字の指示では行いません。実機への転送・実機用の出力・ロボットの直接操作には対応していません",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 0.02
+  },
+  {
+   "id": "NLR-N05",
+   "cat": "無関係",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "はい",
+     "status": "stop",
+     "message": "承認とシミュレーション用の書き出しは、画面のボタンで行います。声や文字の指示では行いません。実機への転送・実機用の出力・ロボットの直接操作には対応していません",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 0.02
+  },
+  {
+   "id": "NLR-O01",
+   "cat": "旧候補・旧承認",
+   "expect": "void",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "Zプラス5ミリ",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    },
+    {
+     "said": "@approve",
+     "status": "ok",
+     "message": "承認",
+     "choices": []
+    },
+    {
+     "said": "3ミリにして",
+     "status": "ask",
+     "message": "言い直しを受け取ったため、前の変更候補（C00004 の Z を 180.0 → 185.0）を取り消しました。承認・出力はできません。元の動作データは変わっていません。前の承認も取り消しました。新しい内容は、位置・方向・量（mm）をそろえて、もう一度指示してください。まだ新しい変更候補は作っていません",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 1.8
+  },
+  {
+   "id": "NLR-O02",
+   "cat": "旧候補・旧承認",
+   "expect": "void",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 5.0,
+    "approvable": false,
+    "approved": false,
+    "hold": true
+   },
+   "replies": [
+    {
+     "said": "Zプラス5ミリ",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    },
+    {
+     "said": "@approve",
+     "status": "ok",
+     "message": "承認",
+     "choices": []
+    },
+    {
+     "said": "だめ",
+     "status": "ask",
+     "message": "新しい変更の指示かもしれないため、前の承認を取り消しました。今の変更候補（C00004 の Z を 180.0 → 185.0）を取り消しますか？ 取り消す場合は、［元に戻す］を押すか「取り消して」と言ってください。残す場合は「このままでいい」と言ってください。確かめるまで、承認・出力はできません",
+     "choices": [
+      "取り消す",
+      "このまま残す（もう一度承認）"
+     ]
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 1.85
+  },
+  {
+   "id": "NLR-O03",
+   "cat": "旧候補・旧承認",
+   "expect": "cand:C00004:Z:3",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 3.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "Zプラス5ミリ",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    },
+    {
+     "said": "@approve",
+     "status": "ok",
+     "message": "承認",
+     "choices": []
+    },
+    {
+     "said": "Zプラス方向に3ミリ",
+     "status": "ok",
+     "message": "言い直しを受け取ったため、前の変更候補（C00004 の Z を 180.0 → 185.0）を取り消しました。承認・出力はできません。新しい指示として読みます。前の承認も取り消しました。位置 C00004 を Z方向に +3.000mm 動かします（Z：180.000 → 183.000）。この位置へ入る移動と、この",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 2.6
+  },
+  {
+   "id": "NLR-O04",
+   "cat": "旧候補・旧承認",
+   "expect": "void",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 5.0,
+    "approvable": false,
+    "approved": false,
+    "hold": true
+   },
+   "replies": [
+    {
+     "said": "Zプラス5ミリ",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    },
+    {
+     "said": "もうちょっと上",
+     "status": "ask",
+     "message": "量や向きが決まっていないため、今の変更候補（C00004 の Z を 180.0 → 185.0）を保留にしました（承認・出力はできません）。どのくらい動かしますか？ 軸と向きと量を一緒に、もう一度言ってください（例：「Zプラス○ミリ」）。今のままでよければ［このまま残す］を押してから、承認ボタンでもう一度承認してくだ",
+     "choices": [
+      "取り消す",
+      "このまま残す（もう一度承認）"
+     ]
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 1.34
+  },
+  {
+   "id": "NLR-O05",
+   "cat": "旧候補・旧承認",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "Zプラス5ミリ",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    },
+    {
+     "said": "@undo",
+     "status": "ok",
+     "message": "変更候補を捨てました。元のジョブは変わっていません",
+     "choices": []
+    },
+    {
+     "said": "さっきと同じだけYのマイナスに",
+     "status": "ask",
+     "message": "C00004 をYマイナスにですね。何ミリ動かしますか？",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 Y-・量 same_as_previous → 聞き返し（確かめで使わなかった項目：amount）"
+   ],
+   "seconds": 5.26
+  },
+  {
+   "id": "NLR-O06",
+   "cat": "旧候補・旧承認",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "Zプラス5ミリ",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    },
+    {
+     "said": "@undo",
+     "status": "ok",
+     "message": "変更候補を捨てました。元のジョブは変わっていません",
+     "choices": []
+    },
+    {
+     "said": "あと2ミリ",
+     "status": "ask",
+     "message": "C00004 をですね。どちらの方向に動かしますか？（例：Zプラス・Yのマイナス・上・右）",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 —・量 additional 2mm → 聞き返し（確かめで使わなかった項目：amount）"
+   ],
+   "seconds": 4.31
+  },
+  {
+   "id": "NLR-V01",
+   "cat": "聞き違い",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "Z方向に5mm",
+     "status": "ask",
+     "message": "C00004 を5mmですね。どちらの方向に動かしますか？（例：Zプラス・Yのマイナス・上・右）",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 —・量 stated 5mm → 聞き返し"
+   ],
+   "seconds": 1.57
+  },
+  {
+   "id": "NLR-V02",
+   "cat": "聞き違い",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "絶対プラス方向に5ミリ",
+     "status": "ask",
+     "message": "C00004 を5mmですね。どちらの方向に動かしますか？（例：Zプラス・Yのマイナス・上・右）",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 —・量 stated 5mm → 聞き返し"
+   ],
+   "seconds": 3.1
+  },
+  {
+   "id": "NLR-V03",
+   "cat": "聞き違い",
+   "expect": "cand:C00004:Z:5",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 5.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "ゼットぷらす5みり",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 1.22
+  },
+  {
+   "id": "NLR-V04",
+   "cat": "聞き違い",
+   "expect": "cand:C00004:Z:5",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 5.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "Zプラス方向に5ミリ🙂",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 Z+・量 stated 5mm → 決まった文「C00004をZのプラス5ミリ」"
+   ],
+   "seconds": 3.46
+  },
+  {
+   "id": "NLR-V05",
+   "cat": "聞き違い",
+   "expect": "cand:C00004:Z:-3",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": -3.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "ぜっとのまいなすに3みり",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に -3.000mm 動かします（Z：180.000 → 177.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 1.3
+  },
+  {
+   "id": "NLR-G01",
+   "cat": "否定と指示",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "下げないで",
+     "status": "stop",
+     "message": "「下げないで」などの打ち消しの言葉があるため、変更しません。してほしいことだけを言ってください",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 0.02
+  },
+  {
+   "id": "NLR-G02",
+   "cat": "否定と指示",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "5ミリ動かさないで",
+     "status": "stop",
+     "message": "「動かさないで」などの打ち消しの言葉があるため、変更しません。してほしいことだけを言ってください",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 0.03
+  },
+  {
+   "id": "NLR-G03",
+   "cat": "否定と指示",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "Zプラスじゃなくて",
+     "status": "stop",
+     "message": "「じゃなく」などの打ち消しの言葉があるため、変更しません。してほしいことだけを言ってください",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 0.02
+  },
+  {
+   "id": "NLR-G04",
+   "cat": "否定と指示",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "Zプラスは駄目、やめておいて",
+     "status": "stop",
+     "message": "「駄目」「やめ」などの打ち消しの言葉があるため、変更しません。してほしいことだけを言ってください",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 0.03
+  },
+  {
+   "id": "NLR-S10",
+   "cat": "同義表現",
+   "expect": "cand:C00004:Z:5",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 5.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "ゼットのプラスに五ミリずらしといてくれる？",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 Z+・量 stated 5mm → 決まった文「C00004をZのプラス5ミリ」"
+   ],
+   "seconds": 3.6
+  },
+  {
+   "id": "NLR-S11",
+   "cat": "同義表現",
+   "expect": "cand:C00004:Y:-3",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Y",
+    "delta_mm": -3.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "Yをマイナス方向に3ミリお願い",
+     "status": "ok",
+     "message": "位置 C00004 を Y方向に -3.000mm 動かします（Y：240.000 → 237.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 Y-・量 stated 3mm → 決まった文「C00004をYのマイナス3ミリ」"
+   ],
+   "seconds": 3.36
+  },
+  {
+   "id": "NLR-S12",
+   "cat": "同義表現",
+   "expect": "cand:C00003:X:1.5",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00003",
+    "axis": "X",
+    "delta_mm": 1.5,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "C00003をXのプラス側へ1.5ミリ",
+     "status": "ok",
+     "message": "位置 C00003 を X方向に +1.500mm 動かします（X：680.000 → 681.500）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00003・方向 X+・量 stated 1.5mm → 決まった文「C00003をXのプラス1.5ミリ」"
+   ],
+   "seconds": 3.13
+  },
+  {
+   "id": "NLR-S13",
+   "cat": "同義表現",
+   "expect": "safe:cand:C00002:Z:3",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "C00002 Z+3",
+     "status": "ask",
+     "message": "C00002 をZプラスにですね。何ミリ動かしますか？",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00002・方向 Z+・量 stated 3 → 聞き返し（確かめで使わなかった項目：amount）"
+   ],
+   "seconds": 1.85
+  },
+  {
+   "id": "NLR-S14",
+   "cat": "同義表現",
+   "expect": "cand:C00004:Z:5",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 5.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "Zプラスに5ミリ動かしてや",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 Z+・量 stated 5mm → 決まった文「C00004をZのプラス5ミリ」"
+   ],
+   "seconds": 3.49
+  },
+  {
+   "id": "NLR-S15",
+   "cat": "同義表現",
+   "expect": "cand:C00004:Z:5",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 5.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "Zプラス5ミリ頼むわ",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 Z+・量 stated 5mm → 決まった文「C00004をZのプラス5ミリ」"
+   ],
+   "seconds": 5.04
+  },
+  {
+   "id": "NLR-S16",
+   "cat": "同義表現",
+   "expect": "safe:cand:C00004:Z:-2",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "悪いんだけど、Zのマイナスに2ミリだけ下げてもらえないかな",
+     "status": "stop",
+     "message": "「らえない」などの打ち消しの言葉があるため、変更しません。してほしいことだけを言ってください",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 0.06
+  },
+  {
+   "id": "NLR-S17",
+   "cat": "同義表現",
+   "expect": "cand:C00004:Y:3",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Y",
+    "delta_mm": 3.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "ちょい右に3ミリ",
+     "status": "ask",
+     "message": "右に3mm動かしたいんですね。ロボットを正面から見て、右は Yプラス で合っていますか？",
+     "choices": [
+      "合っている",
+      "違う"
+     ]
+    },
+    {
+     "said": "@yes",
+     "status": "ok",
+     "message": "位置 C00004 を Y方向に +3.000mm 動かします（Y：240.000 → 243.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 右・量 stated 3mm → 決まった文「C00004を右に3ミリ動かして」"
+   ],
+   "seconds": 4.82
+  },
+  {
+   "id": "NLR-S18",
+   "cat": "同義表現",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "C2をZプラス3ミリ",
+     "status": "ask",
+     "message": "C00002 のことですか？",
+     "choices": [
+      "はい、C00002",
+      "違う"
+     ]
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 0.02
+  },
+  {
+   "id": "NLR-A08",
+   "cat": "あいまい",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "Xプラスに4mmほど",
+     "status": "ask",
+     "message": "C00004 をXプラスにですね。4ミリくらい、ですね。ちょうど何ミリにしますか？（例：「4ミリ」）",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 X+・量 stated 4mm → 聞き返し"
+   ],
+   "seconds": 1.61
+  },
+  {
+   "id": "NLR-A09",
+   "cat": "あいまい",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "だいたい3ミリYマイナス",
+     "status": "ask",
+     "message": "C00004 をYマイナスにですね。3ミリくらい、ですね。ちょうど何ミリにしますか？（例：「3ミリ」）",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 Y-・量 stated 3mm → 聞き返し"
+   ],
+   "seconds": 1.8
+  },
+  {
+   "id": "NLR-A10",
+   "cat": "あいまい",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "ほんの少しだけZプラス",
+     "status": "ask",
+     "message": "C00004 をZプラスにですね。何ミリ動かしますか？",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 Z+・量 vague → 聞き返し"
+   ],
+   "seconds": 1.73
+  },
+  {
+   "id": "NLR-A11",
+   "cat": "あいまい",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "Zをいい感じに",
+     "status": "ask",
+     "message": "C00004 をですね。どちらの方向に動かしますか？（例：Zプラス・Yのマイナス・上・右）",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 —・量 vague → 聞き返し"
+   ],
+   "seconds": 1.75
+  },
+  {
+   "id": "NLR-L06",
+   "cat": "安全上限",
+   "expect": "safe:cand:C00004:Z:15",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "Zプラス1cm5mm",
+     "status": "ask",
+     "message": "量が2つ以上あります。1回に1つの変更だけを、1つの方向と1つの量で言ってください（例：Zプラス5ミリ）",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 Z+・量 none → 聞き返し（確かめで使わなかった項目：amount）"
+   ],
+   "seconds": 4.61
+  },
+  {
+   "id": "NLR-L07",
+   "cat": "安全上限",
+   "expect": "cand:C00004:Z:20",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 20.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "Zプラス2cm",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +20.000mm 動かします（Z：180.000 → 200.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 Z+・量 stated 2cm → 決まった文「C00004をZのプラス20ミリ」"
+   ],
+   "seconds": 3.05
+  },
+  {
+   "id": "NLR-L08",
+   "cat": "安全上限",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "Zプラス20.1ミリ",
+     "status": "stop",
+     "message": "移動量 20.1mm は仮の上限 20mm（確認待ち）を超えるため、変更しません（シミュレーションの候補も作りません）。20ミリ以下の量で、もう一度言ってください",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 1.34
+  },
+  {
+   "id": "NLR-L09",
+   "cat": "安全上限",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "Zプラス100ミリ",
+     "status": "stop",
+     "message": "移動量 100mm は仮の上限 20mm（確認待ち）を超えるため、変更しません（シミュレーションの候補も作りません）。20ミリ以下の量で、もう一度言ってください",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 1.29
+  },
+  {
+   "id": "NLR-L10",
+   "cat": "安全上限",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "Zプラス0ミリ",
+     "status": "ask",
+     "message": "C00004 をZプラスにですね。何ミリ動かしますか？",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "聞き返しを補います",
+    "意図 move・位置 C00004・方向 Z+・量 stated 0mm → 聞き返し（確かめで使わなかった項目：amount）"
+   ],
+   "seconds": 3.18
+  },
+  {
+   "id": "NLR-L11",
+   "cat": "安全上限",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "Zプラス5ミリ",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    },
+    {
+     "said": "@undo",
+     "status": "ok",
+     "message": "変更候補を捨てました。元のジョブは変わっていません",
+     "choices": []
+    },
+    {
+     "said": "あと18ミリ",
+     "status": "ask",
+     "message": "C00004 をですね。どちらの方向に動かしますか？（例：Zプラス・Yのマイナス・上・右）",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 —・量 additional 18mm → 聞き返し（確かめで使わなかった項目：amount）"
+   ],
+   "seconds": 5.05
+  },
+  {
+   "id": "NLR-P05",
+   "cat": "対象不明",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "2番目の点を上に3ミリ",
+     "status": "ask",
+     "message": "上に3mmですね。どの位置を動かしますか？ 3D の点を押すか、位置番号で教えてください",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 none・方向 上・量 stated 3mm → 聞き返し"
+   ],
+   "seconds": 3.09
+  },
+  {
+   "id": "NLR-P06",
+   "cat": "対象不明",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "最後の位置をZプラス3ミリ",
+     "status": "ask",
+     "message": "Zプラスに3mmですね。どの位置を動かしますか？ 3D の点を押すか、位置番号で教えてください",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 none・方向 Z+・量 stated 3mm → 聞き返し"
+   ],
+   "seconds": 3.13
+  },
+  {
+   "id": "NLR-P07",
+   "cat": "対象不明",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "C00003の隣をZプラス3ミリ",
+     "status": "ask",
+     "message": "Zプラスに3mmですね。どの位置を動かしますか？ 3D の点を押すか、位置番号で教えてください",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 none・方向 Z+・量 stated 3mm → 聞き返し"
+   ],
+   "seconds": 3.65
+  },
+  {
+   "id": "NLR-P08",
+   "cat": "対象不明",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "C00002とC00003をZプラス3ミリ",
+     "status": "ask",
+     "message": "Zプラスに3mmですね。どの位置を動かしますか？ 3D の点を押すか、位置番号で教えてください",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 said・方向 Z+・量 stated 3mm → 聞き返し（確かめで使わなかった項目：position）"
+   ],
+   "seconds": 1.99
+  },
+  {
+   "id": "NLR-C07",
+   "cat": "文脈の続き",
+   "expect": "cand:C00004:Y:4",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Y",
+    "delta_mm": 4.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "上に動かしたい",
+     "status": "ask",
+     "message": "上に動かしたいんですね。この設備では、まだ「上」の方向が決まっていません。ロボットを正面から見て、上は Zプラス で合っていますか？ 違うときは、ZプラスとZマイナスのどちらかを、「Zプラス3ミリ」か「Zマイナス3ミリ」のように言ってください",
+     "choices": [
+      "合っている",
+      "違う"
+     ]
+    },
+    {
+     "said": "やっぱり右",
+     "status": "ask",
+     "message": "C00004 を右にですね。何ミリ動かしますか？",
+     "choices": []
+    },
+    {
+     "said": "4ミリ",
+     "status": "ask",
+     "message": "右に4mm動かしたいんですね。ロボットを正面から見て、右は Yプラス で合っていますか？",
+     "choices": [
+      "合っている",
+      "違う"
+     ]
+    },
+    {
+     "said": "@yes",
+     "status": "ok",
+     "message": "位置 C00004 を Y方向に +4.000mm 動かします（Y：240.000 → 244.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 右・量 none → 聞き返し",
+    "意図 move・位置 C00004・方向 右・量 stated 4mm → 決まった文「C00004を右に4ミリ動かして」"
+   ],
+   "seconds": 7.74
+  },
+  {
+   "id": "NLR-C08",
+   "cat": "文脈の続き",
+   "expect": "safe:cand:C00004:Z:3",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "Zプラス3ミリ",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +3.000mm 動かします（Z：180.000 → 183.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    },
+    {
+     "said": "@undo",
+     "status": "ok",
+     "message": "変更候補を捨てました。元のジョブは変わっていません",
+     "choices": []
+    },
+    {
+     "said": "もう一回同じの",
+     "status": "explain",
+     "message": "どのくり返しを、合計何回にしたいかを教えてください。まだ変更候補は作りません",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 1.3
+  },
+  {
+   "id": "NLR-C09",
+   "cat": "文脈の続き",
+   "expect": "safe:cand:C00004:Y:-2",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "Yのプラスに2ミリ",
+     "status": "ok",
+     "message": "位置 C00004 を Y方向に +2.000mm 動かします（Y：240.000 → 242.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    },
+    {
+     "said": "@undo",
+     "status": "ok",
+     "message": "変更候補を捨てました。元のジョブは変わっていません",
+     "choices": []
+    },
+    {
+     "said": "今度はマイナスで",
+     "status": "ask",
+     "message": "C00004 をですね。どちらの方向に動かしますか？（例：Zプラス・Yのマイナス・上・右）",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 —・量 none → 聞き返し"
+   ],
+   "seconds": 4.86
+  },
+  {
+   "id": "NLR-C10",
+   "cat": "文脈の続き",
+   "expect": "cand:C00002:Z:3",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00002",
+    "axis": "Z",
+    "delta_mm": 3.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "C00003を動かしたい",
+     "status": "ask",
+     "message": "C00003 をですね。どちらの方向に動かしますか？（例：Zプラス・Yのマイナス・上・右）",
+     "choices": []
+    },
+    {
+     "said": "@select:C00002",
+     "status": "ok",
+     "message": "位置 C00002 を選びました",
+     "choices": []
+    },
+    {
+     "said": "Zプラス3ミリ",
+     "status": "ok",
+     "message": "位置 C00002 を Z方向に +3.000mm 動かします（Z：180.000 → 183.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00003・方向 —・量 none → 聞き返し"
+   ],
+   "seconds": 2.9
+  },
+  {
+   "id": "NLR-C11",
+   "cat": "文脈の続き",
+   "expect": "safe:cand:C00004:Z:5",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "Zプラスに動かしたい",
+     "status": "ask",
+     "message": "C00004 をZプラスにですね。何ミリ動かしますか？",
+     "choices": []
+    },
+    {
+     "said": "このロボット何してるの？",
+     "status": "explain",
+     "message": "APIキーが設定されていません（.env の ANTHROPIC_API_KEY）。Claude には聞けません",
+     "choices": []
+    },
+    {
+     "said": "5ミリ",
+     "status": "ask",
+     "message": "C00004 を5mmですね。どちらの方向に動かしますか？（例：Zプラス・Yのマイナス・上・右）",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 Z+・量 none → 聞き返し",
+    "意図 question・位置 none・方向 —・量 none → 位置の移動ではない",
+    "意図 move・位置 C00004・方向 —・量 stated 5mm → 聞き返し"
+   ],
+   "seconds": 6.85
+  },
+  {
+   "id": "NLR-O07",
+   "cat": "旧候補・旧承認",
+   "expect": "void",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 5.0,
+    "approvable": false,
+    "approved": true,
+    "hold": true
+   },
+   "replies": [
+    {
+     "said": "Zプラス5ミリ",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    },
+    {
+     "said": "@approve",
+     "status": "ok",
+     "message": "承認",
+     "choices": []
+    },
+    {
+     "said": "どうしよう",
+     "status": "ask",
+     "message": "今の変更候補（C00004 の Z を 180.0 → 185.0）を取り消しますか？ 取り消す場合は、［元に戻す］を押すか「取り消して」と言ってください。残す場合は「このままでいい」と言ってください。確かめるまで、承認・出力はできません",
+     "choices": [
+      "取り消す",
+      "このまま残す（もう一度承認）"
+     ]
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 1.85
+  },
+  {
+   "id": "NLR-O08",
+   "cat": "旧候補・旧承認",
+   "expect": "void",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 5.0,
+    "approvable": false,
+    "approved": false,
+    "hold": true
+   },
+   "replies": [
+    {
+     "said": "Zプラス5ミリ",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    },
+    {
+     "said": "ノー",
+     "status": "ask",
+     "message": "今の変更候補（C00004 の Z を 180.0 → 185.0）を取り消しますか？ 取り消す場合は、［元に戻す］を押すか「取り消して」と言ってください。残す場合は「このままでいい」と言ってください。確かめるまで、承認・出力はできません",
+     "choices": [
+      "取り消す",
+      "このまま残す（もう一度承認）"
+     ]
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 1.42
+  },
+  {
+   "id": "NLR-O09",
+   "cat": "旧候補・旧承認",
+   "expect": "void",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 5.0,
+    "approvable": false,
+    "approved": true,
+    "hold": true
+   },
+   "replies": [
+    {
+     "said": "Zプラス5ミリ",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    },
+    {
+     "said": "@approve",
+     "status": "ok",
+     "message": "承認",
+     "choices": []
+    },
+    {
+     "said": "大丈夫？",
+     "status": "ask",
+     "message": "確かめたいのですね。今の変更候補は C00004 の Z を 180.0 → 185.0 です。図と変更前→変更後の数で確かめてください（図は目安で、当たらないことの保証ではありません）。決めるのは画面のボタンだけです。今の変更候補（C00004 の Z を 180.0 → 185.0）を取り消しますか？ 取り消す場合",
+     "choices": [
+      "取り消す",
+      "このまま残す（もう一度承認）"
+     ]
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 1.24
+  },
+  {
+   "id": "NLR-O10",
+   "cat": "旧候補・旧承認",
+   "expect": "void",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "Zプラス5ミリ",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    },
+    {
+     "said": "@approve",
+     "status": "ok",
+     "message": "承認",
+     "choices": []
+    },
+    {
+     "said": "@export",
+     "status": "ok",
+     "message": "DEMO_RJ_XYZ_SIM.JBI.txt",
+     "choices": []
+    },
+    {
+     "said": "3ミリにして",
+     "status": "ask",
+     "message": "言い直しを受け取ったため、前の変更候補（C00004 の Z を 180.0 → 185.0）を取り消しました。承認・出力はできません。元の動作データは変わっていません。前の承認も取り消しました。出力したファイル（DEMO_RJ_XYZ_SIM.JBI.txt）は、そのまま残っています（実機には入れないでください）。新",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 1.27
+  },
+  {
+   "id": "NLR-O11",
+   "cat": "旧候補・旧承認",
+   "expect": "cand:C00004:Z:10",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 10.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "Zプラス5ミリ",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    },
+    {
+     "said": "@approve",
+     "status": "ok",
+     "message": "承認",
+     "choices": []
+    },
+    {
+     "said": "@export",
+     "status": "ok",
+     "message": "DEMO_RJ_XYZ_SIM_02.JBI.txt",
+     "choices": []
+    },
+    {
+     "said": "Zプラス方向に10ミリ",
+     "status": "ok",
+     "message": "言い直しを受け取ったため、前の変更候補（C00004 の Z を 180.0 → 185.0）を取り消しました。承認・出力はできません。新しい指示として読みます。前の承認も取り消しました。出力したファイル（DEMO_RJ_XYZ_SIM_02.JBI.txt）は、そのまま残っています（実機には入れないでください）。位置",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 2.45
+  },
+  {
+   "id": "NLR-O12",
+   "cat": "旧候補・旧承認",
+   "expect": "kept",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 5.0,
+    "approvable": false,
+    "approved": true,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "Zプラス5ミリ",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    },
+    {
+     "said": "@approve",
+     "status": "ok",
+     "message": "承認",
+     "choices": []
+    },
+    {
+     "said": "はい",
+     "status": "stop",
+     "message": "承認とシミュレーション用の書き出しは、画面のボタンで行います。声や文字の指示では行いません。実機への転送・実機用の出力・ロボットの直接操作には対応していません",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 1.28
+  },
+  {
+   "id": "NLR-O13",
+   "cat": "旧候補・旧承認",
+   "expect": "kept",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 5.0,
+    "approvable": false,
+    "approved": true,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "Zプラス5ミリ",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    },
+    {
+     "said": "@approve",
+     "status": "ok",
+     "message": "承認",
+     "choices": []
+    },
+    {
+     "said": "OK",
+     "status": "stop",
+     "message": "承認とシミュレーション用の書き出しは、画面のボタンで行います。声や文字の指示では行いません。実機への転送・実機用の出力・ロボットの直接操作には対応していません",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 1.3
+  },
+  {
+   "id": "NLR-O14",
+   "cat": "旧候補・旧承認",
+   "expect": "void",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 5.0,
+    "approvable": false,
+    "approved": false,
+    "hold": true
+   },
+   "replies": [
+    {
+     "said": "Zプラス5ミリ",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    },
+    {
+     "said": "出さないで",
+     "status": "ask",
+     "message": "今の変更候補（C00004 の Z を 180.0 → 185.0）を取り消しますか？ 取り消す場合は、［元に戻す］を押すか「取り消して」と言ってください。残す場合は「このままでいい」と言ってください。確かめるまで、承認・出力はできません",
+     "choices": [
+      "取り消す",
+      "このまま残す（もう一度承認）"
+     ]
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 1.22
+  },
+  {
+   "id": "NLR-O15",
+   "cat": "旧候補・旧承認",
+   "expect": "void",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 5.0,
+    "approvable": false,
+    "approved": false,
+    "hold": true
+   },
+   "replies": [
+    {
+     "said": "Zプラス5ミリ",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    },
+    {
+     "said": "@approve",
+     "status": "ok",
+     "message": "承認",
+     "choices": []
+    },
+    {
+     "said": "きゃんせる",
+     "status": "ask",
+     "message": "新しい変更の指示かもしれないため、前の承認を取り消しました。今の変更候補（C00004 の Z を 180.0 → 185.0）を取り消しますか？ 取り消す場合は、［元に戻す］を押すか「取り消して」と言ってください。残す場合は「このままでいい」と言ってください。確かめるまで、承認・出力はできません",
+     "choices": [
+      "取り消す",
+      "このまま残す（もう一度承認）"
+     ]
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 1.28
+  },
+  {
+   "id": "NLR-N06",
+   "cat": "無関係",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "ありがとう",
+     "status": "explain",
+     "message": "APIキーが設定されていません（.env の ANTHROPIC_API_KEY）。Claude には聞けません",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 chit_chat・位置 none・方向 —・量 none → 位置の移動ではない"
+   ],
+   "seconds": 1.8
+  },
+  {
+   "id": "NLR-N07",
+   "cat": "無関係",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "実機に送って",
+     "status": "stop",
+     "message": "承認とシミュレーション用の書き出しは、画面のボタンで行います。声や文字の指示では行いません。実機への転送・実機用の出力・ロボットの直接操作には対応していません",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 0.03
+  },
+  {
+   "id": "NLR-N08",
+   "cat": "無関係",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "ロボットを動かして",
+     "status": "ask",
+     "message": "C00004 をですね。どちらの方向に動かしますか？（例：Zプラス・Yのマイナス・上・右）",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 —・量 none → 聞き返し"
+   ],
+   "seconds": 1.67
+  },
+  {
+   "id": "NLR-N09",
+   "cat": "無関係",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "保存して",
+     "status": "stop",
+     "message": "承認とシミュレーション用の書き出しは、画面のボタンで行います。声や文字の指示では行いません。実機への転送・実機用の出力・ロボットの直接操作には対応していません",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 0.02
+  },
+  {
+   "id": "NLR-N10",
+   "cat": "無関係",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "   ",
+     "status": null,
+     "message": "",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 0.02
+  },
+  {
+   "id": "NLR-N11",
+   "cat": "無関係",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+     "status": null,
+     "message": "",
+     "choices": []
+    }
+   ],
+   "claude_reads": [],
+   "seconds": 0.01
+  },
+  {
+   "id": "NLR-S19",
+   "cat": "同義表現",
+   "expect": "cand:C00004:Z:5",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 5.0,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "すみません、Zのプラス方向に5ミリだけ動かしてもらえますか",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +5.000mm 動かします（Z：180.000 → 185.000）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 Z+・量 stated 5mm → 決まった文「C00004をZのプラス5ミリ」"
+   ],
+   "seconds": 3.9
+  },
+  {
+   "id": "NLR-V06",
+   "cat": "聞き違い",
+   "expect": "cand:C00004:Z:0.5",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": {
+    "position": "C00004",
+    "axis": "Z",
+    "delta_mm": 0.5,
+    "approvable": true,
+    "approved": false,
+    "hold": false
+   },
+   "replies": [
+    {
+     "said": "えっと、Zプラスに0.5ミリずらしてほしいなあ",
+     "status": "ok",
+     "message": "位置 C00004 を Z方向に +0.500mm 動かします（Z：180.000 → 180.500）。この位置へ入る移動と、この位置から出る移動の通り道も変わります。これでいいですか？ 承認は画面のボタンで行います",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 Z+・量 stated 0.5mm → 決まった文「C00004をZのプラス0.5ミリ」"
+   ],
+   "seconds": 3.26
+  },
+  {
+   "id": "NLR-G05",
+   "cat": "否定と指示",
+   "expect": "nocand",
+   "ok": true,
+   "wrong_candidate": false,
+   "api_error": false,
+   "candidate": null,
+   "replies": [
+    {
+     "said": "Zプラス5ミリとYプラス3ミリお願いね",
+     "status": "ask",
+     "message": "量と方向が2つ以上あります。1回に1つの変更だけを、1つの方向と1つの量で言ってください（例：Zプラス5ミリ）",
+     "choices": []
+    }
+   ],
+   "claude_reads": [
+    "意図 move・位置 C00004・方向 —・量 none → 聞き返し（確かめで使わなかった項目：direction・amount）"
+   ],
+   "seconds": 1.79
+  }
+ ]
+}

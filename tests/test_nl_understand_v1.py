@@ -382,3 +382,59 @@ def test_frame_is_dropped_on_cancel_or_negation(out, cancel):
     assert w._entries[sid].nl_frame is None
     w.talk(sid, "5ミリ")
     assert cand(w, sid) is None
+
+
+# ---- クロークの早めの知らせ（handoff/KUROKU_TO_SHIKURO_20261107_RC_EARLY.md）----
+@pytest.mark.parametrize("text,ev,val", [
+    ("えっと、Zプラスに0.5ミリずらしてほしいなあ", "5ミリ", 5),   # 0.5 の中の「5ミリ」
+    ("えっと、Zプラスに15ミリずらしてほしいなあ", "5ミリ", 5),
+    ("えっと、Zプラスに2.5ミリずらしてほしいなあ", "5ミリ", 5),
+])
+def test_xc16_amount_must_match_the_whole_utterance(text, ev, val):
+    o = nu.interpret(ans(direction="Z+", direction_evidence="Zプラス", amount_kind="stated", amount_value=val,
+                         amount_unit="mm", amount_evidence=ev),
+                     text, positions=POS, selected="C00005", previous=None, frame=None)
+    assert o.kind == "ask" and "amount" in o.rejected
+
+
+@pytest.mark.parametrize("text,d,ev,val,aev", [
+    ("Zプラス5ミリとYプラス3ミリお願いね", "Z+", "Zプラス", 5, "5ミリ"),
+    ("Zプラスに5ミリか10ミリでお願いね", "Z+", "Zプラス", 5, "5ミリ"),
+    ("Zプラスに5ミリ、Zマイナスに3ミリ", "Z+", "Zプラス", 5, "5ミリ"),
+    ("Zプラスに下げて5ミリ", "Z+", "Zプラス", 5, "5ミリ"),
+])
+def test_xc17_two_amounts_or_directions_always_ask(text, d, ev, val, aev):
+    o = nu.interpret(ans(direction=d, direction_evidence=ev, amount_kind="stated", amount_value=val, amount_unit="mm",
+                         amount_evidence=aev), text, positions=POS, selected="C00005", previous=None, frame=None)
+    assert o.kind == "ask" and "2つ以上" in o.text
+
+
+@pytest.mark.parametrize("text,d,ev", [
+    ("Zを3ミリ下げといて", "Z-", "Zを3ミリ下げ"),
+    ("ゼットプラス五ミリでお願いします", "Z+", "ゼットプラス"),
+    ("5ミリZプラスに動かして下さい", "Z+", "Zプラス"),
+])
+def test_one_direction_said_two_ways_is_still_one(text, d, ev):
+    aev = "3ミリ" if "3ミリ" in text else ("五ミリ" if "五ミリ" in text else "5ミリ")
+    o = nu.interpret(ans(direction=d, direction_evidence=ev, amount_kind="stated", amount_value=3 if "3" in aev else 5,
+                         amount_unit="mm", amount_evidence=aev), text, positions=POS, selected="C00005", previous=None,
+                     frame=None)
+    assert o.kind == "canonical", o
+
+
+def test_xc14_discarded_candidate_is_not_used_for_more(out):
+    """［元に戻す］で捨てた +15 に「あと3ミリ」を足して +18 にしない（Claude が additional と答えても、前の候補を渡さない）。"""
+    w, sid, fake = setup(ans(amount_kind="additional", amount_value=3, amount_unit="mm", amount_evidence="3ミリ"))
+    w.talk(sid, "Zプラス方向に15ミリ")
+    assert cand(w, sid) is not None
+    w.undo(sid)
+    r = w.talk(sid, "えっと、あと3ミリお願いね")
+    assert cand(w, sid) is None and r["hear"]["status"] == "ask"
+    assert fake.calls[-1][0]["previous_operation"] is None
+
+
+def test_xc18_polite_sumimasen_is_not_a_negation():
+    from voice_teaching import utterance as ut
+    f = ut.read_utterance("すみません、Zのプラス方向に5ミリだけ動かしてもらえますか")
+    assert not f.negations
+    assert ut.read_utterance("すみません、やっぱり下げないで").negations

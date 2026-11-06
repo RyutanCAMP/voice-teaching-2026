@@ -418,7 +418,8 @@
     "@undo",
     "さっきと同じだけYのマイナスに"
    ],
-   "expect": "cand:C00004:Y:-5"
+   "expect": "nocand",
+   "note": "XC-14（11/7・クローク）：元に戻した候補の量は使わない。聞き返すのが正しい（期待を直した）"
   },
   {
    "id": "NLR-O06",
@@ -428,7 +429,8 @@
     "@undo",
     "あと2ミリ"
    ],
-   "expect": "cand:C00004:Z:7"
+   "expect": "nocand",
+   "note": "XC-14（11/7・クローク）：元に戻した候補の量は使わない。聞き返すのが正しい（期待を直した）"
   },
   {
    "id": "NLR-V01",
@@ -876,6 +878,30 @@
    "cat": "無関係",
    "turns": [
     "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   ],
+   "expect": "nocand"
+  },
+  {
+   "id": "NLR-S19",
+   "cat": "同義表現",
+   "turns": [
+    "すみません、Zのプラス方向に5ミリだけ動かしてもらえますか"
+   ],
+   "expect": "cand:C00004:Z:5"
+  },
+  {
+   "id": "NLR-V06",
+   "cat": "聞き違い",
+   "turns": [
+    "えっと、Zプラスに0.5ミリずらしてほしいなあ"
+   ],
+   "expect": "cand:C00004:Z:0.5"
+  },
+  {
+   "id": "NLR-G05",
+   "cat": "否定と指示",
+   "turns": [
+    "Zプラス5ミリとYプラス3ミリお願いね"
    ],
    "expect": "nocand"
   }

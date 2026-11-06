@@ -221,7 +221,7 @@ def check_shape(data: object) -> dict:
 
 
 # ---- Python による確かめ ----
-_NUM_UNIT = re.compile(r"([0-9]+(?:\.[0-9]+)?)\s*(ミリメートル|ミリ|MM|センチメートル|センチ|CM)(?![A-Z])")
+_NUM_UNIT = re.compile(r"([0-9]+(?:\.[0-9]+)?)\s*(ミリメートル|ミリ|センチメートル|センチ|MM(?![A-Z])|CM(?![A-Z]))")
 _UNIT_FACTOR = {"ミリメートル": 1.0, "ミリ": 1.0, "MM": 1.0, "センチメートル": 10.0, "センチ": 10.0, "CM": 10.0}
 _AXIS_WORD = re.compile(r"X|Y|Z|エックス|ワイ|ゼット|えっくす|わい|ぜっと")
 _PLUS_WORD = re.compile(r"\+|プラス|ぷらす|正")
@@ -244,11 +244,39 @@ def norm(text: str) -> str:
 
 def read_amount_mm(evidence: str) -> float | None:
     """根拠の文字列から、量を mm で読む（Python だけで換算）。量がちょうど1つのときだけ。"""
-    found = _NUM_UNIT.findall(norm(evidence))
-    if len(found) != 1:
-        return None
-    value, unit = found[0]
-    return float(value) * _UNIT_FACTOR[unit]
+    found = amounts_mm(evidence)
+    return found[0] if len(found) == 1 else None
+
+
+# 数の前が数字・小数点でないこと（「0.5ミリ」の中の「5ミリ」を別の量として読まない：XC-16・11/7）
+_NUM_UNIT_BOUNDED = re.compile(r"(?<![0-9.])([0-9]+(?:\.[0-9]+)?)\s*(ミリメートル|ミリ|センチメートル|センチ|MM(?![A-Z])|CM(?![A-Z]))")
+
+
+def amounts_mm(text: str) -> list[float]:
+    """文の中の量を全部、mm で読む（Python だけで換算）。"""
+    return [float(v) * _UNIT_FACTOR[u] for v, u in _NUM_UNIT_BOUNDED.findall(ut._spoken(ut.normalize(text)))]
+
+
+def directions_in(text: str) -> set[str]:
+    """文の中の方向の言葉（軸と符号・上下・右左・前奥）を、決まった形にして全部返す（XC-17：2つ以上なら聞き返す）。"""
+    text = _NOT_DIRECTION.sub("", text)
+    t = ut._spoken(ut.normalize(text))
+    out: set[str] = set()
+    for m in re.finditer(r"(X|Y|Z)\s*(?:の|を)?\s*(?:[0-9.]+\s*(?:ミリ|MM|センチ|CM)\s*)?(\+|プラス|-|マイナス)", t):
+        out.add(m.group(1) + ("+" if m.group(2) in ("+", "プラス") else "-"))
+    for word, pat in _DIR_WORDS.items():
+        if pat.search(text) or pat.search(t):
+            out.add(word)
+    # 「Zプラスに上げて」「Zを3ミリ下げて」のように、軸の文字と上げ下げで同じ向きを言ったものは1つに数える
+    for word, same, other in (("上", "Z+", "Z-"), ("下", "Z-", "Z+")):
+        if word in out and (same in out or ("Z" in t and other not in out)):
+            out.discard(word)
+            out.add(same)
+    return out
+
+
+# 方向の言葉に見えるが方向ではない言い方（「下さい」「上限」「以上」など）。方向の数を数える前に外す
+_NOT_DIRECTION = re.compile(r"下さい|下され|上限|以上|以下|上書き|前回|以前|最上|上手|手前味噌|右左|左右|上下")
 
 
 def _in_text(evidence: str | None, text: str) -> bool:
@@ -413,10 +441,23 @@ def interpret(data: Mapping[str, Any], text: str, *, positions: Sequence[str], s
         else:
             rejected.append("position")
 
+    # Python が発話の全体から読んだ量と方向（Claude の答えとは別に。XC-16・XC-17・11/7）
+    said_amounts = amounts_mm(text)
+    said_dirs = directions_in(text)
+    many = []
+    if len(said_amounts) > 1:
+        many.append("amount")  # 量が2つ以上：Claude がどれかを選んでも使わない（矛盾する複数値を勝手に選ばない）
+    if len(said_dirs) > 1:
+        many.append("direction")
+
     # 方向（今の発話に根拠があるものだけを新しく使う。根拠が無ければ前の枠のまま）
     d, dev = data["direction"], data["direction_evidence"]
-    if d is not None and dev is not None:
-        if _in_text(dev, text) and _direction_ok(d, dev):
+    if "direction" in many:
+        rejected.append("direction")
+        if frame is None or frame.direction is None:
+            f.direction = None
+    elif d is not None and dev is not None:
+        if _in_text(dev, text) and _direction_ok(d, dev) and (not said_dirs or d in said_dirs):
             f.direction = d
         else:
             rejected.append("direction")
@@ -426,10 +467,17 @@ def interpret(data: Mapping[str, Any], text: str, *, positions: Sequence[str], s
     # 量
     kind, val, unit, aev = data["amount_kind"], data["amount_value"], data["amount_unit"], data["amount_evidence"]
     approx = None
-    if kind == "stated" and aev is not None:
+    if "amount" in many:
+        rejected.append("amount")
+        if frame is None or frame.amount_mm is None:
+            f.amount_mm = None
+    elif kind == "stated" and aev is not None:
         mm = read_amount_mm(aev) if _in_text(aev, text) else None
         claimed = None if (val is None or unit is None) else float(val) * (10.0 if unit == "cm" else 1.0)
-        if mm is not None and claimed is not None and math.isclose(mm, claimed, abs_tol=1e-9) and mm > 0:
+        # 根拠の量と Claude の量に加えて、発話の全体で Python が読んだ量（ちょうど1つ）とも同じこと
+        # （「0.5ミリ」の中の「5ミリ」を根拠にした答えを通さない：XC-16）
+        whole_ok = len(said_amounts) == 1 and mm is not None and math.isclose(said_amounts[0], mm, abs_tol=1e-9)
+        if whole_ok and claimed is not None and math.isclose(mm, claimed, abs_tol=1e-9) and mm > 0:
             if is_approx(aev, text):
                 approx = mm  # 「5ミリくらい」：だいたいの量は候補にしない。ちょうどの量を聞く
                 f.amount_mm = None
@@ -445,6 +493,8 @@ def interpret(data: Mapping[str, Any], text: str, *, positions: Sequence[str], s
     elif kind == "additional":
         # 「あと2ミリ」：前の候補と同じ位置・同じ軸・同じ向きのときだけ、元からの合計を Python が足す（上限は今までの判定）
         add = read_amount_mm(aev) if (aev is not None and _in_text(aev, text)) else None
+        if not (len(said_amounts) == 1 and add is not None and math.isclose(said_amounts[0], add, abs_tol=1e-9)):
+            add = None  # 発話の全体の量と合わない（XC-16）
         claimed = None if (val is None or unit is None) else float(val) * (10.0 if unit == "cm" else 1.0)
         pd = None if previous is None else f"{previous.axis}{'+' if previous.delta_mm > 0 else '-'}"
         same_dir = f.direction is None or f.direction == pd
@@ -463,7 +513,10 @@ def interpret(data: Mapping[str, Any], text: str, *, positions: Sequence[str], s
     if f.turns > MAX_FRAME_TURNS:
         return Outcome("ask", "うまく読み取れませんでした。位置番号・方向・量（mm）を一度に言ってください（例：C00003 を Zプラス 5ミリ）",
                        None, tuple(rejected))
-    if approx is not None:
+    if many:
+        f.asked = ("量" if many == ["amount"] else "方向" if many == ["direction"] else "量と方向") + \
+            "が2つ以上あります。1回に1つの変更だけを、1つの方向と1つの量で言ってください（例：Zプラス5ミリ）"
+    elif approx is not None:
         f.asked = ask_text(f, None).replace(_ASK["amount"], "") + (
             f"{_fmt(approx)}ミリくらい、ですね。ちょうど何ミリにしますか？（例：「{_fmt(approx)}ミリ」）")
     else:
