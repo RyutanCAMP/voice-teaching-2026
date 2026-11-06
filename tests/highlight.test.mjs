@@ -196,7 +196,10 @@ test('前後の移動は控えめ：強調と違う色・細い・薄い。MOVJ 
 // ---- Issue #8 round3（11/6 唐川さん）：3D の上の上下の向きは短い状態だけをいつも見せ、ロボット名・確認した人・日時・理由は詳しい説明へ ----
 test('updownShort: short state for the figure head', () => {
   assert.equal(updownShort({ status: 'unconfirmed', app_robot: 'HC20DT' }), '上下方向 未確認');
-  assert.equal(updownShort({ status: 'confirmed', robot: 'HC20DT', confirmed_by: '唐川' }), '上下方向 確認済み');
+  // round4（11/6 唐川さんの決定）：確認済みは対象のロボット名も短い表示に出す（設定の robot、無ければアプリの --robot の値）
+  assert.equal(updownShort({ status: 'confirmed', robot: 'HC20DT', confirmed_by: '唐川' }), '上下方向 確認済み（HC20DT）');
+  assert.equal(updownShort({ status: 'confirmed', app_robot: 'HC10DTP' }), '上下方向 確認済み（HC10DTP）');
+  assert.equal(updownShort({ status: 'confirmed' }), '上下方向 確認済み');
   assert.equal(updownShort({ status: 'mismatch', app_robot: 'HC20DT' }), '上下方向 設定と違います');
   assert.equal(updownShort({ status: 'changed', app_robot: 'HC20DT' }), '上下方向 設定が変わっています');
   assert.equal(updownShort({}), '上下方向 未確認');  // 分からない状態は未確認（確認済みにしない）

@@ -2689,9 +2689,10 @@ def check_c026(browser, url, check, shots: Path | None) -> None:
     short = pg.inner_text("#updown-detail") if pg.is_visible("#updown-detail") else ""
     det = (pg.text_content("#updown-full") or "").split("。")[0]
     tip = pg.get_attribute("#updown-detail", "title") or ""
-    check(short == "上下方向 確認済み" and det.startswith("上下の向き：HC20DT・e2e（一時フォルダの仮の設定）（") and det.endswith("）で確認済み")
+    # round4（11/6 唐川さんの決定）：確認済みの短い表示にも対象のロボット名を出す
+    check(short == "上下方向 確認済み（HC20DT）" and det.startswith("上下の向き：HC20DT・e2e（一時フォルダの仮の設定）（") and det.endswith("）で確認済み")
           and tip.startswith(det),
-          f"S30-1：確認済みは「上下方向 確認済み」を常に出し、「上下の向き：HC20DT・確認した人（日時）で確認済み」は詳しい説明（{short!r}／{det!r}）")
+          f"S30-1：確認済みは「上下方向 確認済み（HC20DT）」を常に出し、「上下の向き：HC20DT・確認した人（日時）で確認済み」は詳しい説明（{short!r}／{det!r}）")
     pg.click("#updown-detail")
     check(pg.is_visible("#updown-full") and pg.get_attribute("#updown-detail", "aria-expanded") == "true"
           and pg.inner_text("#updown-full").startswith(det),
@@ -2787,7 +2788,7 @@ def check_c026(browser, url, check, shots: Path | None) -> None:
         short = pg.inner_text("#updown-detail") if pg.is_visible("#updown-detail") else ""
         det = (pg.text_content("#updown-full") or "").split("。")[0]
         shorts = {"unconfirmed": "上下方向 未確認", "mismatch": "上下方向 設定と違います", "changed": "上下方向 設定が変わっています",
-                  "confirmed": "上下方向 確認済み"}
+                  "confirmed": "上下方向 確認済み（HC20DT）"}  # round4：確認済みは対象のロボット名も出す
         # 音声のカード（.side）の外に置く：右側の 80文字の決まり（下の check_updown_unconfirmed・4ステップで数える）を変えない
         inside = pg.evaluate("() => !!document.querySelector('.side #updown-detail')")
         check(short == shorts.get(value["status"], "上下方向 未確認") and det == details[value["status"]]

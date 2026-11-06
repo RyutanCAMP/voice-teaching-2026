@@ -172,7 +172,11 @@ export function updownDetail(u) {
 // 確認済みと言うのは status が confirmed のときだけ（分からない状態は未確認）
 export function updownShort(u) {
   if (!u || typeof u !== "object" || Array.isArray(u)) return "";
-  if (u.status === "confirmed") return "上下方向 確認済み";
+  if (u.status === "confirmed") {
+    // round4（11/6 唐川さんの決定）：確認済みは対象のロボット名も出す（updownDetail と同じ：設定の robot、無ければアプリの --robot の値）
+    const robot = [u.robot, u.app_robot].find((x) => typeof x === "string" && x.length > 0);
+    return robot ? `上下方向 確認済み（${robot}）` : "上下方向 確認済み";
+  }
   if (u.status === "mismatch") return "上下方向 設定と違います";
   if (u.status === "changed") return "上下方向 設定が変わっています";
   return "上下方向 未確認";
