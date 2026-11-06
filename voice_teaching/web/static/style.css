@@ -337,6 +337,9 @@ body.recording .mic-label { color: #ffb3b6; }
 .cand-values { font-family: "SF Mono", Consolas, monospace; font-size: 16px; color: var(--sub); margin: 0; }
 .cand-warn { margin: 8px 0 0; padding: 8px 12px 8px 28px; background: var(--warn-bg); color: var(--warn-text); border-radius: 12px; font-size: 13px; line-height: 1.5; }
 .approved { font-size: 15px; font-weight: 700; color: var(--green); margin: 8px 0 0; }
+/* UI-1：承認の記録があっても保留中・閉じた画面は緑にしない（黄の三角＋文。上の帯のアイコンの warn と同じ黄） */
+.approved.held { color: var(--warn-text); }
+.approved.held::before { content: "⚠ "; color: #ffb020; }
 /* 承認のあとの3つの状態（台本 Ver.6.1 Scene 3-3）。狭い画面では項目と値を折り返す */
 .approval-states { margin: 6px 0 6px; padding: 0; font-size: 13px; }
 .approval-states .state-row { display: flex; flex-wrap: wrap; gap: 0 10px; padding: 2px 0; border-bottom: 1px solid var(--line); }
@@ -1517,3 +1520,10 @@ body.hero #kbd-button { min-width: 0; width: 44px; padding-inline: 0; }
 .app-build { flex: none; margin-left: 6px; font-family: "SF Mono", Consolas, monospace; font-size: 11px; color: var(--faint);
   white-space: nowrap; cursor: default; user-select: text; }
 @media (max-width: 699.98px) { .app-build { display: none; } }
+/* ===== Issue #8（11/6）：保留のあいだは、候補のポップアップを中身の高さにする（1100〜1499px は左の欄の上に重ねているため）。
+   下にある返事のカード（「取り消しますか？」と［取り消す］［このまま残す］）を、ポップアップの下に隠さない。見せ方だけ ===== */
+@media (min-width: 1100px) and (max-width: 1499px) {
+  body.vt-hold .cand-pop { bottom: auto; max-height: calc(100vh - 128px - 150px); }
+}
+/* 返事のカードの選択肢（［このまま残す（もう一度承認）］など）：狭い欄（1280×720）で文字がボタンの外へはみ出さないよう折り返す */
+#reply-message button.choice { white-space: normal; line-height: 1.3; }

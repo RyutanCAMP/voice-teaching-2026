@@ -1158,6 +1158,98 @@ def check_build_label(browser, check, shots: Path | None, out: Path) -> None:
         srv.server_close()
 
 
+def check_ui1_hold_display(browser, check, shots: Path | None, out: Path) -> None:
+    """UI-1（11/6 クローク Medium・Issue #8 の5）：承認のあとに「ちょっと待って」「違くない？」で保留になる
+    （サーバーは approval あり・hold true・can_export false）と、ポップアップの緑の「✓ 〜さんが承認しました」・
+    3つの状態の「変更候補：人が承認しました」・アプリの記録の「承認 済み」・出力を勧める返事が残っていた。
+    保留のあいだは、どれも出さず黄の「保留中：承認・出力はできません」にする。出力ボタンは押せない。
+    保留から残す（［このまま残す］・「このままでいい」）と承認は消え、承認ボタンで承認し直すと、また緑で出る。"""
+    sys.path.insert(0, str(REPO / "tools"))
+    import demo_mock as dm
+    from voice_teaching import claude_explain as cx
+    from voice_teaching import sim
+    from voice_teaching.claude_interpreter import MockInterpreter
+    from voice_teaching.web import server
+    cx.PRICES[dm.MOCK_MODEL] = cx.Price(input=0.0, output=0.0, cache_write_5m=0.0, cache_write_1h=0.0, cache_read=0.0)
+    ex = cx.Explainer("mock-no-network", dm.MOCK_MODEL, client=dm.ScriptClient(), usage_log=cx.UsageLog(out / "ui1_usage.jsonl"))
+    old_out = sim.DEFAULT_OUT_DIR
+    sim.DEFAULT_OUT_DIR = out / "ui1_sim"
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None, explainer=ex)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+
+    def send(pg, text):
+        fill_text(pg, text)
+        pg.click("#text-send")
+        until(pg, lambda: pg.is_enabled("#text-send") or not pg.is_visible("#text-send"), 15000)
+        pg.wait_for_timeout(300)
+
+    def approve(pg):
+        until(pg, lambda: pg.is_enabled("#open-confirm"), 10000)
+        pg.click("#open-confirm")
+        pg.fill("#approver-name", "e2e確認")
+        pg.click("#approve-button")
+        until(pg, lambda: pg.is_visible("#approval-status") and "✓" in pg.inner_text("#approval-status"), 10000)
+
+    def green(pg, tag):
+        s = pg.inner_text("#approval-status")
+        check(s.startswith("✓") and "e2e確認 さんが承認しました" in s and "held" not in (pg.get_attribute("#approval-status", "class") or "")
+              and pg.is_visible("#approval-states") and "人が承認しました" in pg.inner_text("#approval-states")
+              and pg.is_enabled("#export-button") and pg.get_attribute("#approval-icon", "data-appr") == "ok"
+              and "承認 済み（ボタンで承認）" in pg.text_content("#app-info-status"),
+              f"UI-1 {tag}：保留でない承認済みは、緑の ✓・「人が承認しました」・出力ボタンを押せる（{s}）")
+
+    def held(pg, said):
+        s = pg.inner_text("#approval-status")
+        reply = pg.text_content("#reply-message") or ""
+        info = pg.text_content("#app-info-status") or ""
+        states = pg.inner_text("#approval-states") if pg.is_visible("#approval-states") else ""
+        check(pg.is_visible("#approval-status") and "✓" not in s and "さんが承認しました" not in s
+              and s.startswith("保留中") and "承認・出力はできません" in s
+              and "held" in (pg.get_attribute("#approval-status", "class") or ""),
+              f"UI-1「{said}」：保留中は緑の ✓ を出さず、黄の「保留中：承認・出力はできません」（{s}）")
+        check("人が承認しました" not in states and pg.is_hidden("#approval-states"),
+              f"UI-1「{said}」：保留中は「変更候補：人が承認しました」を出さない（{states!r}）")
+        check("出力は画面の" not in reply and "承認済みです" not in reply and "出力してください" not in reply
+              and "出力してください" not in pg.inner_text("#next-action"),
+              f"UI-1「{said}」：保留中の返事・見出しは出力を勧めない（{' '.join(reply.split())[:80]}）")
+        check(pg.is_disabled("#export-button") and pg.get_attribute("#approval-icon", "data-appr") == "warn"
+              and "承認 済み" not in info and "承認 保留中" in info,
+              f"UI-1「{said}」：出力ボタンは押せない・上の帯は警告・アプリの記録は「承認 保留中」（{info}）")
+
+    try:
+        for said, keep in (("ちょっと待って", "text"), ("違くない？", "button")):
+            pg = browser.new_page(viewport={"width": 1280, "height": 720})
+            pg.add_init_script(FAKE_RECOGNITION)
+            pg.goto(url + "?opening=0")
+            pg.set_input_files("#file-input", str(REPO / "samples/dummy" / "DEMO_C_PLACE.JBI"))
+            pg.wait_for_selector("#job-area:not([hidden])")
+            pg.locator("#position-chips button", has_text="C00005").first.click()
+            send(pg, "Zプラス方向に5ミリ")
+            approve(pg)
+            green(pg, f"前提（{said}の前）")
+            send(pg, said)
+            until(pg, lambda: pg.get_attribute("#approval-icon", "data-appr") == "warn", 10000)
+            held(pg, said)
+            if shots:
+                pg.screenshot(path=str(shots / f"ui1_hold_{keep}.png"))
+            if keep == "button":
+                pg.locator("#reply-message button", has_text="このまま残す").first.click()
+                pg.wait_for_timeout(600)
+            else:
+                send(pg, "このままでいい")
+            until(pg, lambda: pg.get_attribute("#approval-icon", "data-appr") == "pending", 10000)
+            check(pg.is_hidden("#approval-status") and pg.is_disabled("#export-button") and pg.is_enabled("#open-confirm"),
+                  f"UI-1「{said}」→ 残す：承認は消え、緑も保留の文も出ない。もう一度［確認して承認へ］から")
+            approve(pg)
+            green(pg, f"「{said}」→ 残す → 承認し直し")
+            pg.close()
+    finally:
+        sim.DEFAULT_OUT_DIR = old_out
+        srv.shutdown()
+        srv.server_close()
+
+
 def check_export_twice(browser, check, shots: Path | None, out: Path) -> None:
     """11/5 夜 H1：出力に成功したあと［シミュレーション用に出力］をもう一度押す（2回押す・ダブルクリック）と、
     2回目が「既にあるため、上書きしません」の赤い失敗になり、「出力しました」の見出し・「出力 済み」と食い違っていた。
@@ -3679,6 +3771,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             check_mic_after_undo(b, check, shots, out)
             check_hold_after_approval(b, check, shots, out)
             check_build_label(b, check, shots, out)
+            check_ui1_hold_display(b, check, shots, out)
             check_export_twice(b, check, shots, out)
             check_opening_click_through(b, check, shots, out)
             check_export_path_short(b, check, shots, out)

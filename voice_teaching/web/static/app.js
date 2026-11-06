@@ -1342,14 +1342,23 @@ function renderAfterApproval(aa) {
 function renderApproval() {
   const st = state.st;
   const a = st.approval;
-  $("approval-status").textContent = a ? `✓ ${a.approved_by} さんが承認しました` : "";
-  $("approval-status").hidden = !a;
-  $("open-confirm").hidden = !!a;
   const reviewOnly = st.exportable === false;  // 実機の JOB：承認しても出力しない
+  // 緑の ✓ と承認のあとの3つの状態は、サーバーが保留にしていない・画面が終わっていないときだけ（UI-1・唐川さんの決定 main 1e7aa98）。
+  // 保留（承認の記録が残っていても）と閉じた画面は、黄の形で「承認・出力はできません」と出す（上の帯のアイコンと同じ文）。表示だけ
+  const done = !!a && !st.hold && !state.closed && (!!st.can_export || reviewOnly);
+  const heldText = !a || done ? ""
+    : state.closed ? "この画面は終わりました（承認・出力は使えません）"
+    : "保留中：承認・出力はできません（取り消すか確かめています）";
+  $("approval-status").textContent = done ? `✓ ${a.approved_by} さんが承認しました` : heldText;
+  $("approval-status").hidden = !a;
+  $("approval-status").classList.toggle("held", !!a && !done);
+  $("approval-status").dataset.appr = !a ? "" : done ? "ok" : "warn";
+  document.body.classList.toggle("vt-hold", !!st.hold);  // 保留のあいだは返事のカードを隠さない（style.css の Issue #8。見せ方だけ）
+  $("open-confirm").hidden = !!a;
   $("export-button").hidden = !a || reviewOnly;
   $("export-note").hidden = !a || reviewOnly;
   $("export-review-only").hidden = !a || !reviewOnly;
-  renderAfterApproval(a ? st.after_approval : null);
+  renderAfterApproval(done ? st.after_approval : null);
   // 出力に成功したら（今の承認の出力が済み）・出力を送っている間は押せない。2回目が「上書きしません」の赤い失敗になって、
   // 「出力しました」と食い違うため（11/5 夜 H1）。上書きしない決まりはサーバーのまま。1回目の失敗のあとは押せる
   $("export-button").disabled = !st.can_export || !!st.exported || state.exporting || recording();

@@ -78,7 +78,9 @@ def _status_line(has_candidate: bool, blocked: bool, approved: bool, exported: b
         cand = "参考の表示だけ（変更しません・承認できません）"
     else:
         cand = "あり（まだ動作データは変えていません）"
-    return (f"アプリの記録：変更の候補 {cand}／承認 {'済み（ボタンで承認）' if approved else 'まだ'}"
+    # 承認の記録があっても保留中は「済み」と言わない（UI-1・11/6。文だけ。承認・出力の判定は変えない）
+    appr = ("保留中（承認・出力はできません）" if hold else "済み（ボタンで承認）") if approved else "まだ"
+    return (f"アプリの記録：変更の候補 {cand}／承認 {appr}"
             f"／出力 {'済み（シミュレーション用）' if exported else 'まだ'}")
 
 
@@ -957,6 +959,9 @@ class WebFlow:
             with e.lock:
                 if e.closed:
                     return self._closed_reply(sid, e)
+                if msg == STEP_F_APPROVED_NEXT and e.hold:
+                    # 保留中（「ちょっと待って」など）：出力できないので出力を勧めない（UI-1・11/6。文だけ。保留・承認・出力の判定は変えない）
+                    msg = M_HOLD
                 e.session.log.append(("発話", f"{'音声' if source == 'voice' else '文字'}：{text}"))
                 e.session.log.append(("止めた理由", msg))
             hear_out = {"ok": True, "status": "stop", "message": msg, "heard": text, "source": source}
