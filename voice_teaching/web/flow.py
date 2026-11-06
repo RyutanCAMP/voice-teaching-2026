@@ -106,6 +106,10 @@ def _bare(text: str) -> str:
     return re.sub(r"[\s。、．，,.!！?？…〜~]+$", "", ut.normalize(text).strip())
 
 
+# 音声認識の「回」の聞き違い（「2階から3階にして」）。数のすぐあとの「階」だけ
+_ASR_KAI = re.compile(r"([0-9０-９一二三四五六七八九十]+)\s*階")
+
+
 # XC-03（11/7）：承認のあとのためらい（「どう〜」の形の、決めかねている言葉）
 _HESITATION = re.compile(r"どうしよ|どうかな|どうだろ|どうしたもの|どうするか")
 M_Q_ANSWER = ("確かめたいのですね。今の変更候補は {summary} です。図と変更前→変更後の数で確かめてください"
@@ -1024,6 +1028,12 @@ class WebFlow:
                 return self._closed_reply(sid, e)
             # 新しい発話（どの道でも。会話の道・回数の変更の希望も）：前の向きの確かめのボタンは使えない（QA 003 M2）
             e.session.forget_facing()
+            if _ASR_KAI.search(text) and talk.repeat_blocks(e.session.original):
+                # 本番候補 v1.0（11/7・クロークの聞き違いの分類）：音声認識の「2階から3階」は、繰り返しのある JOB では「回」と読む。
+                # 範囲と回数は今までどおり範囲の確かめのボタンで人が確かめる（声では決めない）。作業ログに読み替えを残す
+                fixed = _ASR_KAI.sub(lambda m: m.group(1) + "回", text)
+                e.session.log.append(("読み替え", f"「{text}」の「階」を「回」として読みました（音声認識の聞き違い）"))
+                text = fixed
             pre = self._stale_check(e, text, source, said_by_person=True, remake=True)
             route = "stale" if pre is not None else self._talk_route(e, text)
             if route not in ("hear", "stale"):

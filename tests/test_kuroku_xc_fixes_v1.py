@@ -135,3 +135,19 @@ def test_xc19_teisei_is_a_correction_with_consistent_reply(said, remade):
         assert c is None
     else:
         assert c is not None and c.after_value - c.before_value == pytest.approx(remade)
+
+
+def test_asr_kai_is_read_as_kai_only_for_repeat_jobs():
+    """音声認識の「2階から3階にして」：繰り返しのある JOB では「回」と読み、範囲の確かめのボタンへ（声では決めない）。
+    繰り返しの無い JOB では読み替えない。"""
+    rp = (ROOT / "samples" / "dummy" / "DEMO_BUTTON_REPEAT.JBI").read_bytes()
+    w = WebFlow(interpreter=ci.MockInterpreter(), updown_config=None)
+    sid = w.load(rp)["session_id"]
+    r = w.talk(sid, "2階から3階にして")
+    e = w._entries[sid]
+    assert any(k == "読み替え" for k, _ in e.session.log)
+    assert r["state"]["candidate"] is None and r["state"]["approval"] is None  # 候補は範囲のボタンのあと
+    w2 = WebFlow(interpreter=ci.MockInterpreter(), updown_config=None)
+    sid2 = w2.load(RJ)["session_id"]
+    w2.talk(sid2, "2階から3階にして")
+    assert not any(k == "読み替え" for k, _ in w2._entries[sid2].session.log)
