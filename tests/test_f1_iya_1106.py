@@ -26,6 +26,14 @@ CASES = [(p, a) for p in NG_BOTH for a in (True, False)] + [(p, False) for p in 
 assert len(CASES) == 27
 
 
+# 仕様A（11/6 12:29 唐川さんの決定）：完全な言い直し・新しい指示は、古い候補・承認を失効したうえで、新しい未承認の候補を作る（前の期待：候補なし）
+# 対象・軸・向き・量がプログラムで読める言い直し（C00003 で「Yプラス10ミリ」→ C00003 Y +10.000）
+REMADE = ["いやYプラス10ミリ", "いや Yプラス10ミリ", "あ、いやYプラス10ミリ", "いやC00003をYプラス10ミリ", "いやワイプラス10ミリ",
+          "いやYのプラス方向に10ミリ", "Yプラス10ミリだった"]
+NEW_LINE = b"C00003=400.000,-140.000,300.000,"   # 新しい候補（Y -150 → -140）
+OLD_LINE = b"C00003=400.000,-160.000,300.000,"   # 古い候補（Y -150 → -160）
+
+
 def _run(p: str, approved: bool):
     with tempfile.TemporaryDirectory() as d:
         sim.DEFAULT_OUT_DIR = Path(d) / "o"
@@ -38,37 +46,63 @@ def _run(p: str, approved: bool):
         assert (w.state(sid)["state"]["candidate"] or {}).get("delta") == "-10.000"
         if approved:
             assert w.approve(sid, "QA", candidate_gen=g0)["ok"] is True
-        w.talk(sid, p)
+        reply = w.talk(sid, p)
         st = w.state(sid)["state"]
         g = w.candidate_gen_of(sid)
-        # 画面を通さず、API をそのまま呼ぶ（今の世代・前の世代の両方）
+        # 画面を通さず、API をそのまま呼ぶ（前の世代 → 今の世代の順。承認の前の出力も試す）
         tries = []
-        for gen in {g0, g}:
-            if gen is None:
-                continue
+        for gen in sorted({x for x in (g0, g) if x is not None}):
+            e_pre = w.export(sid, candidate_gen=gen)          # 承認の前の出力（できてはいけない）
             a = w.approve(sid, "QA", candidate_gen=gen)
-            e = w.export(sid, candidate_gen=gen) if a.get("ok") else w.export(sid, candidate_gen=gen)
-            tries.append((gen, a.get("ok"), e.get("ok")))
-        return st, g0, g, tries
+            e = w.export(sid, candidate_gen=gen)
+            body = Path(e["path"]).read_bytes() if e.get("ok") else None
+            tries.append((gen, a.get("ok"), e.get("ok"), e_pre.get("ok"), body))
+        return st, g0, g, tries, reply
 
 
 @pytest.mark.parametrize("p,approved", CASES)
 def test_old_candidate_cannot_be_approved_or_exported_after_correction(p, approved):
-    st, g0, g, tries = _run(p, approved)
+    # 仕様A（11/6 12:29 唐川さんの決定）：完全な言い直し・新しい指示は、古い候補・承認を失効したうえで、新しい未承認の候補を作る（前の期待：候補なし）
+    st, g0, g, tries, reply = _run(p, approved)
     old_left = (st.get("candidate") or {}).get("delta") == "-10.000"
-    assert not any(e_ok for _, _, e_ok in tries), (p, approved, tries)  # 古い候補も新しい何かも、出力されない
+    # 古い世代：承認も出力もできない（どの言い方でも）
+    for gen, a_ok, e_ok, e_pre_ok, body in tries:
+        if gen == g0:
+            assert a_ok is False and e_ok is False and e_pre_ok is False, (p, approved, gen)
+    assert not any(e_pre_ok for *_, e_pre_ok, _ in tries), (p, approved)  # 承認の前には、どの世代も出力できない
+    if p in REMADE:
+        assert g != g0, p
+        assert reply["hear"]["message"].startswith("言い直しを受け取ったため"), (p, reply["hear"])
+        cand = st.get("candidate")
+        assert cand is not None and (cand["target"], cand["delta"]) == ("C00003 Y", "+10.000"), (p, cand)
+        assert st["approval"] is None and st["can_export"] is False, p  # 新しい候補は未承認
+        cur = [t for t in tries if t[0] == g]
+        assert len(cur) == 1
+        _, a_ok, e_ok, _, body = cur[0]
+        if e_ok:  # 新しい候補をボタン（API）で承認したあとの出力：中身は新しい値。古い候補の値は出ない
+            assert NEW_LINE in body and OLD_LINE not in body, p
+        return
+    assert not any(e_ok for _, _, e_ok, _, _ in tries), (p, approved, tries)  # 古い候補も新しい何かも、出力されない
     if old_left:
         assert st["hold"] is True, (p, approved)  # 古い候補が残るなら、必ず保留（承認・出力できない）
         assert st["can_approve"] is False and st["can_export"] is False
-        assert not any(a_ok for _, a_ok, _ in tries), (p, approved, tries)
+        assert not any(a_ok for _, a_ok, _, _, _ in tries), (p, approved, tries)
 
 
 @pytest.mark.parametrize("p", NG_BOTH[:4] + ["いやワイプラス10ミリ", "Yプラス10ミリだった", "プラスだった", "マイナスやなくてプラス"])
 def test_clear_corrections_invalidate_the_candidate_and_bump_generation(p):
-    """値のはっきりした言い直しは、候補を無効にする（候補が無くなり、世代番号が進む）"""
-    st, g0, g, _ = _run(p, approved=True)
-    assert st.get("candidate") is None, p
+    """値のはっきりした言い直しは、候補を無効にする（世代番号が進む）"""
+    # 仕様A（11/6 12:29 唐川さんの決定）：完全な言い直し・新しい指示は、古い候補・承認を失効したうえで、新しい未承認の候補を作る（前の期待：候補なし）
+    st, g0, g, tries, _ = _run(p, approved=True)
     assert st["approval"] is None
+    assert [t[1:4] for t in tries if t[0] == g0] == [(False, False, False)], p  # 古い世代は承認・出力できない
+    if p in REMADE:
+        assert g != g0, p
+        cand = st.get("candidate")
+        assert cand is not None and (cand["target"], cand["delta"]) == ("C00003 Y", "+10.000"), (p, cand)
+        assert st["can_export"] is False
+    else:
+        assert st.get("candidate") is None, p
 
 
 @pytest.mark.parametrize("p", ["いやYプラス10ミリ", "いや Yプラス10ミリ", "いやC00003をYプラス10ミリ", "いやワイプラス10ミリ",

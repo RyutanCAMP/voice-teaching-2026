@@ -122,16 +122,20 @@ def test_natural_direction_still_never_makes_an_unclear_candidate(tmp_path, text
 
 
 def test_natural_direction_with_pending_candidate_is_refused(tmp_path):
-    """A1-54：承認待ちの候補があるときは、今どおり断る（新しい候補にしない）。"""
+    """A1-54：承認待ちの候補があるときは、古い候補を取り消し、新しい指示として読む（新しい候補は未承認）。"""
     w, _, sid = A.place_flow(tmp_path)
     first = w.talk(sid, "Y-方向に10mm")["state"]["candidate"]
     assert first
     # Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：古い候補を残して断る）。
-    # 新しい候補にしないのは今どおり
+    # 仕様A（11/6 12:29 唐川さんの決定）：完全な言い直し・新しい指示は、古い候補・承認を失効したうえで、新しい未承認の候補を作る（前の期待：候補なし）
     old_gen = w.candidate_gen_of(sid)
     r = w.talk(sid, "Y-の方向に5mm")
-    assert r["state"]["candidate"] is None and not r["state"]["approval"]
-    assert not (r.get("hear") or {}).get("candidate_made") and "取り消しました" in hear_msg(r)
+    c = r["state"]["candidate"]
+    assert (c["target"], c["delta"]) == ("C00003 Y", "-5.000") and not r["state"]["approval"]
+    assert r["state"]["can_export"] is False
+    assert (r.get("hear") or {}).get("candidate_made") and "取り消しました" in hear_msg(r)
+    assert hear_msg(r).startswith("言い直しを受け取ったため")
+    assert w.export(sid, candidate_gen=w.candidate_gen_of(sid))["ok"] is False  # 新しい候補は未承認
     assert w.approve(sid, "QA", candidate_gen=old_gen)["ok"] is False
     assert w.export(sid, candidate_gen=old_gen)["ok"] is False
 
@@ -759,17 +763,25 @@ def test_long_position_number_keeps_the_form_message(tmp_path):
 
 
 def test_short_position_confirm_text_is_not_an_approval(tmp_path):
-    """［はい］の文は位置を言い直すだけ（承認ではない）。承認待ちの候補があるときは、今どおり断る。"""
+    """［はい］の文は位置を言い直すだけ（承認ではない）。承認待ちの候補があるときは、古い候補を取り消して新しい指示として読む。"""
     w, _, sid = A.place_flow(tmp_path)
     first = w.talk(sid, "Y-方向に10mm")["state"]["candidate"]
     assert first
     # Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：古い候補を残して断る）
     old_gen = w.candidate_gen_of(sid)
+    # 仕様A（11/6 12:29 唐川さんの決定）：完全な言い直し・新しい指示は、古い候補・承認を失効したうえで、新しい未承認の候補を作る（前の期待：候補なし）
+    # 新しい部分はふつうの道で、短い位置番号の［はい、C00004］の確かめになる（候補はまだ作らない）
     r = w.talk(sid, "c0004をYマイナスに3ミリ")
-    yes = next((c["text"] for c in (r.get("hear") or {}).get("choices", []) if c["label"].startswith("はい")), None)
-    if yes is not None:
-        r = w.talk(sid, yes)
+    assert (r.get("hear") or {}).get("message", "").startswith("言い直しを受け取ったため")
     assert r["state"]["candidate"] is None and r["state"]["approval"] is None
+    yes = next((c["text"] for c in (r.get("hear") or {}).get("choices", []) if c["label"].startswith("はい")), None)
+    assert yes is not None
+    r = w.talk(sid, yes)
+    # ［はい］で新しい候補（C00004 Y -3.000）になる。承認ではない
+    c = r["state"]["candidate"]
+    assert (c["target"], c["delta"]) == ("C00004 Y", "-3.000") and r["state"]["approval"] is None
+    assert r["state"]["can_export"] is False
+    assert w.export(sid, candidate_gen=w.candidate_gen_of(sid))["ok"] is False
     assert w.approve(sid, "QA", candidate_gen=old_gen)["ok"] is False
     assert w.export(sid, candidate_gen=old_gen)["ok"] is False
 

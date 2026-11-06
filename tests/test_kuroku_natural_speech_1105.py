@@ -123,9 +123,11 @@ def test_wish_ending_without_a_selected_position_is_read_like_the_request(tmp_pa
 
 
 def test_wish_ending_with_a_pending_candidate_is_read_like_the_request(tmp_path):
-    """承認待ちの候補があるときも「〜て」と同じ返事（候補を作り直さない。P0 の扱いはシクロの担当なので比べるだけ）。"""
+    """承認待ちの候補があるときも「〜て」と同じ返事（P0 の扱いはシクロの担当なので比べるだけ）。"""
     # Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：古い候補 +3.000 を残す）。
-    # 「〜たい」も「〜て」と同じく無効にする（新しい候補は作らない）
+    # 「〜たい」も「〜て」と同じく無効にする
+    # 仕様A（11/6 12:29 唐川さんの決定）：完全な言い直し・新しい指示は、古い候補・承認を失効したうえで、新しい未承認の候補を作る（前の期待：候補なし）
+    # 「〜たい」も「〜て」と同じ新しい候補（C00003 Z +5.000・未承認）になる
     out = []
     for i, text in enumerate(("Zプラス5ミリ動かしたい", "Zプラス5ミリ動かして")):
         w, _, sid = A.place_flow(tmp_path / str(i))
@@ -135,9 +137,11 @@ def test_wish_ending_with_a_pending_candidate_is_read_like_the_request(tmp_path)
         r = w.talk(sid, text, "voice")
         assert w.approve(sid, "QA", candidate_gen=old_gen)["ok"] is False
         assert w.export(sid, candidate_gen=old_gen)["ok"] is False
-        out.append((hear(r).get("message"), r["state"]["candidate"], r["state"]["approval"]))
-    assert out[0] == out[1] and out[0][1] is None and out[0][2] is None, out
-    assert "取り消しました" in out[0][0]
+        assert w.export(sid, candidate_gen=w.candidate_gen_of(sid))["ok"] is False  # 新しい候補は未承認
+        c = r["state"]["candidate"]
+        out.append((hear(r).get("message"), c and (c["target"], c["delta"]), r["state"]["approval"], r["state"]["can_export"]))
+    assert out[0] == out[1] and out[0][1] == ("C00003 Z", "+5.000") and out[0][2] is None and out[0][3] is False, out
+    assert out[0][0].startswith("言い直しを受け取ったため") and "取り消しました" in out[0][0]
 
 
 # ---- 3. 止めるべきものは今どおり止める ----

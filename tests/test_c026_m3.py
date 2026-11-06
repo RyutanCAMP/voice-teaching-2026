@@ -227,10 +227,15 @@ def test_old_want_change_after_other_work_is_a_normal_instruction():
     assert cand(r) == ("C00005 X", "+2.000")
     # Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：古い候補を残す）
     old_gen = w.candidate_gen_of(sid)
+    # 仕様A（11/6 12:29 唐川さんの決定）：完全な言い直し・新しい指示は、古い候補・承認を失効したうえで、新しい未承認の候補を作る（前の期待：候補なし）
     r2 = press(w, sid, old, "変更したい")
     assert r2["message"].startswith("言い直しを受け取ったため") and "取り消しました" in r2["message"]
-    assert cand(r2) is None and r2["state"]["approval"] is None and r2["tool_calls"] == []
-    assert not r2["candidate_made"]
+    # 新しい部分だけをふつうの指示の道へ通す（解釈器はふつうの1回だけ呼ぶ）。新しい候補は未承認
+    assert cand(r2) == ("C00005 Y", "-3.000") and r2["state"]["approval"] is None and r2["state"]["can_export"] is False
+    assert r2["tool_calls"] == [{"tool": "propose_change",
+                                 "args": {"kind": "shift", "position": "C00005", "axis": "Y", "delta_mm": -3.0}}]
+    assert r2["candidate_made"] and w.candidate_gen_of(sid) != old_gen
+    assert w.export(sid, candidate_gen=w.candidate_gen_of(sid))["ok"] is False  # 承認の前は出力できない
     assert w.approve(sid, "テスト太郎", candidate_gen=old_gen)["ok"] is False
     assert w.export(sid, candidate_gen=old_gen)["ok"] is False
 
@@ -262,8 +267,11 @@ def test_shimasu_with_pending_candidate_says_pending():
     assert cand(w.hear(sid, "Xのプラス2ミリ移動して")) == ("C00005 X", "+2.000")
     # Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：古い候補を残す）
     old_gen = w.candidate_gen_of(sid)
+    # 仕様A（11/6 12:29 唐川さんの決定）：完全な言い直し・新しい指示は、古い候補・承認を失効したうえで、新しい未承認の候補を作る（前の期待：候補なし）
+    # 新しい部分「Yのマイナス3ミリずらします」はふつうの道で M3 の2択になる（候補はまだ作らない）
     r = w.hear(sid, "Yのマイナス3ミリずらします")
-    assert r["message"].startswith("言い直しを受け取ったため") and "取り消しました" in r["message"] and r["choices"] == []
+    assert r["message"].startswith("言い直しを受け取ったため") and "取り消しました" in r["message"]
+    assert r["message"].endswith(TAIL) and labels(r) == LABELS
     assert cand(r) is None and r["state"]["approval"] is None and r["tool_calls"] == []
     assert w.approve(sid, "テスト太郎", candidate_gen=old_gen)["ok"] is False
     assert w.export(sid, candidate_gen=old_gen)["ok"] is False
@@ -360,10 +368,15 @@ def test_s_msg_after_approval():
     assert w.approve(sid, "テスト太郎", candidate_gen=w.candidate_gen_of(sid))["ok"] is True
     # Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：古い候補を残す）
     old_gen = w.candidate_gen_of(sid)
+    # 仕様A（11/6 12:29 唐川さんの決定）：完全な言い直し・新しい指示は、古い候補・承認を失効したうえで、新しい未承認の候補を作る（前の期待：候補なし）
     r = w.hear(sid, "Yのマイナス3ミリ移動して")
     assert r["message"].startswith("言い直しを受け取ったため")
     assert "承認待ち" not in r["message"]
-    assert r["tool_calls"] == [] and cand(r) is None
+    # 新しい部分だけをふつうの道へ（解釈器はふつうの1回だけ）。新しい候補は未承認・出力できない
+    assert r["tool_calls"] == [{"tool": "propose_change",
+                                "args": {"kind": "shift", "position": "C00005", "axis": "Y", "delta_mm": -3.0}}]
+    assert cand(r) == ("C00005 Y", "-3.000") and r["state"]["can_export"] is False
+    assert w.export(sid, candidate_gen=w.candidate_gen_of(sid))["ok"] is False
     # 新しい指示があったので、承認も取り消す（文もそれを伝える）
     assert r["state"]["approval"] is None and "前の承認も取り消しました" in r["message"]
     assert w.approve(sid, "テスト太郎", candidate_gen=old_gen)["ok"] is False
@@ -375,10 +388,15 @@ def test_s_msg_before_approval_is_unchanged():
     assert cand(w.hear(sid, "Xのプラス2ミリ移動して")) == ("C00005 X", "+2.000")
     # Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：古い候補を残す）
     old_gen = w.candidate_gen_of(sid)
+    # 仕様A（11/6 12:29 唐川さんの決定）：完全な言い直し・新しい指示は、古い候補・承認を失効したうえで、新しい未承認の候補を作る（前の期待：候補なし）
     r = w.hear(sid, "Yのマイナス3ミリ移動して")
     assert r["message"].startswith("言い直しを受け取ったため") and "取り消しました" in r["message"]
     assert "前の承認も取り消しました" not in r["message"]  # 承認前：承認の文は付けない
-    assert cand(r) is None and r["state"]["approval"] is None and r["tool_calls"] == []
+    # 新しい部分だけをふつうの道へ（解釈器はふつうの1回だけ）。新しい候補は未承認・出力できない
+    assert cand(r) == ("C00005 Y", "-3.000") and r["state"]["approval"] is None and r["state"]["can_export"] is False
+    assert r["tool_calls"] == [{"tool": "propose_change",
+                                "args": {"kind": "shift", "position": "C00005", "axis": "Y", "delta_mm": -3.0}}]
+    assert w.export(sid, candidate_gen=w.candidate_gen_of(sid))["ok"] is False
     assert w.approve(sid, "テスト太郎", candidate_gen=old_gen)["ok"] is False
     assert w.export(sid, candidate_gen=old_gen)["ok"] is False
 
@@ -396,9 +414,13 @@ def test_s_msg_question_after_approval():
     assert w.approve(sid, "テスト太郎", candidate_gen=old_gen)["ok"] is False
     assert w.export(sid, candidate_gen=old_gen)["ok"] is False
     # 2回目（質問でない指示）は、古い候補と承認を無効にする
+    # 仕様A（11/6 12:29 唐川さんの決定）：完全な言い直し・新しい指示は、古い候補・承認を失効したうえで、新しい未承認の候補を作る（前の期待：候補なし）
     r = w.hear(sid, "Yのマイナス3ミリ移動して")
     assert r["message"].startswith("言い直しを受け取ったため")
-    assert cand(r) is None and r["state"]["approval"] is None and r["tool_calls"] == []
+    assert cand(r) == ("C00005 Y", "-3.000") and r["state"]["approval"] is None and r["state"]["can_export"] is False
+    assert r["tool_calls"] == [{"tool": "propose_change",
+                                "args": {"kind": "shift", "position": "C00005", "axis": "Y", "delta_mm": -3.0}}]
+    assert w.export(sid, candidate_gen=w.candidate_gen_of(sid))["ok"] is False
     assert w.approve(sid, "テスト太郎", candidate_gen=old_gen)["ok"] is False
     assert w.export(sid, candidate_gen=old_gen)["ok"] is False
 

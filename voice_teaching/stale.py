@@ -96,11 +96,16 @@ _AFTER_CANCEL_TE = re.compile(r"((?:取り消|取消|キャンセル|元に戻|�
 # 値の節の、値のほかに許す言葉（「4回にして」「2回のままでいい」）。ほかの言葉（「理由を説明して」）が残れば値の節にしない
 # おおよその量（Q-3・K3）：「3回くらい」「5ミリぐらい」「約3ミリ」は保留にして確かめる
 _APPROX = re.compile(r"くらい|ぐらい|程度|ほど|前後|約|およそ|大体|だいたい|ちょっと|ちょい")
+# 値を確かめるだけの言い方（「5ミリでいい」「5ミリのままで」「3回だよね」「うん5ミリ」）：保留（候補を消さない）
+_CONFIRM = re.compile(r"でいい|でよい|で良い|で大丈夫|のまま|だよね|よね|^うん|^はい|でok|でOK|合って")
+# 単位の言葉（数がかな書き・読めないとき）：保留
+_UNIT_WORD = re.compile(r"ミリ|みり|mm|MM|センチ|せんち|cm|CM|ミリメートル")
 # 相対の量（「あと1回」「もう3ミリ」「さらに」）
 _RELATIVE = re.compile(r"あと|もう|さらに|追加|足して|増やし|減らし")
 # 数の無い量・向きの変更の言葉（Q-3）：候補があるときに言われたら保留にする
 _VAGUE_CHANGE = re.compile(r"半分|倍に|小さく|大きく|減らし|増やし|少なめ|多め|少なく|多く|短く|長く|上げ|下げ|ずらし|動かし"
-                           r"|ちいさく|おおきく|へらし|ふやし|すくなめ|おおめ")
+                           r"|ちいさく|おおきく|へらし|ふやし|すくなめ|おおめ"
+                           r"|(?:^|[、,])(?:もう少し|もうちょっと|少し|ちょっと)?(?:上|下|右|左|前|後ろ|奥|手前|うえ|した)(?:に|へ|の方)")
 _VALUE_FILLER = re.compile(r"にして|にする|にします|に|で|のまま|まま|いい|よい|お願いします|お願い|します|ください|して|だけ")
 
 
@@ -111,6 +116,7 @@ class Verdict:
     explain: str | None = None   # CANCEL_EXPLAIN のとき、Claude に送る説明の節だけ（取消の節は送らない）
     value: str | None = None     # CORRECTION のとき、新しい値の部分（プログラムが読んだ字のまま。案内の文に使うだけ）
     rule: str = ""               # どの規則で決めたか（テスト・作業ログ用）
+    rest: str | None = None      # CORRECTION のとき、新しい内容の部分（仕様 A：完全な指示なら、呼ぶ側がふつうの指示の道へ通す）
 
 
 # 取消・言い直しの言葉のカタカナ書き（声の認識・打ち間違いで出る）。言葉ごとにひらがなに寄せる
@@ -235,8 +241,10 @@ def classify(text: object) -> Verdict:
     cancel_verb = bool(_CANCEL_VERB.search(t))
     # 1・2：承認・出力などの言葉
     if _BUTTON.search(t):
-        if x_clauses or has_m or cancel_verb or _values(t):  # 「3ミリで出力して」：新しい値と出力の頼みが一緒（Q-3）。確かめる
+        if x_clauses or has_m or cancel_verb:
             return Verdict(UNSURE, rule="1 button+cancel")  # 「取り消して承認して」：矛盾する頼み。何も変えずに確かめる
+        if [v for v in _values(t) if not v.startswith("C")] or _UNIT_WORD.search(t):
+            return Verdict(UNSURE, rule="10 button+value")  # 「3ミリで出力して」：新しい値と出力の頼みが一緒（Q-3）。保留して確かめる
         return Verdict(OTHER, rule="2 button")
     # 3：取消の打ち消し・候補を残す言葉
     if _N.search(t) or _KEEP_WORDS.search(t):
@@ -278,7 +286,8 @@ def classify(text: object) -> Verdict:
             return Verdict(CANCEL_EXPLAIN, explain="、".join(others), rule="5 cancel+explain")
         vals = [v for c in others for v in _values(c)]
         if vals and all(_value_clause(c) or _E.fullmatch(c) for c in others):
-            return Verdict(CORRECTION, value=vals[-1], rule="5 cancel+value")
+            return Verdict(CORRECTION, value=vals[-1], rule="5 cancel+value",
+                           rest="、".join(c for c in others if _value_clause(c)))
         return Verdict(UNSURE, rule="5 cancel+rest")
     if has_m:
         # 6：印より後ろ（「に変えて」の形は前）に新しい値
@@ -290,7 +299,8 @@ def classify(text: object) -> Verdict:
         if not vals and m_after:
             vals = _values(t[:m_after.start()])
         if vals:
-            return Verdict(CORRECTION, value=vals[-1], rule="6 correction")
+            rest = t[m_before.end():] if m_before and _values(t[m_before.end():]) else (t[:m_after.start()] if m_after else None)
+            return Verdict(CORRECTION, value=vals[-1], rule="6 correction", rest=rest)
         # 7：印のほかに中身が無い（「違う」「やっぱり」「今の提案は違う」）
         if _empty_rest(t):
             return Verdict(UNSURE, rule="7 bare marker")
@@ -311,16 +321,18 @@ def classify(text: object) -> Verdict:
     if vals:
         if is_plain_question(t):
             return Verdict(OTHER, rule="10 plain question")
-        if _H.search(t) or _ASKING.search(t) or _APPROX.search(t):
-            return Verdict(UNSURE, rule="10 value question")  # 確かめの質問・ためらい・「3回くらい」（K3）：保留
-        if not any(re.search(r"[0-9]", v) for v in vals):
+        if _H.search(t) or _ASKING.search(t) or _APPROX.search(t) or _CONFIRM.search(t):
+            # 確かめの質問・ためらい・「3回くらい」（K3）・値を確かめるだけの言い方（「5ミリでいい」）：保留
+            return Verdict(UNSURE, rule="10 value question")
+        if not any(re.search(r"[0-9]", v) for v in vals if not v.startswith("C")):
             # 軸・符号だけ（「マイナス」「Zプラス」）：量が無く直す先が決まらない。F-1 の「いやX」と同じく保留にして確かめる
             return Verdict(UNSURE, rule="10 sign only")
         if _RELATIVE.search(t):
             # 「あと1回」「もう3ミリ」：相対の言い方。値をそのまま案内に使うと意味を取り違える（「1回にして」と案内しない）
-            return Verdict(CORRECTION, value=None, rule="10 new value relative")
-        return Verdict(CORRECTION, value=vals[-1], rule="10 new value")
-    # 数の無い量の変更（「半分にして」「もう少し小さく」）：直す先が分からないので保留にして確かめる
-    if _VAGUE_CHANGE.search(t):
+            return Verdict(CORRECTION, value=None, rule="10 new value relative")  # 相対の量は作り直さない（聞き返す）
+        return Verdict(CORRECTION, value=vals[-1], rule="10 new value", rest=t)
+    # 数の無い量の変更（「半分にして」「もう少し小さく」「上に」）・単位だけ読めた量（「ごミリ」「3センチ」）：
+    # 直す先が分からないので保留にして確かめる。ふつうの質問（「何を動かしているの？」）は今の道のまま
+    if (_VAGUE_CHANGE.search(t) or _UNIT_WORD.search(t)) and not is_plain_question(t):
         return Verdict(UNSURE, rule="10 vague change")
     return Verdict(OTHER, rule="11 other")

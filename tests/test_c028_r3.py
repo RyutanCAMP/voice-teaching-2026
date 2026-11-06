@@ -254,10 +254,22 @@ def test_message_and_state_always_agree(op, tmp_path):
         assert st["candidate"] is not None and st["approval"] is None, op
     elif msg.startswith(DROPPED):
         assert st["candidate"] is None and st["approval"] is None, op
+    elif msg.startswith(flow_mod.M_HOLD_REVOKED):
+        # Q-3（11/6 Safety レビュー F1）：新しい変更の指示かもしれない文は保留にし、承認も取り消す（黙って消さない）
+        assert st["candidate"] is not None and st["approval"] is None and st["hold"] is True, op
+        assert w.approve(sid, "QA", candidate_gen=old_gen)["ok"] is False
+        assert w.export(sid, candidate_gen=old_gen)["ok"] is False
     elif msg.startswith("言い直しを受け取ったため"):
         # Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：古い候補を残す）
-        assert st["candidate"] is None and st["approval"] is None, op
+        # 仕様A（11/6 12:29 唐川さんの決定）：完全な言い直し・新しい指示は、古い候補・承認を失効したうえで、新しい未承認の候補を作る（前の期待：候補なし）
+        new = {"声 Yのマイナス3ミリ": ("C00005 Y", "-3.000")}.get(op)  # 対象・軸・向き・量が読める新しい指示
+        c = st["candidate"]
+        assert ((c["target"], c["delta"]) if c else None) == new, (op, c)
+        assert st["approval"] is None and st["can_export"] is False, op
         assert "前の承認も取り消しました" in msg, (op, msg)
+        if new:
+            assert w.candidate_gen_of(sid) != old_gen
+            assert w.export(sid, candidate_gen=w.candidate_gen_of(sid))["ok"] is False  # 新しい候補は未承認
         assert w.approve(sid, "QA", candidate_gen=old_gen)["ok"] is False
         assert w.export(sid, candidate_gen=old_gen)["ok"] is False
     else:

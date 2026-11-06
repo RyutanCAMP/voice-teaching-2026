@@ -589,8 +589,10 @@ def test_s_msg_only_when_approval_was_really_cancelled(make_updown, tmp_path):
     assert cand(w.hear(sid, "Zマイナス3ミリ")) == ("C00005 Z", "-3.000")
     # 承認していない：古い候補を無効にする（承認の文は付けない）
     old_gen = w.candidate_gen_of(sid)
+    # 仕様A（11/6 12:29 唐川さんの決定）：完全な言い直し・新しい指示は、古い候補・承認を失効したうえで、新しい未承認の候補を作る（前の期待：候補なし）
     r = w.hear(sid, "Yのマイナス3ミリ")
-    assert cand(r) is None and r["state"]["approval"] is None
+    assert cand(r) == ("C00005 Y", "-3.000") and r["state"]["approval"] is None and r["state"]["can_export"] is False
+    assert r["message"].startswith("言い直しを受け取ったため")
     assert "取り消しました" in r["message"] and APPROVAL_CANCELLED not in r["message"]
     assert "前の承認も取り消しました" not in r["message"]
     assert w.approve(sid, "テスト太郎", candidate_gen=old_gen)["ok"] is False
@@ -600,7 +602,8 @@ def test_s_msg_only_when_approval_was_really_cancelled(make_updown, tmp_path):
     assert w.approve(sid, "テスト太郎", candidate_gen=w.candidate_gen_of(sid))["ok"] is True
     old_gen = w.candidate_gen_of(sid)
     r = w.hear(sid, "Yのマイナス3ミリ", source="voice")
-    assert r["state"]["approval"] is None and cand(r) is None
+    assert r["state"]["approval"] is None and cand(r) == ("C00005 Y", "-3.000") and r["state"]["can_export"] is False
+    assert w.export(sid, candidate_gen=w.candidate_gen_of(sid))["ok"] is False  # 新しい候補は未承認
     assert "取り消しました" in r["message"] and "前の承認も取り消しました" in r["message"]
     assert APPROVAL_CANCELLED not in r["message"]
     assert w.approve(sid, "テスト太郎", candidate_gen=old_gen)["ok"] is False

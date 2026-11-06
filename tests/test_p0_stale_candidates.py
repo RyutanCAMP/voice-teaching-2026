@@ -80,9 +80,20 @@ def test_h02_correction_voids_old_candidate(tmp_path, text):
 
 
 def test_h02_new_count_is_restated_not_made(tmp_path):
-    w, _, sid = pending_three(tmp_path)
+    # 仕様A（11/6 12:29 唐川さんの決定）：完全な言い直し・新しい指示は、古い候補・承認を失効したうえで、新しい未承認の候補を作る（前の期待：候補なし）
+    # 回数の頼み「4回」は新しい指示としてふつうの道へ通す。ふつうの道は 2回→3回 だけを扱うので、4回の候補・範囲の確かめは作らない
+    w, fake, sid = pending_three(tmp_path)
+    old_gen = w.candidate_gen_of(sid)
     r = w.talk(sid, "3回じゃなくて4回")
-    assert "「4回にして」と言い直してください" in r["hear"]["message"]
+    m = r["hear"]["message"]
+    assert m.startswith("言い直しを受け取ったため、前の変更候補（C00001〜C00003 の作業を 2回 → 3回）を取り消しました。"), m
+    assert "新しい指示として読みます" in m and "4回にはしません" in m
+    st = w.state(sid)["state"]
+    assert st["candidate"] is None and st["approval"] is None and st["repeat_range"] is None  # 古い 3回の候補は残らない
+    assert st["candidate_gen"] > old_gen
+    assert w.approve(sid, "QA", candidate_gen=old_gen)["ok"] is False
+    assert w.export(sid, candidate_gen=old_gen)["ok"] is False
+    assert not fake.requests  # Claude は呼ばない
     w2, _, sid2 = pending_three(tmp_path)
     m = w2.talk(sid2, "いや、2回のままでいい")["hear"]["message"]
     assert "今2回です" in m

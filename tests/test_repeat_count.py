@@ -653,9 +653,15 @@ def test_pending_candidate_blocks_another_repeat_request(counting):
     assert first is not None
     # Q-3／F-2（11/6 唐川さんの方針）：新しい変更の指示では古い候補・承認を無効にする（前の期待：「承認待ち」で古い候補を残す）
     old_gen = w.candidate_gen_of(sid)
+    # 仕様A（11/6 12:29 唐川さんの決定）：完全な言い直し・新しい指示は、古い候補・承認を失効したうえで、新しい未承認の候補を作る（前の期待：候補なし）
+    # 回数の頼みは新しい指示としてふつうの道へ通し、いつもの範囲の確かめから始める（候補はまだ作らない。Claude は呼ばない）
     r = w.hear(sid, "C00001からC00003の作業を2回から3回にして")
-    assert "取り消しました" in r["message"] and rng(r) is None and not r["candidate_made"]
+    assert r["message"].startswith("言い直しを受け取ったため") and "取り消しました" in r["message"]
+    assert "を繰り返しますか？" in r["message"] and not r["candidate_made"]
+    assert rng(r) is not None and r["state"]["repeat_range"] is not None
     assert cand(r) is None and r["state"]["approval"] is None and counting.decides == 0
+    assert r["state"]["can_approve"] is False and r["state"]["can_export"] is False
+    assert w.export(sid, candidate_gen=w.candidate_gen_of(sid))["ok"] is False
     assert w.approve(sid, "確認者", candidate_gen=old_gen)["ok"] is False
     assert w.export(sid, candidate_gen=old_gen)["ok"] is False
 

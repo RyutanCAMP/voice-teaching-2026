@@ -130,6 +130,8 @@ M_CXEX_NOASK = ("前の変更候補（{summary}）を取り消しました。元
                 "説明は、もう一度「何をしているか教えて」と聞いてください")
 M_HOWCX = ("取り消す場合は、［元に戻す］を押すか「取り消して」と言ってください。取り消しても元の動作データは変わりません。"
            "今の変更候補はそのままです")
+M_CORR_REMADE = "言い直しを受け取ったため、前の変更候補（{summary}）を取り消しました。承認・出力はできません。新しい指示として読みます。"
+M_HOLD_REVOKED = "新しい変更の指示かもしれないため、前の承認を取り消しました。"  # Q-3 の保留で承認を取り消したとき（文の頭）
 M_UNSURE = ("今の変更候補（{summary}）を取り消しますか？ 取り消す場合は、［元に戻す］を押すか「取り消して」と言ってください。"
             "残す場合は「このままでいい」と言ってください。確かめるまで、承認・出力はできません")
 M_KEPT = "今の変更候補（{summary}）を残しました。承認はまだです。内容を確かめてから、確認表示の承認ボタンで承認してください"
@@ -139,6 +141,21 @@ M_NOGEN = "画面の変更候補の番号がないため、承認・出力でき
 M_STALEGEN = ("画面に出ていた変更候補は、もう使えません（取り消し・言い直し・読み直しのどれかがありました）。"
               "今の内容を確かめてから、もう一度ボタンを押してください")
 M_VOIDED = "（{why}のため、前の変更候補 {summary} は取り消してあります）"
+
+
+def _complete_instruction(text: str) -> bool:
+    """仕様 A：新しい指示として、プログラムの読みで対象・軸・向き・量がそろっているか（そろわなければ聞き返す。推測しない）。
+    位置の移動：軸と向き（軸の文字＋符号、または上下）と mm の量。回数の変更：回数の変更の頼みとして読める。"""
+    if rc.is_repeat_request(text):
+        return True
+    f = ut.read_utterance(text)
+    if f.unclear_amounts or f.negations or f.unknown_words or len(f.amounts) != 1:
+        return False
+    a = f.amounts[0]
+    if a.unit != "mm":
+        return False
+    has_dir = bool(f.vertical) or (bool(f.axes) and (bool(f.axis_signs) or a.sign is not None))
+    return has_dir
 
 
 def _summary(ch) -> str:
@@ -293,7 +310,7 @@ class WebFlow:
             return {"ok": False, "error": "指示の種類（voice か text）が分かりません"}
 
         def run(e: _Entry) -> dict:
-            pre = self._stale_check(e, text, source)
+            pre = self._stale_check(e, text, source, remake=True)
             if pre is not None:
                 summary, tail = pre.pop("summary", None), pre.pop("tail", "")
                 if pre.pop("explain", None) is not None:  # /api/hear からの取消＋説明：取り消すだけ（Claude は呼ばない）
@@ -929,7 +946,7 @@ class WebFlow:
                 return self._closed_reply(sid, e)
             # 新しい発話（どの道でも。会話の道・回数の変更の希望も）：前の向きの確かめのボタンは使えない（QA 003 M2）
             e.session.forget_facing()
-            pre = self._stale_check(e, text, source, said_by_person=True)
+            pre = self._stale_check(e, text, source, said_by_person=True, remake=True)
             route = "stale" if pre is not None else self._talk_route(e, text)
             if route not in ("hear", "stale"):
                 # 指示の道以外（会話・ボタンの案内・変更が2つ・回数）へ回した発話のあとに、前の聞き返しへの答えを当てない
@@ -1319,7 +1336,8 @@ class WebFlow:
         return ((M_HAD_APPROVAL if v["had_approval"] else "")
                 + (M_HAD_EXPORT.format(name=v["exported_name"]) if v["exported_name"] else ""))
 
-    def _stale_check(self, e: _Entry, text: str, source: str, said_by_person: bool = False) -> "dict | None":
+    def _stale_check(self, e: _Entry, text: str, source: str, said_by_person: bool = False,
+                     remake: bool = False) -> "dict | None":
         """取消・言い直し・保留の見分け（プログラム。錠の中で、文を受け取る入口の最初に呼ぶ）。
         候補が無いとき・今の道のままのときは None。扱ったときは、指示の道の答えの形（hear と同じ）を返す。
         取消＋説明なら "explain"（説明の節）・"summary"・"tail" を入れて返す（呼んだ側が使って外す）。"""
@@ -1351,6 +1369,14 @@ class WebFlow:
             return self._stale_out(e, text, source, "ok", msg, v.kind)
         if v.kind == stale.CORRECTION:
             info = self._invalidate(e, "言い直し")
+            if remake and v.rest and _complete_instruction(v.rest):
+                # 仕様 A（11/6 12:29 唐川さんの決定）：完全な新しい指示（対象・軸・向き・量が分かる）は、古い候補・承認を
+                # 失効したうえで、新しい内容だけをふつうの指示の道へ通す（上限・向き・単位などの検査を全部通す。承認はボタンだけ）。
+                # 呼ぶのは talk・hear の入口だけ（ask は読み取りの入口なので作り直さない）
+                out = self._hear_body(e, v.rest, source)
+                out["message"] = M_CORR_REMADE.format(summary=info["summary"]) + self._void_tail(info) + (out.get("message") or "")
+                out["heard"], out["stale"], out["remade_from"] = text, v.kind, v.rest
+                return out
             msg = M_CORR.format(summary=info["summary"]) + self._void_tail(info) + self._corr_next(info, v.value)
             return self._stale_out(e, text, source, "ask", msg, v.kind)
         if v.kind == stale.CANCEL_EXPLAIN:
@@ -1360,11 +1386,16 @@ class WebFlow:
             out.update(explain=v.explain, summary=info["summary"], tail=tail)
             return out
         if v.kind == stale.UNSURE:
+            revoked = False
+            if v.rule.startswith("10"):
+                # Q-3（規則 10）の保留：新しい変更の指示かもしれない。承認も取り消す（取り消しの印を立てる・2層目。
+                # 前は hear の道で承認を取り消していた。安全を保留の印 1つだけに頼らない：11/6 Safety レビュー F1）
+                revoked = self._cancel_approval(e, "新しい変更の指示かもしれないため")
             e.hold = True
             s.log.append(("保留", "取り消すか確かめるまで、変更候補を保留にしました（承認・出力はできません）"))
             if v.asked_form:
                 return None  # 「元に戻しますか」：今の道が［「元に戻します」でよいですか？］で確かめる（押すと取消）。保留のまま
-            msg = M_UNSURE.format(summary=_summary(s.candidate))
+            msg = (M_HOLD_REVOKED if revoked else "") + M_UNSURE.format(summary=_summary(s.candidate))  # 承認は黙って消さない
             return self._stale_out(e, text, source, "ask", msg, v.kind)
         if v.kind == stale.QUESTION_ABOUT_CANCEL:
             return self._stale_out(e, text, source, "ok", M_HOWCX, v.kind)

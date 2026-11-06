@@ -119,7 +119,15 @@ def test_p2_new_value_after_approval_invalidates_candidate_and_approval(text, so
     w, sid = approved(make_updown)
     old_gen = w.candidate_gen_of(sid)
     r = w.hear(sid, text, source)
-    assert r["state"]["approval"] is None and r["state"]["candidate"] is None, (text, r["message"])
+    if text == "3ミリ":  # 軸・向きが無い（不完全）：候補を作らず聞き返す（変わらない）
+        assert r["state"]["approval"] is None and r["state"]["candidate"] is None, (text, r["message"])
+    else:
+        # 仕様A（11/6 12:29 唐川さんの決定）：完全な言い直し・新しい指示は、古い候補・承認を失効したうえで、新しい未承認の候補を作る（前の期待：候補なし）
+        assert r["message"].startswith("言い直しを受け取ったため"), (text, r["message"])
+        assert r["state"]["approval"] is None and cand(r) == ("C00005 Y", "-3.000"), (text, r["message"])
+        assert r["state"]["can_export"] is False
+        assert w.candidate_gen_of(sid) != old_gen
+        assert w.export(sid, candidate_gen=w.candidate_gen_of(sid))["ok"] is False  # 新しい候補は未承認
     assert "取り消しました" in r["message"] and "前の承認も取り消しました" in r["message"], (text, r["message"])
     assert CANCELLED not in r["message"]
     assert w.approve(sid, "唐川", candidate_gen=old_gen)["ok"] is False
