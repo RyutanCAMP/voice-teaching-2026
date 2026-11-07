@@ -228,7 +228,7 @@ def check_header_help(browser, url, check, shots: Path | None) -> None:
         check(pg.is_hidden("#help-pop") and pg.get_attribute("#help-button", "aria-expanded") == "false", f"{tag}：使い方の小窓は最初は閉じている")
         pg.click("#help-button")
         check(pg.is_visible("#help-pop") and pg.get_attribute("#help-button", "aria-expanded") == "true"
-              and "承認は画面の［この変更を承認する］のボタンだけです（声では承認しません）" in pg.inner_text("#help-pop"), f"{tag}：「使い方」を押すと小窓が開く")  # 11/7：承認は1回
+              and "承認は画面の［承認して保存］のボタンだけです（声では承認しません）" in pg.inner_text("#help-pop"), f"{tag}：「使い方」を押すと小窓が開く")  # 11/7：承認は1回
         pb = pg.locator("#help-pop").bounding_box()
         check(pb is not None and pb["x"] >= 0 and pb["x"] + pb["width"] <= w, f"{tag}：小窓は画面の横の内側（{pb}）")
         pg.keyboard.press("Escape")
@@ -315,7 +315,7 @@ def check_ux_polish(browser, url, check, shots: Path | None) -> None:
     check(pg.is_hidden("#help-pop"), "使い方の小窓は最初は閉じている")
     pg.click("#help-button")
     pop = pg.inner_text("#help-pop") if pg.is_visible("#help-pop") else ""
-    check("Y座標を3ミリ下げて" in pop and "承認は画面の［この変更を承認する］のボタンだけです（声では承認しません）" in pop
+    check("Y座標を3ミリ下げて" in pop and "承認は画面の［承認して保存］のボタンだけです（声では承認しません）" in pop
           and pg.get_attribute("#help-button", "aria-expanded") == "true", "「使い方」で使い方の小窓が開く")
     shot(pg, "9_help.png")
     pg.keyboard.press("Escape")
@@ -1565,17 +1565,17 @@ def check_export_twice(browser, check, shots: Path | None, out: Path) -> None:
         # N-1（11/7）：同じ名前のファイルが既にある → 上書きせず、番号を付けた新しいファイル（_02）に出力できる（撮り直し）
         d = out / "h1_sim_exists"
         d.mkdir(parents=True, exist_ok=True)
-        (d / f"DEMO_C_PLACE_SIM_{E2E_STAMP}.JBI.txt").write_text("e2e：前からあるファイル（上書きしないことを確かめる）", encoding="utf-8")
+        (d / f"DEMO_C_PLACE_SIM_{E2E_STAMP}.JBI").write_text("e2e：前からあるファイル（上書きしないことを確かめる）", encoding="utf-8")
         sim.DEFAULT_OUT_DIR = d
         pg, exports = approved_page(1280, 720)
         pg.click("#export-button")
         pg.wait_for_selector("#export-result:not([hidden])")
         pg.wait_for_timeout(300)
         box = pg.inner_text("#export-result")
-        check(pg.get_attribute("#export-result", "data-ok") == "true" and f"DEMO_C_PLACE_SIM_{E2E_STAMP}_02.JBI.txt" in box
+        check(pg.get_attribute("#export-result", "data-ok") == "true" and f"DEMO_C_PLACE_SIM_{E2E_STAMP}_02.JBI" in box
               and len(exports) == 1
-              and (d / f"DEMO_C_PLACE_SIM_{E2E_STAMP}.JBI.txt").read_text(encoding="utf-8").startswith("e2e：")
-              and (d / f"DEMO_C_PLACE_SIM_{E2E_STAMP}_02.JBI.txt").exists() and pg.is_disabled("#export-button"),
+              and (d / f"DEMO_C_PLACE_SIM_{E2E_STAMP}.JBI").read_text(encoding="utf-8").startswith("e2e：")
+              and (d / f"DEMO_C_PLACE_SIM_{E2E_STAMP}_02.JBI").exists() and pg.is_disabled("#export-button"),
               f"N-1（11/7）：同じ名前のファイルがあっても上書きせず、_02 の新しいファイルに出力する（そのあと押せない）：{' '.join(box.split())[:80]}")
         pg.close()
         # 1回目が本当に失敗したとき（番号を付けた名前も全部ある）は、今までどおり失敗を出す（隠さない・上書きしない）
@@ -1734,7 +1734,7 @@ def check_export_path_short(browser, check, shots: Path | None, out: Path) -> No
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{srv.server_address[1]}/"
     saved_out_dir = sim.DEFAULT_OUT_DIR
-    name = f"DEMO_C_PLACE_SIM_{E2E_STAMP}.JBI.txt"  # 11/7：日時つき（e2e は時刻を決めている）
+    name = f"DEMO_C_PLACE_SIM_{E2E_STAMP}.JBI"  # 11/7：日時つき（e2e は時刻を決めている）
     try:
         for (w, h) in [(1920, 1080), (1280, 720)]:
             d = (out / f"h10_{w}" / "output" / "sim").resolve()
@@ -2078,7 +2078,7 @@ IN_VIEW_TOP_JS = """(s) => { const e = document.querySelector(s); if (!e || !e.g
     return !!t && (t === e || e.contains(t)); }); }"""
 EXPORT_EXISTS_NEXT = "次にすること：同じ名前のファイルが output\\sim\\ にあります。消してから、もう一度［出力］"
 E2E_TIME = __import__("datetime").datetime(2026, 11, 7, 12, 15, 30, tzinfo=__import__("datetime").timezone(__import__("datetime").timedelta(hours=9)))  # e2e の出力の時刻（日本時間）
-E2E_STAMP = "20261107_121530"
+E2E_STAMP = "2611071215"
 EXPORT_FULL_NEXT = "次にすること：output\\sim\\ の古いファイルを別の場所へ移してから、もう一度［出力］"  # N-1（11/7）
 
 
@@ -2139,7 +2139,7 @@ def check_export_fail_next(browser, check, shots: Path | None, out: Path) -> Non
             d.mkdir(parents=True, exist_ok=True)
             for n in range(2, sim.MAX_SAME_NAME + 1):
                 sim.output_path_for(d, "DEMO_C_PLACE_SIM", n, E2E_STAMP).write_text("e2e：前からあるファイル", encoding="utf-8")
-            f = d / f"DEMO_C_PLACE_SIM_{E2E_STAMP}.JBI.txt"
+            f = d / f"DEMO_C_PLACE_SIM_{E2E_STAMP}.JBI"
             f.write_text("e2e：前からあるファイル（上書きしないことを確かめる）", encoding="utf-8")
             before = (f.read_bytes(), f.stat().st_mtime_ns)
             sim.DEFAULT_OUT_DIR = d
@@ -2266,7 +2266,7 @@ def check_ask_limit_reset(browser, check, shots: Path | None, out: Path) -> None
         srv.server_close()
 
 
-APPROVE_TIP_BODY = "変更前→変更後と 3D を確かめて、名前を入れて［この変更を承認する］を1回押します。くわしく見るときは［詳しく見る］。声では承認しません。"  # 11/7：承認は1回
+APPROVE_TIP_BODY = "変更前→変更後と 3D を確かめて、名前を入れて［承認して保存］を1回押します。承認のあと SIM 用の JOB を書き、保存の場所を選ぶ窓が開きます。声では承認しません。"  # 11/7：承認は1回
 
 
 def check_approve_tip_error(browser, check, shots: Path | None, out: Path) -> None:
@@ -2615,7 +2615,7 @@ def check_review_only(browser, url, check, shots: Path | None) -> None:
                     until(pg, lambda: pg.is_visible("#export-result"))
                     line = pg.inner_text("#approval-exported") if pg.is_visible("#approval-exported") else ""
                     check(line.startswith("シミュレーション用に出力しました（") and line.endswith("。実機には入れないでください）")
-                          and ".JBI.txt" in line, f"3つの状態：出力のあとに出力した行を足す（{line!r}）")
+                          and ".JBI" in line, f"3つの状態：出力のあとに出力した行を足す（{line!r}）")
                 if synthetic:
                     check(hint == "", f"S30-3 {name}（{width}px）：合成ジョブの承認のあとは、元に戻す案内を出さない（{hint!r}）")
                 else:
@@ -3086,10 +3086,10 @@ def check_repeat(browser, url, check, shots: Path | None, out: Path, errors: lis
     shot(pg, "R5_approved.png")
     pg.click("#export-button")
     pg.wait_for_selector("#export-result:not([hidden])")
-    # 11/7：名前は <ジョブ名>_SIM_YYYYMMDD_HHMMSS.JBI.txt（日本時間）
-    got = sorted((out / "sim").glob("DEMO_BUTTON_REPEAT_SIM_*.JBI.txt"))
+    # 11/7：名前は <ジョブ名>_SIM_YYYYMMDD_HHMMSS.JBI（日本時間）
+    got = sorted((out / "sim").glob("DEMO_BUTTON_REPEAT_SIM_*.JBI"))
     f = got[-1] if got else out / "sim" / "（無い）"
-    check(len(got) == 1 and re.fullmatch(r"DEMO_BUTTON_REPEAT_SIM_\d{8}_\d{6}\.JBI\.txt", f.name) is not None
+    check(len(got) == 1 and re.fullmatch(r"DEMO_BUTTON_REPEAT_SIM_\d{10}\.JBI", f.name) is not None
           and "出力しました" in pg.inner_text("#export-result"), f"回数の変更：出力 {f.name}")
     if f.is_file():
         a = (REPO / "samples/dummy/DEMO_BUTTON_REPEAT.JBI").read_bytes().splitlines()
@@ -3837,6 +3837,10 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
     saved_out_dir = sim.DEFAULT_OUT_DIR
     sim.DEFAULT_OUT_DIR = out / "sim"
     saved_clock = sim.clock
+    # 11/7：本番は［承認して保存］（承認のあと続けて書き、保存の窓）。この e2e の今までの確かめ（承認と出力の間の状態・二重押し・
+    # 出力の失敗）は、承認のあと［保存をやり直す］のボタンで書く形で流す。承認して保存の1回の流れは tools/check_approve_save.py で確かめる
+    from voice_teaching.web import server as _srv
+    _srv.AUTOSAVE_DEFAULT = False
     sim.clock = lambda: E2E_TIME  # 11/7：出力の名前は日本時間の日時つき。e2e では時刻を決めて、同じ名前の確かめを書けるようにする
     updown_cfg = write_test_updown(out / "updown")
     # はじめの通し確認は DEMO_PLACE（C00004 を「上に10mm」）。DEMO_C_PLACE の確認の前に設定を差し替える（読込のときに決まる）
@@ -3942,8 +3946,8 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             pg.wait_for_selector("#export-result:not([hidden])")
             result = pg.inner_text("#export-result")
             files = list((out / "sim").glob("*"))
-            check(len(files) == 1 and re.fullmatch(r"DEMO_PLACE_SIM_\d{8}_\d{6}\.JBI\.txt", files[0].name) is not None,
-                  f"出力の名前は <ジョブ名>_SIM_日時.JBI.txt（日本時間・11/7）：{[f.name for f in files]}")
+            check(len(files) == 1 and re.fullmatch(r"DEMO_PLACE_SIM_\d{10}\.JBI", files[0].name) is not None,
+                  f"出力の名前は <ジョブ名>_SIM_日時.JBI（日本時間・11/7）：{[f.name for f in files]}")
             check("出力しました" in result and len(files) == 1, f"出力：{[f.name for f in files]}")
             if files:
                 a = (REPO / "samples/dummy/DEMO_PLACE.JBI").read_bytes().splitlines()

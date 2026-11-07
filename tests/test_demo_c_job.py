@@ -60,7 +60,7 @@ def test_full_simulation_flow_changes_only_the_place_point(tmp_path):
     e = wf.export(sid, candidate_gen=wf.candidate_gen_of(sid))
     assert e["ok"] is True, e
     out = Path(e["path"])
-    assert re.fullmatch(r"DEMO_C_PLACE_SIM_\d{8}_\d{6}\.JBI\.txt", out.name)  # 11/7：日本時間の日時つき
+    assert re.fullmatch(r"DEMO_C_PLACE_SIM_\d{10}\.JBI", out.name)  # 11/7：日本時間の日時つき
     new = out.read_bytes()
     diff = [(a, b) for a, b in zip(lines(data), lines(new)) if a != b]
     assert diff == [

@@ -48,7 +48,11 @@ _VERSION_MARK = b"__VT_VERSION__"  # index.html の中の版の印（配信す�
 # 版の小さな文字（v1.00-dev など）と詳しい版（v1.00-dev（dev・a1b2c3d））の印。起動のときに決めた srv.build から入れる
 _BUILD_LABEL_MARK = b"__VT_BUILD_LABEL__"
 _BUILD_DETAIL_MARK = b"__VT_BUILD_DETAIL__"
-_CHANNEL_MARK = b"__VT_CHANNEL__"  # 本番候補 v1.0（11/7）：<body data-channel>。dev のときだけ版・SHA・詳細表示を画面に出す（CSS）
+_CHANNEL_MARK = b"__VT_CHANNEL__"
+_AUTOSAVE_MARK = b"__VT_AUTOSAVE__"
+# 承認して保存（11/7 唐川さんの決定）：承認が通ったら続けて SIM を書き、保存の窓を開く。e2e の古い確かめ（承認と出力の間の状態）を
+# 流すときだけ False にする（tools/e2e_browser.py）。本番の起動（python -m voice_teaching.web）はいつも True
+AUTOSAVE_DEFAULT = True  # 本番候補 v1.0（11/7）：<body data-channel>。dev のときだけ版・SHA・詳細表示を画面に出す（CSS）
 # 上の帯の MOCK の印の場所（Issue #8 round4）。モックなら印を入れ、本物の Claude なら空（要素ごと出さない）
 _MOCK_MARK = b"<!--__VT_MOCK_BANNER__-->"
 _MOCK_BANNER = ('<p id="mock-banner" class="mode-banner mock-banner" title="モック：解釈か説明の係が本物の Claude ではありません" '
@@ -111,6 +115,7 @@ class Handler(BaseHTTPRequestHandler):
             body = body.replace(_VERSION_MARK, __version__.encode("ascii"))
             flow = getattr(self.server, "flow", None)
             body = body.replace(_MOCK_MARK, _MOCK_BANNER if (flow is None or flow.uses_mock()) else b"")
+            body = body.replace(_AUTOSAVE_MARK, b"1" if getattr(self.server, "autosave", True) else b"0")
             if build is not None:
                 body = body.replace(_CHANNEL_MARK, html.escape(build.channel).encode("ascii"))
                 body = (body.replace(_BUILD_LABEL_MARK, html.escape(build.label).encode("utf-8"))
@@ -249,6 +254,7 @@ def make_server(host: str = HOST, port: int = DEFAULT_PORT, interpreter=None,
     build = buildinfo.resolve(buildinfo.channel_from(channel))
     srv = ThreadingHTTPServer((HOST, port), Handler)
     srv.build = build
+    srv.autosave = AUTOSAVE_DEFAULT
     srv.daemon_threads = True
     srv.flow = WebFlow(interpreter=interpreter, updown_config=updown_config, robot=robot, explainer=explainer)
     return srv

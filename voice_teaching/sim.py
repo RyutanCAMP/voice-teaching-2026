@@ -29,7 +29,7 @@ SAMPLES_DIR = REPO_ROOT / "samples" / "dummy"
 # シミュレーション用の出力先（固定）。呼び出し側からは選べない（USB など任意の場所へ直接は書かない。CHECKER_019 R6）
 DEFAULT_OUT_DIR = REPO_ROOT / "output" / "sim"
 SIM_SUFFIX = "_SIM"
-SIM_EXTENSION = ".JBI.txt"
+SIM_EXTENSION = ".JBI"  # 11/7 唐川さんの決定（前は .JBI.txt）。名前の _SIM と中の //NAME <ジョブ名>_SIM で区別する
 # 出力の拡張子。.JBI のままにしないことで、取り違えて実機に入れることを減らす（R6）。
 # 拡張子・出力先・ジョブ名の _SIM は誤使用を減らすためのもので、完全に防ぐものではない。JBI の中身に警告のコメントは足さない
 
@@ -272,7 +272,7 @@ def approve(proposal: "SimProposal | SimRepeatProposal", approved_by: str, updow
 
 # ---- 3. シミュレーション用の出力 ----
 def export_sim(proposal: SimProposal, approval: Approval) -> Path:
-    """承認した変更候補を、シミュレーション専用のフォルダ（DEFAULT_OUT_DIR）に <ジョブ名>_SIM.JBI.txt で書く。"""
+    """承認した変更候補を、シミュレーション専用のフォルダ（DEFAULT_OUT_DIR）に <ジョブ名>_SIM_YYMMDDHHMM.JBI で書く。"""
     if isinstance(approval, Approval) and approval.revocation.revoked:
         raise SimError(REVOKED)  # 取り消した承認を手に持ったまま直接呼んでも書かない（P0 設計 0-2 (1) 層2）
     if isinstance(proposal, SimRepeatProposal):
@@ -402,12 +402,12 @@ def clock() -> datetime:
 
 
 def stamp_of(dt: datetime) -> str:
-    """YYYYMMDD_HHMMSS（日本時間）。"""
-    return dt.astimezone(JST).strftime("%Y%m%d_%H%M%S")
+    """YYMMDDHHMM（日本時間・分まで。11/7 唐川さんの決定で短くした）。"""
+    return dt.astimezone(JST).strftime("%y%m%d%H%M")
 
 
 def output_path_for(out: Path, new_name: str, n: int, stamp: str | None = None) -> Path:
-    """出力のファイル名（11/7 唐川さんの決定）：<ジョブ名>_SIM_YYYYMMDD_HHMMSS.JBI.txt（日本時間）。同じ秒に2つ目なら _02 …。
+    """出力のファイル名（11/7 唐川さんの決定）：<ジョブ名>_SIM_YYMMDDHHMM.JBI（日本時間・分まで）。同じ分に2つ目なら _02 …。
     stamp を省くと時刻なしの形（テストと前の版の名前）。"""
     base = f"{new_name}_{stamp}" if stamp else new_name
     return out / (f"{base}{SIM_EXTENSION}" if n == 1 else f"{base}_{n:02d}{SIM_EXTENSION}")

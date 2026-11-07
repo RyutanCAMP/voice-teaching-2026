@@ -1378,6 +1378,8 @@ async function approveWith(nameInput, errorBox, button) {
   closeConfirm();
   $("export-result").hidden = true;
   renderState();
+  // 承認して保存：承認が通ったときだけ、続けて SIM を書いて保存の窓を開く（承認が断られたら書かない）
+  if (autosave() && state.st && state.st.approval && state.st.can_export && !state.st.exported) await doExport();
 }
 function onApproveClick() { return approveWith($("approver-name"), $("confirm-error"), $("approve-button")); }
 $("approve-button").addEventListener("click", onApproveClick);
@@ -1429,7 +1431,8 @@ function renderApproval() {
   const nw = qa && st.candidate.warnings ? st.candidate.warnings.length : 0;
   $("quick-approve-warn").textContent = nw ? `この変更の注意が ${nw} 件あります（上の窓に全部あります。スクロールして読めます）` : "";
   $("quick-approve-warn").hidden = !nw;
-  $("export-button").hidden = !a || reviewOnly;
+  // 承認して保存（11/7）：ふだんは出力のボタンを出さない。書き出しが断られたときだけ［保存をやり直す］を出す（承認はそのまま）
+  $("export-button").hidden = !a || reviewOnly || (autosave() && !exportFailed());
   $("export-note").hidden = !a || reviewOnly;
   $("export-review-only").hidden = !a || !reviewOnly;
   renderAfterApproval(done ? st.after_approval : null);
@@ -1463,7 +1466,10 @@ function splitPath(path) {
   return { dir: i >= 0 ? path.slice(0, i) : "", name: path.slice(i + 1) };
 }
 
-$("export-button").addEventListener("click", async () => {
+// 承認して保存（11/7）：承認が通ったら、続けてこの関数で SIM を書き（サーバーが承認・世代・保留を確かめる）、保存の窓を開く。
+// 保存の窓を閉じた・保存に失敗したときは、承認はそのまま、保存のボタンでやり直せる（書いた中身を使う。もう一度承認しない）。
+// 書き出しそのものが断られたときは［保存をやり直す］（同じ承認で、もう一度サーバーに書かせる）
+async function doExport() {
   if (recording() || state.exporting || (state.st && state.st.exported)) return;  // ダブルクリックでも送るのは1回（11/5 夜 H1）
   state.exporting = true;
   $("export-button").disabled = true;
@@ -1497,7 +1503,9 @@ $("export-button").addEventListener("click", async () => {
   }
   box.hidden = false;
   renderState();
-});
+}
+$("export-button").addEventListener("click", doExport);
+function autosave() { return document.body.dataset.autosave !== "0"; }
 
 // ---- 人が選んだ場所への保存（11/7 唐川さんの決定・FINAL_RC_CHANGE_REQUEST B） ----
 // サーバーが検査して書いた SIM の中身（同じバイト列）だけを保存する。保存の窓（showSaveFilePicker）が使えるときはそれで、
@@ -1551,7 +1559,7 @@ async function saveToChosenPlace(auto) {
   try {
     handle = await window.showSaveFilePicker({
       suggestedName: x.name,
-      types: [{ description: "シミュレーション用の JOB（テキスト・実機に入れない）", accept: { "text/plain": [".txt"] } }],
+      types: [{ description: "シミュレーション用の JOB（.JBI・実機に入れない）", accept: { "application/octet-stream": [".JBI"] } }],
     });
   } catch (err) {
     if (err && err.name === "AbortError") {
@@ -1578,7 +1586,7 @@ async function saveToChosenPlace(auto) {
 function downloadFallback() {
   const x = state.lastExport;
   if (!x) return;
-  const url = URL.createObjectURL(new Blob([b64bytes(x.b64)], { type: "text/plain" }));
+  const url = URL.createObjectURL(new Blob([b64bytes(x.b64)], { type: "application/octet-stream" }));
   const a = el("a", { href: url, download: x.name });
   document.body.append(a);
   a.click();

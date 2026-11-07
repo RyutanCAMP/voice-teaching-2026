@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DUMMY = ROOT / "samples" / "dummy" / "DEMO_PLACE.JBI"
 STATIC = ROOT / "voice_teaching" / "web" / "static"
 ORIGINAL = DUMMY.read_bytes()
-EXPORT_LABEL = "シミュレーション用に出力（合成ジョブだけ・実機に入れない）"
+EXPORT_LABEL = "保存をやり直す（承認はそのまま・合成ジョブだけ・実機に入れない）"  # 11/7：承認して保存。ふだんは出さず、書き出しが断られたときだけ
 ASSERTIVE = ["安全です", "当たります", "干渉します", "当たりません", "干渉しません", "安全な"]
 
 
@@ -87,7 +87,7 @@ def test_full_flow_exports_two_line_diff(wf, tmp_path):
     assert e["ok"] is True, e
     out = Path(e["path"])
     assert out.parent == tmp_path / "sim"
-    assert re.fullmatch(r"DEMO_PLACE_SIM_\d{8}_\d{6}\.JBI\.txt", out.name)  # 11/7：日本時間の日時つき
+    assert re.fullmatch(r"DEMO_PLACE_SIM_\d{10}\.JBI", out.name)  # 11/7：日本時間の日時つき
     new = out.read_bytes()
     a_lines, b_lines = lines(ORIGINAL), lines(new)
     assert len(a_lines) == len(b_lines)
@@ -403,7 +403,7 @@ def test_http_full_flow(running, tmp_path):
     assert r["ok"] is True
     assert Path(r["path"]).read_bytes() != ORIGINAL
     names = sorted(p.name for p in (tmp_path / "sim").iterdir())
-    assert len(names) == 1 and re.fullmatch(r"DEMO_PLACE_SIM_\d{8}_\d{6}\.JBI\.txt", names[0])
+    assert len(names) == 1 and re.fullmatch(r"DEMO_PLACE_SIM_\d{10}\.JBI", names[0])
     # 作業フォルダ（tmp_path）には出力先のほか何も作らない
     assert sorted(p.name for p in tmp_path.iterdir()) == ["sim"]
 

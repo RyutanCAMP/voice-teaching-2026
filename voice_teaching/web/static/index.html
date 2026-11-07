@@ -6,7 +6,7 @@
 <title>Voice Teaching — 話して、動きを確かめる</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
-<body data-channel="__VT_CHANNEL__">
+<body data-channel="__VT_CHANNEL__" data-autosave="__VT_AUTOSAVE__">
 <!-- オープニング（11/5 UI 最終仕様）：起動のときだけの短い演出（約3秒・押すかキーで飛ばせる・動きを減らす設定では止めた絵だけ）。
      表示だけ。ROBOT・TOOL・JOB・READY は、確かめていない接続・安全を言わない（実機に接続しない・TOOL は確認していない・READY はシミュレーションの操作を始められるだけ） -->
 <div id="opening" class="opening" role="dialog" aria-modal="true" aria-label="起動の演出（押すと飛ばします）" hidden>
@@ -95,7 +95,7 @@
       <!-- 11/6 唐川さん（round4）：3D の下の線の種類の凡例をやめ、違いはここに書く -->
       <p class="help-head help-sub">図の線の種類</p>
       <p class="help-line" id="help-line-kinds">MOVL＝直線で移動（実線）。MOVJ＝関節を使って移動（細い点線。点線は順番だけで、実際の通り道ではありません）。破線＝直線とは限りません（目安）</p>
-      <p class="help-line">承認は画面の［この変更を承認する］のボタンだけです（声では承認しません）</p>
+      <p class="help-line">承認は画面の［承認して保存］のボタンだけです（声では承認しません）</p>
     </div><!-- /help-pop -->
   </div>
   <button type="button" id="engineer-toggle" class="icon-btn" aria-label="詳細表示" title="詳細表示" aria-expanded="false" aria-controls="engineer-view"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="16" cy="7" r="2.2" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="10" cy="17" r="2.2" fill="none" stroke="currentColor" stroke-width="1.7"/></svg></button>
@@ -311,22 +311,22 @@
                3D の差分が見えるこの場所で、名前を入れて［この変更を承認する］を1回押す。名前の入力は承認の操作ではない。
                承認の判定はサーバー（候補の世代・保留・上下の向き）のまま。詳しい表示（変わる命令の行など）は［詳しく見る］（任意） -->
           <div id="quick-approve" class="quick-approve" hidden>
-            <p class="quick-approve-note">シミュレーション用の変更です（実機への接続・送信はしません）。上の変更前→変更後と 3D の差分を確かめてから承認してください</p>
+            <p class="quick-approve-note">シミュレーション用の変更です（実機への接続・送信はしません）。上の変更前→変更後と 3D の差分を確かめてから、承認して保存してください（保存の場所を選ぶ窓が開きます）</p>
             <p id="quick-approve-warn" class="quick-approve-warn" hidden></p>
             <p id="quick-approve-error" class="error" hidden></p>
             <div class="quick-approve-row">
               <label for="quick-approver" class="sr-only">承認する人の名前</label>
               <input type="text" id="quick-approver" maxlength="50" autocomplete="name" placeholder="承認する人の名前">
-              <button type="button" id="quick-approve-button" class="approve" disabled>この変更を承認する</button>
+              <button type="button" id="quick-approve-button" class="approve" disabled>承認して保存</button>
             </div>
           </div>
           <button type="button" id="open-confirm" class="link" disabled>詳しく見る（変わる命令の行・注意の全文）</button>
-          <button type="button" id="export-button" class="wide" disabled>シミュレーション用に出力（合成ジョブだけ・実機に入れない）</button>
+          <button type="button" id="export-button" class="wide" disabled>保存をやり直す（承認はそのまま・合成ジョブだけ・実機に入れない）</button>
           <button type="button" id="undo-button" class="link" disabled>元に戻す</button>
           <!-- 出力の結果（出力の場面でいつも見えるよう、操作の欄に出す。出力のあとは出力先の注記の代わり） -->
           <div id="export-result" class="export-result" aria-live="polite" hidden></div>
-          <p id="export-note" class="fine export-note" hidden>出力先：<code id="out-dir"></code>（.JBI.txt）。実機での取り違えを完全に防ぐものではありません。実機には入れないでください。</p>
-          <p class="fine role-note">承認は［この変更を承認する］のボタンだけです<button type="button" class="tip" data-tip="approve">?</button></p>
+          <p id="export-note" class="fine export-note" hidden>出力先：<code id="out-dir"></code>（名前は <JOB名>_SIM_日時.JBI。中のジョブ名も _SIM）。実機での取り違えを完全に防ぐものではありません。実機には入れないでください。</p>
+          <p class="fine role-note">承認は［承認して保存］のボタンだけです<button type="button" class="tip" data-tip="approve">?</button></p>
         </div>
       </div>
     </div>
@@ -469,7 +469,7 @@
       <p id="confirm-error" class="error" hidden></p>
       <label for="approver-name" class="sr-only">承認する人の名前</label>
       <input type="text" id="approver-name" maxlength="50" autocomplete="name" placeholder="承認する人の名前">
-      <button type="button" id="approve-button" class="approve" disabled>承認する</button>
+      <button type="button" id="approve-button" class="approve" disabled>承認して保存</button>
       <button type="button" id="confirm-close" class="link">閉じる</button>
     </div>
   </div>

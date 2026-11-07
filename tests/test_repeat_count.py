@@ -495,7 +495,7 @@ def test_end_to_end_two_to_three(counting):
     a = w.approve(sid, "e2e確認", candidate_gen=w.candidate_gen_of(sid))
     assert a["ok"] is True, a
     x = w.export(sid, candidate_gen=w.candidate_gen_of(sid))
-    assert x["ok"] is True and re.fullmatch(r"DEMO_BUTTON_REPEAT_SIM_\d{8}_\d{6}\.JBI\.txt", x["file_name"]), x
+    assert x["ok"] is True and re.fullmatch(r"DEMO_BUTTON_REPEAT_SIM_\d{10}\.JBI", x["file_name"]), x
     out = lines(Path(x["path"]).read_bytes())
     old = lines(DEMO)
     assert out[1] == b"//NAME DEMO_BUTTON_REPEAT_SIM\r\n"

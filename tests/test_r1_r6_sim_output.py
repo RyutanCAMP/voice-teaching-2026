@@ -4,7 +4,7 @@ R1：実機用の検査で止まった（blocked_reason のある）変更候補
     sim.approve・sim.export_sim・WebFlow.approve/export・HTTP の /api/approve・/api/export のどれからでも断る。
     対象は samples/dummy のすべての合成ジョブ × すべての位置のうち、実機用の検査で止まるもの全部
     （CHECKER_019 が挙げた合成ジョブ7種類を含む範囲）。正しい変更の承認・出力は今までどおり。
-R6：シミュレーション用の出力は、拡張子 .JBI.txt で、シミュレーション専用のフォルダ（sim.DEFAULT_OUT_DIR）だけに書く。
+R6：シミュレーション用の出力は、拡張子 .JBI で、シミュレーション専用のフォルダ（sim.DEFAULT_OUT_DIR）だけに書く。
     出力先を呼び出し側から指定する引数は無い。JBI の中身に警告のコメントは足さない。
     これらは実機での誤使用を完全に防ぐものではない。
 """
@@ -155,7 +155,7 @@ def test_http_api_approves_and_exports_passing_change(running, name, position, b
     e = _post(running, "/api/export", {"session_id": sid, "candidate_gen": gen})
     assert e["ok"] is True, e
     out = Path(e["path"])
-    assert re.fullmatch(re.escape(name.replace(".JBI", "_SIM")) + r"_\d{8}_\d{6}\.JBI\.txt", out.name)  # 11/7：日時つき
+    assert re.fullmatch(re.escape(name.replace(".JBI", "_SIM")) + r"_\d{10}\.JBI", out.name)  # 11/7：日時つき
     assert out.parent == sim.DEFAULT_OUT_DIR.resolve()
     new = out.read_bytes()
     diff = [(a, b) for a, b in zip(data.splitlines(), new.splitlines()) if a != b]
@@ -165,15 +165,16 @@ def test_http_api_approves_and_exports_passing_change(running, name, position, b
     assert (DUMMY / name).read_bytes() == data  # 元のジョブは変わらない
 
 
-# ---- R6：出力先は固定・拡張子は .JBI.txt ----
+# ---- R6：出力先は固定・拡張子は .JBI ----
 def test_output_location_cannot_be_chosen_by_caller():
     assert "out_dir" not in inspect.signature(sim.export_sim).parameters
     assert "out_dir" not in inspect.signature(WebFlow).parameters
     assert "out_dir" not in inspect.signature(server.make_server).parameters
 
 
-def test_sim_output_extension_is_jbi_txt():
-    assert sim.SIM_EXTENSION == ".JBI.txt"
+def test_sim_output_extension_is_jbi():
+    # 11/7 唐川さんの決定：最後の出力の拡張子は .JBI（前は .JBI.txt）。名前の _SIM_ と //NAME の _SIM で区別する
+    assert sim.SIM_EXTENSION == ".JBI"
 
 
 @pytest.mark.real_out_dir

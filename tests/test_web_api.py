@@ -280,7 +280,10 @@ def test_approve_and_export_buttons_start_disabled():
     for attrs, text in buttons:
         if any(w in text for w in ["書き出", "出力", "保存", "転送", "承認する", "ダウンロード", "送信"]):
             assert "disabled" in attrs, text
-        assert not any(w in text for w in ["保存", "転送", "ダウンロード"]), text
+        # 11/7：承認して保存（承認と SIM の保存を1回の操作に）。「保存」の言葉が使えるのは、この3つのボタンだけ（どれも最初は押せない）
+        if "保存" in text:
+            assert text in ("承認して保存", "保存をやり直す（承認はそのまま・合成ジョブだけ・実機に入れない）"), text
+        assert not any(w in text for w in ["転送", "ダウンロード"]), text
     assert re.search(r'<button[^>]*id="approve-button"[^>]*disabled', html)
     assert re.search(r'<button[^>]*id="export-button"[^>]*disabled', html)
     assert re.search(r'<button[^>]*id="quick-approve-button"[^>]*disabled', html)

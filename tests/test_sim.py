@@ -188,8 +188,8 @@ def test_approve_needs_a_person(who):
 def test_export_writes_sim_job_with_two_line_diff(tmp_path):
     p = sim.simulate_shift(job(), "C00004", "Y", 10)
     out = sim.export_sim(p, sim.approve(p, "テスト担当"))
-    # 11/7：名前は <ジョブ名>_SIM_YYYYMMDD_HHMMSS.JBI.txt（日本時間）
-    assert out.parent == tmp_path / "sim" and re.fullmatch(r"DEMO_PLACE_SIM_\d{8}_\d{6}\.JBI\.txt", out.name)
+    # 11/7：名前は <ジョブ名>_SIM_YYYYMMDD_HHMMSS.JBI（日本時間）
+    assert out.parent == tmp_path / "sim" and re.fullmatch(r"DEMO_PLACE_SIM_\d{10}\.JBI", out.name)
     written = out.read_bytes()
     j2 = jbi.parse_bytes(written)
     assert j2.name == "DEMO_PLACE_SIM"
@@ -252,12 +252,12 @@ def test_export_does_not_overwrite(tmp_path, monkeypatch):
     """N-1（11/7）：同じ名前（同じ秒）のファイルがあっても上書きしない。番号を付けた新しいファイルに書く"""
     monkeypatch.setattr(sim, "clock", lambda: FIXED)
     (tmp_path / "sim").mkdir()
-    existing = tmp_path / "sim" / "DEMO_PLACE_SIM_20261107_121530.JBI.txt"
+    existing = tmp_path / "sim" / "DEMO_PLACE_SIM_2611071215.JBI"
     existing.write_bytes(b"keep me")
     p = sim.simulate_shift(job(), "C00004", "Y", 10)
     out = sim.export_sim(p, sim.approve(p, "テスト担当"))
     assert existing.read_bytes() == b"keep me"
-    assert out.name == "DEMO_PLACE_SIM_20261107_121530_02.JBI.txt"
+    assert out.name == "DEMO_PLACE_SIM_2611071215_02.JBI"
     assert b"//NAME DEMO_PLACE_SIM\n" in out.read_bytes() or b"//NAME DEMO_PLACE_SIM\r\n" in out.read_bytes()
 
 
@@ -266,7 +266,7 @@ def test_export_refuses_when_all_numbers_are_used(tmp_path, monkeypatch):
     d = tmp_path / "sim"
     d.mkdir()
     for n in range(1, sim.MAX_SAME_NAME + 1):
-        sim.output_path_for(d, "DEMO_PLACE_SIM", n, "20261107_121530").write_bytes(b"keep")
+        sim.output_path_for(d, "DEMO_PLACE_SIM", n, "2611071215").write_bytes(b"keep")
     p = sim.simulate_shift(job(), "C00004", "Y", 10)
     with pytest.raises(sim.SimError):
         sim.export_sim(p, sim.approve(p, "テスト担当"))

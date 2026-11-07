@@ -82,12 +82,11 @@ def main() -> int:
         pg.click("#quick-approve-button")
         pg.wait_for_timeout(1500)
         shot("08_approved", "画面のボタンで承認")
-        pg.wait_for_function("() => !document.querySelector('#export-button').disabled", timeout=30000)
-        pg.click("#export-button")
+        # 承認して保存（11/7）：承認が通ると続けて書き出す（自動テストでは保存の窓は開かず、保存のボタンを出す）
         pg.wait_for_selector("#export-result:not([hidden])", timeout=30000)
         shot("09_exported", "SIM 用の JOB を出力")
         export_text = pg.inner_text("#export-result")
-        can_again = pg.is_enabled("#export-button")
+        can_again = pg.is_visible("#export-button") and pg.is_enabled("#export-button")
         pg.locator("details.app-info > summary").click()
         shot("10_app_info", "アプリ情報（版・SHA を出さない）")
         pg.locator("details.app-info > summary").click()
@@ -109,8 +108,7 @@ def main() -> int:
         shot("13_repeat_candidate", "回数の変更候補（2回 → 3回）")
         pg.fill("#quick-approver", "唐川")
         pg.click("#quick-approve-button")
-        pg.wait_for_function("() => !document.querySelector('#export-button').disabled", timeout=30000)
-        pg.click("#export-button")
+        # 承認して保存（11/7）：承認が通ると続けて書き出す（自動テストでは保存の窓は開かず、保存のボタンを出す）
         pg.wait_for_selector("#export-result:not([hidden])", timeout=30000)
         shot("14_repeat_exported", "回数の変更を SIM 用に出力")
         count["export_result"] = pg.inner_text("#export-result")[:300]

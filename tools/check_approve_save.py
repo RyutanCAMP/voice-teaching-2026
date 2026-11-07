@@ -1,18 +1,17 @@
-"""承認は1回・保存の場所を選ぶ（11/7 FINAL_RC_CHANGE_REQUEST A・B）の画面の確かめ。偽の Claude・合成 JOB・一時フォルダ。
+"""［承認して保存］（11/7 唐川さんの決定）の画面の確かめ。偽の Claude・合成 JOB・一時フォルダ。本物の Chromium。
 
   python tools/check_approve_save.py [--shots <フォルダ>]
 
-- 承認：候補の窓の横で名前を入れて［この変更を承認する］を1回押すと承認になる（確認表示を開かない）。名前が空なら承認しない。
-  2回すばやく押しても承認の送信は1回。保留・止まった候補では押せない
-- 保存：OS の保存の窓は自動で操作できないので、showSaveFilePicker を偽の窓に差し替えて、①保存できた（読み戻しが同じ）
-  ②取りやめた（失敗ではない）③書けなかった の3つを確かめる。ダウンロード（窓が無いとき）は本物のブラウザーのダウンロードで、
-  中身がサーバーの SIM の中身と同じことを確かめる
-- 実機には何もしない。OS の本物の保存の窓は、人の手で確かめる（報告に手順を書く）
+- 1回の操作：候補の窓の横で名前を入れて［承認して保存］を1回押すと、サーバーが承認を確かめ、通ったら SIM（.JBI）を書き、
+  保存の場所を選ぶ窓を開き、選んだ場所に書いて読み戻しが同じなら「保存しました」。最後の［シミュレーション用に出力］は無い
+- 名前が空なら承認も保存もしない。2回すばやく押しても、承認の送信1回・書き出し1回
+- 保存の窓を閉じた・書けない・読み戻しが違う：保存したと言わない。もう一度承認せずに［保存先を選んで保存］で保存し直せる
+- 保存の窓が無いブラウザー：ダウンロード（中身と名前はサーバーと同じ）
+- OS の本物の保存の窓は自動で操作できないので、showSaveFilePicker を偽の窓に差し替える（本物の窓は人の手で確かめる）
 """
 from __future__ import annotations
 
 import argparse
-import hashlib
 import re
 import sys
 import tempfile
@@ -31,7 +30,8 @@ from voice_teaching.web import server  # noqa: E402
 
 FAKE_PICKER = """
 window.__picks = [];
-window.__pickerMode = 'ok';
+window.__pickerMode = 'MODE';
+Object.defineProperty(navigator, 'webdriver', { get: () => false });  // 人の操作と同じく、承認のあと窓を自動で開かせる
 window.showSaveFilePicker = async (opts) => {
   window.__picks.push(opts.suggestedName);
   if (window.__pickerMode === 'abort') { const e = new Error('cancel'); e.name = 'AbortError'; throw e; }
@@ -46,7 +46,7 @@ window.showSaveFilePicker = async (opts) => {
   };
 };
 """
-
+NAME_RE = r"DEMO_RJ_XYZ_SIM_\d{10}(?:_\d{2})?\.JBI"
 results: list[tuple[bool, str]] = []
 
 
@@ -64,15 +64,27 @@ def main() -> int:
         shots.mkdir(parents=True, exist_ok=True)
     out = Path(tempfile.mkdtemp(prefix="vt-approve-save-"))
     sim.DEFAULT_OUT_DIR = out / "sim"
-    ex = cx.Explainer.from_env({})
-    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None, explainer=ex)
+    server.AUTOSAVE_DEFAULT = True  # 本番と同じ［承認して保存］
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None, explainer=cx.Explainer.from_env({}))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{srv.server_address[1]}/"
-    approves: list[int] = []
+    calls = {"approve": 0, "export": 0}
 
-    def to_candidate(pg):
+    def count(r):
+        for k in calls:
+            if r.url.endswith("/api/" + k):
+                calls[k] += 1
+
+    def page(b, w, h, picker=True, mode="ok"):
+        ctx = b.new_context(viewport={"width": w, "height": h}, accept_downloads=True)
+        pg = ctx.new_page()
+        pg.on("request", count)
+        if picker:
+            pg.add_init_script(FAKE_PICKER.replace("MODE", mode))
+        else:
+            pg.add_init_script("delete window.showSaveFilePicker;")
         pg.goto(url)
-        pg.wait_for_timeout(800)
+        pg.wait_for_timeout(700)
         pg.set_input_files("#file-input", str(ROOT / "samples" / "dummy" / "DEMO_RJ_XYZ.JBI"))
         pg.wait_for_selector("#job-area:not([hidden])")
         pg.locator("#position-chips .chip", has_text="C00004").first.click()
@@ -81,121 +93,92 @@ def main() -> int:
         pg.fill("#text-input", "Zプラス方向に5ミリ動かして")
         pg.click("#text-send")
         pg.wait_for_function("() => !document.querySelector('#quick-approve').hidden", timeout=20000)
+        return ctx, pg
+
+    def text(pg):
+        return pg.inner_text("#export-result") if pg.is_visible("#export-result") else ""
 
     try:
         with sync_playwright() as p:
             b = p.chromium.launch()
             for (w, h) in [(1920, 1080), (1440, 900), (1280, 720)]:
-                ctx = b.new_context(viewport={"width": w, "height": h}, accept_downloads=True)
-                pg = ctx.new_page()
-                pg.on("request", lambda r: approves.append(1) if r.url.endswith("/api/approve") else None)
-                pg.add_init_script(FAKE_PICKER)
-                to_candidate(pg)
-                # 何を承認するかが、承認のボタンと一緒に見えている（対象・JOB・SIM 専用・変更前→変更後）
+                ctx, pg = page(b, w, h)
                 pop = pg.inner_text("#candidate-view")
-                note = pg.inner_text("#quick-approve")
                 vis = pg.evaluate("""() => { const r = document.querySelector('#quick-approve-button').getBoundingClientRect();
                     return r.top >= 0 && r.bottom <= innerHeight && r.width > 0; }""")
-                check("C00004" in pop and "DEMO_RJ_XYZ.JBI" in pop and "シミュレーション用" in pop and "180.000" in pop
-                      and "185.000" in pop and "実機への接続・送信はしません" in (pop + note) and vis
+                check("C00004" in pop and "DEMO_RJ_XYZ.JBI" in pop and "実機への接続・送信はしません" in pop and "180.000" in pop
+                      and "185.000" in pop and vis and pg.inner_text("#quick-approve-button") == "承認して保存"
+                      and pg.is_hidden("#export-button")
                       and "primary" in (pg.get_attribute("#quick-approve-button", "class") or ""),
-                      f"承認の前（{w}×{h}）：対象・JOB・SIM 専用・変更前→変更後が見え、［この変更を承認する］が画面の中で目立つ")
+                      f"押す前（{w}×{h}）：対象・JOB・SIM 専用・変更前→変更後が見え、［承認して保存］だけが目立つ。最後の出力ボタンは無い")
                 if shots:
-                    pg.screenshot(path=str(shots / f"A1_before_approve_{w}x{h}.png"))
-                # 名前が空：承認しない
-                n0 = len(approves)
+                    pg.screenshot(path=str(shots / f"A1_before_approve_save_{w}x{h}.png"))
+                a0, e0 = calls["approve"], calls["export"]
                 pg.click("#quick-approve-button")
                 pg.wait_for_timeout(300)
-                check(len(approves) == n0 and pg.is_visible("#quick-approve-error") and pg.is_hidden("#approval-status"),
-                      f"名前が空（{w}×{h}）：承認の送信をしない・理由を出す")
-                # 1回で承認（確認表示を開かない）。2回すばやく押しても送信は1回
+                check(calls["approve"] == a0 and calls["export"] == e0 and pg.is_visible("#quick-approve-error"),
+                      f"名前が空（{w}×{h}）：承認も保存もしない・理由を出す")
                 pg.fill("#quick-approver", "唐川")
-                n0 = len(approves)
                 pg.click("#quick-approve-button")
                 try:
-                    pg.click("#quick-approve-button", timeout=500)
+                    pg.click("#quick-approve-button", timeout=400)  # 連打
                 except Exception:  # noqa: BLE001  1回目で押せなくなっていれば、それでよい
                     pass
-                pg.wait_for_selector("#approval-status:not([hidden])", timeout=10000)
-                pg.wait_for_timeout(300)
-                check(len(approves) - n0 == 1 and pg.is_hidden("#confirm-overlay")
-                      and "唐川 さんが承認しました" in pg.inner_text("#approval-status") and pg.is_hidden("#quick-approve"),
-                      f"承認は1回（{w}×{h}）：［この変更を承認する］1回で承認。確認表示は開かない。送信 {len(approves) - n0}回")
-                if w == 1920:
-                    # 保存の窓：保存できた（読み戻しで照らし合わせる）
-                    pg.evaluate("() => { window.__pickerMode = 'ok'; }")
-                    pg.evaluate("() => Object.defineProperty(navigator, 'webdriver', { get: () => false })")
-                    with pg.expect_response(lambda r: r.url.endswith("/api/export")) as er:
-                        pg.click("#export-button")
-                    res = er.value.json()
-                    pg.wait_for_function("() => /選んだ場所に保存しました/.test(document.querySelector('#export-result').innerText)",
-                                         timeout=10000)
-                    saved = bytes(pg.evaluate("() => window.__saved"))
-                    server_file = Path(res["path"]).read_bytes()
-                    box = pg.inner_text("#export-result")
-                    picks = pg.evaluate("() => window.__picks")
-                    check(re.fullmatch(r"DEMO_RJ_XYZ_SIM_\d{8}_\d{6}\.JBI\.txt", res["file_name"]) is not None
-                          and picks == [res["file_name"]] and saved == server_file
-                          and hashlib.sha256(saved).hexdigest() == res["sha256"]
-                          and "アプリの記録" in box and "選んだ場所に保存しました" in box,
-                          f"保存の窓：日本時間の日時つきの名前を出し、選んだ場所にサーバーと同じ中身を保存。知らせは「アプリの記録」と分ける（{res['file_name']}）")
-                    if shots:
-                        pg.screenshot(path=str(shots / "B1_saved_to_chosen_place.png"))
-                    # 取りやめ：失敗ではない。ボタンでやり直せる
-                    pg.evaluate("() => { window.__pickerMode = 'abort'; }")
-                    pg.click("#export-result .save-as-pick") if pg.locator("#export-result .save-as-pick").count() else None
-                pg.close()
+                pg.wait_for_function("() => /選んだ場所に保存しました/.test(document.querySelector('#export-result').innerText)",
+                                     timeout=15000)
+                saved = bytes(pg.evaluate("() => window.__saved"))
+                picks = pg.evaluate("() => window.__picks")
+                box = text(pg)
+                check(calls["approve"] - a0 == 1 and calls["export"] - e0 == 1 and bool(picks)
+                      and re.fullmatch(NAME_RE, picks[-1]) is not None
+                      and saved == (out / "sim" / picks[-1]).read_bytes() and "アプリの記録" in box
+                      and "選んだ場所に保存しました" in box and pg.is_hidden("#export-button")
+                      and "唐川 さんが承認しました" in pg.inner_text("#approval-status"),
+                      f"［承認して保存］1回（{w}×{h}）：承認 {calls['approve'] - a0}回・書き出し {calls['export'] - e0}回・"
+                      f"保存の窓の名前 {picks[-1] if picks else None}・選んだ場所とアプリの記録の中身が同じ")
+                if shots:
+                    pg.screenshot(path=str(shots / f"A2_after_approve_save_{w}x{h}.png"))
                 ctx.close()
 
-            # 取りやめ・書けない・読み戻しが違う・ダウンロード（窓が無い）を、それぞれ新しい画面で
             for mode, want in [("abort", "取りやめました"), ("fail", "保存に失敗しました"), ("corrupt", "保存に失敗しました")]:
-                ctx = b.new_context(viewport={"width": 1920, "height": 1080}, accept_downloads=True)
-                pg = ctx.new_page()
-                pg.add_init_script(FAKE_PICKER)
-                to_candidate(pg)
+                ctx, pg = page(b, 1920, 1080, mode=mode)
                 pg.fill("#quick-approver", "唐川")
+                a0, e0 = calls["approve"], calls["export"]
                 pg.click("#quick-approve-button")
-                pg.wait_for_selector("#approval-status:not([hidden])")
-                pg.evaluate(f"() => {{ window.__pickerMode = '{mode}'; }}")
-                pg.evaluate("() => Object.defineProperty(navigator, 'webdriver', { get: () => false })")
-                pg.click("#export-button")
-                pg.wait_for_function(f"() => /{want}/.test(document.querySelector('#export-result').innerText)", timeout=10000)
-                box = pg.inner_text("#export-result")
-                check(want in box and "選んだ場所に保存しました" not in box and pg.locator("#export-result .save-as-download").count() == 1,
-                      f"保存の窓（{mode}）：「{want}」と出し、保存したとは言わない。ダウンロードのボタンを出す")
-                if mode == "abort":
-                    with pg.expect_download() as dl:
-                        pg.click("#export-result .save-as-download")
-                    path = dl.value.path()
-                    got = Path(path).read_bytes()
-                    srv_files = sorted((out / "sim").iterdir())
-                    check(got == srv_files[-1].read_bytes() and dl.value.suggested_filename == srv_files[-1].name
-                          and "ダウンロードを始めました" in pg.inner_text("#export-result"),
-                          f"ダウンロード：中身はサーバーの SIM と同じ・名前も同じ（{dl.value.suggested_filename}）。「保存しました」とは言わない")
-                    if shots:
-                        pg.screenshot(path=str(shots / "B2_cancel_then_download.png"))
-                pg.close()
+                pg.wait_for_function(f"() => /{want}/.test(document.querySelector('#export-result').innerText)", timeout=15000)
+                box = text(pg)
+                check(want in box and "選んだ場所に保存しました" not in box and pg.locator("#export-result .save-as-pick").count() == 1,
+                      f"保存の窓（{mode}）：「{want}」と出し、保存したとは言わない。［保存先を選んで保存］を出す")
+                pg.evaluate("() => { window.__pickerMode = 'ok'; }")
+                pg.click("#export-result .save-as-pick")
+                pg.wait_for_function("() => /選んだ場所に保存しました/.test(document.querySelector('#export-result').innerText)",
+                                     timeout=15000)
+                check(calls["approve"] - a0 == 1 and calls["export"] - e0 == 1 and pg.is_visible("#approval-status"),
+                      f"保存し直し（{mode} のあと）：もう一度承認しない・書き出しも1回のまま・選んだ場所に保存できた")
+                if shots and mode == "abort":
+                    pg.screenshot(path=str(shots / "B1_cancel_then_resave.png"))
                 ctx.close()
 
-            # 保存の窓が無いブラウザー：自動で窓を開かず、ダウンロードと設定の案内
-            ctx = b.new_context(viewport={"width": 1920, "height": 1080})
-            pg = ctx.new_page()
-            pg.add_init_script("delete window.showSaveFilePicker;")
-            to_candidate(pg)
+            ctx, pg = page(b, 1920, 1080, picker=False)
             pg.fill("#quick-approver", "唐川")
             pg.click("#quick-approve-button")
-            pg.wait_for_selector("#approval-status:not([hidden])")
-            pg.click("#export-button")
-            pg.wait_for_selector("#export-result .save-as-download", timeout=10000)
-            box = pg.inner_text("#export-result")
-            check(pg.locator("#export-result .save-as-pick").count() == 0 and "ダウンロード前に各ファイルの保存場所を確認する" in box,
-                  "保存の窓が無いとき：ダウンロードのボタンと、ブラウザーの設定の案内を出す")
-            pg.close()
+            pg.wait_for_selector("#export-result .save-as-download", timeout=15000)
+            with pg.expect_download() as dl:
+                pg.click("#export-result .save-as-download")
+            got = Path(dl.value.path()).read_bytes()
+            name = dl.value.suggested_filename
+            check(re.fullmatch(NAME_RE, name) is not None and got == (out / "sim" / name).read_bytes()
+                  and pg.locator("#export-result .save-as-pick").count() == 0
+                  and "ダウンロードを始めました" in text(pg) and "選んだ場所に保存しました" not in text(pg),
+                  f"保存の窓が無いとき：ダウンロード（{name}）の中身はサーバーと同じ。保存したとは言わない")
             ctx.close()
             b.close()
     finally:
         srv.shutdown()
         srv.server_close()
+    names = sorted(f.name for f in (out / "sim").glob("*"))
+    check(bool(names) and all(re.fullmatch(NAME_RE, n) for n in names) and len(names) == len(set(names)),
+          f"出力の名前はどれも <JOB名>_SIM_YYMMDDHHMM(_NN).JBI・重なりなし（{len(names)}個：{names[:3]}…）")
     ng = [m for ok, m in results if not ok]
     print(f"結果：OK {len(results) - len(ng)}・NG {len(ng)}")
     return 1 if ng else 0
