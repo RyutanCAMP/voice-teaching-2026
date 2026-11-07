@@ -228,7 +228,7 @@ def check_header_help(browser, url, check, shots: Path | None) -> None:
         check(pg.is_hidden("#help-pop") and pg.get_attribute("#help-button", "aria-expanded") == "false", f"{tag}：使い方の小窓は最初は閉じている")
         pg.click("#help-button")
         check(pg.is_visible("#help-pop") and pg.get_attribute("#help-button", "aria-expanded") == "true"
-              and "承認は確認表示のボタンだけです" in pg.inner_text("#help-pop"), f"{tag}：「使い方」を押すと小窓が開く")
+              and "承認は画面の［この変更を承認する］のボタンだけです（声では承認しません）" in pg.inner_text("#help-pop"), f"{tag}：「使い方」を押すと小窓が開く")  # 11/7：承認は1回
         pb = pg.locator("#help-pop").bounding_box()
         check(pb is not None and pb["x"] >= 0 and pb["x"] + pb["width"] <= w, f"{tag}：小窓は画面の横の内側（{pb}）")
         pg.keyboard.press("Escape")
@@ -315,7 +315,7 @@ def check_ux_polish(browser, url, check, shots: Path | None) -> None:
     check(pg.is_hidden("#help-pop"), "使い方の小窓は最初は閉じている")
     pg.click("#help-button")
     pop = pg.inner_text("#help-pop") if pg.is_visible("#help-pop") else ""
-    check("Y座標を3ミリ下げて" in pop and "承認は確認表示のボタンだけです" in pop
+    check("Y座標を3ミリ下げて" in pop and "承認は画面の［この変更を承認する］のボタンだけです（声では承認しません）" in pop
           and pg.get_attribute("#help-button", "aria-expanded") == "true", "「使い方」で使い方の小窓が開く")
     shot(pg, "9_help.png")
     pg.keyboard.press("Escape")
@@ -3082,8 +3082,11 @@ def check_repeat(browser, url, check, shots: Path | None, out: Path, errors: lis
     shot(pg, "R5_approved.png")
     pg.click("#export-button")
     pg.wait_for_selector("#export-result:not([hidden])")
-    f = out / "sim" / "DEMO_BUTTON_REPEAT_SIM.JBI.txt"
-    check(f.is_file() and "出力しました" in pg.inner_text("#export-result"), f"回数の変更：出力 {f.name}")
+    # 11/7：名前は <ジョブ名>_SIM_YYYYMMDD_HHMMSS.JBI.txt（日本時間）
+    got = sorted((out / "sim").glob("DEMO_BUTTON_REPEAT_SIM_*.JBI.txt"))
+    f = got[-1] if got else out / "sim" / "（無い）"
+    check(len(got) == 1 and re.fullmatch(r"DEMO_BUTTON_REPEAT_SIM_\d{8}_\d{6}\.JBI\.txt", f.name) is not None
+          and "出力しました" in pg.inner_text("#export-result"), f"回数の変更：出力 {f.name}")
     if f.is_file():
         a = (REPO / "samples/dummy/DEMO_BUTTON_REPEAT.JBI").read_bytes().splitlines()
         b = f.read_bytes().splitlines()
@@ -3933,7 +3936,8 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
             pg.wait_for_selector("#export-result:not([hidden])")
             result = pg.inner_text("#export-result")
             files = list((out / "sim").glob("*"))
-            check([f.name for f in files] == ["DEMO_PLACE_SIM.JBI.txt"], f"出力の名前は .JBI.txt：{[f.name for f in files]}")
+            check(len(files) == 1 and re.fullmatch(r"DEMO_PLACE_SIM_\d{8}_\d{6}\.JBI\.txt", files[0].name) is not None,
+                  f"出力の名前は <ジョブ名>_SIM_日時.JBI.txt（日本時間・11/7）：{[f.name for f in files]}")
             check("出力しました" in result and len(files) == 1, f"出力：{[f.name for f in files]}")
             if files:
                 a = (REPO / "samples/dummy/DEMO_PLACE.JBI").read_bytes().splitlines()
@@ -5409,9 +5413,10 @@ def check_four_steps(browser, url, check, shots: Path | None) -> None:
       const a = document.querySelector('#fig-3d .inset-amt').getBoundingClientRect();
       return a.top - h.bottom; }""")
     check(gap > 0, f"拡大の窓の見出しと量が重ならない（間 {gap:.0f}px）")
+    # 11/7：承認は1回。目立つのは候補の窓の横の［この変更を承認する］だけ（［詳しく見る］は文字のリンク）
     check(cards(pg) == ["candidate-panel"] and primaries(pg) == 1
-          and "primary" in (pg.get_attribute("#open-confirm", "class") or ""),
-          "ステップ4は「確認して承認へ」だけが目立つ")
+          and "primary" in (pg.get_attribute("#quick-approve-button", "class") or ""),
+          "ステップ4は［この変更を承認する］だけが目立つ")
     check(pg.is_hidden("#export-button"), "承認する前は、出力のボタンを出さない")
     pg.wait_for_timeout(1500)
     check(pg.locator("#fig-3d circle.marker").count() == 1, "再生の印が 3D の中を動く")

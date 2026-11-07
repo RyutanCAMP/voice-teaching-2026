@@ -113,6 +113,10 @@ def _bare(text: str) -> str:
     return re.sub(r"[\s。、．，,.!！?？…〜~]+$", "", ut.normalize(text).strip())
 
 
+# 回数の変更の気持ち（範囲の案内を出すきっかけ。決めるのはプログラムのジョブの解析）
+_REPEAT_INTENT = re.compile(r"繰り返|くりかえ|繰返|反復|リピート|回数|[0-9０-９一二三四五六七八九十]+\s*回(?!転)|もう(?:一|1|１)回")
+
+
 # 音声認識の「回」の聞き違い（「2階から3階にして」）。数のすぐあとの「階」だけ
 _ASR_KAI = re.compile(r"([0-9０-９一二三四五六七八九十]+)\s*階")
 
@@ -1164,10 +1168,73 @@ class WebFlow:
         with e.lock:
             if e.closed:
                 return self._closed_reply(sid, e)
+            guide = self._repeat_guide(e, text, hear_out)
+            if guide is not None:
+                guide["source"] = source
+                prev = (hear_out or {}).get("message") or ""
+                if prev and not prev.startswith("回数の変更は「"):
+                    # 今までの道の理由（「C00004 が区間の外の MOVJ でも使われている」など）は消さずに前に置く
+                    guide["message"] = prev + "\n" + guide["message"]
+                hear_out = guide
+                if "hear" not in via:
+                    via.append("hear")
             self._remember_talk(e, text, ask_out, hear_out)
             self._nl_after(e, text, hear_out)
             state = self._state(sid, e)
         return {"ok": True, "via": via, "ask": ask_out, "hear": hear_out, "state": state, "heard": text, "source": source}
+
+    # ---- 回数の変更の範囲の案内（11/7 FINAL_RC_REPEAT_RANGE_GUIDANCE） ----
+    def _repeat_guide(self, e: _Entry, text: str, out: dict | None) -> dict | None:
+        """回数の変更の気持ち（「繰り返したい」「2回」「もう1回」）があり、今までの道が候補も範囲の確かめも作れなかったとき、
+        決まった文の言い直しを頼む代わりに、この JOB で変えられる範囲をプログラムが調べて案内する（錠の中で呼ぶ）。
+        - 範囲はジョブの解析（repeat_blocks と、2→3回の変更案を本当に作れるか plan_repeat）からだけ。Claude に推測させない
+        - 提出版は「今2回の区間を3回にする」だけ。人が言った範囲・回数が違えば、違うことを書き、置き換えない
+        - 選ぶボタンは、今までの決まった文（範囲の確かめのボタンへ進むだけ）と［今回は変更しない］。どちらも承認ではない"""
+        s = e.session
+        if s.candidate is not None or s.repeat_range is not None or self._approved(e) or e.dialog.step is not None:
+            return None
+        nt = ut.normalize(text)
+        if not _REPEAT_INTENT.search(nt):
+            return None
+        f = ut.read_utterance(text)
+        if f.axes or any(a.unit == "mm" for a in f.amounts):
+            return None  # 位置の移動の指示（「Zプラス5ミリを…」）は案内しない
+        if isinstance(out, dict) and (out.get("candidate_made") or out.get("choices")):
+            return None
+        supported = []
+        for b in talk.repeat_blocks(s.original):
+            if b.count != 2:
+                continue
+            try:
+                s.original.plan_repeat(b.positions[0], b.positions[-1], 3)
+            except Exception:  # noqa: BLE001  作れない区間は案内しない（理由はふつうの道が言う）
+                continue
+            supported.append(b)
+        said = [f"C{int(n):05d}" for n in re.findall(r"C\s*0*([0-9]{1,5})(?![0-9])", nt)]
+        if not supported:
+            msg = ("繰り返しの変更ですね。このJOBでは、繰り返しの回数を変えられる範囲を確認できません"
+                   "（変えられるのは、今2回続けて書かれている作業を3回にすることだけです）。何も変えていません")
+            return {"ok": True, "status": "ask", "message": msg, "heard": text, "source": "text", "choices": [],
+                    "candidate_made": False, "blocked_reason": None, "repeat_guide": {"ranges": []}}
+        lines = ["繰り返しの変更ですね。このJOBで変えられる範囲は "
+                 + "・".join(f"{b.positions[0]}〜{b.positions[-1]}" for b in supported)
+                 + " です。今2回の作業を、3回に増やすことができます（ほかの回数・範囲は、この版では変えません）。"]
+        if len(said) >= 2:
+            want = (said[0], said[-1])
+            if not any((b.positions[0], b.positions[-1]) == want for b in supported):
+                lines.append(f"ご指定の {want[0]}〜{want[1]} とは範囲が違います。使う範囲を下のボタンで選んでください。")
+        nums = [int(x) for x in re.findall(r"([0-9]+)\s*回", re.sub(r"もう\s*(?:一|1)\s*回", "", ut._spoken_numbers(nt)))]  # 「もう1回」は「1回増やす」
+        if nums and all(n != 3 for n in nums):
+            lines.append(f"「{nums[-1]}回」は、今の回数（2回）と変えたあとの回数（3回）のどちらのことか、プログラムは決めません。"
+                         "3回に増やすときだけ、下のボタンを押してください。")
+        choices = [(f"{b.positions[0]}〜{b.positions[-1]} を3回にする（範囲を確かめる）",
+                    rc.canonical(b.positions[0], b.positions[-1], 2, 3)) for b in supported]
+        choices.append(("今回は変更しない", ut.EXPLAIN_CHOICE_TEXT))
+        msg = "".join(lines)
+        s.log.append(("案内", msg))
+        return {"ok": True, "status": "ask", "message": msg, "heard": text, "source": "text",
+                "choices": [{"label": a, "text": b} for a, b in choices], "candidate_made": False, "blocked_reason": None,
+                "repeat_guide": {"ranges": [[b.positions[0], b.positions[-1]] for b in supported]}}
 
     # ---- 意味理解（本番候補 v1.0・voice_teaching/nl_understand.py） ----
     def _nl_available(self, e: _Entry) -> bool:
