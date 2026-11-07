@@ -136,6 +136,16 @@ def main() -> int:
                       and "唐川 さんが承認しました" in pg.inner_text("#approval-status"),
                       f"［承認して保存］1回（{w}×{h}）：承認 {calls['approve'] - a0}回・書き出し {calls['export'] - e0}回・"
                       f"保存の窓の名前 {picks[-1] if picks else None}・選んだ場所とアプリの記録の中身が同じ")
+                # UI-1700-2：見出しは確かめたあとだけ「保存しました」。✓ は1つ（選んだ場所）。アプリの記録は控えとして別の行
+                check(pg.inner_text("#next-action") == "保存しました" and box.count("✓") == 1
+                      and "アプリの記録（控え）に出力しました" in box,
+                      f"保存の言い分け（{w}×{h}）：見出し「{pg.inner_text('#next-action')}」・✓ {box.count('✓')}個")
+                # UI-1700-1・XC-26：承認のあと、候補の窓が 3D の変更の点（C00003〜C00005）を隠さない
+                hidden_pts = pg.evaluate("""() => { const p = document.querySelector('.cand-pop').getBoundingClientRect();
+                    return [...document.querySelectorAll('#fig-3d svg circle')].filter((c) => { const r = c.getBoundingClientRect();
+                      const x = (r.left + r.right) / 2, y = (r.top + r.bottom) / 2;
+                      return r.width > 0 && x >= p.left && x <= p.right && y >= p.top && y <= p.bottom; }).length; }""")
+                check(hidden_pts == 0, f"承認のあと（{w}×{h}）：候補の窓の下に隠れた 3D の点 {hidden_pts}個")
                 if shots:
                     pg.screenshot(path=str(shots / f"A2_after_approve_save_{w}x{h}.png"))
                 ctx.close()
@@ -147,8 +157,12 @@ def main() -> int:
                 pg.click("#quick-approve-button")
                 pg.wait_for_function(f"() => /{want}/.test(document.querySelector('#export-result').innerText)", timeout=15000)
                 box = text(pg)
-                check(want in box and "選んだ場所に保存しました" not in box and pg.locator("#export-result .save-as-pick").count() == 1,
-                      f"保存の窓（{mode}）：「{want}」と出し、保存したとは言わない。［保存先を選んで保存］を出す")
+                head = pg.inner_text("#next-action")
+                check(want in box and "選んだ場所に保存しました" not in box and pg.locator("#export-result .save-as-pick").count() == 1
+                      and "✓" not in box and "保存しました" not in head.replace("保存していません", "") and "まだ" in box,
+                      f"保存の窓（{mode}）：「{want}」と出し、保存したとは言わない（見出し「{head}」・✓ なし）。［保存先を選んで保存］を出す")
+                if shots:
+                    pg.screenshot(path=str(shots / f"B0_{mode}_not_saved.png"))
                 pg.evaluate("() => { window.__pickerMode = 'ok'; }")
                 pg.click("#export-result .save-as-pick")
                 pg.wait_for_function("() => /選んだ場所に保存しました/.test(document.querySelector('#export-result').innerText)",
@@ -169,7 +183,8 @@ def main() -> int:
             name = dl.value.suggested_filename
             check(re.fullmatch(NAME_RE, name) is not None and got == (out / "sim" / name).read_bytes()
                   and pg.locator("#export-result .save-as-pick").count() == 0
-                  and "ダウンロードを始めました" in text(pg) and "選んだ場所に保存しました" not in text(pg),
+                  and "ダウンロードを始めました" in text(pg) and "選んだ場所に保存しました" not in text(pg)
+                  and "✓" not in text(pg) and pg.inner_text("#next-action") != "保存しました",
                   f"保存の窓が無いとき：ダウンロード（{name}）の中身はサーバーと同じ。保存したとは言わない")
             ctx.close()
             b.close()

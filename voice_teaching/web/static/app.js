@@ -613,7 +613,14 @@ function renderSteps() {
     text = "承認しました。出力してください";
     primary = "export-button";
   } else {
-    text = "出力しました";
+    // UI-1700-2（11/7 21時）：「保存しました」は、選んだ場所に書いて読み戻しが同じと確かめたときだけ。
+    // それまでは、アプリの記録に書いたこと（出力）と、保存先がまだであることを分けて出す
+    const ss = state.lastExport ? state.lastExport.save : "";
+    text = ss === "saved" ? "保存しました"
+      : ss === "picking" ? "出力しました。保存の場所を選んでください"
+      : ss === "browser" ? "出力しました（ダウンロードはブラウザーで確かめてください）"
+      : state.lastExport ? "出力しました（保存先にはまだ保存していません）"
+      : "出力しました";
   }
   if (step === 3 && st && st.repeat_range && !recording() && !dialogStep()) {
     // 回数の変更の範囲の確認：画面の上の目立たせるボタンは作らない。範囲の欄の中だけ、［この範囲を繰り返す］を
@@ -1486,11 +1493,11 @@ async function doExport() {
     box.className = "result done";
     box.dataset.ok = "true";
     // 11/7（保存の場所を選ぶ）：サーバーが書いたのは「アプリの記録」（output\sim）。人が選んだ場所への保存は、下の行で別に知らせる
-    box.replaceChildren(el("strong", {}, "✓ シミュレーション用に出力しました（実機には入れないでください）"),
-      el("p", { class: "reason", title: res.path }, "アプリの記録：", el("code", {}, splitPath(res.path).name),
-        "（場所：" + shortDir(splitPath(res.path).dir) + "）"),
-      el("div", { id: "save-as-area", class: "save-as" }));
-    state.lastExport = res.content_b64 ? { name: res.file_name, b64: res.content_b64, sha256: res.sha256 } : null;
+    // UI-1700-2：✓ は「選んだ場所に保存しました」の1つだけ。アプリの記録（控え）と、人が選んだ保存先を別の行に分け、保存先を上に出す
+    box.replaceChildren(el("div", { id: "save-as-area", class: "save-as" }),
+      el("p", { class: "reason export-record", title: res.path }, "アプリの記録（控え）に出力しました：",
+        el("code", {}, splitPath(res.path).name), "（場所：" + shortDir(splitPath(res.path).dir) + "）。シミュレーション用・実機には入れないでください"));
+    state.lastExport = res.content_b64 ? { name: res.file_name, b64: res.content_b64, sha256: res.sha256, save: "" } : null;
     box.hidden = false;
     renderState();
     if (state.lastExport) await saveToChosenPlace(true);
@@ -1522,10 +1529,13 @@ async function sha256hex(bytes) {
   return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 function saveArea() { return document.getElementById("save-as-area"); }
-function saveLine(cls, ...kids) {
+// 保存先の状態（UI-1700-2）："picking" 窓を開いている・"saved" 書いて読み戻しが同じ・"browser" ダウンロードを始めた（完了はブラウザーだけが知る）・
+// "none" まだ保存していない（取りやめ・失敗・窓が無い）。見出しはこの値で言い分ける
+function saveLine(save, cls, ...kids) {
+  if (state.lastExport) state.lastExport.save = save;
   const a = saveArea();
-  if (!a) return;
-  a.replaceChildren(el("p", { class: cls }, ...kids));
+  if (a) a.replaceChildren(el("p", { class: cls }, ...kids));
+  renderState();
 }
 function saveButtons() {
   const a = saveArea();
@@ -1550,11 +1560,12 @@ async function saveToChosenPlace(auto) {
   const x = state.lastExport;
   if (!x) return;
   if (typeof window.showSaveFilePicker !== "function" || (auto && navigator.webdriver)) {
-    const a = saveArea();
-    if (a) a.replaceChildren();  // 窓を自動で開かないとき：ボタンだけ（場所を選んで保存・ダウンロード）
+    // 窓を自動で開かないとき：まだ保存していないと書き、ボタン（場所を選んで保存・ダウンロード）を出す
+    saveLine("none", "save-pending", "保存先：まだ保存していません。下のボタンで保存してください");
     saveButtons();
     return;
   }
+  saveLine("picking", "save-pending", "保存先：保存の場所を選んでください（窓が開きます）");
   let handle;
   try {
     handle = await window.showSaveFilePicker({
@@ -1563,9 +1574,10 @@ async function saveToChosenPlace(auto) {
     });
   } catch (err) {
     if (err && err.name === "AbortError") {
-      saveLine("fine", "保存の場所への保存は取りやめました（アプリの記録には書いてあります。失敗ではありません）");
+      saveLine("none", "save-pending", "保存先：まだ保存していません（保存の場所を選ぶのを取りやめました。アプリの記録には書いてあります）");
     } else {
-      saveLine("fine", "保存の場所を選ぶ窓を開けませんでした（" + ((err && err.name) || "理由不明") + "）。下のボタンでダウンロードできます");
+      saveLine("none", "save-pending", "保存先：まだ保存していません（保存の場所を選ぶ窓を開けませんでした："
+        + ((err && err.name) || "理由不明") + "）。下のボタンでダウンロードできます");
     }
     saveButtons();
     return;
@@ -1577,9 +1589,9 @@ async function saveToChosenPlace(auto) {
     await w.close();
     const back = new Uint8Array(await (await handle.getFile()).arrayBuffer());
     if ((await sha256hex(back)) !== x.sha256) throw new Error("読み戻した中身が違います");
-    saveLine("saved", "✓ 選んだ場所に保存しました：", el("code", {}, handle.name), "（中身をアプリの記録と照らし合わせて確かめました）");
+    saveLine("saved", "saved", "✓ 選んだ場所に保存しました：", el("code", {}, handle.name), "（中身をアプリの記録と照らし合わせて確かめました）");
   } catch (err) {
-    saveLine("error", "選んだ場所への保存に失敗しました（" + ((err && err.message) || "理由不明") + "）。保存したとは扱いません");
+    saveLine("none", "error", "保存先：保存に失敗しました（" + ((err && err.message) || "理由不明") + "）。まだ保存していません");
     saveButtons();
   }
 }
@@ -1592,7 +1604,7 @@ function downloadFallback() {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 60000);
-  saveLine("fine", "ダウンロードを始めました：", el("code", {}, x.name),
+  saveLine("browser", "save-pending", "保存先：ダウンロードを始めました：", el("code", {}, x.name),
     "（保存先と完了は、ブラウザーのダウンロードの表示で確かめてください。アプリからは確かめられません）");
 }
 

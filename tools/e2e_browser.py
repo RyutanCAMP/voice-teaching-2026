@@ -1554,7 +1554,8 @@ def check_export_twice(browser, check, shots: Path | None, out: Path) -> None:
                 pg.wait_for_timeout(800)
                 check(no_contradiction(pg) and len(exports) == 1 and pg.is_disabled("#export-button")
                       and "出力 済み" in (pg.text_content("#status-line") or "")
-                      and pg.inner_text("#next-action") == "出力しました",
+                      # UI-1700-2（11/7 21時）：保存先にまだ保存していないときは、見出しでそれを言い分ける（「保存しました」とは言わない）
+                      and pg.inner_text("#next-action") == "出力しました（保存先にはまだ保存していません）",
                       f"11/5 H1（{w}×{h}・{how}）：出力に成功したあとは［シミュレーション用に出力］を押せず、2回目を送らない。"
                       f"赤い「上書きしません」を出さない（送信 {len(exports)}回・ボタン {'押せない' if pg.is_disabled('#export-button') else '押せる'}・"
                       f"結果「{' '.join(pg.inner_text('#export-result').split())[:60]}」）")
@@ -2165,7 +2166,7 @@ def check_export_fail_next(browser, check, shots: Path | None, out: Path) -> Non
             f.replace(moved / f.name)  # 次にすること（古いファイルを別の場所へ移してから、もう一度［出力］）のとおりにすると、出力できる
             box = press_export(pg, exports)
             check(pg.get_attribute("#export-result", "data-ok") == "true" and "出力しました" in box and "次にすること" not in box
-                  and pg.is_disabled("#export-button") and pg.inner_text("#next-action") == "出力しました" and f.exists(),
+                  and pg.is_disabled("#export-button") and pg.inner_text("#next-action") == "出力しました（保存先にはまだ保存していません）" and f.exists(),  # UI-1700-2
                   f"11/5 確定版 K2（{w}×{h}）：消してから［出力］を押すと出力でき、そのあと押せない（H1）：{box[:80]}")
             pg.close()
         # 失敗のあと［元に戻す］→ 新しい候補：前の結果の欄は消す（もう今の承認のものではない。11/5 確定版 1 の表）
