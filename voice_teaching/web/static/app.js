@@ -538,7 +538,7 @@ function renderSteps() {
   $("mic-button").disabled = micLocked(step);
   renderDialog();
   // 次に押すものを1つだけ目立たせる
-  for (const id of ["drop-zone", "mic-button", "voice-stop", "consent-yes", "text-send", "open-confirm", "undo-button", "export-button", "copy-url"]) {
+  for (const id of ["drop-zone", "mic-button", "voice-stop", "consent-yes", "text-send", "open-confirm", "quick-approve-button", "undo-button", "export-button", "copy-url"]) {
     $(id).classList.remove("primary");
   }
   const st = state.st;
@@ -599,7 +599,7 @@ function renderSteps() {
     primary = null;
   } else if (!st.approval) {
     text = "動きを確かめてください";
-    primary = "open-confirm";
+    primary = st.can_approve ? "quick-approve-button" : "open-confirm";  // 承認は1回（11/7）：候補の窓の横のボタン
   } else if (st.exportable === false) {
     // 実機の JOB（合成ジョブでない）：承認しても出力しない。出力を促さない（内部 QA の再レビュー P1-1）
     text = "承認しました（変更案の確認のみ。実機用JOBは出力できません）";
@@ -1180,6 +1180,7 @@ function renderCandidate() {
     parts.push(band);
   }
   parts.push(el("p", { class: "cand-pos" }, pos));
+  parts.push(candJobLine());
   if (c.estimated) parts.push(estimatedLine(c.estimated));
   parts.push(el("p", { class: "cand-big" }, displayMinus(`${axis}方向に ${c.delta}mm`) + dirName(axis, c.delta, c.direction_names)));
   parts.push(changeLine(axis, c));
@@ -1194,9 +1195,15 @@ function renderCandidate() {
     el("ul", {}, ...c.affected.map((a) => el("li", {}, a))));
 }
 
+// 承認は1回（11/7）：何を承認するかを候補の窓に出す（対象の JOB・シミュレーション用・実機に接続しない）
+function candJobLine() {
+  const job = ($("file-name").textContent || "").trim();
+  return el("p", { class: "cand-job" }, (job ? job + "・" : "") + "シミュレーション用（実機への接続・送信はしません）");
+}
+
 // 回数の変更の候補（docs/REPEAT_COUNT_DESIGN.md）：区間・「×2 → ×3」・足す行。数はサーバーの文字のまま
 function renderRepeatCandidate(c, host) {
-  const parts = [el("p", { class: "cand-pos" }, c.target), el("p", { class: "cand-big repeat-count" }, repeatCountLabel(c)),
+  const parts = [el("p", { class: "cand-pos" }, c.target), candJobLine(), el("p", { class: "cand-big repeat-count" }, repeatCountLabel(c)),
     el("p", { class: "cand-change" }, `合計 ${c.before_value}回`, el("span", { class: "arrow" }, "→"), el("span", { class: "to" }, `${c.after_value}回`))];
   if (c.heard) parts.push(el("p", { class: "cand-heard" }, "指示：「", ...heardNodes(c.heard), "」"));
   if (c.warnings.length) parts.push(el("ul", { class: "cand-warn" }, ...c.warnings.map((w) => el("li", {}, w))));
@@ -1340,17 +1347,20 @@ document.addEventListener("keydown", (ev) => {
 });
 
 // ---- 承認（このボタンからだけ） ----
-async function onApproveClick() {
+// 承認は1回（11/7 唐川さんの決定）：候補の窓の［この変更を承認する］（quick）か、詳しい表示の［承認する］のどちらか1回。
+// どちらも同じ /api/approve（画面が見ていた候補の世代つき）。判定はサーバー。名前の欄は2つを同じ値にそろえる
+async function approveWith(nameInput, errorBox, button) {
   if (recording() || state.approving) return;  // ダブルクリックでも送るのは1回（作業ログに同じ承認を2行残さない。11/5 夜 N2）
-  const name = $("approver-name").value.trim();
+  const name = nameInput.value.trim();
   if (!name) {
-    $("confirm-error").textContent = "名前を入れてから、承認してください";
-    $("confirm-error").hidden = false;
-    $("approver-name").focus();
+    errorBox.textContent = "名前を入れてから、承認してください";
+    errorBox.hidden = false;
+    nameInput.focus();
     return;
   }
   state.approving = true;
   $("approve-button").disabled = true;
+  $("quick-approve-button").disabled = true;
   let res;
   try {
     res = await postJson("/api/approve", { session_id: state.sessionId, approver: name, candidate_gen: candidateGen() });
@@ -1359,16 +1369,23 @@ async function onApproveClick() {
   }
   if (res.state) state.st = res.state;
   if (res.ok !== true) {
-    $("confirm-error").replaceChildren(friendly("approve", res.error || "理由が分かりません"));
-    $("confirm-error").hidden = false;
+    errorBox.replaceChildren(friendly("approve", res.error || "理由が分かりません"));
+    errorBox.hidden = false;
     renderState();
     return;
   }
+  errorBox.hidden = true;
   closeConfirm();
   $("export-result").hidden = true;
   renderState();
 }
+function onApproveClick() { return approveWith($("approver-name"), $("confirm-error"), $("approve-button")); }
 $("approve-button").addEventListener("click", onApproveClick);
+$("quick-approve-button").addEventListener("click",
+  () => approveWith($("quick-approver"), $("quick-approve-error"), $("quick-approve-button")));
+// 名前の欄を2つでそろえる（入れ直しの手間を省くだけ。承認の操作ではない）
+$("quick-approver").addEventListener("input", () => { $("approver-name").value = $("quick-approver").value; });
+$("approver-name").addEventListener("input", () => { $("quick-approver").value = $("approver-name").value; });
 
 // 承認のあとの3つの状態（元の動作データ・変更候補・ロボットへの送信）と、出力したあとの1行。
 // 文はサーバーの決まった文をそのまま出す（ここでは作らない）。承認していなければ何も出さない
@@ -1401,6 +1418,16 @@ function renderApproval() {
   $("approval-status").dataset.appr = !a ? "" : done ? "ok" : "warn";
   document.body.classList.toggle("vt-hold", !!st.hold);  // 保留のあいだは返事のカードを隠さない（style.css の Issue #8。見せ方だけ）
   $("open-confirm").hidden = !!a;
+  // 承認は1回：候補があり、まだ承認していないときだけ、候補の窓の横に名前と［この変更を承認する］を出す
+  const qa = !!st.candidate && !a;
+  $("quick-approve").hidden = !qa;
+  $("quick-approve-button").disabled = !qa || !st.can_approve || state.approving || recording() || state.closed;
+  $("quick-approver").disabled = !qa || !st.can_approve || state.closed;
+  if (!qa) $("quick-approve-error").hidden = true;
+  // 小さい画面では候補の窓の下の注意がスクロールの下になるので、承認のボタンの上に件数を出す（注意を読まずに承認させない）
+  const nw = qa && st.candidate.warnings ? st.candidate.warnings.length : 0;
+  $("quick-approve-warn").textContent = nw ? `この変更の注意が ${nw} 件あります（上の窓に全部あります。スクロールして読めます）` : "";
+  $("quick-approve-warn").hidden = !nw;
   $("export-button").hidden = !a || reviewOnly;
   $("export-note").hidden = !a || reviewOnly;
   $("export-review-only").hidden = !a || !reviewOnly;
@@ -1451,9 +1478,16 @@ $("export-button").addEventListener("click", async () => {
   if (res.ok === true) {
     box.className = "result done";
     box.dataset.ok = "true";
+    // 11/7（保存の場所を選ぶ）：サーバーが書いたのは「アプリの記録」（output\sim）。人が選んだ場所への保存は、下の行で別に知らせる
     box.replaceChildren(el("strong", {}, "✓ シミュレーション用に出力しました（実機には入れないでください）"),
-      el("p", { class: "reason", title: res.path }, el("code", {}, splitPath(res.path).name),
-        "（場所：" + shortDir(splitPath(res.path).dir) + "）"));
+      el("p", { class: "reason", title: res.path }, "アプリの記録：", el("code", {}, splitPath(res.path).name),
+        "（場所：" + shortDir(splitPath(res.path).dir) + "）"),
+      el("div", { id: "save-as-area", class: "save-as" }));
+    state.lastExport = res.content_b64 ? { name: res.file_name, b64: res.content_b64, sha256: res.sha256 } : null;
+    box.hidden = false;
+    renderState();
+    if (state.lastExport) await saveToChosenPlace(true);
+    return;
   } else {
     box.className = "result";
     box.dataset.ok = "false";
@@ -1463,6 +1497,94 @@ $("export-button").addEventListener("click", async () => {
   box.hidden = false;
   renderState();
 });
+
+// ---- 人が選んだ場所への保存（11/7 唐川さんの決定・FINAL_RC_CHANGE_REQUEST B） ----
+// サーバーが検査して書いた SIM の中身（同じバイト列）だけを保存する。保存の窓（showSaveFilePicker）が使えるときはそれで、
+// 使えないとき（非対応のブラウザー・権限・自動テスト）は、ふつうのダウンロードを人が押す。「保存しました」は、書き終えて
+// 読み戻した中身が同じだと確かめてから出す。ダウンロードは完了を確かめられないので「始めました」と書く（保存したとは言わない）
+function b64bytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+async function sha256hex(bytes) {
+  const d = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function saveArea() { return document.getElementById("save-as-area"); }
+function saveLine(cls, ...kids) {
+  const a = saveArea();
+  if (!a) return;
+  a.replaceChildren(el("p", { class: cls }, ...kids));
+}
+function saveButtons() {
+  const a = saveArea();
+  if (!a || !state.lastExport) return;
+  const pick = typeof window.showSaveFilePicker === "function";
+  const row = el("div", { class: "save-as-row" });
+  if (pick) {
+    const b = el("button", { type: "button", class: "save-as-pick" }, "保存先を選んで保存");
+    b.addEventListener("click", () => saveToChosenPlace(false));
+    row.append(b);
+  }
+  const d = el("button", { type: "button", class: "save-as-download link" }, "ダウンロードとして保存");
+  d.addEventListener("click", downloadFallback);
+  row.append(d);
+  a.append(row);
+  if (!pick) {
+    a.append(el("p", { class: "fine" }, "このブラウザーでは保存の場所を選ぶ窓を使えません。ダウンロードの保存先はブラウザーの設定です"
+      + "（Chrome の「ダウンロード前に各ファイルの保存場所を確認する」をオンにすると、場所を選べます）"));
+  }
+}
+async function saveToChosenPlace(auto) {
+  const x = state.lastExport;
+  if (!x) return;
+  if (typeof window.showSaveFilePicker !== "function" || (auto && navigator.webdriver)) {
+    saveLine("fine", "保存の場所を選ぶときは、下のボタンを押してください（アプリの記録には書いてあります）");
+    saveButtons();
+    return;
+  }
+  let handle;
+  try {
+    handle = await window.showSaveFilePicker({
+      suggestedName: x.name,
+      types: [{ description: "シミュレーション用の JOB（テキスト・実機に入れない）", accept: { "text/plain": [".txt"] } }],
+    });
+  } catch (err) {
+    if (err && err.name === "AbortError") {
+      saveLine("fine", "保存の場所への保存は取りやめました（アプリの記録には書いてあります。失敗ではありません）");
+    } else {
+      saveLine("fine", "保存の場所を選ぶ窓を開けませんでした（" + ((err && err.name) || "理由不明") + "）。下のボタンでダウンロードできます");
+    }
+    saveButtons();
+    return;
+  }
+  try {
+    const bytes = b64bytes(x.b64);
+    const w = await handle.createWritable();
+    await w.write(bytes);
+    await w.close();
+    const back = new Uint8Array(await (await handle.getFile()).arrayBuffer());
+    if ((await sha256hex(back)) !== x.sha256) throw new Error("読み戻した中身が違います");
+    saveLine("saved", "✓ 選んだ場所に保存しました：", el("code", {}, handle.name), "（中身をアプリの記録と照らし合わせて確かめました）");
+  } catch (err) {
+    saveLine("error", "選んだ場所への保存に失敗しました（" + ((err && err.message) || "理由不明") + "）。保存したとは扱いません");
+    saveButtons();
+  }
+}
+function downloadFallback() {
+  const x = state.lastExport;
+  if (!x) return;
+  const url = URL.createObjectURL(new Blob([b64bytes(x.b64)], { type: "text/plain" }));
+  const a = el("a", { href: url, download: x.name });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  saveLine("fine", "ダウンロードを始めました：", el("code", {}, x.name),
+    "（保存先と完了は、ブラウザーのダウンロードの表示で確かめてください。アプリからは確かめられません）");
+}
 
 // 出力に失敗したときの「次にすること」（11/5 確定版 1・K2）。理由はサーバーの文のまま出し、ここでは次の操作だけを足す。
 // 同じ名前のファイルは上書きしない（サーバーの決まり）ので、消してから押し直してもらう。承認が消えたら承認し直してもらう

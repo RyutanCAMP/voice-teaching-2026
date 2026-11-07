@@ -95,7 +95,7 @@
       <!-- 11/6 唐川さん（round4）：3D の下の線の種類の凡例をやめ、違いはここに書く -->
       <p class="help-head help-sub">図の線の種類</p>
       <p class="help-line" id="help-line-kinds">MOVL＝直線で移動（実線）。MOVJ＝関節を使って移動（細い点線。点線は順番だけで、実際の通り道ではありません）。破線＝直線とは限りません（目安）</p>
-      <p class="help-line">承認は確認表示のボタンだけです</p>
+      <p class="help-line">承認は画面の［この変更を承認する］のボタンだけです（声では承認しません）</p>
     </div><!-- /help-pop -->
   </div>
   <button type="button" id="engineer-toggle" class="icon-btn" aria-label="詳細表示" title="詳細表示" aria-expanded="false" aria-controls="engineer-view"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="16" cy="7" r="2.2" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="10" cy="17" r="2.2" fill="none" stroke="currentColor" stroke-width="1.7"/></svg></button>
@@ -307,13 +307,26 @@
         </section>
       <div id="dock-actions" class="dock-actions" aria-label="確かめて承認・出力">
           <p id="export-review-only" class="review-only" hidden>変更案の確認のみ。実機用JOBは出力できません</p>
-          <button type="button" id="open-confirm" class="wide" disabled>確認して承認へ</button>
+          <!-- 承認は1回（11/7 唐川さんの決定・FINAL_RC_CHANGE_REQUEST A）：候補の窓（位置・軸・向き・量・変更前→変更後・注意）と
+               3D の差分が見えるこの場所で、名前を入れて［この変更を承認する］を1回押す。名前の入力は承認の操作ではない。
+               承認の判定はサーバー（候補の世代・保留・上下の向き）のまま。詳しい表示（変わる命令の行など）は［詳しく見る］（任意） -->
+          <div id="quick-approve" class="quick-approve" hidden>
+            <p class="quick-approve-note">シミュレーション用の変更です（実機への接続・送信はしません）。上の変更前→変更後と 3D の差分を確かめてから承認してください</p>
+            <p id="quick-approve-warn" class="quick-approve-warn" hidden></p>
+            <p id="quick-approve-error" class="error" hidden></p>
+            <div class="quick-approve-row">
+              <label for="quick-approver" class="sr-only">承認する人の名前</label>
+              <input type="text" id="quick-approver" maxlength="50" autocomplete="name" placeholder="承認する人の名前">
+              <button type="button" id="quick-approve-button" class="approve" disabled>この変更を承認する</button>
+            </div>
+          </div>
+          <button type="button" id="open-confirm" class="link" disabled>詳しく見る（変わる命令の行・注意の全文）</button>
           <button type="button" id="export-button" class="wide" disabled>シミュレーション用に出力（合成ジョブだけ・実機に入れない）</button>
           <button type="button" id="undo-button" class="link" disabled>元に戻す</button>
           <!-- 出力の結果（出力の場面でいつも見えるよう、操作の欄に出す。出力のあとは出力先の注記の代わり） -->
           <div id="export-result" class="export-result" aria-live="polite" hidden></div>
           <p id="export-note" class="fine export-note" hidden>出力先：<code id="out-dir"></code>（.JBI.txt）。実機での取り違えを完全に防ぐものではありません。実機には入れないでください。</p>
-          <p class="fine role-note">承認は確認表示のボタンだけです<button type="button" class="tip" data-tip="approve">?</button></p>
+          <p class="fine role-note">承認は［この変更を承認する］のボタンだけです<button type="button" class="tip" data-tip="approve">?</button></p>
         </div>
       </div>
     </div>

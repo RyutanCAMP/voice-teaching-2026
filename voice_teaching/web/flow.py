@@ -19,6 +19,7 @@
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import re
 import secrets
@@ -1007,7 +1008,11 @@ class WebFlow:
             e.exported_gen = e.approval_gen
             e.session.log.append(("出力", f"シミュレーション用のジョブを出力しました：{full}（実機には入れないでください）。"
                                           f"{_updown_note(e.approval_updown)}"))
-            return {"ok": True, "path": full, "file_name": Path(path).name}
+            # 11/7（保存の場所を選ぶ）：書いたファイルを読み戻した中身も返す。画面はこの中身だけを、人が選んだ場所へ保存する
+            # （ここで書いた output\sim の写しと、同じバイト列。画面は「アプリの記録」と「選んだ場所」を分けて出す）
+            data = Path(path).read_bytes()
+            return {"ok": True, "path": full, "file_name": Path(path).name,
+                    "content_b64": base64.b64encode(data).decode("ascii"), "sha256": hashlib.sha256(data).hexdigest()}
         return self._run(sid, run)
 
     # ---- Claude に聞く（読み取りだけ。docs/CLAUDE_API.md 8章・CHECKER_031 E1〜E7） ----

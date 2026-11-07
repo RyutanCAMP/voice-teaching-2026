@@ -283,7 +283,16 @@ def test_approve_and_export_buttons_start_disabled():
         assert not any(w in text for w in ["保存", "転送", "ダウンロード"]), text
     assert re.search(r'<button[^>]*id="approve-button"[^>]*disabled', html)
     assert re.search(r'<button[^>]*id="export-button"[^>]*disabled', html)
-    assert "download" not in js.lower()
+    assert re.search(r'<button[^>]*id="quick-approve-button"[^>]*disabled', html)
+    # 11/7（唐川さんの決定・FINAL_RC_CHANGE_REQUEST B）：人が選んだ場所への保存（保存の窓・使えないときはダウンロード）を足した。
+    # 保存・ダウンロードの言葉とボタンは、画面のファイルには無く、出力に成功したあとに JS の保存の節だけが作る
+    # （中身はサーバーが検査して書いた SIM のバイト列だけ）。ほかの所でダウンロードしない
+    start = js.index("// ---- 人が選んだ場所への保存")
+    end = js.index("// 出力に失敗したときの「次にすること」")
+    rest = js[:start] + js[end:]
+    assert "download" not in rest.lower() and "showSaveFilePicker" not in rest
+    save = js[start:end]
+    assert "state.lastExport" in save and "x.b64" in save and "/api/" not in save
 
 
 def test_simulation_mode_is_shown():

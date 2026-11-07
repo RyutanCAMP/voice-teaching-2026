@@ -1626,3 +1626,71 @@ body.hero #kbd-button > span { display: inline; font-size: 14px; }
 }
 /* 会話の幅は保ち、3Dの内側の余白を詰める。候補の前後で図の位置を動かさない。 */
 @media (min-width: 1100px) { .stage { padding-inline: 10px; } }
+
+/* ===== 承認は1回（11/7・FINAL_RC_CHANGE_REQUEST A）：候補の窓の横の名前と［この変更を承認する］ ===== */
+.cand-job { margin: 2px 0 6px; font-size: 13px; color: var(--muted, #9aa8bf); }
+.quick-approve { display: grid; gap: 6px; margin: 0 0 8px; }
+.quick-approve[hidden] { display: none; }
+.quick-approve-note { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted, #9aa8bf); }
+.quick-approve-row { display: flex; gap: 8px; align-items: stretch; }
+.quick-approve-row input { flex: 1 1 auto; min-width: 0; min-height: 44px; font-size: 16px; }
+.quick-approve-row .approve { flex: 0 0 auto; min-height: 44px; font-size: 16px; padding-inline: 16px; }
+.quick-approve .error { margin: 0; }
+
+/* ↓ クーちゃんの UI 精査 K1〜K8（ui/kuchan-ux-1107 51d4855・style.css の塊）をそのまま取り込み（11/7 シクロ）。クロークの回帰の確かめが要る */
+
+/* ===== クーちゃん UI 精査（2026-11-07・ui/kuchan-ux-1107）=====================================================
+   見せ方（CSS）だけ。app.js・サーバー・安全の判定・承認・出力は変えない。この区切りの中だけを足した（統合・差し戻しはこの塊ごと）。
+   安全の表示（SIM・盾・20mm・差分・承認・止めた理由）は消さない・小さくしない。 */
+
+/* K1（P1）1500px 以上：候補のポップアップが、動かす点・変更の線・拡大の窓を隠さない。
+   1100〜1499px で決めてある置き方（会話の欄の上に重ねる）を 1500px 以上にもそろえる。3D の大きさ・点の位置は変えない（11/5 F6・F7）。
+   見出し（動きを確かめてください）と、下の文字の入力欄（承認のあとの質問）はふさがない。ポップアップの中身は最新の答えと同じ候補 */
+@media (min-width: 1500px) {
+  .stage { backdrop-filter: none; }  /* fixed の基準を画面にする */
+  .fig-wrap { overflow: visible; }
+  .cand-pop { position: fixed; left: 10px; right: auto; top: 112px; bottom: 150px; max-height: none; z-index: 6;
+    width: 500px; }  /* 会話の欄（left 10px・幅 500px）にぴったり重ねる */
+}
+@media (min-width: 1700px) and (min-height: 950px) {
+  .cand-pop { left: 8px; width: min(26vw, 500px); top: 118px; bottom: 156px; }  /* 会話の欄（left 8px・幅 26vw）に合わせる */
+}
+
+/* K1 の例外：会話の欄に、答えを選ぶボタン（保留の［取り消す］［このまま残す］・聞き返しの選択・範囲の確認）が出ている間は、
+   会話の欄をふさがない。ポップアップは RC と同じ 3D の右下に戻す（押す必要がある選択を、ポップアップの下に隠さない） */
+@media (min-width: 1500px) {
+  body:has(#reply-message:not([hidden]) button, #dialog-choices button, #dock-range:not([hidden])) .cand-pop {
+    position: absolute; left: auto; right: 16px; top: auto; bottom: 16px; width: min(380px, 36%); max-height: calc(100% - 32px); z-index: 4; }
+}
+
+/* K2（P2）1100px 以上：ポップアップを会話の欄の上に重ねるとき、後ろの吹き出しが切れて覗かないよう、ひと続きの面にする */
+@media (min-width: 1100px) {
+  .cand-pop { background: #0a1324; border-radius: 16px; box-shadow: 0 0 0 1px var(--glass-line), 0 18px 40px rgba(0, 0, 0, 0.55); }
+  .cand-pop .cand-card, .cand-pop .dock-actions { box-shadow: none; }
+}
+
+/* K3（P2）主なボタンは横いっぱい。「シミュレーション用に出力（合成ジョブだけ・実機に入れない）」の文は省かず、折り返しを減らす。
+   「元に戻す」はその下に、文字のリンクのまま。
+   1499px 以下は今のまま（下の行が増えると、承認のあとの「ロボットへの送信：していません」がスクロールの下に隠れるため） */
+@media (min-width: 1500px) {
+  .cand-pop .dock-actions button.wide { flex: 1 1 100%; }
+}
+
+/* K4（P2）空のまま「送る」を押せそうに見せない（押しても送らないのは今のまま。見た目だけ） */
+#text-form:has(#text-input:placeholder-shown) #text-send { opacity: 0.4; pointer-events: none; }
+
+/* K5（P3）会話の「人」の文字は丸いアイコンと重複するので出さない。「アプリ」「Claude」（誰の文か）は残す */
+.bubble.human > .who { display: none; }
+.side-flow .bubble.human .said { min-height: 0; }  /* 見出しを消した分、短い発話の吹き出しに空きを作らない */
+
+/* K6（P3）変更できない位置の番号は、薄いだけでなく点線の枠にして「押せない」と分かるように */
+.chip.blocked { border-style: dashed; }
+
+/* K7（P3）SIM の印（安全の表示）を 12px 以上に。小さくしない */
+.top .mode-banner { font-size: 12px; }
+
+/* K8（P3）3D の操作の手がかり（ドラッグで回す・格子）は控えめに。点・差分より目立たせない */
+#fig-3d svg text.hint3 { opacity: 0.6; }
+/* ===== ここまで（クーちゃん 11/7）===== */
+
+.quick-approve-warn { margin: 0; font-size: 13px; color: var(--amber, #ffb020); }

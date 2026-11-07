@@ -87,7 +87,7 @@ def test_full_flow_exports_two_line_diff(wf, tmp_path):
     assert e["ok"] is True, e
     out = Path(e["path"])
     assert out.parent == tmp_path / "sim"
-    assert out.name == "DEMO_PLACE_SIM.JBI.txt"
+    assert re.fullmatch(r"DEMO_PLACE_SIM_\d{8}_\d{6}\.JBI\.txt", out.name)  # 11/7：日本時間の日時つき
     new = out.read_bytes()
     a_lines, b_lines = lines(ORIGINAL), lines(new)
     assert len(a_lines) == len(b_lines)
@@ -402,7 +402,8 @@ def test_http_full_flow(running, tmp_path):
     _, r = post(running, "/api/export", {"session_id": sid, "candidate_gen": gen})
     assert r["ok"] is True
     assert Path(r["path"]).read_bytes() != ORIGINAL
-    assert sorted(p.name for p in (tmp_path / "sim").iterdir()) == ["DEMO_PLACE_SIM.JBI.txt"]
+    names = sorted(p.name for p in (tmp_path / "sim").iterdir())
+    assert len(names) == 1 and re.fullmatch(r"DEMO_PLACE_SIM_\d{8}_\d{6}\.JBI\.txt", names[0])
     # 作業フォルダ（tmp_path）には出力先のほか何も作らない
     assert sorted(p.name for p in tmp_path.iterdir()) == ["sim"]
 

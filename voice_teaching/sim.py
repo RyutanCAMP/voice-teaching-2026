@@ -18,7 +18,7 @@ import hashlib
 import math
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import jbi
@@ -393,15 +393,33 @@ def _export_repeat(proposal: SimRepeatProposal, approval: Approval) -> Path:
 MAX_SAME_NAME = 99  # N-1（11/7）：同じ名前のファイルがあれば _02 〜 _99 を付けて新しく書く（今あるファイルは上書きしない）
 
 
-def output_path_for(out: Path, new_name: str, n: int) -> Path:
-    return out / (f"{new_name}{SIM_EXTENSION}" if n == 1 else f"{new_name}_{n:02d}{SIM_EXTENSION}")
+JST = timezone(timedelta(hours=9), "JST")
+
+
+def clock() -> datetime:
+    """出力の名前に付ける時刻（日本時間）。テストは決まった時刻に差し替える。"""
+    return datetime.now(JST)
+
+
+def stamp_of(dt: datetime) -> str:
+    """YYYYMMDD_HHMMSS（日本時間）。"""
+    return dt.astimezone(JST).strftime("%Y%m%d_%H%M%S")
+
+
+def output_path_for(out: Path, new_name: str, n: int, stamp: str | None = None) -> Path:
+    """出力のファイル名（11/7 唐川さんの決定）：<ジョブ名>_SIM_YYYYMMDD_HHMMSS.JBI.txt（日本時間）。同じ秒に2つ目なら _02 …。
+    stamp を省くと時刻なしの形（テストと前の版の名前）。"""
+    base = f"{new_name}_{stamp}" if stamp else new_name
+    return out / (f"{base}{SIM_EXTENSION}" if n == 1 else f"{base}_{n:02d}{SIM_EXTENSION}")
 
 
 def _write_new(out: Path, new_name: str, data: bytes) -> Path:
     """新しいファイルにだけ書く（open の "xb"。今あるファイルは決して上書きしない）。同じ名前があれば番号を付ける。
-    ファイルの中の //NAME は <ジョブ名>_SIM のまま（番号はファイル名だけ）。"""
+    ファイルの中の //NAME は <ジョブ名>_SIM のまま（日時と番号はファイル名だけ）。名前は _NAME_OK の英数字・_・- だけ
+    （Windows で使えない文字・パスの区切りは入らない）。"""
+    stamp = stamp_of(clock())
     for n in range(1, MAX_SAME_NAME + 1):
-        path = output_path_for(out, new_name, n)
+        path = output_path_for(out, new_name, n, stamp)
         try:
             with open(path, "xb") as f:
                 f.write(data)

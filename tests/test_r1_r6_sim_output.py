@@ -11,6 +11,7 @@ R6：シミュレーション用の出力は、拡張子 .JBI.txt で、シミ�
 import http.client
 import inspect
 import json
+import re
 import threading
 from pathlib import Path
 
@@ -154,7 +155,7 @@ def test_http_api_approves_and_exports_passing_change(running, name, position, b
     e = _post(running, "/api/export", {"session_id": sid, "candidate_gen": gen})
     assert e["ok"] is True, e
     out = Path(e["path"])
-    assert out.name == name.replace(".JBI", "_SIM.JBI.txt")
+    assert re.fullmatch(re.escape(name.replace(".JBI", "_SIM")) + r"_\d{8}_\d{6}\.JBI\.txt", out.name)  # 11/7：日時つき
     assert out.parent == sim.DEFAULT_OUT_DIR.resolve()
     new = out.read_bytes()
     diff = [(a, b) for a, b in zip(data.splitlines(), new.splitlines()) if a != b]
