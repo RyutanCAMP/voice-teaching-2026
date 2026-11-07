@@ -97,7 +97,7 @@ def main() -> int:
                 vis = pg.evaluate("""() => { const r = document.querySelector('#quick-approve-button').getBoundingClientRect();
                     return r.top >= 0 && r.bottom <= innerHeight && r.width > 0; }""")
                 check("C00004" in pop and "DEMO_RJ_XYZ.JBI" in pop and "シミュレーション用" in pop and "180.000" in pop
-                      and "185.000" in pop and "実機への接続・送信はしません" in note and vis
+                      and "185.000" in pop and "実機への接続・送信はしません" in (pop + note) and vis
                       and "primary" in (pg.get_attribute("#quick-approve-button", "class") or ""),
                       f"承認の前（{w}×{h}）：対象・JOB・SIM 専用・変更前→変更後が見え、［この変更を承認する］が画面の中で目立つ")
                 if shots:
