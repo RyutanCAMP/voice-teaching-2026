@@ -955,6 +955,8 @@ function nextStepLine(message) {
 function showReply(status, message, choices) {
   const box = $("reply-message");
   box.className = "reply " + status;
+  // 承認のあとに出た答えの印（style.css の 11/7 の例外・UX-2100-P1-1）。承認の前からの答えでは、候補の窓を 3D の右下に戻さない。見せ方だけ
+  if (state.st && state.st.approval) box.dataset.afterApproval = "1"; else delete box.dataset.afterApproval;
   if (status === "ok") box.replaceChildren(el("p", {}, message));
   else if (status === "ask" || status === "guide") {
     box.replaceChildren(status === "guide" ? el("p", { class: "guide-text" }, message) : friendly("ask", message));
@@ -1452,7 +1454,25 @@ function renderApproval() {
   if (!$("export-result").hidden && $("export-result").dataset.owner !== exportOwner()) {
     $("export-result").hidden = true;
   }
+  // XC-28（11/7）：保存のボタンが保存するのは、承認して出力した中身（アプリの記録の控えと同じ）だけ。承認していない中身は保存できない（前から）。
+  // 保留中・閉じた画面では、見出しの「承認・出力はできません」にそろえて、保存のボタンも押せなくし、わけを書く。
+  // 保留が終わると、［このまま残す］は承認を取り消し、［取り消す］は候補も取り消すので、どちらも結果の欄は消える（上の exportOwner）
+  const held = saveHeld();
+  for (const b of document.querySelectorAll("#save-as-area button")) b.disabled = held;
+  const area = saveArea();
+  let note = document.getElementById("save-held-note");
+  if (area && held && !note) {
+    note = el("p", { id: "save-held-note", class: "save-pending" });
+    area.append(note);
+  }
+  if (note) {
+    note.textContent = state.closed ? "この画面は終わったので、保存できません"
+      : "保留中は保存できません（取り消すか確かめています）。［このまま残す］を選んだら、もう一度［承認して保存］してください";
+    note.hidden = !held;
+  }
 }
+// 保存のボタンを押せないとき：保留中（取り消すか確かめている）・閉じた画面（XC-28）
+function saveHeld() { return !!(state.st && state.st.hold) || !!state.closed; }
 // 出力の結果が、どの画面・候補・承認のものか（vt:state の key と同じ考え）
 function exportOwner() {
   const st = state.st || {}, c = st.candidate;
@@ -1550,6 +1570,7 @@ function saveButtons() {
   const d = el("button", { type: "button", class: "save-as-download link" }, "ダウンロードとして保存");
   d.addEventListener("click", downloadFallback);
   row.append(d);
+  for (const b of row.querySelectorAll("button")) b.disabled = saveHeld();  // XC-28
   a.append(row);
   if (!pick) {
     a.append(el("p", { class: "fine" }, "このブラウザーでは保存の場所を選ぶ窓を使えません。ダウンロードの保存先はブラウザーの設定です"
@@ -1558,7 +1579,7 @@ function saveButtons() {
 }
 async function saveToChosenPlace(auto) {
   const x = state.lastExport;
-  if (!x) return;
+  if (!x || saveHeld()) return;  // XC-28：保留中・閉じた画面では保存しない（ボタンも押せない）
   if (typeof window.showSaveFilePicker !== "function" || (auto && navigator.webdriver)) {
     // 窓を自動で開かないとき：まだ保存していないと書き、ボタン（場所を選んで保存・ダウンロード）を出す
     saveLine("none", "save-pending", "保存先：まだ保存していません。下のボタンで保存してください");
@@ -1597,7 +1618,7 @@ async function saveToChosenPlace(auto) {
 }
 function downloadFallback() {
   const x = state.lastExport;
-  if (!x) return;
+  if (!x || saveHeld()) return;  // XC-28：保留中・閉じた画面では保存しない（ボタンも押せない）
   const url = URL.createObjectURL(new Blob([b64bytes(x.b64)], { type: "application/octet-stream" }));
   const a = el("a", { href: url, download: x.name });
   document.body.append(a);

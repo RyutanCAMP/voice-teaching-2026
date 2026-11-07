@@ -173,6 +173,32 @@ def main() -> int:
                     pg.screenshot(path=str(shots / "B1_cancel_then_resave.png"))
                 ctx.close()
 
+            # XC-28：保存のあとに話しかけて保留になったら、見出しのとおり保存もできない（ボタンは押せない・わけを書く）。
+            # 取り消したら結果の欄ごと消える。保存のボタンが保存するのは、承認して出力した中身だけ（承認していない中身は保存できない）
+            ctx, pg = page(b, 1920, 1080, mode="abort")
+            pg.fill("#quick-approver", "唐川")
+            pg.click("#quick-approve-button")
+            pg.wait_for_function("() => /取りやめました/.test(document.querySelector('#export-result').innerText)", timeout=15000)
+            pg.fill("#text-input", "どこが変わったの？")
+            pg.click("#text-send")
+            pg.wait_for_function("() => /承認・出力はできません/.test(document.querySelector('#next-action').innerText)", timeout=15000)
+            pg.wait_for_timeout(300)
+            st = pg.evaluate("""() => ({ btn: [...document.querySelectorAll('#save-as-area button')].map((b) => b.disabled),
+                note: (n => n && !n.hidden ? n.innerText : '')(document.querySelector('#save-held-note')) })""")
+            n0, e0 = len(pg.evaluate("() => window.__picks")), calls["export"]
+            pg.evaluate("() => document.querySelectorAll('#save-as-area button').forEach((x) => x.click())")  # 押せないボタンを JS から押しても
+            pg.wait_for_timeout(500)
+            check(len(st["btn"]) == 2 and all(st["btn"]) and "保留中は保存できません" in st["note"]
+                  and len(pg.evaluate("() => window.__picks")) == n0 and calls["export"] == e0,
+                  f"保留中（XC-28）：保存のボタン {len(st['btn'])}つとも押せない・わけを出す・押しても保存の窓を開かない")
+            if shots:
+                pg.screenshot(path=str(shots / "C0_hold_save_disabled.png"))
+            pg.locator("#reply-message button, #dialog-choices button", has_text="取り消す").first.click()
+            pg.wait_for_function("() => document.querySelector('#export-result').hidden", timeout=15000)
+            check(pg.locator("#save-as-area button:visible").count() == 0,
+                  "保留から［取り消す］（XC-28）：結果の欄と保存のボタンは消える（取り消した中身は保存できない）")
+            ctx.close()
+
             ctx, pg = page(b, 1920, 1080, picker=False)
             pg.fill("#quick-approver", "唐川")
             pg.click("#quick-approve-button")
@@ -194,9 +220,73 @@ def main() -> int:
     names = sorted(f.name for f in (out / "sim").glob("*"))
     check(bool(names) and all(re.fullmatch(NAME_RE, n) for n in names) and len(names) == len(set(names)),
           f"出力の名前はどれも <JOB名>_SIM_YYMMDDHHMM(_NN).JBI・重なりなし（{len(names)}個：{names[:3]}…）")
+    repeat_check(shots)
     ng = [m for ok, m in results if not ok]
     print(f"結果：OK {len(results) - len(ng)}・NG {len(ng)}")
     return 1 if ng else 0
+
+
+def repeat_check(shots: Path | None) -> None:
+    """UX-2100-P1-1：回数の変更（2→3回）を［承認して保存］したあと、候補の窓が 3D の「×2 → ×3」と変更の点を隠さない（3つの大きさ）"""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import demo_mock as dm  # noqa: PLC0415  偽の Claude の台本（本物の Claude は呼ばない）
+    out = Path(tempfile.mkdtemp(prefix="vt-approve-save-repeat-"))
+    sim.DEFAULT_OUT_DIR = out / "sim"
+    cx.PRICES[dm.MOCK_MODEL] = cx.Price(input=0.0, output=0.0, cache_write_5m=0.0, cache_write_1h=0.0, cache_read=0.0)
+    ex = cx.Explainer("mock-no-network", dm.MOCK_MODEL, client=dm.ScriptClient(), usage_log=cx.UsageLog(out / "usage.jsonl"))
+    srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=None, explainer=ex)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+
+    def say(pg, t, wait):
+        if not pg.is_visible("#text-input") and pg.is_visible("#kbd-button"):
+            pg.click("#kbd-button")
+        pg.fill("#text-input", t)
+        pg.click("#text-send")
+        pg.wait_for_function(wait, timeout=20000)
+
+    try:
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            for (w, h) in [(1920, 1080), (1440, 900), (1280, 720)]:
+                ctx = b.new_context(viewport={"width": w, "height": h})
+                pg = ctx.new_page()
+                pg.add_init_script(FAKE_PICKER.replace("MODE", "ok"))
+                pg.goto(url)
+                pg.wait_for_timeout(700)
+                pg.set_input_files("#file-input", str(ROOT / "samples" / "dummy" / "DEMO_BUTTON_REPEAT.JBI"))
+                pg.wait_for_selector("#job-area:not([hidden])")
+                say(pg, "このロボット、何をしている？", "() => document.querySelector('#ask-turns .bubble.claude:not(.thinking)')")
+                say(pg, "ボタンを押してるんだよ", "() => document.querySelector('#ask-turns .talk-choice')")
+                pg.locator("#ask-turns .talk-choice", has_text="この動きです").click()
+                pg.wait_for_selector("#ask-turns .bubble.taught")
+                say(pg, "じゃあ、3回にして", "() => document.querySelector('#range-yes')")
+                pg.click("#range-yes")
+                pg.wait_for_function("() => !document.querySelector('#quick-approve').hidden", timeout=15000)
+                pg.fill("#quick-approver", "唐川")
+                pg.click("#quick-approve-button")
+                pg.wait_for_function("() => /選んだ場所に保存しました/.test(document.querySelector('#export-result').innerText)",
+                                     timeout=15000)
+                pg.wait_for_timeout(500)
+                # 数えるのは 3D の表示の中（.stage の四角の中）にあるものだけ。回数の変更の向きでは、台座の印（robot-origin）が 3D の表示の
+                # 左の外（会話の欄の位置）に来て、候補の窓があってもなくても見えないため
+                r = pg.evaluate("""() => { const p = document.querySelector('.cand-pop').getBoundingClientRect();
+                    const sg = document.querySelector('.stage').getBoundingClientRect();
+                    const under = (e) => { const r = e.getBoundingClientRect(); const x = (r.left + r.right) / 2, y = (r.top + r.bottom) / 2;
+                      return r.width > 0 && x >= sg.left && x <= sg.right && y >= sg.top && y <= sg.bottom
+                        && x >= p.left && x <= p.right && y >= p.top && y <= p.bottom; };
+                    const x3 = [...document.querySelectorAll('#fig-3d *')].filter((e) => !e.children.length && /×\s*3/.test(e.textContent));
+                    return { pts: [...document.querySelectorAll('#fig-3d svg circle')].filter(under).length,
+                             x3: x3.length, x3under: x3.filter(under).map((e) => e.textContent.trim()) }; }""")
+                check(r["pts"] == 0 and r["x3"] > 0 and not r["x3under"],
+                      f"回数の変更を承認して保存（{w}×{h}）：候補の窓の下に 3D の点 {r['pts']}個・「×3」{r['x3']}か所のうち隠れたもの {r['x3under']}")
+                if shots:
+                    pg.screenshot(path=str(shots / f"D0_repeat_after_save_{w}x{h}.png"))
+                ctx.close()
+            b.close()
+    finally:
+        srv.shutdown()
+        srv.server_close()
 
 
 if __name__ == "__main__":
