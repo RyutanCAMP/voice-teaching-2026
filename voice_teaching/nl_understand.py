@@ -275,6 +275,12 @@ def directions_in(text: str) -> set[str]:
     return out
 
 
+# 選んでいる位置とは別の位置を指す言い方（XC-20）。位置番号（C00003）は read_utterance が読む
+_OTHER_POSITION_WORDS = re.compile(r"[0-9一二三四五六七八九十]+\s*(?:番目|個目|つ目|点目)|最初の(?:点|位置)|最後の(?:点|位置)|"
+                                   r"隣|となり|次の(?:点|位置)|前の(?:点|位置)|別の(?:点|位置)|ほかの(?:点|位置)|他の(?:点|位置)|"
+                                   r"[0-9]+\s*番の(?:点|位置)|さっきの(?:点|位置)")
+
+
 # 方向の言葉に見えるが方向ではない言い方（「下さい」「上限」「以上」など）。方向の数を数える前に外す
 _NOT_DIRECTION = re.compile(r"下さい|下され|上限|以上|以下|上書き|前回|以前|最上|上手|手前味噌|右左|左右|上下")
 
@@ -431,7 +437,14 @@ def interpret(data: Mapping[str, Any], text: str, *, positions: Sequence[str], s
         else:
             rejected.append("position")
     elif ref == "selected":
-        if selected is not None and selected in known and (f.position is None or f.position == selected):
+        said_pos = set(ut.read_utterance(text).positions)
+        if said_pos - {selected} or _OTHER_POSITION_WORDS.search(norm(text)):
+            # XC-20（11/7・クローク）：発話が別の位置を言っている（「3番目の点」「最後の位置」「隣」・別の位置番号）のに、
+            # Claude が「選んでいる位置」と答えた：選んでいる位置に当てずに聞き返す
+            rejected.append("position")
+            if frame is None or frame.position is None:
+                f.position = None
+        elif selected is not None and selected in known and (f.position is None or f.position == selected):
             f.position = selected
         elif selected is None:
             rejected.append("position")
