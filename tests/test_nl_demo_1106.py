@@ -1019,7 +1019,11 @@ def test_karakawa_repeat_two_steps_have_no_dead_end(tmp_path):
     w, sid = _repeat_flow(tmp_path)
     r = w.talk(sid, "C0001からC0003までの動作を2回続けて下さい")
     msg = hear_msg(r)
-    assert "往復" not in msg and not (r.get("hear") or {}).get("choices"), msg  # 行き止まりの二択を出さない
+    # 行き止まりの二択（往復）を出さない。11/7（FINAL_RC_REPEAT_RANGE_GUIDANCE）：同じ回数のときは、プログラムが確かめた範囲と
+    # 「3回に増やす」ボタン・［今回は変更しない］を案内する（2→3 と決めない。押すまで候補にも範囲の確かめにもしない）
+    labels = [c["label"] for c in (r.get("hear") or {}).get("choices") or []]
+    assert "往復" not in msg and all("往復" not in x for x in labels), msg
+    assert labels in ([], ["C00001〜C00003 を3回にする（範囲を確かめる）", "今回は変更しない"]), labels
     assert "C00001〜C00003 は今 2 回で、同じ回数のため、変更しません" in msg, msg  # 今も同じ回数なら、そう言う
     assert not r["state"]["candidate"] and not r["state"]["repeat_range"]
     r = w.talk(sid, "はい")

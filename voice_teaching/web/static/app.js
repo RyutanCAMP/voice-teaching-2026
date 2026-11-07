@@ -1417,6 +1417,7 @@ function renderApproval() {
   $("approval-status").classList.toggle("held", !!a && !done);
   $("approval-status").dataset.appr = !a ? "" : done ? "ok" : "warn";
   document.body.classList.toggle("vt-hold", !!st.hold);  // 保留のあいだは返事のカードを隠さない（style.css の Issue #8。見せ方だけ）
+  document.body.classList.toggle("vt-approved", !!a);  // 承認のあと：候補の窓で会話の欄（いちばん新しい答え）をふさがない（クーちゃん K1 の例外。見せ方だけ）
   $("open-confirm").hidden = !!a;
   // 承認は1回：候補があり、まだ承認していないときだけ、候補の窓の横に名前と［この変更を承認する］を出す
   const qa = !!st.candidate && !a;
@@ -1541,7 +1542,8 @@ async function saveToChosenPlace(auto) {
   const x = state.lastExport;
   if (!x) return;
   if (typeof window.showSaveFilePicker !== "function" || (auto && navigator.webdriver)) {
-    saveLine("fine", "保存の場所を選ぶときは、下のボタンを押してください（アプリの記録には書いてあります）");
+    const a = saveArea();
+    if (a) a.replaceChildren();  // 窓を自動で開かないとき：ボタンだけ（場所を選んで保存・ダウンロード）
     saveButtons();
     return;
   }
@@ -2463,6 +2465,9 @@ function followLatest() {
     // 候補のカードは 3D の上のポップアップ（左の欄の外）。左の欄の中にあるときだけ送る
     const target = !$("approval-status").hidden ? $("approval-panel") : $("candidate-panel");
     if (sideScroll.contains(target)) return revealIn(sideScroll, target, "top");
+    // 候補のカードが左の欄の外（3D の上のポップアップ）のとき：左の欄では、いちばん新しい答えを見せる（11/7：承認のあと、
+    // ポップアップが会話の欄の上から 3D の右下へ戻ったとき、答えが下に切れていた）
+    if (!$("reply-message").hidden && sideScroll.contains($("reply-message"))) revealIn(sideScroll, $("reply-message"), "top");
     return;
   }
   if (replyNew) return revealIn(sideScroll, $("reply-message"), "top");  // 範囲のボタンは下の操作の欄にある：カードは上の端から

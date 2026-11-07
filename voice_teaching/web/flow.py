@@ -1168,7 +1168,7 @@ class WebFlow:
         with e.lock:
             if e.closed:
                 return self._closed_reply(sid, e)
-            guide = self._repeat_guide(e, text, hear_out)
+            guide = self._repeat_guide(e, text, hear_out, route)
             if guide is not None:
                 guide["source"] = source
                 prev = (hear_out or {}).get("message") or ""
@@ -1184,7 +1184,7 @@ class WebFlow:
         return {"ok": True, "via": via, "ask": ask_out, "hear": hear_out, "state": state, "heard": text, "source": source}
 
     # ---- 回数の変更の範囲の案内（11/7 FINAL_RC_REPEAT_RANGE_GUIDANCE） ----
-    def _repeat_guide(self, e: _Entry, text: str, out: dict | None) -> dict | None:
+    def _repeat_guide(self, e: _Entry, text: str, out: dict | None, route: str = "hear") -> dict | None:
         """回数の変更の気持ち（「繰り返したい」「2回」「もう1回」）があり、今までの道が候補も範囲の確かめも作れなかったとき、
         決まった文の言い直しを頼む代わりに、この JOB で変えられる範囲をプログラムが調べて案内する（錠の中で呼ぶ）。
         - 範囲はジョブの解析（repeat_blocks と、2→3回の変更案を本当に作れるか plan_repeat）からだけ。Claude に推測させない
@@ -1193,10 +1193,15 @@ class WebFlow:
         s = e.session
         if s.candidate is not None or s.repeat_range is not None or self._approved(e) or e.dialog.step is not None:
             return None
+        if route not in ("hear", "ask", "count", "nl"):
+            return None  # 変更が2つ・目的と変更・ボタンの案内などは、今までの決まった文のまま
         nt = ut.normalize(text)
         if not _REPEAT_INTENT.search(nt):
             return None
         f = ut.read_utterance(text)
+        if (f.negations or f.undo_negations or rc.has_decimal_count(text)
+                or re.search(r"くらい|ぐらい|程度|ほど|たぶん|多分|かも|かな|おそらく|ずつ", nt)):
+            return None  # 打ち消し・小数・だいたい・ためらい：今までの安全の文で止める（範囲の案内で上書きしない）
         if f.axes or any(a.unit == "mm" for a in f.amounts):
             return None  # 位置の移動の指示（「Zプラス5ミリを…」）は案内しない
         if isinstance(out, dict) and (out.get("candidate_made") or out.get("choices")):
@@ -1210,7 +1215,7 @@ class WebFlow:
             except Exception:  # noqa: BLE001  作れない区間は案内しない（理由はふつうの道が言う）
                 continue
             supported.append(b)
-        said = [f"C{int(n):05d}" for n in re.findall(r"C\s*0*([0-9]{1,5})(?![0-9])", nt)]
+        said = [f"C{int(n):05d}" for n in re.findall(r"C\s*0*([0-9]{1,5})(?![0-9])|(?<![0-9])([0-9]{1,5})\s*番(?!目)", ut._spoken_numbers(nt)) for n in n if n]
         if not supported:
             msg = ("繰り返しの変更ですね。このJOBでは、繰り返しの回数を変えられる範囲を確認できません"
                    "（変えられるのは、今2回続けて書かれている作業を3回にすることだけです）。何も変えていません")

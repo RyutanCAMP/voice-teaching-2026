@@ -5,6 +5,11 @@
 - 位置・範囲を言った回数の文は、指示の道へ（言ったとおりの範囲だけを調べる。区間と合わなければ止める。Claude を呼ばない）
 - 言った範囲が区間とちょうど合うとき（C00001〜C00003）だけ、その範囲の確認になる
 - 範囲を言わない文（「じゃあ3回にして」）は今までどおり（区間を示して、ボタンで確かめる）
+
+11/7（唐川さんの決定・FINAL_RC_REPEAT_RANGE_GUIDANCE）：言った範囲が区間と違うとき、プログラムが確かめた区間（C00001〜C00003）を
+「ご指定の範囲とは違います」と書いて案内し、人が［C00001〜C00003 を3回にする（範囲を確かめる）］を押したときだけ、その区間の
+範囲の確かめへ進む（黙って置き換えない・広げない：P1-C の決まりは今もそのまま）。前の期待「返事に C00001〜C00003 を出さない」は、
+この案内のために「出すなら、違うと書いてボタンで選ばせる」に変えた
 """
 import pytest
 
@@ -35,7 +40,10 @@ def test_said_range_is_not_widened_to_the_block(tmp_path, text, source):
     assert r["via"] == ["hear"]  # 回数の変更の道（区間の決まった文への置き換え）を通らない
     assert st["repeat_range"] is None and st["candidate"] is None and st["approval"] is None
     assert len(f.requests) == 0  # Claude を呼ばない
-    assert "C00001〜C00003" not in (r["hear"].get("message") or "")
+    msg = r["hear"].get("message") or ""
+    if "C00001〜C00003" in msg:  # 11/7：案内するときは、違うと書き、選ぶのは人のボタン（黙って置き換えない）
+        assert "範囲が違います" in msg
+        assert [c["label"] for c in r["hear"]["choices"]][0] == "C00001〜C00003 を3回にする（範囲を確かめる）"
     assert st["status_line"] == "アプリの記録：変更の候補 なし／承認 まだ／出力 まだ"
 
 
@@ -52,13 +60,20 @@ def test_the_two_choices_do_not_widen_the_range(tmp_path, text):
     w, f, sid = start(tmp_path)
     r = w.talk(sid, text)
     ch = r["hear"].get("choices") or []
-    # 11/5 唐川さん：行き止まりの二択はやめた。選択肢があっても、どれも言った範囲を区間に広げない
-    assert "C00001〜C00003" not in (r["hear"].get("message") or "") and r["state"]["repeat_range"] is None
+    # 11/5 唐川さん：行き止まりの二択はやめた。11/7：案内のボタンは［区間を3回にする（範囲を確かめる）］［今回は変更しない］。
+    # どちらを押しても候補はできない。前者は人が選んだ区間（C00001〜C00003）の範囲の確かめへ進むだけ（言った範囲を黙って広げない）
+    assert r["state"]["repeat_range"] is None and r["state"]["candidate"] is None
+    assert "範囲が違います" in (r["hear"].get("message") or "")
     for c in ch:
         w2, f2, sid2 = start(tmp_path)
         w2.talk(sid2, text)
         st = w2.hear(sid2, c["text"])["state"]
-        assert st["repeat_range"] is None and st["candidate"] is None
+        assert st["candidate"] is None and st["approval"] is None
+        if c["label"].startswith("C00001〜C00003"):
+            assert st["repeat_range"] is not None and st["repeat_range"]["positions"][0] == "C00001"
+            assert st["repeat_range"]["positions"][-1] == "C00003"
+        else:
+            assert st["repeat_range"] is None
 
 
 @pytest.mark.parametrize("text", ["C00001からC00003を3回にして", "C00001〜C00003を3回にして", "C1からC3を3回にして"])

@@ -1421,9 +1421,10 @@ def check_safety_notes_scenes(browser, check, shots: Path | None, out: Path) -> 
             base(pg, f"{w}×{h} 上限超え")
             send(pg, "Zプラス方向に5ミリ")
             until(pg, lambda: pg.is_enabled("#open-confirm"), 10000)
-            check(bool(pg.evaluate(SEEN, "#open-confirm") and "未承認" in (pg.get_attribute("#approval-icon", "aria-label") or "")
+            # 11/7：承認は1回。承認待ちの場面で見えるべきなのは［この変更を承認する］（［詳しく見る］は任意の文字のリンク）
+            check(bool(pg.evaluate(SEEN, "#quick-approve-button") and "未承認" in (pg.get_attribute("#approval-icon", "aria-label") or "")
                        and pg.evaluate(SEEN, "#candidate-view .cand-warn")),
-                  f"場面の警告（{w}×{h}）：承認待ち（未承認・確認して承認へ）と候補の注意がその場面で見える")
+                  f"場面の警告（{w}×{h}）：承認待ち（未承認・［この変更を承認する］）と候補の注意がその場面で見える")
             base(pg, f"{w}×{h} 候補")
             pg.click("#open-confirm")
             pg.fill("#approver-name", "e2e確認")
@@ -1564,23 +1565,24 @@ def check_export_twice(browser, check, shots: Path | None, out: Path) -> None:
         # N-1（11/7）：同じ名前のファイルが既にある → 上書きせず、番号を付けた新しいファイル（_02）に出力できる（撮り直し）
         d = out / "h1_sim_exists"
         d.mkdir(parents=True, exist_ok=True)
-        (d / "DEMO_C_PLACE_SIM.JBI.txt").write_text("e2e：前からあるファイル（上書きしないことを確かめる）", encoding="utf-8")
+        (d / f"DEMO_C_PLACE_SIM_{E2E_STAMP}.JBI.txt").write_text("e2e：前からあるファイル（上書きしないことを確かめる）", encoding="utf-8")
         sim.DEFAULT_OUT_DIR = d
         pg, exports = approved_page(1280, 720)
         pg.click("#export-button")
         pg.wait_for_selector("#export-result:not([hidden])")
         pg.wait_for_timeout(300)
         box = pg.inner_text("#export-result")
-        check(pg.get_attribute("#export-result", "data-ok") == "true" and "DEMO_C_PLACE_SIM_02.JBI.txt" in box and len(exports) == 1
-              and (d / "DEMO_C_PLACE_SIM.JBI.txt").read_text(encoding="utf-8").startswith("e2e：")
-              and (d / "DEMO_C_PLACE_SIM_02.JBI.txt").exists() and pg.is_disabled("#export-button"),
+        check(pg.get_attribute("#export-result", "data-ok") == "true" and f"DEMO_C_PLACE_SIM_{E2E_STAMP}_02.JBI.txt" in box
+              and len(exports) == 1
+              and (d / f"DEMO_C_PLACE_SIM_{E2E_STAMP}.JBI.txt").read_text(encoding="utf-8").startswith("e2e：")
+              and (d / f"DEMO_C_PLACE_SIM_{E2E_STAMP}_02.JBI.txt").exists() and pg.is_disabled("#export-button"),
               f"N-1（11/7）：同じ名前のファイルがあっても上書きせず、_02 の新しいファイルに出力する（そのあと押せない）：{' '.join(box.split())[:80]}")
         pg.close()
         # 1回目が本当に失敗したとき（番号を付けた名前も全部ある）は、今までどおり失敗を出す（隠さない・上書きしない）
         d = out / "h1_sim_full"
         d.mkdir(parents=True, exist_ok=True)
         for n in range(1, sim.MAX_SAME_NAME + 1):
-            sim.output_path_for(d, "DEMO_C_PLACE_SIM", n).write_text("e2e：前からあるファイル", encoding="utf-8")
+            sim.output_path_for(d, "DEMO_C_PLACE_SIM", n, E2E_STAMP).write_text("e2e：前からあるファイル", encoding="utf-8")
         sim.DEFAULT_OUT_DIR = d
         pg, exports = approved_page(1280, 720)
         pg.click("#export-button")
@@ -1732,7 +1734,7 @@ def check_export_path_short(browser, check, shots: Path | None, out: Path) -> No
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{srv.server_address[1]}/"
     saved_out_dir = sim.DEFAULT_OUT_DIR
-    name = "DEMO_C_PLACE_SIM.JBI.txt"
+    name = f"DEMO_C_PLACE_SIM_{E2E_STAMP}.JBI.txt"  # 11/7：日時つき（e2e は時刻を決めている）
     try:
         for (w, h) in [(1920, 1080), (1280, 720)]:
             d = (out / f"h10_{w}" / "output" / "sim").resolve()
@@ -2075,6 +2077,8 @@ IN_VIEW_TOP_JS = """(s) => { const e = document.querySelector(s); if (!e || !e.g
   return [0.2, 0.5, 0.8].every((f) => { const t = document.elementFromPoint(Math.min(innerWidth - 1, b.left + b.width * f), Math.min(innerHeight - 1, y));
     return !!t && (t === e || e.contains(t)); }); }"""
 EXPORT_EXISTS_NEXT = "次にすること：同じ名前のファイルが output\\sim\\ にあります。消してから、もう一度［出力］"
+E2E_TIME = __import__("datetime").datetime(2026, 11, 7, 12, 15, 30, tzinfo=__import__("datetime").timezone(__import__("datetime").timedelta(hours=9)))  # e2e の出力の時刻（日本時間）
+E2E_STAMP = "20261107_121530"
 EXPORT_FULL_NEXT = "次にすること：output\\sim\\ の古いファイルを別の場所へ移してから、もう一度［出力］"  # N-1（11/7）
 
 
@@ -2134,8 +2138,8 @@ def check_export_fail_next(browser, check, shots: Path | None, out: Path) -> Non
             d = out / f"k1_sim_exists_{w}"
             d.mkdir(parents=True, exist_ok=True)
             for n in range(2, sim.MAX_SAME_NAME + 1):
-                sim.output_path_for(d, "DEMO_C_PLACE_SIM", n).write_text("e2e：前からあるファイル", encoding="utf-8")
-            f = d / "DEMO_C_PLACE_SIM.JBI.txt"
+                sim.output_path_for(d, "DEMO_C_PLACE_SIM", n, E2E_STAMP).write_text("e2e：前からあるファイル", encoding="utf-8")
+            f = d / f"DEMO_C_PLACE_SIM_{E2E_STAMP}.JBI.txt"
             f.write_text("e2e：前からあるファイル（上書きしないことを確かめる）", encoding="utf-8")
             before = (f.read_bytes(), f.stat().st_mtime_ns)
             sim.DEFAULT_OUT_DIR = d
@@ -2168,7 +2172,7 @@ def check_export_fail_next(browser, check, shots: Path | None, out: Path) -> Non
         d = out / "k1_sim_exists_undo"
         d.mkdir(parents=True, exist_ok=True)
         for n in range(1, sim.MAX_SAME_NAME + 1):  # N-1：番号つきの名前も全部ある（本当に失敗する）
-            sim.output_path_for(d, "DEMO_C_PLACE_SIM", n).write_text("e2e：前からあるファイル", encoding="utf-8")
+            sim.output_path_for(d, "DEMO_C_PLACE_SIM", n, E2E_STAMP).write_text("e2e：前からあるファイル", encoding="utf-8")
         sim.DEFAULT_OUT_DIR = d
         pg, exports = approved_page(1280, 720)
         press_export(pg, exports)
@@ -2262,7 +2266,7 @@ def check_ask_limit_reset(browser, check, shots: Path | None, out: Path) -> None
         srv.server_close()
 
 
-APPROVE_TIP_BODY = "［確認して承認へ］を押し、名前を入れて［承認する］。声では承認しません。"
+APPROVE_TIP_BODY = "変更前→変更後と 3D を確かめて、名前を入れて［この変更を承認する］を1回押します。くわしく見るときは［詳しく見る］。声では承認しません。"  # 11/7：承認は1回
 
 
 def check_approve_tip_error(browser, check, shots: Path | None, out: Path) -> None:
@@ -3832,6 +3836,8 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
     # 出力先は sim.DEFAULT_OUT_DIR に固定（呼び出し側からは選べない）。この確認の間だけ一時フォルダに差し替え、最後に戻す
     saved_out_dir = sim.DEFAULT_OUT_DIR
     sim.DEFAULT_OUT_DIR = out / "sim"
+    saved_clock = sim.clock
+    sim.clock = lambda: E2E_TIME  # 11/7：出力の名前は日本時間の日時つき。e2e では時刻を決めて、同じ名前の確かめを書けるようにする
     updown_cfg = write_test_updown(out / "updown")
     # はじめの通し確認は DEMO_PLACE（C00004 を「上に10mm」）。DEMO_C_PLACE の確認の前に設定を差し替える（読込のときに決まる）
     srv = server.make_server(port=0, interpreter=MockInterpreter(), updown_config=updown_cfg["DEMO_PLACE.JBI"])
@@ -4102,6 +4108,7 @@ def run(out_dir: Path | None = None, log=print, shots: Path | None = None) -> li
     finally:
         srv.shutdown()
         sim.DEFAULT_OUT_DIR = saved_out_dir
+        sim.clock = saved_clock
         srv.server_close()
     check(not errors, f"画面のエラー：{errors or 'なし'}")
     return fails

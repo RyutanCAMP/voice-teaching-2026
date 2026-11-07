@@ -1694,3 +1694,28 @@ body.hero #kbd-button > span { display: inline; font-size: 14px; }
 /* ===== ここまで（クーちゃん 11/7）===== */
 
 .quick-approve-warn { margin: 0; font-size: 13px; color: var(--amber, #ffb020); }
+/* 低い画面（720px など）：候補の窓の注意が見えるよう、承認の欄の説明の1行を畳む（同じ「シミュレーション用・実機に接続しない」は候補の窓の JOB の行にある） */
+@media (max-height: 800px) {
+  .quick-approve-note { display: none; }
+  .quick-approve { gap: 4px; margin-bottom: 4px; }
+  .cand-job { margin: 0 0 2px; }
+}
+/* 承認のあと（1500px 以上）：候補の窓を 3D の右下に戻し、会話の欄のいちばん新しい答えをふさがない（クーちゃん K1 の例外と同じ置き方・11/7） */
+@media (min-width: 1500px) {
+  body.vt-approved .cand-pop { position: absolute; left: auto; right: 16px; top: auto; bottom: 16px; width: min(380px, 36%); max-height: calc(100% - 32px); z-index: 4; }
+}
+.save-as-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 2px; }
+.save-as-row button { min-height: 44px; font-size: 14px; padding-inline: 10px; }
+#export-result .save-as p { margin: 2px 0 0; font-size: 13px; }
+/* 低い画面（800px 以下）：候補の窓は、対象・JOB と SIM 専用・量・変更前→変更後・注意を上に、指示の文・XYZ の表などはその下に並べる
+   （承認の欄が下にあっても、注意が見えるように。消すものは無い。並べる順だけ・11/7） */
+@media (max-height: 800px) {
+  #candidate-view { display: flex; flex-direction: column; }
+  #candidate-view > * { order: 10; }
+  #candidate-view > .friendly { order: 0; }
+  #candidate-view > .cand-pos { order: 1; }
+  #candidate-view > .cand-job { order: 2; }
+  #candidate-view > .cand-big { order: 3; }
+  #candidate-view > .cand-change { order: 4; }
+  #candidate-view > .cand-warn { order: 5; }
+}
