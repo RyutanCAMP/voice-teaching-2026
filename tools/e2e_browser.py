@@ -2266,7 +2266,7 @@ def check_ask_limit_reset(browser, check, shots: Path | None, out: Path) -> None
         srv.server_close()
 
 
-APPROVE_TIP_BODY = "変更前→変更後と 3D を確かめて、名前を入れて［承認して保存］を1回押します。承認のあと SIM 用の JOB を書き、保存の場所を選ぶ窓が開きます。声では承認しません。"  # 11/7：承認は1回
+APPROVE_TIP_BODY = "変更前→変更後と 3D を確かめ、名前を入れて［承認して保存］を1回押します。SIM 用の JOB を書き、保存の場所を選びます。声では承認しません。"  # 11/7：承認は1回
 
 
 def check_approve_tip_error(browser, check, shots: Path | None, out: Path) -> None:
